@@ -114,3 +114,13 @@ TTL-based caching works in earlier versions. For API-based invalidation, use the
 ### Why can't I see my cache tags generated from responses in the debugger once cached?
 
 For performance, cache tags derived from responses are written to Redis in a debugger‑readable form only when the cache‑populating request runs in debug mode. Cache tags coming from responses written outside debug mode aren’t visible in the debugger.
+
+### What versions of Redis are supported?
+
+Response caching is compatible with caches that support open-source Redis >7.0. It has been thoroughly tested against standalone Redis, Redis cluster, and Google's Memorystore.
+
+### Can I set a limit on my Redis database size?
+
+You can use [Redis's key eviction](https://redis.io/docs/latest/develop/reference/eviction/) to limit the maximum memory to use for the cache data. If an eviction policy is set, you **must** use the `volatile-ttl` eviction policy, which evicts keys with the shortest remaining TTL value. 
+
+If you want to set a memory limit per subgraph, you must configure a different Redis instance per subgraph.
