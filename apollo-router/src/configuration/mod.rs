@@ -1020,11 +1020,6 @@ pub(crate) struct QueryPlanRedisCache {
     #[serde(default = "default_query_planner_cache_pool_size")]
     /// The size of the Redis connection pool
     pub(crate) pool_size: u32,
-
-    #[serde(default = "default_lazy_replica_connections")]
-    /// Lazily connect to redis replicas (if redis-cluster enabled).
-    /// TODO: ideally we would just use true always - adding this config option to make testing easier
-    pub(crate) lazy_replica_connections: bool,
 }
 
 fn default_query_plan_cache_ttl() -> Duration {
@@ -1121,11 +1116,6 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// Interval for collecting Redis metrics (default: 1s)
     pub(crate) metrics_interval: Duration,
-
-    #[serde(default = "default_lazy_replica_connections")]
-    /// Lazily connect to redis replicas (if redis-cluster enabled).
-    /// TODO: ideally we would just use true always - adding this config option to make testing easier
-    pub(crate) lazy_replica_connections: bool,
 }
 
 fn default_timeout() -> Duration {
@@ -1144,10 +1134,6 @@ pub(crate) fn default_metrics_interval() -> Duration {
     Duration::from_secs(1)
 }
 
-pub(crate) fn default_lazy_replica_connections() -> bool {
-    false
-}
-
 impl From<QueryPlanRedisCache> for RedisCache {
     fn from(value: QueryPlanRedisCache) -> Self {
         RedisCache {
@@ -1162,7 +1148,6 @@ impl From<QueryPlanRedisCache> for RedisCache {
             reset_ttl: value.reset_ttl,
             pool_size: value.pool_size,
             metrics_interval: default_metrics_interval(),
-            lazy_replica_connections: value.lazy_replica_connections,
         }
     }
 }
