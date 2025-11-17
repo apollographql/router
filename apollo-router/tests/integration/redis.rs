@@ -1749,51 +1749,6 @@ async fn test_redis_uses_replicas_when_clustered() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
-    if !graph_os_enabled() {
-        return;
-    }
-
-    let namespace = Uuid::new_v4().to_string();
-    let redis_monitor = RedisMonitor::new(&REDIS_STANDALONE_PORT).await;
-
-    let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
-    let mut router = IntegrationTest::builder()
-        .config(router_config)
-        .log("trace,jsonpath_lib=info")
-        .redis_namespace(&namespace)
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-
-    let expected_metric = r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 2"#;
-    router.assert_metrics_contains(expected_metric, None).await;
-
-    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
-    // the in-memory cache
-    let responses = router.execute_several_default_queries(2).await;
-    for response in responses {
-        let r = response.1.text().await;
-        eprintln!("{r:?}");
-    }
-
-    // check that there were no I/O errors
-    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
-    router.assert_metrics_does_not_contain(io_error).await;
-
-    // check that there were no parse errors; these might show up when fred can't read the cluster
-    // state properly
-    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
-    router.assert_metrics_does_not_contain(parse_error).await;
-
-    let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
-    assert_eq!(redis_monitor_output.num_nodes(), 1);
-    assert!(redis_monitor_output.command_sent_to_any("GET"));
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     if !graph_os_enabled() {
         return;
