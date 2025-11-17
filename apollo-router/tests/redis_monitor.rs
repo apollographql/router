@@ -37,7 +37,7 @@ impl Monitor {
         let mut collection_tasks = JoinSet::new();
 
         for port in ports {
-            let (tx, mut rx) = mpsc::channel(100);
+            let (tx, mut rx) = mpsc::channel(100_000);
             let port = port.to_string();
 
             monitor_tasks.spawn(async move {
