@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/plugins/response_cache/tests.rs
-description: "Make sure everything is in status 'new' and we have all the entities and root fields"
+description: "Make sure everything is with source 'subgraph' and we have all the entities and root fields"
 expression: cache_keys
 ---
 [
@@ -38,7 +38,7 @@ expression: cache_keys
     "warnings": []
   },
   {
-    "key": "version:1.1:subgraph:orga:type:Organization:representation:07f0ad9351c409fd3acfae0be59e64f218dc486d6dbe0081e68794673b96df73:hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:512b8af55ea384e083ac903edb6c05ea23659dffdde5c97d418e01c986ee3003",
+    "key": "version:1.1:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:512b8af55ea384e083ac903edb6c05ea23659dffdde5c97d418e01c986ee3003",
     "invalidationKeys": [
       "organization",
       "organization-1"
