@@ -147,7 +147,7 @@ impl Merger {
                         if arg.is_required() && arg.default_value.is_none() {
                             self.error_reporter.add_error(CompositionError::ContextualArgumentNotContextualInAllSubgraphs {
                                 message: format!(
-                                    "Argument \"{dest_arg_pos}\" is contextual in at least one subgraph but in \"{pos}\" it does not have @fromContext, is not nullable and has no default value.",
+                                    "Argument \"{dest_arg_pos}\" is contextual in at least one subgraph but in \"{dest_arg_pos}\" it does not have @fromContext, is not nullable and has no default value.",
                                 ),
                                 locations: subgraph.node_locations(arg),
                             });

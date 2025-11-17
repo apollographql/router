@@ -1,5 +1,10 @@
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
 use http::HeaderMap;
@@ -111,6 +116,107 @@ pub fn handle_raw_response(
         map_response(data, key, inputs, warnings)
     } else {
         map_error(connector, data, parts, key, inputs, warnings)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GraphQLDataMapper<'a> {
+    doc: &'a ExecutableDocument,
+    subtypes_map: &'a IndexMap<String, IndexSet<String>>,
+}
+
+impl<'a> GraphQLDataMapper<'a> {
+    fn new(
+        doc: &'a ExecutableDocument,
+        subtypes_map: &'a IndexMap<String, IndexSet<String>>,
+    ) -> Self {
+        Self { doc, subtypes_map }
+    }
+
+    fn fragment_matches(&self, data: &Value, fragment_type_condition: &Name) -> bool {
+        if let Some(data_typename) = data.get("__typename") {
+            match data_typename {
+                Value::String(typename) => {
+                    self.supertype_has_subtype(fragment_type_condition.as_str(), typename.as_str())
+                }
+                _ => false,
+            }
+        } else {
+            true
+        }
+    }
+
+    fn supertype_has_subtype(&self, supertype: &str, subtype: &str) -> bool {
+        if supertype == subtype {
+            true
+        } else if let Some(subtypes) = self.subtypes_map.get(supertype) {
+            subtypes
+                .iter()
+                .any(|s| self.supertype_has_subtype(s, subtype))
+        } else {
+            false
+        }
+    }
+
+    fn map_data(&self, data: &Value, selection_set: &SelectionSet) -> Value {
+        if selection_set.selections.is_empty() {
+            return data.clone();
+        }
+
+        match data {
+            Value::Object(map) => {
+                let mut new_map = Map::new();
+
+                for field in selection_set.selections.iter() {
+                    match field {
+                        Selection::Field(field) => {
+                            if let Some(field_value) = map.get(field.name.as_str()) {
+                                let output_field_name = field.alias.as_ref().unwrap_or(&field.name);
+                                new_map.insert(
+                                    output_field_name.to_string(),
+                                    self.map_data(field_value, &field.selection_set),
+                                );
+                            }
+                        }
+
+                        Selection::FragmentSpread(spread) => {
+                            if let Some(fragment) =
+                                self.doc.fragments.get(spread.fragment_name.as_str())
+                                && self.fragment_matches(data, fragment.type_condition())
+                            {
+                                let mapped = self.map_data(data, &fragment.selection_set);
+                                if let Some(fragment_map) = mapped.as_object() {
+                                    new_map.extend(fragment_map.clone());
+                                }
+                            }
+                        }
+
+                        Selection::InlineFragment(fragment) => {
+                            if let Some(type_condition) = &fragment.type_condition
+                                && !self.fragment_matches(data, type_condition)
+                            {
+                                continue;
+                            }
+                            let mapped = self.map_data(data, &fragment.selection_set);
+                            if let Some(fragment_map) = mapped.as_object() {
+                                new_map.extend(fragment_map.clone());
+                            }
+                        }
+                    }
+                }
+
+                Value::Object(new_map)
+            }
+
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .map(|item| self.map_data(item, selection_set))
+                    .collect(),
+            ),
+
+            primitive => primitive.clone(),
+        }
     }
 }
 
@@ -406,6 +512,185 @@ impl MappedResponse {
     pub fn problems(&self) -> &[Problem] {
         match self {
             Self::Error { problems, .. } | Self::Data { problems, .. } => problems,
+        }
+    }
+
+    /// Applies the given GraphQL operation (note: must be a single operation!)
+    /// to the [`MappedResponse`] to produce a new [`MappedResponse`] with
+    /// GraphQL transforms like alias renaming applied.
+    ///
+    /// The `operation_option` parameter is an [`Option<&ExecutableDocument>`]
+    /// to simplify cases where you might not have an [`ExecutableDocument`]
+    /// available (hence `None`). When `operation_option.is_none()`, note that
+    /// `subtypes` is ignored.
+    ///
+    /// The `subtypes` parameter is necessary for handling abstract fragment
+    /// type conditions, since that information is not preserved in
+    /// [`ExecutableDocument`].
+    pub fn apply_operation(
+        self, // NOTE: Takes ownership of self!
+        operation_option: Option<&ExecutableDocument>,
+        subtypes: &IndexMap<String, IndexSet<String>>,
+    ) -> Self {
+        match (self, operation_option) {
+            (
+                Self::Data {
+                    data,
+                    key,
+                    problems,
+                },
+                Some(operation),
+            ) => {
+                let single_op = operation
+                    .operations
+                    .anonymous
+                    .as_ref()
+                    .or_else(|| operation.operations.named.values().next());
+
+                let data = if let Some(op) = single_op {
+                    let mut new_sub = SelectionSet::new(op.selection_set.ty.clone());
+
+                    match &key {
+                        ResponseKey::RootField { name, .. } => {
+                            for field in op.selection_set.selections.iter() {
+                                if let Selection::Field(field) = field
+                                    && field.name.as_str() == name.as_str()
+                                {
+                                    new_sub
+                                        .selections
+                                        .extend(field.selection_set.selections.iter().cloned());
+                                }
+                            }
+                        }
+
+                        ResponseKey::EntityField { field_name, .. } => {
+                            let field_str = field_name.as_str();
+
+                            for selection in op.selection_set.selections.iter() {
+                                if let Selection::Field(field) = selection
+                                    && field.name.as_str() == "_entities"
+                                {
+                                    for ent_sel in field.selection_set.selections.iter() {
+                                        // Selection::InlineFragment is what we
+                                        // actually expect, but we could handle
+                                        // ::Field and ::FragmentSpread too if
+                                        // necessary.
+                                        match ent_sel {
+                                            Selection::InlineFragment(frag) => {
+                                                for field_sel in
+                                                    frag.selection_set.selections.iter()
+                                                {
+                                                    if let Selection::Field(field) = field_sel
+                                                        && field.name.as_str() == field_str
+                                                    {
+                                                        new_sub.selections.extend(
+                                                            field
+                                                                .selection_set
+                                                                .selections
+                                                                .iter()
+                                                                .cloned(),
+                                                        );
+                                                    }
+                                                }
+                                            }
+
+                                            Selection::Field(field) => {
+                                                if field.name.as_str() == field_str {
+                                                    new_sub.selections.extend(
+                                                        field
+                                                            .selection_set
+                                                            .selections
+                                                            .iter()
+                                                            .cloned(),
+                                                    );
+                                                }
+                                            }
+
+                                            Selection::FragmentSpread(spread) => {
+                                                if let Some(fragment) = operation
+                                                    .fragments
+                                                    .get(spread.fragment_name.as_str())
+                                                {
+                                                    for field_sel in
+                                                        fragment.selection_set.selections.iter()
+                                                    {
+                                                        if let Selection::Field(field) = field_sel
+                                                            && field.name.as_str() == field_str
+                                                        {
+                                                            new_sub.selections.extend(
+                                                                field
+                                                                    .selection_set
+                                                                    .selections
+                                                                    .iter()
+                                                                    .cloned(),
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        ResponseKey::Entity { .. } => {
+                            for selection in op.selection_set.selections.iter() {
+                                if let Selection::Field(field) = selection
+                                    && field.name.as_str() == "_entities"
+                                {
+                                    new_sub
+                                        .selections
+                                        .extend(field.selection_set.selections.iter().cloned());
+                                }
+                            }
+                        }
+
+                        ResponseKey::BatchEntity { keys, .. } => {
+                            new_sub
+                                .selections
+                                .extend(keys.selection_set.selections.iter().cloned());
+
+                            for selection in op.selection_set.selections.iter() {
+                                if let Selection::Field(field) = selection
+                                    && field.name.as_str() == "_entities"
+                                {
+                                    new_sub
+                                        .selections
+                                        .extend(field.selection_set.selections.iter().cloned());
+                                }
+                            }
+                        }
+                    };
+
+                    GraphQLDataMapper::new(operation, subtypes).map_data(&data, &new_sub)
+                } else {
+                    data
+                };
+
+                Self::Data {
+                    data,
+                    key,
+                    problems,
+                }
+            }
+
+            // We do not transform errors using the operation.
+            (
+                MappedResponse::Error {
+                    error,
+                    key,
+                    problems,
+                },
+                Some(_),
+            ) => MappedResponse::Error {
+                error,
+                key,
+                problems,
+            },
+
+            // When operation_option.is_none(), return self unmodified.
+            (mapped, None) => mapped,
         }
     }
 }

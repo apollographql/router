@@ -56,6 +56,12 @@ apq:
 
 In the example above, subgraph APQ is disabled _except for_ the `products` subgraph.
 
+<Note>
+
+To use APQ with subgraphs effectively, your subgraph server should have a shared cache that can store all incoming operations. If the cache is too small or isn't shared between multiple instances of the subgraph server, the router sends extra requests on cache misses to resolve the operation. Consult your subgraph server framework's documentation to ensure it supports APQ and to configure caching options.
+
+</Note>
+
 ## Distributed caching with Redis
 
 <PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>

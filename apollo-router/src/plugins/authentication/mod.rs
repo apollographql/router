@@ -74,16 +74,11 @@ struct AuthenticationPlugin {
     connector: Option<ConnectorAuth>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Default)]
 enum OnError {
     Continue,
+    #[default]
     Error,
-}
-
-impl Default for OnError {
-    fn default() -> Self {
-        Self::Error
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
@@ -171,6 +166,15 @@ enum Source {
         /// Name of the cookie containing the JWT
         name: String,
     },
+}
+
+impl Source {
+    fn as_textual_representation(&self) -> String {
+        match self {
+            Source::Header { name, .. } => format!("header:{}", name),
+            Source::Cookie { name } => format!("cookie:{}", name),
+        }
+    }
 }
 
 /// Authentication
@@ -460,8 +464,15 @@ fn authenticate(
         // This is a metric and will not appear in the logs
         let failed = true;
         increment_jwt_counter_metric(failed);
-
-        tracing::info!(message = %error, "jwt authentication failure");
+        // Record span attributes for JWT failure
+        let span = tracing::Span::current();
+        span.record("authentication.jwt.failed", true);
+        if let Some(src) = source {
+            span.record("authentication.jwt.source", src.as_textual_representation());
+            tracing::debug!(message = %error, jwtsource = %src.as_textual_representation(), "jwt authentication failure");
+        } else {
+            tracing::debug!(message = %error, "jwt authentication failure");
+        }
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
