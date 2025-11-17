@@ -20,7 +20,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
     },
     Message {
         code: InvalidUrl,
-        message: "Invalid @source `baseURL` template: expected `One<Float, Bool, String, null, None>` rejects `{}`",
+        message: "Invalid @source `baseURL` template: expected union but received incompatible object\nDetails: `One<Float, Bool, String, null, None>` does not accept `{}`",
         locations: [
             7:52..7:54,
         ],
