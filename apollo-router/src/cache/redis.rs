@@ -739,7 +739,10 @@ impl RedisCacheStorage {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
 
         // NOTE: we need a writer, so don't use replicas() here
-        let result: Result<(), _> = self.client().set(key, value, self.expiration(ttl), None, false).await;
+        let result: Result<(), _> = self
+            .client()
+            .set(key, value, self.expiration(ttl), None, false)
+            .await;
         tracing::trace!("insert result {:?}", result);
 
         if let Err(err) = result {
