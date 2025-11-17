@@ -303,7 +303,13 @@ async fn check_cache_tags_from_debugger_data() {
         return;
     }
 
-    let (mut router, subgraph_request_counters) = harness(base_config(), base_subgraphs()).await;
+    let mut config = base_config();
+    config
+        .get_mut("preview_response_cache")
+        .and_then(|c| c.as_object_mut())
+        .and_then(|c| c.insert("debug".to_string(), true.into()));
+
+    let (mut router, subgraph_request_counters) = harness(config, base_subgraphs()).await;
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
     products: 0
     reviews: 0
