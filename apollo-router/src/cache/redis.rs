@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use fred::clients::Client;
 use fred::clients::Pipeline;
+use fred::clients::Replicas;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
@@ -351,14 +352,14 @@ impl RedisCacheStorage {
         required_to_start: bool,
     ) -> Result<Self, BoxError> {
         let pooled_client = Builder::from_config(client_config)
-            // TODO: comment
             .with_config(|client_config| {
-                // TODO: comment
                 if is_cluster {
+                    // use `ClusterDiscoveryPolicy::ConfigEndpoint` - explicit in case the default changes.
+                    // this determines how the clients discover other cluster nodes
                     let _ = client_config
                         .server
                         .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint)
-                        .inspect_err(|err| tracing::error!("Redis running in a cluster but unable to set cluster-discovery-policy: {err}"));
+                        .inspect_err(|err| record_redis_error(err, caller));
                 }
             })
             .with_connection_config(|config| {
@@ -375,7 +376,7 @@ impl RedisCacheStorage {
                     interval: Duration::from_secs(3),
                 };
 
-                // PR-8405: lazy connections or else commands will queue rather than being sent
+                // PR-8405: must not use lazy connections or else commands will queue rather than being sent
                 config.replica.lazy_connections = false;
             })
             .with_performance_config(|config| {
@@ -588,6 +589,10 @@ impl RedisCacheStorage {
         self.inner.next().clone()
     }
 
+    fn replica_client(&self) -> Replicas<Client> {
+        self.client().replicas()
+    }
+
     pub(crate) fn pipeline(&self) -> Pipeline<Client> {
         self.inner.next().pipeline()
     }
@@ -634,7 +639,7 @@ impl RedisCacheStorage {
                 Ok(value)
             }
             _ => {
-                let client = self.client().replicas().with_options(&options);
+                let client = self.replica_client().with_options(&options);
                 client.get(key).await.inspect_err(|e| self.record_error(e))
             }
         }
@@ -659,7 +664,7 @@ impl RedisCacheStorage {
         //    - https://redis.io/docs/latest/commands/mget/
 
         tracing::trace!("getting multiple values from redis: {:?}", keys);
-        let client = self.client().replicas().with_options(&options);
+        let client = self.replica_client().with_options(&options);
 
         if keys.len() == 1 {
             let key = self.make_key(keys.swap_remove(0));
@@ -734,8 +739,7 @@ impl RedisCacheStorage {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
 
         // NOTE: we need a writer, so don't use replicas() here
-        let expiration = self.expiration(ttl);
-        let result: Result<(), _> = self.client().set(key, value, expiration, None, false).await;
+        let result: Result<(), _> = self.client().set(key, value, self.expiration(ttl), None, false).await;
         tracing::trace!("insert result {:?}", result);
 
         if let Err(err) = result {
@@ -798,7 +802,7 @@ impl RedisCacheStorage {
             entry.push(key);
         }
 
-        // then we query all the key groups at the same time
+        // then we execute against all the key groups at the same time
         let results: Vec<Result<u32, RedisError>> = join_all(h.into_values().map(|keys| async {
             let client = self.client().with_options(&options);
             client.del(keys).await
