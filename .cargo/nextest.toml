@@ -2,6 +2,7 @@
 redis = { max-threads = 6 }
 
 [[profile.default.overrides]]
-# number of tests running with 'redis' in the name should be up to 6 at any given time
+# number of tests running with 'redis' in the name should be up to 6 at any given time to prevent
+# overloading the redis instances
 test-group = "redis"
 filter = "test(redis)"
