@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/env-vars.graph
 [
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: expected `One<Float, Bool, String, null, None>` rejects `Dict<String>`",
+        message: "In `@source(http.headers:)`: expected union but received incompatible object\nDetails: `One<Float, Bool, String, null, None>` does not accept `Dict<String>`",
         locations: [
             19:36..19:40,
         ],
@@ -22,7 +22,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/env-vars.graph
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.invalidObject`: expected `One<Float, Bool, String, null, None>` rejects `Dict<String>`",
+        message: "In `GET` in `@connect(http:)` on `Query.invalidObject`: expected union but received incompatible object\nDetails: `One<Float, Bool, String, null, None>` does not accept `Dict<String>`",
         locations: [
             36:44..36:48,
         ],

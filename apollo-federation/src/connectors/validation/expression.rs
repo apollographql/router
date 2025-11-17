@@ -13,7 +13,6 @@ use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::ShapeMismatch;
 use shape::graphql::shape_for_arguments;
 use shape::location::Location;
 use shape::location::SourceId;
@@ -334,41 +333,16 @@ pub(crate) fn validate(
         Err(Message {
             code: context.code,
             message: format!(
-                "expected `{}` rejects `{}`{}",
+                "expected {} but received incompatible {}\nDetails: `{}` does not accept `{}`",
+                short_shape_name(&mismatch.expected),
+                short_shape_name(&mismatch.received),
                 mismatch.expected.pretty_print(),
                 mismatch.received.pretty_print(),
-                explain_mismatch(&mismatch),
             ),
             locations: transform_locations(mismatch.received.locations(), context, expression),
         })
     } else {
         Ok(())
-    }
-}
-
-/// Generate a more specific explanation by examining the mismatch causes hierarchy
-fn explain_mismatch(mismatch: &ShapeMismatch) -> String {
-    // Follow the chain of first causes
-    fn follow_first_cause(m: &ShapeMismatch) -> Vec<String> {
-        if let Some(first_cause) = m.causes.first() {
-            let mut path = vec![format!(
-                "`{}` rejects `{}`",
-                first_cause.expected.pretty_print(),
-                first_cause.received.pretty_print()
-            )];
-            path.extend(follow_first_cause(first_cause));
-            path
-        } else {
-            Vec::new()
-        }
-    }
-
-    let explanations = follow_first_cause(mismatch);
-
-    if explanations.is_empty() {
-        String::new()
-    } else {
-        format!(" (because {})", explanations.join(", because "))
     }
 }
 
@@ -614,6 +588,25 @@ fn transform_locations<'a>(
         ))
     }
     locations
+}
+
+/// A simplified shape name for error messages
+fn short_shape_name(shape: &Shape) -> &'static str {
+    match shape.case() {
+        ShapeCase::Bool(_) => "boolean",
+        ShapeCase::String(_) => "string",
+        ShapeCase::Int(_) => "number",
+        ShapeCase::Float => "number",
+        ShapeCase::Null => "null",
+        ShapeCase::Array { .. } => "array",
+        ShapeCase::Object { .. } => "object",
+        ShapeCase::One(_) => "union",
+        ShapeCase::All(_) => "intersection",
+        ShapeCase::Name(_, _) => "named type",
+        ShapeCase::Unknown => "unknown",
+        ShapeCase::None => "none",
+        ShapeCase::Error(_) => "error",
+    }
 }
 
 pub(crate) struct MappingArgument {

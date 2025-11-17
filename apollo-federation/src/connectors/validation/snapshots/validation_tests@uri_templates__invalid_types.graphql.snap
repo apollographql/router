@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
 [
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.argIsArray`: expected `One<Float, Bool, String, null, None>` rejects `One<List<One<String, null>>, null>` (because `One<Float, Bool, String, null, None>` rejects `List<One<String, null>>`)",
+        message: "In `GET` in `@connect(http:)` on `Query.argIsArray`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<List<One<String, null>>, null>`",
         locations: [
             8:16..8:29,
             10:47..10:50,
@@ -14,7 +14,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.argIsObject`: expected `One<Float, Bool, String, null, None>` rejects `One<{ val: Unknown }, null>` (because `One<Float, Bool, String, null, None>` rejects `{ val: Unknown }`)",
+        message: "In `GET` in `@connect(http:)` on `Query.argIsObject`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<{ val: Unknown }, null>`",
         locations: [
             36:1..38:2,
             14:22..14:27,
@@ -24,7 +24,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `This.thisIsArray`: expected `One<Float, Bool, String, null, None>` rejects `One<List<One<String, null>>, null>` (because `One<Float, Bool, String, null, None>` rejects `List<One<String, null>>`)",
+        message: "In `GET` in `@connect(http:)` on `This.thisIsArray`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<List<One<String, null>>, null>`",
         locations: [
             22:5..22:32,
             25:47..25:54,
@@ -32,7 +32,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `This.requiresAnObject`: expected `One<Float, Bool, String, null, None>` rejects `One<\n  { __typename: One<\"Object\", None>, stuff: Unknown },\n  null,\n>` (because `One<Float, Bool, String, null, None>` rejects `{ __typename: One<\"Object\", None>, stuff: Unknown }`)",
+        message: "In `GET` in `@connect(http:)` on `This.requiresAnObject`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<\n  { __typename: One<\"Object\", None>, stuff: Unknown },\n  null,\n>`",
         locations: [
             40:1..42:2,
             28:15..28:21,
