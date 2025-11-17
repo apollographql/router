@@ -1,5 +1,5 @@
-/// Functionality to run the `MONITOR` command against Redis, to ensure
-/// specific commands are or are not sent.
+/// Functionality to run the `MONITOR` command against Redis, to ensure specific commands are or are
+/// not sent.
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -71,7 +71,7 @@ impl Monitor {
 
     /// End all `monitor_tasks` and collect the results into a `MonitorOutput`.
     pub async fn collect(mut self) -> MonitorOutput {
-        // sleep a bit to make sure the monitor tasks have time to finish
+        // sleep a bit to allow the monitor_tasks to get through any backlog of output
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         // abort monitor tasks and collect all the collection tasks
