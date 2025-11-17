@@ -2939,7 +2939,28 @@ impl ObjectTypeDefinitionPosition {
             schema
                 .referencers
                 .object_types
-                .insert(new_name, object_type_referencers);
+                .insert(new_name.clone(), object_type_referencers);
+        }
+
+        // Update directive referencers to reflect the type rename
+        // This is necessary because directive referencers store field positions by value,
+        // and when we rename a type (e.g., MyMutation -> Mutation), we need to update
+        // all the field positions in the directive referencers.
+        for (_directive_name, directive_referencers) in schema.referencers.directives.iter_mut() {
+            let updated_fields: Vec<_> = directive_referencers
+                .object_fields
+                .iter()
+                .filter(|f| f.type_name == self.type_name)
+                .map(|f| ObjectFieldDefinitionPosition {
+                    type_name: new_name.clone(),
+                    field_name: f.field_name.clone(),
+                })
+                .collect();
+
+            directive_referencers
+                .object_fields
+                .retain(|f| f.type_name != self.type_name);
+            directive_referencers.object_fields.extend(updated_fields);
         }
 
         Ok(())

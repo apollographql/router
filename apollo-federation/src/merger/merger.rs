@@ -2081,9 +2081,16 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             (Type::List(inner_sub), Type::List(inner_super)) => {
                 self.is_strict_subtype(inner_super, inner_sub)
             }
-            // NonNullablePropagation and NonNullableDowngrade
-            (Type::NonNullList(inner_sub), Type::NonNullList(inner_super))
-            | (Type::NonNullList(inner_sub), Type::List(inner_super)) => {
+            // NonNullableDowngrade: [T]! is subtype of [T]
+            (Type::NonNullList(inner_sub), Type::List(inner_super)) if inner_sub == inner_super => {
+                Ok(true)
+            }
+            // NonNullablePropagation: [T]! is subtype of [U]! if T is subtype of U
+            (Type::NonNullList(inner_sub), Type::NonNullList(inner_super)) => {
+                self.is_strict_subtype(inner_super, inner_sub)
+            }
+            // NonNullablePropagation + NonNullableDowngrade: [T]! is subtype of [U] if T is subtype of U
+            (Type::NonNullList(inner_sub), Type::List(inner_super)) => {
                 self.is_strict_subtype(inner_super, inner_sub)
             }
 
