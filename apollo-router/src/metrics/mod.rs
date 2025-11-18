@@ -230,7 +230,9 @@ pub(crate) mod test_utils {
         pub(crate) static AGGREGATE_METER_PROVIDER_ASYNC: OnceLock<(AggregateMeterProvider, ClonableManualReader)>;
     }
 
-    pub(crate) static GLOBAL_AGGREGATE_METER_PROVIDER: OnceLock<&'static (AggregateMeterProvider, ClonableManualReader)> = OnceLock::new();
+    thread_local! {
+        pub(crate) static AGGREGATE_METER_PROVIDER: OnceLock<&'static (AggregateMeterProvider, ClonableManualReader)> = const { OnceLock::new() };
+    }
 
     fn create_test_meter_provider() -> (AggregateMeterProvider, ClonableManualReader) {
         {
@@ -270,9 +272,10 @@ pub(crate) mod test_utils {
             // access happens during TLS teardown and panics with: "cannot access a Thread Local
             // Storage value during or after destruction: AccessError" To avoid that panic in tests,
             // we never Drop the provider here.
-            let &(provider, reader) = GLOBAL_AGGREGATE_METER_PROVIDER
-                .get_or_init(create_test_meter_provider_leaked);
-            (provider.clone(), reader.clone())
+            AGGREGATE_METER_PROVIDER.with(|cell| {
+                let pair = cell.get_or_init(create_test_meter_provider_leaked);
+                pair.clone()
+            }).clone()
         }
     }
 
