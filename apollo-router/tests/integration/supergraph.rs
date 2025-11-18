@@ -380,3 +380,122 @@ async fn test_supergraph_legacy_limits_max_headers_exceeded() -> Result<(), BoxE
     assert_eq!(response.status(), 431);
     Ok(())
 }
+
+// Test that server.http.max_header_size takes precedence over limits.http_max_header_size
+#[tokio::test(flavor = "multi_thread")]
+async fn test_supergraph_server_http_max_header_size_precedence() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            server:
+              http:
+                max_header_size: 2kb
+            limits:
+              http_max_header_size: 1kb
+            "#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Create a header value between 1KB and 2KB
+    // If server.http takes precedence, this should succeed (2KB limit)
+    // If limits takes precedence, this should fail (1KB limit)
+    let header_value = "x".repeat(1500);
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .header("test-header", header_value)
+                .build(),
+        )
+        .await;
+
+    // Should succeed because server.http.max_header_size (2KB) takes precedence
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        json!({ "data": { "__typename": "Query" } })
+    );
+    Ok(())
+}
+
+// Test that server.http.max_headers takes precedence over limits.http1_max_request_headers
+#[tokio::test(flavor = "multi_thread")]
+async fn test_supergraph_server_http_max_headers_precedence() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            server:
+              http:
+                max_headers: 10
+            limits:
+              http1_max_request_headers: 5
+            "#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Create 8 headers - should succeed if server.http.max_headers (10) takes precedence
+    // Should fail if limits.http1_max_request_headers (5) takes precedence
+    let mut headers = HashMap::new();
+    for i in 0..8 {
+        headers.insert(format!("test-header-{i}"), format!("value_{i}"));
+    }
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .headers(headers)
+                .build(),
+        )
+        .await;
+
+    // Should succeed because server.http.max_headers (10) takes precedence
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        json!({ "data": { "__typename": "Query" } })
+    );
+    Ok(())
+}
+
+// Test backward compatibility - limits config works when server.http is not set
+#[tokio::test(flavor = "multi_thread")]
+async fn test_supergraph_limits_config_backward_compatibility() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            limits:
+              http_max_header_size: 1kb
+            "#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Create a header value larger than 1KB
+    let large_header_value = "x".repeat(2048);
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .header("test-header", large_header_value)
+                .build(),
+        )
+        .await;
+
+    // Should fail because limits.http_max_header_size (1KB) is enforced
+    assert!(response.status() == 431 || response.status() == 400);
+    Ok(())
+}

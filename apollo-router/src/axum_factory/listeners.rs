@@ -309,9 +309,10 @@ async fn process_error(io_error: std::io::Error) {
 }
 
 // Helper function to determine effective HTTP configuration with backward compatibility
+// Precedence: server.http.* > limits.* > legacy parameters
 fn get_effective_http_config(
     limits_config: &LimitsConfig,
-    _server_config: &ServerHttpConfig,
+    server_config: &ServerHttpConfig,
     legacy_max_headers: Option<usize>,
     legacy_max_buf_size: Option<ByteSize>,
 ) -> (
@@ -320,17 +321,24 @@ fn get_effective_http_config(
     Option<ByteSize>,
     Option<ByteSize>,
 ) {
-    // Use limits config for header configuration, with legacy fallback
-    let effective_max_headers = limits_config
-        .http1_max_request_headers
+    // Maximum number of headers: server.http.max_headers > limits.http1_max_request_headers > legacy
+    let effective_max_headers = server_config
+        .max_headers
+        .or(limits_config.http1_max_request_headers)
         .or(legacy_max_headers);
 
     // Use legacy_max_buf_size for HTTP/1 buffer size (different from header size)
     let effective_max_buf_size = legacy_max_buf_size;
 
-    // Use limits config for new header configuration
-    let effective_max_header_size = limits_config.http_max_header_size;
-    let effective_max_header_list_size = limits_config.http_max_header_list_size;
+    // Maximum header size: server.http.max_header_size > limits.http_max_header_size
+    let effective_max_header_size = server_config
+        .max_header_size
+        .or(limits_config.http_max_header_size);
+
+    // Maximum header list size: server.http.max_header_list_size > limits.http_max_header_list_size
+    let effective_max_header_list_size = server_config
+        .max_header_list_size
+        .or(limits_config.http_max_header_list_size);
 
     (
         effective_max_headers,
@@ -369,7 +377,7 @@ pub(super) fn serve_router_on_listen_addr(
         let (
             effective_max_headers,
             effective_max_buf_size,
-            effective_max_header_size,
+            _effective_max_header_size, // Used in middleware layer, not here
             effective_max_header_list_size,
         ) = get_effective_http_config(
             &limits_config,
@@ -427,13 +435,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let mut http_connection = builder.http1();
                                         let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(server_http_config.header_read_timeout);
+                                            .keep_alive(true)
+                                            .timer(TokioTimer::new())
+                                            .header_read_timeout(server_http_config.header_read_timeout);
                                         if let Some(max_headers) = effective_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
-
                                         if let Some(max_buf_size) = effective_max_buf_size {
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
@@ -451,13 +458,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let mut http_connection = builder.http1();
                                         let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(server_http_config.header_read_timeout);
+                                            .keep_alive(true)
+                                            .timer(TokioTimer::new())
+                                            .header_read_timeout(server_http_config.header_read_timeout);
                                         if let Some(max_headers) = effective_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
-
                                         if let Some(max_buf_size) = effective_max_buf_size {
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
@@ -497,12 +503,10 @@ pub(super) fn serve_router_on_listen_addr(
                                                 http_config.max_header_list_size(max_header_list_size.as_u64() as u32);
                                             }
 
-                                            // Apply individual header size limit for HTTP/2
-                                            if let Some(_max_header_size) = effective_max_header_size {
-                                                // For HTTP/2, individual header size is enforced via max_frame_size
-                                                // But hyper doesn't expose this directly, so we'll rely on max_header_list_size
-                                                // and validation at the application level if needed
-                                            }
+                                            // Note: Individual header size limits (max_header_size) are enforced
+                                            // at the application level via HeaderSizeLimitLayer middleware in main_router.
+                                            // HTTP/2's max_frame_size is not directly configurable through hyper's API,
+                                            // but max_header_list_size provides protection at the protocol level.
 
                                             let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                             handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
@@ -510,13 +514,12 @@ pub(super) fn serve_router_on_listen_addr(
                                             // Configure HTTP/1.1
                                             let mut http_connection = builder.http1();
                                             let http_config = http_connection
-                                                             .keep_alive(true)
-                                                             .timer(TokioTimer::new())
-                                                             .header_read_timeout(server_http_config.header_read_timeout);
+                                                .keep_alive(true)
+                                                .timer(TokioTimer::new())
+                                                .header_read_timeout(server_http_config.header_read_timeout);
                                             if let Some(max_headers) = effective_max_headers {
                                                 http_config.max_headers(max_headers);
                                             }
-
                                             if let Some(max_buf_size) = effective_max_buf_size {
                                                 http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                             }

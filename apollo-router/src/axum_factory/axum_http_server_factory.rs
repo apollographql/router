@@ -475,7 +475,13 @@ where
     }));
 
     // Add header size limit middleware
-    if let Some(max_header_size) = configuration.limits.http_max_header_size {
+    // Precedence: server.http.max_header_size > limits.http_max_header_size
+    let max_header_size = configuration
+        .server
+        .http
+        .max_header_size
+        .or(configuration.limits.http_max_header_size);
+    if let Some(max_header_size) = max_header_size {
         tracing::debug!(?max_header_size, "Adding header size limit middleware");
         router = router.layer(HeaderSizeLimitLayer::new(Some(max_header_size)));
     }

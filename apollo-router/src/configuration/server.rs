@@ -62,6 +62,7 @@ impl Default for ServerHttpConfig {
 #[buildstructor::buildstructor]
 impl ServerHttpConfig {
     #[builder]
+    #[allow(dead_code)] // Used in tests
     pub(crate) fn new(
         header_read_timeout: Option<Duration>,
         max_header_size: Option<ByteSize>,
