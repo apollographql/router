@@ -412,20 +412,20 @@ mod helpers {
                     // without at least a root-level Query)
 
                     let parent_pos = ObjectTypeDefinitionPosition {
-                        type_name: parent_type.name.clone(),
+                        type_name: parent_type.name().clone(),
                     };
 
                     self.insert_object_and_field(&mut schema, &parent_pos, field_def)?;
                     self.ensure_query_root_type(
                         &mut schema,
                         &query_alias,
-                        Some(&parent_type.name),
+                        Some(parent_type.name()),
                     )?;
                     if let Some(mutation_alias) = mutation_alias {
                         self.ensure_mutation_root_type(
                             &mut schema,
                             &mutation_alias,
-                            &parent_type.name,
+                            parent_type.name(),
                         )?;
                     }
 
@@ -433,11 +433,11 @@ mod helpers {
                     self.process_outputs(
                         &mut schema,
                         connector,
-                        parent_type.name.clone(),
+                        parent_type.name().clone(),
                         field_def.ty.inner_named_type().clone(),
                     )?;
                 }
-                ConnectedElement::Type { type_def } => {
+                ConnectedElement::Type { type_ref } => {
                     SchemaVisitor::new(
                         self.original_schema,
                         &mut schema,
@@ -445,7 +445,7 @@ mod helpers {
                     )
                     .walk((
                         ObjectTypeDefinitionPosition {
-                            type_name: type_def.name.clone(),
+                            type_name: type_ref.name().clone(),
                         },
                         connector
                             .selection
@@ -463,8 +463,8 @@ mod helpers {
                     self.process_outputs(
                         &mut schema,
                         connector,
-                        type_def.name.clone(),
-                        type_def.name.clone(),
+                        type_ref.name().clone(),
+                        type_ref.name().clone(),
                     )?;
                 }
             }
