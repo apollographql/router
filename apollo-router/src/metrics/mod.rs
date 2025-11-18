@@ -229,9 +229,8 @@ pub(crate) mod test_utils {
     task_local! {
         pub(crate) static AGGREGATE_METER_PROVIDER_ASYNC: OnceLock<(AggregateMeterProvider, ClonableManualReader)>;
     }
-    thread_local! {
-        pub(crate) static AGGREGATE_METER_PROVIDER: OnceLock<(AggregateMeterProvider, ClonableManualReader)> = const { OnceLock::new() };
-    }
+
+    pub(crate) static GLOBAL_AGGREGATE_METER_PROVIDER: OnceLock<&'static (AggregateMeterProvider, ClonableManualReader)> = OnceLock::new();
 
     fn create_test_meter_provider() -> (AggregateMeterProvider, ClonableManualReader) {
         {
@@ -250,16 +249,28 @@ pub(crate) mod test_utils {
             (meter_provider, reader)
         }
     }
+    fn create_test_meter_provider_leaked() -> &'static (AggregateMeterProvider, ClonableManualReader) {
+        Box::leak(Box::new(create_test_meter_provider()))
+    }
     pub(crate) fn meter_provider_and_readers() -> (AggregateMeterProvider, ClonableManualReader) {
         if tokio::runtime::Handle::try_current().is_ok() {
+            // Multi-threaded tests should use a new meter provider on each thread so they don't
+            // interfere with eachother's metrics
             AGGREGATE_METER_PROVIDER_ASYNC
                 .try_with(|cell| cell.get_or_init(create_test_meter_provider).clone())
                 // We need to silently fail here.
                 // Otherwise we fail every multi-threaded test that touches metrics
                 .unwrap_or_default()
         } else {
-            AGGREGATE_METER_PROVIDER
-                .with(|cell| cell.get_or_init(create_test_meter_provider).clone())
+            // Single threaded tests can use a single global meter provider. We must let this leak
+            // memory because of how the meter provider is dropped during test clean-up.
+            // SdkMeterProvider now has a Drop impl that calls a shutdown() fn instrumented
+            // with tracing. When the test is shutting down, TLS OnceLock is dropped first, but the
+            // SdkMeterProvider::shutdown() tracing attempts to log using a TLS key that has already
+            // been destroyed, causing a panic.
+            let &(provider, reader) = GLOBAL_AGGREGATE_METER_PROVIDER
+                .get_or_init(create_test_meter_provider_leaked);
+            (provider.clone(), reader.clone())
         }
     }
 
