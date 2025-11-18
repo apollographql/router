@@ -4,13 +4,13 @@
 //! adding needed types to a mutable schema.
 
 pub(crate) mod input;
-mod selection;
+pub(crate) mod selection;
 
 use std::collections::VecDeque;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast::Directive;
-use indexmap::IndexSet;
+use apollo_compiler::collections::IndexSet;
 
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;

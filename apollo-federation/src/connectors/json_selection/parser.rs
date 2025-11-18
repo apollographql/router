@@ -110,6 +110,7 @@ pub(crate) trait VarPaths {
 
     /// Returns all locally bound variable names in the selection, without
     /// regard for which ones are available where.
+    #[allow(dead_code)]
     fn local_var_names(&self) -> IndexSet<String> {
         self.var_paths()
             .into_iter()
@@ -550,7 +551,8 @@ impl NamedSelection {
     pub(crate) fn parse(input: Span) -> ParseResult<Self> {
         match get_connect_spec(&input) {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_v0_2(input),
-            ConnectSpec::V0_3 | ConnectSpec::V0_4 => Self::parse_v0_3(input),
+            ConnectSpec::V0_3 => Self::parse_v0_3(input),
+            ConnectSpec::V0_4 => Self::parse_v0_4(input),
         }
     }
 
@@ -646,10 +648,9 @@ impl NamedSelection {
         })
     }
 
-    // TODO Reenable ... in ConnectSpec::V0_4, to support abstract types.
     // NamedSelection ::= (Alias | "...")? PathSelection | Alias SubSelection
+    // V0_3 version: Spread syntax (...) is NOT supported. Preserved for backwards compatibility.
     fn parse_v0_3(input: Span) -> ParseResult<Self> {
-        let spec = get_connect_spec(&input);
         let (after_alias, alias) = opt(Alias::parse)(input.clone())?;
 
         if let Some(alias) = alias {
@@ -693,17 +694,90 @@ impl NamedSelection {
             ))(input.clone())
             .map(|(mut remainder, (_spaces, spread, path))| {
                 let prefix = if let Some(spread) = spread {
-                    if spec <= ConnectSpec::V0_3 {
-                        remainder.extra.errors.push((
-                            "Spread syntax (...) is planned for connect/v0.4".to_string(),
-                            input.location_offset(),
-                        ));
-                    }
+                    // V0_3 does NOT support spread syntax - always add error
+                    remainder.extra.errors.push((
+                        "Spread syntax (...) is not supported in connect/v0.3 (use connect/v0.4)"
+                            .to_string(),
+                        input.location_offset(),
+                    ));
                     // An explicit ... spread token was used, so we record
                     // NamingPrefix::Spread(Some(_)). If the path produces
                     // something other than an object or null, we will catch
                     // that in apply_to_path and compute_output_shape (not a
                     // parsing concern).
+                    NamingPrefix::Spread(spread.range())
+                } else if path.is_anonymous() && path.has_subselection() {
+                    // If there is no Alias or ... and the path is anonymous and
+                    // it has a trailing SubSelection, then it should be spread
+                    // into the larger SubSelection. This is an older syntax
+                    // (PathWithSubSelection) that provided some of the benefits
+                    // of ..., before ... was supported (in connect/v0.3). It's
+                    // important the path is anonymous, since regular field
+                    // selections like `user { id name }` meet all the criteria
+                    // above but should not be spread because they do produce an
+                    // output key.
+                    NamingPrefix::Spread(None)
+                } else {
+                    // Otherwise, the path has no prefix, so it either produces
+                    // a single Key according to path.get_single_key(), or this
+                    // is an anonymous NamedSelection, which are only allowed at
+                    // the top level. However, since we don't know about other
+                    // NamedSelections here, these rules have to be enforced at
+                    // a higher level.
+                    NamingPrefix::None
+                };
+                (remainder, Self { prefix, path })
+            })
+        }
+    }
+
+    // NamedSelection ::= (Alias | "...")? PathSelection | Alias SubSelection
+    // This version enables spread syntax (...) for abstract types support.
+    fn parse_v0_4(input: Span) -> ParseResult<Self> {
+        let (after_alias, alias) = opt(Alias::parse)(input.clone())?;
+
+        if let Some(alias) = alias {
+            if let Ok((remainder, sub)) = SubSelection::parse(after_alias.clone()) {
+                let sub_range = sub.range();
+                return Ok((
+                    remainder,
+                    Self {
+                        prefix: NamingPrefix::Alias(alias),
+                        // This is what used to be called a NamedGroupSelection
+                        // in the grammar, where an Alias SubSelection can be
+                        // used to assign a nested name (the Alias) to a
+                        // selection of fields from the current object.
+                        // Logically, this corresponds to an Alias followed by a
+                        // PathSelection with an empty/missing Path. While there
+                        // is no way to write such a PathSelection normally, we
+                        // can construct a PathList consisting of only a
+                        // SubSelection here, for the sake of using the same
+                        // machinery to process all NamedSelection nodes.
+                        path: PathSelection {
+                            path: WithRange::new(PathList::Selection(sub), sub_range),
+                        },
+                    },
+                ));
+            }
+
+            PathSelection::parse(after_alias.clone()).map(|(remainder, path)| {
+                (
+                    remainder,
+                    Self {
+                        prefix: NamingPrefix::Alias(alias),
+                        path,
+                    },
+                )
+            })
+        } else {
+            tuple((
+                spaces_or_comments,
+                opt(ranged_span("...")),
+                PathSelection::parse,
+            ))(input.clone())
+            .map(|(remainder, (_spaces, spread, path))| {
+                let prefix = if let Some(spread) = spread {
+                    // Spread syntax is fully supported in V0_4
                     NamingPrefix::Spread(spread.range())
                 } else if path.is_anonymous() && path.has_subselection() {
                     // If there is no Alias or ... and the path is anonymous and
@@ -746,14 +820,9 @@ impl NamedSelection {
         }
     }
 
-    /// Find the next subselection, if present
+    #[cfg(test)]
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
         self.path.next_subselection()
-    }
-
-    #[allow(unused)]
-    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
-        self.path.next_mut_subselection()
     }
 }
 
@@ -924,6 +993,7 @@ pub(crate) enum PathList {
 }
 
 impl PathList {
+    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         matches!(self, PathList::Empty)
     }
@@ -4201,7 +4271,8 @@ mod tests {
         assert_eq!(
             JSONSelection::parse_with_spec("id ...names", ConnectSpec::V0_3),
             Err(JSONSelectionParseError {
-                message: "Spread syntax (...) is planned for connect/v0.4".to_string(),
+                message: "Spread syntax (...) is not supported in connect/v0.3 (use connect/v0.4)"
+                    .to_string(),
                 // This is the fragment and offset we should get, but we need to
                 // store error offsets in SpanExtra::errors to provide that
                 // information.
@@ -4211,14 +4282,12 @@ mod tests {
             }),
         );
 
-        // This will fail when we promote v0.3 to latest and create v0.4, which
-        // is your signal to consider reenabling the tests below.
-        assert_eq!(ConnectSpec::V0_3, ConnectSpec::next());
+        // Guard test disabled - spread syntax tests have been enabled for V0_4.
+        // assert_eq!(ConnectSpec::V0_3, ConnectSpec::next());
     }
 
-    // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
-    // syntax and abstract types.
-    /** #[cfg(test)]
+    // Spread syntax tests for ConnectSpec::V0_4 (now enabled!)
+    #[cfg(test)]
     mod spread_parsing {
         use crate::connectors::ConnectSpec;
         use crate::connectors::json_selection::PrettyPrintable;
@@ -4376,7 +4445,6 @@ mod tests {
         spread_parsing::check(spec, "...\na {...\nb\nc d ...\ne }", expected);
         assert_debug_snapshot!(selection!("...a{...b c d...e}", spec));
     }
-    **/
 
     #[test]
     fn should_parse_null_coalescing_in_connect_0_3() {
