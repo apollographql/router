@@ -97,11 +97,17 @@ services:
   # working theory, it might be wrong)
   redis-cluster-startup:
     image: cimg/redis:7.4.7
+    depends_on:
+      - redis-cluster-7000
+      - redis-cluster-7001
+      - redis-cluster-7002
+      - redis-cluster-7003
+      - redis-cluster-7004
+      - redis-cluster-7005
     command: |
       sh -c "
-
-        echo 'waiting 30s for cluster'
-        sleep 30
+        echo 'waiting 5s for containers'
+        sleep 5
 
         redis-cli -h redis-cluster-7000 -p 7000 FLUSHALL &
         redis-cli -h redis-cluster-7001 -p 7001 FLUSHALL &
@@ -136,6 +142,14 @@ services:
 
         echo 'waiting 30s for cluster config'
         sleep 30
+      
+        echo 'checking internal connectivity'
+        redis-cli -h redis-cluster-7000 -p 7000 INFO REPLICATION
+        redis-cli -h redis-cluster-7001 -p 7001 INFO REPLICATION
+        redis-cli -h redis-cluster-7002 -p 7002 INFO REPLICATION
+        redis-cli -h redis-cluster-7003 -p 7003 INFO REPLICATION
+        redis-cli -h redis-cluster-7004 -p 7004 INFO REPLICATION
+        redis-cli -h redis-cluster-7005 -p 7005 INFO REPLICATION
 
         echo 'everything should be good to go! if you see connection errors, please raise a ticket'
       "
