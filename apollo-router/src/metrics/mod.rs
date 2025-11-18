@@ -262,12 +262,14 @@ pub(crate) mod test_utils {
                 // Otherwise we fail every multi-threaded test that touches metrics
                 .unwrap_or_default()
         } else {
-            // Single threaded tests can use a single global meter provider. We must let this leak
-            // memory because of how the meter provider is dropped during test clean-up.
-            // SdkMeterProvider now has a Drop impl that calls a shutdown() fn instrumented
-            // with tracing. When the test is shutting down, TLS OnceLock is dropped first, but the
-            // SdkMeterProvider::shutdown() tracing attempts to log using a TLS key that has already
-            // been destroyed, causing a panic.
+            // We deliberately leak the test MeterProvider instead of letting it Drop.
+            // Dropping `opentelemetry_sdk::metrics::SdkMeterProviderInner` calls `shutdown()`,
+            // which logs via OpenTelemetry’s internal logging macros (otel_* -> tracing::*). Those
+            // logs go through tracing-subscriber, which uses thread-local state. If this Drop runs
+            // from a thread-local destructor (e.g. in tests using TLS), tracing_subscriber’s TLS
+            // access happens during TLS teardown and panics with: "cannot access a Thread Local
+            // Storage value during or after destruction: AccessError" To avoid that panic in tests,
+            // we never Drop the provider here.
             let &(provider, reader) = GLOBAL_AGGREGATE_METER_PROVIDER
                 .get_or_init(create_test_meter_provider_leaked);
             (provider.clone(), reader.clone())
