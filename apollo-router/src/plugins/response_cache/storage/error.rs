@@ -32,7 +32,7 @@ impl ErrorCode for Error {
 
         match self {
             Error::Database(err) => {
-                if err.kind() == &fred::error::ErrorKind::Timeout {
+                if err.kind() == &fred::error::ErrorKind::Timeout || err.details() == "timeout" {
                     TIMEOUT_CODE
                 } else {
                     err.kind().to_str()
