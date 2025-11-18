@@ -8,6 +8,8 @@ use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinSet;
 
 /// Represents a Redis command, which includes the actual command (ie GET) and any arguments (ie key1).
@@ -36,15 +38,20 @@ impl Monitor {
         let mut monitor_tasks = JoinSet::new();
         let mut collection_tasks = JoinSet::new();
 
+        let mut initialized_channels = Vec::new();
+
         for port in ports {
             // unbounded channel - not good for prod, but ok in tests. otherwise, you can end up
             // dropping output and getting test failures.
             let (tx, mut rx) = mpsc::unbounded_channel();
+            let (init_tx, init_rx) = oneshot::channel();
+            initialized_channels.push(init_rx);
+
             let port = port.to_string();
 
             monitor_tasks.spawn(async move {
                 let is_replica = is_replica(&port).await;
-                monitor(&port, is_replica, tx).await;
+                monitor(&port, is_replica, tx, init_tx).await;
             });
 
             collection_tasks.spawn(async move {
@@ -61,9 +68,14 @@ impl Monitor {
             });
         }
 
-        // sleep for a bit to allow tasks to spin up - do this here rather than requiring each
-        // caller to do it
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // wait for all the MONITOR commands to initialize
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for rx in initialized_channels {
+                rx.await.expect("No `initialized` message received");
+            }
+        })
+        .await
+        .expect("Failed to execute MONITOR within 5sec");
 
         Self {
             monitor_tasks,
@@ -177,7 +189,12 @@ async fn is_replica(port: &str) -> bool {
 
 /// Run the `MONITOR` command against a specific port and send the commands observed to a channel.
 // NB: fred can't run MONITOR on a cluster, so we have to do it externally
-async fn monitor(port: &str, is_replica: bool, tx: UnboundedSender<(bool, Command)>) {
+async fn monitor(
+    port: &str,
+    is_replica: bool,
+    tx: UnboundedSender<(bool, Command)>,
+    initialized_tx: Sender<()>,
+) {
     let mut cmd = tokio::process::Command::new("redis-cli")
         .args(["-p", port, "MONITOR"])
         .stdout(Stdio::piped())
@@ -186,15 +203,18 @@ async fn monitor(port: &str, is_replica: bool, tx: UnboundedSender<(bool, Comman
         .expect("failed to create redis-cli command for monitoring redis commands");
 
     let mut reader = BufReader::new(cmd.stdout.take().unwrap()).lines();
+
+    // the first line should be an "OK" to reflect that the monitor command has been executed
+    let first_line = reader.next_line().await.unwrap().unwrap();
+    assert_eq!(first_line, "OK");
+    initialized_tx.send(()).unwrap();
+
     while let Ok(Some(line)) = reader.next_line().await {
         if let Some(redis_command) = parse_monitor_output(&line) {
             tx.send((is_replica, redis_command))
                 .expect("unable to send");
         } else {
-            match line.as_str() {
-                "OK" => {}
-                line => eprintln!("unable to parse line: {line}"),
-            };
+            eprintln!("unable to parse line: {line}");
         }
     }
 }
