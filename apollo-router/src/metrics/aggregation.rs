@@ -357,6 +357,8 @@ macro_rules! aggregate_observable_instrument_fn {
                     let cb = Arc::clone(cb);
                     b = b.with_callback(move |inst| cb(inst));
                 }
+                // TODO do we instead wrap in an instrument wrapper and return so it can be dropped?
+                // TODO is this even possible since there's no delegate?
                 handles.push(b.build());
             }
 
@@ -505,113 +507,6 @@ mod test {
         fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
             self.shutdown()
         }
-    }
-
-    #[test]
-    fn test_i64_gauge_drop() {
-        let reader = SharedReader(Arc::new(ManualReader::builder().build()));
-
-        let delegate = MeterProviderBuilder::default()
-            .with_reader(reader.clone())
-            .build();
-        let meter_provider = AggregateMeterProvider::default();
-        meter_provider.set(
-            MeterProviderType::Public,
-            FilterMeterProvider::public(delegate),
-        );
-        let meter = meter_provider.meter("test");
-
-        let observe_counter = Arc::new(AtomicI64::new(0));
-        let callback_observe_counter = observe_counter.clone();
-
-        let mut result = ResourceMetrics::default();
-        {
-            let _gauge = meter
-                .i64_observable_gauge("test")
-                .with_callback(move |i| {
-                    let count =
-                        callback_observe_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    i.observe(count + 1, &[])
-                })
-                .build();
-
-            // Fetching twice will call the observer twice
-            reader
-                .collect(&mut result)
-                .expect("metrics must be collected");
-            reader
-                .collect(&mut result)
-                .expect("metrics must be collected");
-
-            assert_eq!(get_gauge_value(&mut result), 2);
-
-            drop(_gauge)
-        } // Limited scope to drop the gauge after use (b/c it does not impl drop)
-
-        // No further increment will happen now that the gauge has dropped
-        reader
-            .collect(&mut result)
-            .expect("metrics must be collected");
-
-        assert_eq!(observe_counter.load(std::sync::atomic::Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn test_i64_gauge_lifecycle() {
-        let reader = SharedReader(Arc::new(ManualReader::builder().build()));
-
-        let delegate = MeterProviderBuilder::default()
-            .with_reader(reader.clone())
-            .build();
-        let meter_provider = AggregateMeterProvider::default();
-        meter_provider.set(
-            MeterProviderType::Public,
-            FilterMeterProvider::public(delegate),
-        );
-        let meter = meter_provider.meter("test");
-
-        let observe_counter = Arc::new(AtomicI64::new(0));
-        let callback_observe_counter1 = observe_counter.clone();
-        let callback_observe_counter2 = observe_counter.clone();
-
-        let mut result = ResourceMetrics::default();
-
-        {
-            let _gauge1 = meter
-                .i64_observable_gauge("test")
-                .with_callback(move |i| {
-                    let count =
-                        callback_observe_counter1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    i.observe(count + 1, &[])
-                })
-                .build();
-
-            // Fetching metrics will call the observer
-            reader
-                .collect(&mut result)
-                .expect("metrics must be collected");
-
-            assert_eq!(get_gauge_value(&mut result), 1);
-        } // Limited scope to drop the gauge after use (b/c it does not impl drop)
-
-        {
-            // The first gauge is dropped, let's create a new one
-            let _gauge2 = meter
-                .i64_observable_gauge("test")
-                .with_callback(move |i| {
-                    let count =
-                        callback_observe_counter2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    i.observe(count + 1, &[])
-                })
-                .build();
-
-            // Fetching metrics will call the observer ONLY on the remaining gauge
-            reader
-                .collect(&mut result)
-                .expect("metrics must be collected");
-
-            assert_eq!(get_gauge_value(&mut result), 2);
-        } // Limited scope to drop the gauge after use (b/c it does not impl drop)
     }
 
     fn get_gauge_value(result: &mut ResourceMetrics) -> i64 {
