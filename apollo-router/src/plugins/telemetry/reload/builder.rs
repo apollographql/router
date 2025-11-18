@@ -36,6 +36,8 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::apollo;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::MetricView;
+use crate::plugins::telemetry::config_new::cache::RESPONSE_CACHE_METRIC;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
@@ -150,6 +152,19 @@ impl<'a> Builder<'a> {
         // and must be returned from the prepare phase.
         let mut builder = MetricsBuilder::new(self.config);
         builder.configure(&self.config.apollo)?;
+        // We drop this metric only for apollo exporter because it uses the same pattern including `.operations` but should not be forwarded to our apollo exporter
+        builder.with_view(
+            MeterProviderType::Apollo,
+            MetricView {
+                name: String::from(RESPONSE_CACHE_METRIC),
+                rename: None,
+                description: None,
+                unit: None,
+                aggregation: Some(crate::plugins::telemetry::config::MetricAggregation::Drop),
+                allowed_attribute_keys: None,
+            }
+            .try_into()?,
+        );
         let (_, meter_providers, sender) = builder.build();
         self.activation.add_meter_providers(meter_providers);
         self.apollo_sender = sender;

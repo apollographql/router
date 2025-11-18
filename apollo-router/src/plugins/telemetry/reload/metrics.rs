@@ -33,9 +33,7 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::config_new::cache::RESPONSE_CACHE_METRIC;
 
 /// Trait for metric exporters to contribute to meter provider construction
 pub(crate) trait MetricsConfigurator {
@@ -180,21 +178,6 @@ impl<'a> MetricsBuilder<'a> {
     ) -> Result<(), BoxError> {
         for metric_view in self.metrics_common().views.clone() {
             self.with_view(meter_provider_type, metric_view.try_into()?);
-        }
-        // We drop this metric only for apollo exporter because it uses the same pattern including `.operations` but should not be forwarded to our apollo exporter
-        if matches!(meter_provider_type, MeterProviderType::Apollo) {
-            self.with_view(
-                meter_provider_type,
-                MetricView {
-                    name: String::from(RESPONSE_CACHE_METRIC),
-                    rename: None,
-                    description: None,
-                    unit: None,
-                    aggregation: Some(crate::plugins::telemetry::config::MetricAggregation::Drop),
-                    allowed_attribute_keys: None,
-                }
-                .try_into()?,
-            );
         }
         Ok(())
     }
