@@ -552,6 +552,7 @@ mod tests {
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
     use tokio::sync::broadcast;
+    use tokio::time::Instant;
     use tower::BoxError;
     use uuid::Uuid;
 
@@ -1378,10 +1379,22 @@ mod tests {
         storage.truncate_namespace().await?;
 
         let document = common_document();
-        let error = storage.fetch(&document.key, "S1").await.unwrap_err();
-        assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
-        assert_eq!(error.code(), "TIMEOUT");
 
-        Ok(())
+        // because of how tokio::timeout polls, it's possible for a command to finish before the
+        // timeout is polled (even if the duration is 0). perform the check in a loop to give it
+        // a few changes to trigger.
+        let now = Instant::now();
+        while now.elapsed() < Duration::from_secs(5) {
+            let error = storage.fetch(&document.key, "S1").await.unwrap_err();
+            if error.is_row_not_found() {
+                continue;
+            }
+
+            assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
+            assert_eq!(error.code(), "TIMEOUT");
+            return Ok(());
+        }
+
+        panic!("Never observed a timeout");
     }
 }
