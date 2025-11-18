@@ -31,9 +31,9 @@ use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
 use crate::configuration::server::ServerHttpConfig;
-use crate::plugins::limits::Config as LimitsConfig;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
+use crate::plugins::limits::Config as LimitsConfig;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::services::router::pipeline_handle::PipelineRef;
@@ -314,18 +314,30 @@ fn get_effective_http_config(
     _server_config: &ServerHttpConfig,
     legacy_max_headers: Option<usize>,
     legacy_max_buf_size: Option<ByteSize>,
-) -> (Option<usize>, Option<ByteSize>, Option<ByteSize>, Option<ByteSize>) {
+) -> (
+    Option<usize>,
+    Option<ByteSize>,
+    Option<ByteSize>,
+    Option<ByteSize>,
+) {
     // Use limits config for header configuration, with legacy fallback
-    let effective_max_headers = limits_config.http1_max_request_headers.or(legacy_max_headers);
-    
+    let effective_max_headers = limits_config
+        .http1_max_request_headers
+        .or(legacy_max_headers);
+
     // Use legacy_max_buf_size for HTTP/1 buffer size (different from header size)
     let effective_max_buf_size = legacy_max_buf_size;
-    
+
     // Use limits config for new header configuration
     let effective_max_header_size = limits_config.http_max_header_size;
     let effective_max_header_list_size = limits_config.http_max_header_list_size;
-    
-    (effective_max_headers, effective_max_buf_size, effective_max_header_size, effective_max_header_list_size)
+
+    (
+        effective_max_headers,
+        effective_max_buf_size,
+        effective_max_header_size,
+        effective_max_header_list_size,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -352,11 +364,20 @@ pub(super) fn serve_router_on_listen_addr(
         tokio::pin!(shutdown_receiver);
 
         let connection_shutdown = CancellationToken::new();
-        
+
         // Get effective configuration with backward compatibility
-        let (effective_max_headers, effective_max_buf_size, effective_max_header_size, effective_max_header_list_size) = 
-            get_effective_http_config(&limits_config, &server_http_config, legacy_max_headers, legacy_max_buf_size);
-        
+        let (
+            effective_max_headers,
+            effective_max_buf_size,
+            effective_max_header_size,
+            effective_max_header_list_size,
+        ) = get_effective_http_config(
+            &limits_config,
+            &server_http_config,
+            legacy_max_headers,
+            legacy_max_buf_size,
+        );
+
         // Note: individual header size limits (max_header_size) are enforced differently
         // depending on the HTTP version and implementation capabilities
 
@@ -470,7 +491,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             let http_config = http_connection
                                                              .keep_alive_interval(Some(Duration::from_secs(30)))
                                                              .timer(TokioTimer::new());
-                                            
+
                                             // Apply HTTP/2 specific configuration if available
                                             if let Some(max_header_list_size) = effective_max_header_list_size {
                                                 http_config.max_header_list_size(max_header_list_size.as_u64() as u32);
@@ -482,7 +503,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 // But hyper doesn't expose this directly, so we'll rely on max_header_list_size
                                                 // and validation at the application level if needed
                                             }
-                                            
+
                                             let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                             handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                         } else {

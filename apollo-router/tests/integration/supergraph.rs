@@ -229,7 +229,7 @@ async fn test_supergraph_limits_http_max_header_size_exceeded() -> Result<(), Bo
                 .build(),
         )
         .await;
-    
+
     // Should return 431 Request Header Fields Too Large or 400 Bad Request
     assert!(response.status() == 431 || response.status() == 400);
     Ok(())
@@ -269,7 +269,7 @@ async fn test_supergraph_limits_http_max_header_size_within_limit() -> Result<()
     Ok(())
 }
 
-// Test for HTTP/2 header list size limits (http_max_header_list_size)  
+// Test for HTTP/2 header list size limits (http_max_header_list_size)
 #[tokio::test(flavor = "multi_thread")]
 async fn test_supergraph_limits_http_max_header_list_size_exceeded() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
@@ -288,7 +288,10 @@ async fn test_supergraph_limits_http_max_header_list_size_exceeded() -> Result<(
     // Create many headers that together exceed 4KB
     let mut headers = HashMap::new();
     for i in 0..100 {
-        headers.insert(format!("test-header-{i}"), format!("value-{}", "x".repeat(50)));
+        headers.insert(
+            format!("test-header-{i}"),
+            format!("value-{}", "x".repeat(50)),
+        );
     }
 
     let (_trace_id, response) = router
@@ -299,7 +302,7 @@ async fn test_supergraph_limits_http_max_header_list_size_exceeded() -> Result<(
                 .build(),
         )
         .await;
-    
+
     // Should return 431 Request Header Fields Too Large or 400 Bad Request
     assert!(response.status() == 431 || response.status() == 400);
     Ok(())
@@ -323,7 +326,10 @@ async fn test_supergraph_limits_http_max_header_list_size_within_limit() -> Resu
     // Create headers that together are less than 8KB
     let mut headers = HashMap::new();
     for i in 0..20 {
-        headers.insert(format!("test-header-{i}"), format!("value-{}", "x".repeat(20)));
+        headers.insert(
+            format!("test-header-{i}"),
+            format!("value-{}", "x".repeat(20)),
+        );
     }
 
     let (_trace_id, response) = router
@@ -374,4 +380,3 @@ async fn test_supergraph_legacy_limits_max_headers_exceeded() -> Result<(), BoxE
     assert_eq!(response.status(), 431);
     Ok(())
 }
-

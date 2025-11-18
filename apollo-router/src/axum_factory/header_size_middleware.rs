@@ -1,18 +1,18 @@
 //! Middleware to enforce HTTP header size limits
-use std::task::Poll;
-use std::task::Context;
 use std::convert::Infallible;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
 use axum::response::Response;
 use bytesize::ByteSize;
+use futures::ready;
 use http::Request;
 use http::StatusCode;
 use pin_project_lite::pin_project;
 use tower::Layer;
 use tower::Service;
-use futures::ready;
-use std::pin::Pin;
-use std::future::Future;
 
 /// Layer that enforces maximum header size limits
 #[derive(Clone)]
@@ -60,7 +60,7 @@ where
         // Check header sizes if limit is configured
         if let Some(max_size) = self.max_header_size {
             let max_size_bytes = max_size.as_u64() as usize;
-            
+
             for (name, value) in request.headers() {
                 let header_size = name.as_str().len() + value.len();
                 if header_size > max_size_bytes {
@@ -70,15 +70,17 @@ where
                         max_size = max_size_bytes,
                         "Header size exceeds limit"
                     );
-                    
+
                     // Return 431 Request Header Fields Too Large
                     let response = Response::builder()
                         .status(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
                         .body(axum::body::Body::from("Request header field too large"))
                         .unwrap();
-                    
+
                     return HeaderSizeLimitFuture {
-                        kind: HeaderSizeLimitFutureKind::Error { response: Some(response) }
+                        kind: HeaderSizeLimitFutureKind::Error {
+                            response: Some(response),
+                        },
                     };
                 }
             }
@@ -87,8 +89,8 @@ where
         // Headers are within limit, proceed with request
         HeaderSizeLimitFuture {
             kind: HeaderSizeLimitFutureKind::Service {
-                future: self.inner.call(request)
-            }
+                future: self.inner.call(request),
+            },
         }
     }
 }

@@ -36,8 +36,8 @@ use tracing::Instrument;
 use tracing::instrument::WithSubscriber;
 
 use super::ENDPOINT_CALLBACK;
-use super::header_size_middleware::HeaderSizeLimitLayer;
 use super::ListenAddrAndRouter;
+use super::header_size_middleware::HeaderSizeLimitLayer;
 use super::listeners::ListenersAndRouters;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
@@ -473,13 +473,13 @@ where
         early_cancel: configuration.supergraph.early_cancel,
         experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
     }));
-    
+
     // Add header size limit middleware
     if let Some(max_header_size) = configuration.limits.http_max_header_size {
         tracing::debug!(?max_header_size, "Adding header size limit middleware");
         router = router.layer(HeaderSizeLimitLayer::new(Some(max_header_size)));
     }
-    
+
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     {
         use tower::layer::layer_fn;

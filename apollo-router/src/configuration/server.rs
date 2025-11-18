@@ -11,7 +11,6 @@ fn default_header_read_timeout() -> Duration {
     DEFAULT_HEADER_READ_TIMEOUT
 }
 
-
 /// Configuration for HTTP
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -159,14 +158,12 @@ mod tests {
         assert_eq!(config.http.header_read_timeout, Duration::from_secs(60));
     }
 
-
-
     #[test]
     fn test_server_http_config_with_all_header_limits() {
         let json_config = json!({
             "http": {
                 "header_read_timeout": "20s",
-                "max_header_size": "32kb", 
+                "max_header_size": "32kb",
                 "max_headers": 200,
                 "max_header_list_size": "64kb"
             }
