@@ -1954,8 +1954,12 @@ fn get_invalidation_entity_keys_from_schema(
         // Jumping from an interface object
         Some(iface_type) => {
             // In this case, we can only support jumping from an interface object to another
-            // interface object. If the target is a normal interface/implementation case, cache key
-            // can't be determined.
+            // interface object.
+            // Note: `@cacheTag` can be different across implementation types. If the target entity
+            //       type is a interface type (not interface-object), we don't collect the
+            //       directives from its implementation types. Because the actual object type (and
+            //       thus cache key) can't be determined based only on interface type name. This
+            //       may result in cache misses, but it's inherent limitation of interface objects.
             iface_type
                 .directives
                 .get_all("join__directive")
@@ -1973,6 +1977,13 @@ fn get_invalidation_entity_keys_from_schema(
             // Target subgraph may implement an interface object. Handle both interface object case
             // and normal interface/implementations case by chaining the object type's directives
             // and those of its implementing interface types.
+            // Note: We also need to look up the interface types because `@cacheTag` directives
+            //       applied on interface object type is not propagated to implementation types.
+            // Note: We don't really support multiple interface objects overlapping each other.
+            //       There are multiple issues preventing that from working. Thus, we don't expect
+            //       an object type to implement multiple interface types with `@cacheTag` on them
+            //       within the same subgraph. So, we will have at most one `@cacheTag` from
+            //       interfaces.
             let obj_directives: Vec<_> = obj_type
                 .directives
                 .get_all("join__directive")
