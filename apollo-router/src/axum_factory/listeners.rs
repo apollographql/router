@@ -446,7 +446,9 @@ pub(super) fn serve_router_on_listen_addr(
 
                                         let mut http2_config = builder.http2();
                                         if let Some(max_header_list_size) = opt_max_http2_headers_list_bytes {
-                                            http2_config.max_header_list_size(max_header_list_size as u32);
+                                            // ByteSize as a .as_u64, but not as_u32, to explain
+                                            // this funky `as` conversion
+                                            http2_config.max_header_list_size(max_header_list_size.as_u64() as u32);
                                         }
 
                                         // access the http1 config via the http2 builder doesn't

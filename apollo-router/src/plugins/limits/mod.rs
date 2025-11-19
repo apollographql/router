@@ -117,9 +117,10 @@ pub(crate) struct Config {
 
     /// For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.
     ///
-    /// If router receives more headers than the buffer size, it responds to the client with
+    /// If router receives more headers than allowed size of the header list, it responds to the client with
     /// "431 Request Header Fields Too Large".
-    pub(crate) http2_max_headers_list_bytes: Option<usize>,
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) http2_max_headers_list_bytes: Option<ByteSize>,
 
     /// Limit the depth of nested list fields in introspection queries
     /// to protect avoid generating huge responses. Returns a GraphQL
