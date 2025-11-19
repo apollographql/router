@@ -37,6 +37,7 @@ use crate::plugins::telemetry::apollo;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::MetricView;
+use crate::plugins::telemetry::config_new::cache::CACHE_METRIC;
 use crate::plugins::telemetry::config_new::cache::RESPONSE_CACHE_METRIC;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics;
@@ -157,6 +158,18 @@ impl<'a> Builder<'a> {
             MeterProviderType::Apollo,
             MetricView {
                 name: String::from(RESPONSE_CACHE_METRIC),
+                rename: None,
+                description: None,
+                unit: None,
+                aggregation: Some(crate::plugins::telemetry::config::MetricAggregation::Drop),
+                allowed_attribute_keys: None,
+            }
+            .try_into()?,
+        );
+        builder.with_view(
+            MeterProviderType::Apollo,
+            MetricView {
+                name: String::from(CACHE_METRIC),
                 rename: None,
                 description: None,
                 unit: None,
