@@ -129,21 +129,8 @@ impl RouterHttpServer {
         shutdown: Option<ShutdownSource>,
         uplink: Option<UplinkConfig>,
         is_telemetry_disabled: Option<bool>,
-        schema_source_provided: Option<bool>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        // Use provided flag or infer from schema source
-        // A schema source is considered "provided" if:
-        // - It's a Static schema with non-empty content
-        // - It's a File, URLs, Registry, or OCI source (these are always provided)
-        let schema_source_provided = schema_source_provided.unwrap_or(match &schema {
-            SchemaSource::Static { schema_sdl } => !schema_sdl.is_empty(),
-            SchemaSource::File { .. }
-            | SchemaSource::URLs { .. }
-            | SchemaSource::Registry(_)
-            | SchemaSource::OCI(_)
-            | SchemaSource::Stream(_) => true,
-        });
         let event_stream = generate_event_stream(
             shutdown.unwrap_or(ShutdownSource::CtrlC),
             configuration.unwrap_or_default(),
@@ -151,7 +138,6 @@ impl RouterHttpServer {
             uplink,
             license.unwrap_or_default(),
             shutdown_receiver,
-            schema_source_provided,
         );
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory);
@@ -245,15 +231,12 @@ fn generate_event_stream(
     uplink_config: Option<UplinkConfig>,
     license: LicenseSource,
     shutdown_receiver: oneshot::Receiver<()>,
-    schema_source_provided: bool,
 ) -> impl Stream<Item = Event> {
     stream::select_all(vec![
         shutdown.into_stream().boxed(),
         schema.into_stream().boxed(),
         license.into_stream().boxed(),
-        configuration
-            .into_stream(uplink_config, schema_source_provided)
-            .boxed(),
+        configuration.into_stream(uplink_config).boxed(),
         shutdown_receiver
             .into_stream()
             .map(|_| Event::Shutdown)

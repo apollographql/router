@@ -11,7 +11,6 @@ use futures::prelude::*;
 use crate::Configuration;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
-use crate::router::Event::NoMoreSchema;
 use crate::router::Event::RhaiReload;
 use crate::router::Event::UpdateConfiguration;
 use crate::uplink::UplinkConfig;
@@ -55,13 +54,9 @@ impl Default for ConfigurationSource {
 
 impl ConfigurationSource {
     /// Convert this config into a stream regardless of if is static or not. Allows for unified handling later.
-    ///
-    /// `schema_source_provided` indicates if a schema source was already provided via CLI/env.
-    /// Note: graph_artifact_reference is no longer available in YAML config, only via CLI/env options.
     pub(crate) fn into_stream(
         self,
         uplink_config: Option<UplinkConfig>,
-        schema_source_provided: bool,
     ) -> impl Stream<Item = Event> {
         match self {
             ConfigurationSource::Static(mut instance) => {
@@ -69,19 +64,10 @@ impl ConfigurationSource {
                 let config_arc = Arc::new(*instance);
                 let config_event = UpdateConfiguration(config_arc);
 
-                // If no schema source was provided, emit NoMoreSchema so the state machine knows no schema will be provided
-                if !schema_source_provided {
-                    // Chain config event, NoMoreSchema, and NoMoreConfiguration
-                    stream::once(future::ready(config_event))
-                        .chain(stream::iter(vec![NoMoreSchema]))
-                        .chain(stream::iter(vec![NoMoreConfiguration]))
-                        .boxed()
-                } else {
-                    // Chain config event and NoMoreConfiguration
-                    stream::once(future::ready(config_event))
-                        .chain(stream::iter(vec![NoMoreConfiguration]))
-                        .boxed()
-                }
+                // Chain config event and NoMoreConfiguration
+                stream::once(future::ready(config_event))
+                    .chain(stream::iter(vec![NoMoreConfiguration]))
+                    .boxed()
             }
             ConfigurationSource::Stream(stream) => stream
                 .map(move |mut c| {
@@ -206,7 +192,7 @@ mod tests {
         let contents = include_str!("../../testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
         let mut stream = ConfigurationSource::File { path, watch: true }
-            .into_stream(Some(UplinkConfig::default()), false)
+            .into_stream(Some(UplinkConfig::default()))
             .boxed();
 
         // First update is guaranteed
@@ -236,7 +222,7 @@ mod tests {
             path: temp_dir().join("does_not_exit"),
             watch: true,
         }
-        .into_stream(Some(UplinkConfig::default()), false);
+        .into_stream(Some(UplinkConfig::default()));
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -247,7 +233,7 @@ mod tests {
         let (path, mut file) = create_temp_file();
         write_and_flush(&mut file, "Garbage").await;
         let mut stream = ConfigurationSource::File { path, watch: true }
-            .into_stream(Some(UplinkConfig::default()), false);
+            .into_stream(Some(UplinkConfig::default()));
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -260,7 +246,7 @@ mod tests {
         write_and_flush(&mut file, contents).await;
 
         let mut stream = ConfigurationSource::File { path, watch: false }
-            .into_stream(Some(UplinkConfig::default()), false);
+            .into_stream(Some(UplinkConfig::default()));
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
@@ -269,14 +255,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn config_no_schema_source_provided() {
-        // Test that when schema_source_provided=false, we emit NoMoreSchema
-        // graph_artifact_reference is no longer in YAML config, only available via CLI/env
+    async fn config_static() {
+        // Test that static config emits UpdateConfiguration and NoMoreConfiguration
         let config = Configuration::default();
 
         let config_source = ConfigurationSource::Static(Box::new(config));
         let mut stream = config_source
-            .into_stream(Some(UplinkConfig::default()), false)
+            .into_stream(Some(UplinkConfig::default()))
             .boxed();
 
         // Should emit UpdateConfiguration first
@@ -284,31 +269,8 @@ mod tests {
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
         ));
-
-        // Should emit NoMoreSchema since no schema source was provided
-        assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
 
         // Should end with NoMoreConfiguration
-        assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn config_schema_source_provided() {
-        // Test that when schema_source_provided=true, we don't emit NoMoreSchema
-        let config = Configuration::default();
-        let config_source = ConfigurationSource::Static(Box::new(config));
-        let mut stream = config_source
-            .into_stream(Some(UplinkConfig::default()), true)
-            .boxed();
-
-        // Should emit UpdateConfiguration first
-        assert!(matches!(
-            stream.next().await.unwrap(),
-            UpdateConfiguration(_)
-        ));
-
-        // Should NOT emit NoMoreSchema since schema_source_provided=true
-        // Should go directly to NoMoreConfiguration
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 }

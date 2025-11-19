@@ -728,7 +728,6 @@ impl Executable {
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
-            .schema_source_provided(schema_source_provided_via_cli_env)
             .start();
 
         if let Err(err) = router.await {
