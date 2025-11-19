@@ -66,6 +66,12 @@ pub struct OciConfig {
 
     /// OCI Compliant URL pointing to the release bundle
     pub reference: String,
+
+    /// Graph artifact reference (tag or digest)
+    pub graph_artifact_reference: String,
+
+    /// Hot reload enabled
+    pub hot_reload: bool,
 }
 
 #[derive(Debug, Clone)]

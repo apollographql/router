@@ -240,17 +240,19 @@ impl Opt {
     }
 
     pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
-        let reference = self
+        let graph_artifact_reference = self
             .graph_artifact_reference
             .clone()
             .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
-        let (validated_reference, _) = validate_oci_reference(&reference)?;
+        let (validated_reference, _) = validate_oci_reference(&graph_artifact_reference)?;
         Ok(OciConfig {
             apollo_key: self
                 .apollo_key
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
             reference: validated_reference,
+            graph_artifact_reference: graph_artifact_reference.clone(),
+            hot_reload: APOLLO_ROUTER_HOT_RELOAD_CLI.load(Ordering::Relaxed),
         })
     }
 
@@ -499,17 +501,10 @@ impl Executable {
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
         // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE (CLI/env only)
         // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF (CLI/env only)
-        // 6. Config file graph_artifact_reference (handled in config stream)
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
         #[cfg(not(unix))]
         let akp: &Option<PathBuf> = &None;
-
-        // Track if schema source was provided via CLI/env (for OCI/Registry)
-        let mut schema_source_provided_via_cli_env = false;
-        // Track if graph_artifact_reference is being used from CLI/env (not from config)
-        #[allow(unused)]
-        let using_graph_artifact_reference = opt.graph_artifact_reference.is_some();
 
         // Validate that schema sources are not conflicting
         // Check both builder API schema and CLI supergraph_path (both map to -s/--supergraph)
@@ -617,14 +612,8 @@ impl Executable {
                         }
                     };
                     match opt.graph_artifact_reference {
-                        None => {
-                            schema_source_provided_via_cli_env = true;
-                            SchemaSource::Registry(opt.uplink_config()?)
-                        }
-                        Some(_) => {
-                            schema_source_provided_via_cli_env = true;
-                            SchemaSource::OCI(opt.oci_config()?)
-                        }
+                        None => SchemaSource::Registry(opt.uplink_config()?),
+                        Some(_) => SchemaSource::OCI(opt.oci_config()?),
                     }
                 }
             }
@@ -632,14 +621,8 @@ impl Executable {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
                 match opt.graph_artifact_reference {
-                    None => {
-                        schema_source_provided_via_cli_env = true;
-                        SchemaSource::Registry(opt.uplink_config()?)
-                    }
-                    Some(_) => {
-                        schema_source_provided_via_cli_env = true;
-                        SchemaSource::OCI(opt.oci_config()?)
-                    }
+                    None => SchemaSource::Registry(opt.uplink_config()?),
+                    Some(_) => SchemaSource::OCI(opt.oci_config()?),
                 }
             }
             _ => {
