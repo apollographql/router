@@ -1,5 +1,21 @@
 ---
 source: apollo-router/src/plugins/demand_control/cost_calculator/static_cost.rs
 expression: yaml
+snapshot_kind: text
 ---
-[]
+- fields:
+    name: MeterProvider.Drop
+  level: INFO
+  message: "Last reference of MeterProvider dropped, initiating shutdown."
+- fields:
+    name: MeterProvider.Drop
+  level: INFO
+  message: "Last reference of MeterProvider dropped, initiating shutdown."
+- fields:
+    name: MeterProvider.Drop
+  level: INFO
+  message: "Last reference of MeterProvider dropped, initiating shutdown."
+- fields:
+    name: MeterProvider.Drop
+  level: INFO
+  message: "Last reference of MeterProvider dropped, initiating shutdown."
