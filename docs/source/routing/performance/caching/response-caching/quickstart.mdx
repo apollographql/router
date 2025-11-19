@@ -74,7 +74,7 @@ telemetry:
   instrumentation:
     instruments:
       cache: # Cache instruments configuration
-        apollo.router.operations.response.cache: # A counter which counts the number of cache hit and miss for subgraph requests
+        apollo.router.response.cache: # A counter which counts the number of cache hit and miss for subgraph requests
           attributes:
             graphql.type.name: true # Include the entity type name. default: false
             subgraph.name: # Custom attributes to include the subgraph name in the metric
@@ -84,7 +84,7 @@ telemetry:
             # You can add more custom attributes using subgraph selectors
 ```
 
-You can now use the `apollo.router.operations.response.cache` metric to create a dashboard like this example:
+You can now use the `apollo.router.response.cache` metric to create a dashboard like this example:
 
 <img
   className="screenshot"
