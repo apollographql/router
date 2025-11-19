@@ -1089,6 +1089,18 @@ impl Merger {
             }
         }
 
+        // Check if any subgraph defines this type as an @interfaceObject
+        // If so, we need @join__field directives to distinguish which subgraphs provide which fields
+        let has_interface_object = self.subgraphs.iter().any(|subgraph| {
+            let obj_pos = ObjectTypeDefinitionPosition {
+                type_name: parent_name.clone(),
+            };
+            subgraph.is_interface_object_type(&obj_pos.into())
+        });
+        if has_interface_object {
+            return Ok(true);
+        }
+
         // We can avoid the join__field if:
         //   1) the field exists in all sources having the field parent type,
         //   2) none of the field instance has a @requires or @provides.
