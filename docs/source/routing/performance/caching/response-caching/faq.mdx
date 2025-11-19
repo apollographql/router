@@ -121,7 +121,7 @@ Response caching is compatible with caches that support open-source Redis >7.0. 
 
 ### Can I set a limit on my Redis database size?
 
-You can use [Redis's key eviction](https://redis.io/docs/latest/develop/reference/eviction/) to limit the maximum memory to use for the cache data. If an eviction policy is set, you **must** use the `volatile-ttl` eviction policy, which evicts keys with the shortest remaining TTL value. 
+You can use [Redis's key eviction](https://redis.io/docs/latest/develop/reference/eviction/) to limit the maximum memory to use for the cache data. If an eviction policy is set, you **must** use the `volatile-ttl` eviction policy, which evicts keys with the shortest remaining TTL value.
 
 If you want to set a memory limit per subgraph, you must configure a different Redis instance per subgraph.
 
