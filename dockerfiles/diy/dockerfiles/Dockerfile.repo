@@ -9,8 +9,6 @@ WORKDIR /usr/src/router
 RUN apt-get update && apt-get -y install \
     build-essential \
     protobuf-compiler \
-    pkg-config \
-    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Add rustfmt since build requires it
