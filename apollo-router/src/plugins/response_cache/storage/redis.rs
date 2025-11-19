@@ -552,14 +552,17 @@ mod tests {
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
     use tokio::sync::broadcast;
+    use tokio::time::Instant;
     use tower::BoxError;
     use uuid::Uuid;
 
     use super::Config;
     use super::Storage;
     use super::now;
+    use crate::plugins::response_cache::ErrorCode;
     use crate::plugins::response_cache::storage::CacheStorage;
     use crate::plugins::response_cache::storage::Document;
+    use crate::plugins::response_cache::storage::Error;
 
     const SUBGRAPH_NAME: &str = "test";
 
@@ -991,6 +994,7 @@ mod tests {
         use super::SUBGRAPH_NAME;
         use super::common_document;
         use super::redis_config;
+        use crate::plugins::response_cache::ErrorCode;
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
         use crate::plugins::response_cache::storage::redis::Storage;
@@ -1105,7 +1109,8 @@ mod tests {
 
             let result = storage.insert(document, SUBGRAPH_NAME).await;
             let error = result.expect_err("should have timed out via redis");
-            assert!(matches!(error, StorageError::Database(e) if e.details() == "timeout"));
+            assert!(matches!(error, StorageError::Database(ref e) if e.details() == "timeout"));
+            assert_eq!(error.code(), "TIMEOUT");
 
             // make sure the insert function did not try to operate on the document key
             for command in mock_storage.0.read().iter() {
@@ -1361,5 +1366,35 @@ mod tests {
 
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn timeout_errors_are_captured() -> Result<(), BoxError> {
+        let config = Config {
+            fetch_timeout: Duration::from_nanos(0),
+            ..redis_config(false)
+        };
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&config, drop_rx).await?;
+        storage.truncate_namespace().await?;
+
+        let document = common_document();
+
+        // because of how tokio::timeout polls, it's possible for a command to finish before the
+        // timeout is polled (even if the duration is 0). perform the check in a loop to give it
+        // a few changes to trigger.
+        let now = Instant::now();
+        while now.elapsed() < Duration::from_secs(5) {
+            let error = storage.fetch(&document.key, "S1").await.unwrap_err();
+            if error.is_row_not_found() {
+                continue;
+            }
+
+            assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
+            assert_eq!(error.code(), "TIMEOUT");
+            return Ok(());
+        }
+
+        panic!("Never observed a timeout");
     }
 }
