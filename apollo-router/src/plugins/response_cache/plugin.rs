@@ -1949,6 +1949,32 @@ fn get_invalidation_entity_keys_from_schema(
     typename: &str,
     representations: &serde_json_bytes::Map<ByteString, Value>,
 ) -> Result<HashSet<String>, anyhow::Error> {
+    // `filter_dir`: Check if the `@join_directive` directives are for the current subgraph's cacheTags
+    let filter_dir = |dir: &apollo_compiler::ast::Directive| {
+        let Ok(name) = dir.argument_by_name("name", supergraph_schema) else {
+            return false;
+        };
+        let Some(name) = name.as_str() else {
+            return false;
+        };
+        if *name != *CACHE_TAG_DIRECTIVE_NAME {
+            return false;
+        }
+        dir.argument_by_name("graphs", supergraph_schema)
+            .ok()
+            .and_then(|f| {
+                Some(
+                    f.as_list()?
+                        .iter()
+                        .filter_map(|graph| graph.as_enum())
+                        .any(|g| {
+                            subgraph_enums.get(g.as_str()).map(|s| s.as_str())
+                                == Some(subgraph_name)
+                        }),
+                )
+            })
+            .unwrap_or_default()
+    };
     // supports both Object types and Interface types (for interface objects with isInterfaceObject: true)
     let all_directives: Vec<_> = match supergraph_schema.get_interface(typename) {
         // Jumping from an interface object
@@ -1963,6 +1989,7 @@ fn get_invalidation_entity_keys_from_schema(
             iface_type
                 .directives
                 .get_all("join__directive")
+                .filter(|dir| filter_dir(dir))
                 .cloned()
                 .collect()
         }
@@ -1987,6 +2014,7 @@ fn get_invalidation_entity_keys_from_schema(
             let obj_directives: Vec<_> = obj_type
                 .directives
                 .get_all("join__directive")
+                .filter(|dir| filter_dir(dir))
                 .cloned()
                 .collect();
             let iface_directives: Vec<_> = obj_type
@@ -1999,33 +2027,12 @@ fn get_invalidation_entity_keys_from_schema(
                         .flat_map(|iface| iface.directives.get_all("join__directive").cloned())
                         .collect::<Vec<_>>()
                 })
+                .filter(|dir| filter_dir(dir))
                 .collect();
             obj_directives.into_iter().chain(iface_directives).collect()
         }
     };
     let cache_keys = all_directives.into_iter().filter_map(|dir| {
-        let name = dir.argument_by_name("name", supergraph_schema).ok()?;
-        if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
-            return None;
-        }
-        let is_current_subgraph = dir
-            .argument_by_name("graphs", supergraph_schema)
-            .ok()
-            .and_then(|f| {
-                Some(
-                    f.as_list()?
-                        .iter()
-                        .filter_map(|graph| graph.as_enum())
-                        .any(|g| {
-                            subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-                                == Some(subgraph_name)
-                        }),
-                )
-            })
-            .unwrap_or_default();
-        if !is_current_subgraph {
-            return None;
-        }
         dir.argument_by_name("args", supergraph_schema)
             .ok()?
             .as_object()?
