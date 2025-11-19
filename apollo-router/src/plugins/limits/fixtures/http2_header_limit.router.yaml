@@ -1,0 +1,5 @@
+limits:
+  http2_max_header_list_size: 32KiB
+  http1_max_request_headers: 100
+  http1_max_request_buf_size: 16KiB
+

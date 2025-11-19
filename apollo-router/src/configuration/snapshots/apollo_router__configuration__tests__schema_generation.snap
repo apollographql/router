@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -6354,6 +6355,14 @@ expression: "&schema"
           "minimum": 0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "http2_max_header_list_size": {
+          "default": null,
+          "description": "Limit the maximum header list size for HTTP/2 connections.\n\nThis sets the maximum size of all headers (names + values) in uncompressed bytes.\nDefault is 16KB (16384 bytes) which is the HTTP/2 specification default.\n\nIf router receives headers exceeding this size on HTTP/2, it responds with\n\"431 Request Header Fields Too Large\".",
+          "type": [
+            "string",
             "null"
           ]
         },

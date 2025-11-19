@@ -1,0 +1,24 @@
+supergraph:
+  listen: 0.0.0.0:4000
+  path: /
+
+# TLS configuration for HTTP/2 testing
+# Generate self-signed certificates with:
+#   openssl req -x509 -newkey rsa:4096 -keyout test-key.pem -out test-cert.pem -days 365 -nodes -subj "/CN=localhost"
+tls:
+  supergraph:
+    certificate: ${file.test-cert.pem}
+    certificate_chain: ${file.test-cert.pem}
+    key: ${file.test-key.pem}
+
+limits:
+  # HTTP/2 header size limit - NEW CONFIG OPTION!
+  # Set to 32KB to allow larger headers on HTTP/2
+  http2_max_header_list_size: 32KiB
+  
+  # HTTP/1.1 limits (existing)
+  http1_max_request_headers: 100
+  http1_max_request_buf_size: 21KiB
+  
+  # HTTP request body size limit (applies to both HTTP/1.1 and HTTP/2)
+  http_max_request_bytes: 2000000  # 2MB

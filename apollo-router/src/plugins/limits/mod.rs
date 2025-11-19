@@ -116,6 +116,16 @@ pub(crate) struct Config {
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
 
+    /// Limit the maximum header list size for HTTP/2 connections.
+    ///
+    /// This sets the maximum size of all headers (names + values) in uncompressed bytes.
+    /// Default is 16KB (16384 bytes) which is the HTTP/2 specification default.
+    ///
+    /// If router receives headers exceeding this size on HTTP/2, it responds with
+    /// "431 Request Header Fields Too Large".
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) http2_max_header_list_size: Option<ByteSize>,
+
     /// Limit the depth of nested list fields in introspection queries
     /// to protect avoid generating huge responses. Returns a GraphQL
     /// error with `{ message: "Maximum introspection depth exceeded" }`
@@ -136,6 +146,7 @@ impl Default for Config {
             http_max_request_bytes: 2_000_000,
             http1_max_request_headers: None,
             http1_max_request_buf_size: None,
+            http2_max_header_list_size: None,
             parser_max_tokens: 15_000,
 
             // This is `apollo-parser`’s default, which protects against stack overflow
@@ -437,5 +448,111 @@ mod test {
             .await
             .expect("test harness");
         plugin
+    }
+
+    #[test]
+    fn test_http2_max_header_list_size_config_parsing() {
+        use crate::configuration::Configuration;
+        use std::str::FromStr;
+
+        // Test valid configuration with http2_max_header_list_size
+        // Note: "kb" means 1000 bytes, "KiB" means 1024 bytes
+        let yaml = r#"
+limits:
+  http2_max_header_list_size: 32KiB
+  http1_max_request_headers: 100
+  http1_max_request_buf_size: 16KiB
+"#;
+        let config = Configuration::from_str(yaml).expect("config should parse");
+        assert!(config.limits.http2_max_header_list_size.is_some());
+        assert_eq!(
+            config.limits.http2_max_header_list_size.unwrap().as_u64(),
+            32 * 1024
+        );
+        assert_eq!(config.limits.http1_max_request_headers, Some(100));
+        assert_eq!(
+            config.limits.http1_max_request_buf_size.unwrap().as_u64(),
+            16 * 1024
+        );
+    }
+
+    #[test]
+    fn test_http2_max_header_list_size_default_is_none() {
+        use crate::configuration::Configuration;
+        use std::str::FromStr;
+
+        // Test that http2_max_header_list_size defaults to None
+        let yaml = r#"
+limits:
+  http1_max_request_headers: 50
+"#;
+        let config = Configuration::from_str(yaml).expect("config should parse");
+        assert!(config.limits.http2_max_header_list_size.is_none());
+    }
+
+    #[test]
+    fn test_http2_max_header_list_size_various_formats() {
+        use crate::configuration::Configuration;
+        use std::str::FromStr;
+
+        // Test with bytes (must be a string)
+        let yaml = r#"
+limits:
+  http2_max_header_list_size: "16384"
+"#;
+        let config = Configuration::from_str(yaml).expect("config should parse");
+        assert_eq!(
+            config.limits.http2_max_header_list_size.unwrap().as_u64(),
+            16384
+        );
+
+        // Test with KiB (binary kilobytes = 1024 bytes)
+        let yaml = r#"
+limits:
+  http2_max_header_list_size: 16KiB
+"#;
+        let config = Configuration::from_str(yaml).expect("config should parse");
+        assert_eq!(
+            config.limits.http2_max_header_list_size.unwrap().as_u64(),
+            16 * 1024
+        );
+
+        // Test with MiB (binary megabytes = 1024 * 1024 bytes)
+        let yaml = r#"
+limits:
+  http2_max_header_list_size: 1MiB
+"#;
+        let config = Configuration::from_str(yaml).expect("config should parse");
+        assert_eq!(
+            config.limits.http2_max_header_list_size.unwrap().as_u64(),
+            1024 * 1024
+        );
+    }
+
+    #[test]
+    fn test_limits_config_independence() {
+        use crate::configuration::Configuration;
+        use std::str::FromStr;
+
+        // Test that HTTP/1 and HTTP/2 limits can be configured independently
+        // Note: Using KiB for binary kilobytes (1024 bytes)
+        let yaml = r#"
+limits:
+  http1_max_request_headers: 50
+  http1_max_request_buf_size: 8KiB
+  http2_max_header_list_size: 64KiB
+  http_max_request_bytes: 1000000
+"#;
+        let config = Configuration::from_str(yaml).expect("config should parse");
+        assert_eq!(config.limits.http1_max_request_headers, Some(50));
+        assert_eq!(
+            config.limits.http1_max_request_buf_size.unwrap().as_u64(),
+            8 * 1024
+        );
+        assert_eq!(
+            config.limits.http2_max_header_list_size.unwrap().as_u64(),
+            64 * 1024
+        );
+        assert_eq!(config.limits.http_max_request_bytes, 1000000);
     }
 }
