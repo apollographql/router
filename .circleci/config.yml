@@ -253,7 +253,7 @@ commands:
                 command: |
                   curl https://mise.jdx.dev/install.sh | sh
                   mise activate bash >> "$BASH_ENV"
-                  mise install --yes
+                  mise install --yes --quiet
       - when:
           condition:
             or:
@@ -269,7 +269,7 @@ commands:
                 name: Install mise
                 command: |
                   scoop install mise@${MISE_VERSION#v}
-                  mise install --yes
+                  mise install --yes --quiet
   fetch_dependencies:
     steps:
       - run:
