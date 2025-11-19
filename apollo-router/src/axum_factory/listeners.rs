@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::response::*;
-use bytesize::ByteSize;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use hyper_util::rt::TokioExecutor;
@@ -308,16 +307,19 @@ async fn process_error(io_error: std::io::Error) {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn serve_router_on_listen_addr(
+    router: axum::Router,
     pipeline_ref: Arc<PipelineRef>,
     address: ListenAddr,
     mut listener: Listener,
-    connection_shutdown_timeout: Duration,
-    router: axum::Router,
-    opt_max_headers: Option<usize>,
-    opt_max_buf_size: Option<ByteSize>,
-    header_read_timeout: Duration,
+    configuration: Arc<Configuration>,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
+    let opt_max_http1_headers = configuration.limits.http1_max_request_headers;
+    let opt_max_http1_buf_size = configuration.limits.http1_max_request_buf_size;
+    let opt_max_http2_headers_list_bytes = configuration.limits.http2_max_headers_list_bytes;
+    let connection_shutdown_timeout = configuration.supergraph.connection_shutdown_timeout;
+    let header_read_timeout = configuration.server.http.header_read_timeout;
+
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
     // this server reproduces most of hyper::server::Server's behaviour
     // we select over the stop_listen_receiver channel and the listener's
@@ -378,11 +380,11 @@ pub(super) fn serve_router_on_listen_addr(
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
                                                          .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
+                                        if let Some(max_headers) = opt_max_http1_headers {
                                             http_config.max_headers(max_headers);
                                         }
 
-                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                        if let Some(max_buf_size) = opt_max_http1_buf_size{
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
                                         let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
@@ -402,11 +404,11 @@ pub(super) fn serve_router_on_listen_addr(
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
                                                          .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
+                                        if let Some(max_headers) = opt_max_http1_headers {
                                             http_config.max_headers(max_headers);
                                         }
 
-                                        if let Some(max_buf_size) = opt_max_buf_size {
+                                        if let Some(max_buf_size) = opt_max_http1_buf_size {
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
                                         let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
@@ -422,29 +424,56 @@ pub(super) fn serve_router_on_listen_addr(
                                                 "this should not fail unless the socket is invalid",
                                             );
 
-                                        let mut builder = Builder::new(TokioExecutor::new());
-                                        if stream.get_ref().1.alpn_protocol() == Some(&b"h2"[..]) {
-                                            builder = builder.http2_only();
-                                        }
-
-                                        let tokio_stream = TokioIo::new(stream);
                                         let hyper_service = hyper::service::service_fn(move |request| {
                                             app.clone().call(request)
                                         });
-                                        let mut http_connection = builder.http1();
-                                        let http_config = http_connection
+
+                                        // the builder can toggle between http/2 and http/1, which
+                                        // makes for somewhat confusing code below
+                                        let mut builder = Builder::new(TokioExecutor::new());
+
+                                        // ALPN (application-layer protocol negotiation) is an
+                                        // extension of TLS that lets the client/server agree on a
+                                        // protocol during the TLS handshake
+                                        if stream.get_ref().1.alpn_protocol() == Some(&b"h2"[..]) {
+                                            // if we see "h2", we're going to use only HTTP/2
+                                            // WARN: from the docs, this doesn't do anything when
+                                            // used with serve_connection_with_upgrades(), which we
+                                            // use below
+                                            builder = builder.http2_only();
+
+                                        }
+
+                                        let mut http2_config = builder.http2();
+                                        if let Some(max_header_list_size) = opt_max_http2_headers_list_bytes {
+                                            http2_config.max_header_list_size(max_header_list_size as u32);
+                                        }
+
+                                        // access the http1 config via the http2 builder doesn't
+                                        // erase the http2 config, only extends the overall
+                                        // configuration for connections
+                                        let mut http1_config = http2_config.http1();
+                                        let http_config = http1_config
                                                          .keep_alive(true)
                                                          .timer(TokioTimer::new())
                                                          .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
+
+
+                                        if let Some(max_headers) = opt_max_http1_headers {
+                                            // NOTE: max headers has no effect on http2
                                             http_config.max_headers(max_headers);
                                         }
 
-                                        if let Some(max_buf_size) = opt_max_buf_size {
+
+                                        if let Some(max_buf_size) = opt_max_http1_buf_size {
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
+
+
+                                        let tokio_stream = TokioIo::new(stream);
                                         let connection = http_config
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
+
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
 
                                     }
