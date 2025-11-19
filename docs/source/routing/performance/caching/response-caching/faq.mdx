@@ -129,5 +129,7 @@ If you want to set a memory limit per subgraph, you must configure a different R
 
 Performance will be highly dependent on response sizes, query rate, node size, and many other factors.
 
-During internal testing, the Router was able to fetch at least 5000 entities per second, with >98% of fetches under 5ms and
+During internal testing\*, the Router was able to fetch at least 5000 entities per second, with >98% of fetches under 5ms and
 98% of inserts under 15ms.
+
+\*Tests conducted against a single-shard Redis cluster running on a [`redis-standard-small`](https://docs.cloud.google.com/memorystore/docs/cluster/cluster-node-specification#node_type_specification) instance.
