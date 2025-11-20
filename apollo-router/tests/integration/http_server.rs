@@ -5,7 +5,9 @@ use tower::BoxError;
 
 use crate::integration::IntegrationTest;
 
-const SERVER_CERT: &str = include_str!("./fixtures/tls_localhost.crt");
+/// See [`apollo_router::services::http::tests::tls_self_signed`] for detail about how this was generated
+/// and when it expires.
+const SERVER_CERT: &str = include_str!("../../src/services/http/testdata/server_self_signed.crt");
 const TLS_CONFIG: &str = include_str!("./fixtures/tls.router.yml");
 const TLS_CONFIG_WITH_SMALL_H2_HEADER_LIMIT: &str =
     include_str!("./fixtures/tls.header_limited.router.yml");
