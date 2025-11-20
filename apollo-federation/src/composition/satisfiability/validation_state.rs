@@ -275,6 +275,7 @@ impl ValidationState {
     /// returned). This exception occurs when the edge corresponds to a type condition that does not
     /// intersect with the possible runtime types of the old path's tail, in which case further
     /// validation on the new path is not necessary.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn validate_transition(
         &mut self,
         context: &ValidationContext,
@@ -345,7 +346,7 @@ impl ValidationState {
                     ValidationResult::Success { new_subgraph_paths } => {
                         // Check if we're entering a top-level mutation field
                         if let Some(mutation_field) =
-                            Self::field_if_top_level_mutation(&self.supergraph_path, &edge_weight)?
+                            Self::field_if_top_level_mutation(&self.supergraph_path, edge_weight)?
                         {
                             // Partition the paths by subgraph
                             let mut partitioned: IndexMap<Arc<str>, Vec<SubgraphPathInfo>> =
