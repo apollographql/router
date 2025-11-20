@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use fred::clients::Client;
 use fred::clients::Pipeline;
+use fred::error::ErrorKind;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
@@ -32,6 +33,7 @@ use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
 use futures::Stream;
 use futures::future::join_all;
+use itertools::Itertools;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
 use tower::BoxError;
@@ -628,7 +630,7 @@ impl RedisCacheStorage {
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
-    ) -> Vec<Option<RedisValue<V>>> {
+    ) -> Vec<Result<RedisValue<V>, RedisError>> {
         self.get_multiple_with_options(keys, Options::default())
             .await
     }
@@ -637,28 +639,18 @@ impl RedisCacheStorage {
         &self,
         mut keys: Vec<RedisKey<K>>,
         options: Options,
-    ) -> Vec<Option<RedisValue<V>>> {
-        // NB: MGET is different from GET in that it returns `Option`s rather than `Result`s.
-        //  > For every key that does not hold a string value or does not exist, the special value
-        //    nil is returned. Because of this, the operation never fails.
-        //    - https://redis.io/docs/latest/commands/mget/
-
+    ) -> Vec<Result<RedisValue<V>, RedisError>> {
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
-        if keys.len() == 1 {
+        let values = if keys.len() == 1 {
             let key = self.make_key(keys.remove(0));
             let client = self.inner.next().with_options(&options);
-            let res = client
-                .get(key)
-                .await
-                .inspect_err(|e| self.record_error(e))
-                .ok();
+            let res = client.get(key).await;
             vec![res]
         } else if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
             // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
-            let len = keys.len();
             let mut h: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
             for (index, key) in keys.into_iter().enumerate() {
                 let key = self.make_key(key);
@@ -674,27 +666,33 @@ impl RedisCacheStorage {
                 let client = self.inner.next().with_options(&options);
                 tasks.push(async move {
                     let result: Result<Vec<Option<RedisValue<V>>>, _> = client.mget(keys).await;
-                    (indexes, result)
+
+                    // turn (indexes, result) into a Vec<(Index, Result<RedisValue, _>)>
+                    match result {
+                        Ok(values) => indexes
+                            .into_iter()
+                            .zip(values.into_iter())
+                            .map(|(index, value)| {
+                                (index, value.ok_or(RedisError::new(ErrorKind::NotFound, "")))
+                            })
+                            .collect::<Vec<(usize, Result<RedisValue<V>, _>)>>(),
+                        Err(err) => indexes
+                            .into_iter()
+                            .map(|index| (index, Err(err.clone())))
+                            .collect(),
+                    }
                 });
             }
 
             // then we have to assemble the results, by making sure that the values are in the same order as
             // the keys argument's order
-            let mut result = vec![None; len];
-            for (indexes, result_value) in join_all(tasks).await.into_iter() {
-                match result_value {
-                    Ok(values) => {
-                        for (index, value) in indexes.into_iter().zip(values.into_iter()) {
-                            result[index] = value;
-                        }
-                    }
-                    Err(e) => {
-                        self.record_error(&e);
-                    }
-                }
-            }
-
-            result
+            join_all(tasks)
+                .await
+                .into_iter()
+                .flatten()
+                .sorted_by_key(|(index, _)| *index)
+                .map(|(_, value)| value)
+                .collect()
         } else {
             let len = keys.len();
             let keys = keys
@@ -702,12 +700,22 @@ impl RedisCacheStorage {
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
             let client = self.inner.next().with_options(&options);
-            client
-                .mget(keys)
-                .await
-                .inspect_err(|e| self.record_error(e))
-                .unwrap_or_else(|_| vec![None; len])
-        }
+            match client.mget::<Vec<Option<RedisValue<V>>>, _>(keys).await {
+                Ok(values) => values
+                    .into_iter()
+                    .map(|value| value.ok_or(RedisError::new(ErrorKind::NotFound, "")))
+                    .collect(),
+                Err(err) => vec![Err(err.clone()); len],
+            }
+        };
+
+        values.iter().for_each(|value| {
+            if let Err(err) = value {
+                self.record_error(err)
+            }
+        });
+
+        values
     }
 
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
@@ -1039,7 +1047,7 @@ mod test {
         // test the `mget` functionality
         let values = storage.get_multiple(keys).await;
         for value in values {
-            let value: RedisValue<usize> = value.ok_or("missing value")?;
+            let value: RedisValue<usize> = value?;
             assert_eq!(value.0, expected_value);
         }
 
@@ -1090,7 +1098,7 @@ mod test {
 
             let values = storage.get_multiple(keys).await;
             let parsed_values: Vec<Option<String>> =
-                values.into_iter().map(|v| v.map(|v| v.0)).collect();
+                values.into_iter().map(|v| v.map(|v| v.0).ok()).collect();
             assert_eq!(parsed_values, expected_values);
         }
 

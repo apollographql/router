@@ -116,10 +116,7 @@ pub(super) trait CacheStorage {
     }
 
     #[doc(hidden)]
-    async fn internal_fetch_multiple(
-        &self,
-        cache_keys: &[&str],
-    ) -> StorageResult<Vec<Option<CacheEntry>>>;
+    async fn internal_fetch_multiple(&self, cache_keys: &[&str]) -> Vec<StorageResult<CacheEntry>>;
 
     /// Fetch the values belonging to `cache_keys`. Command will be timed out after `self.fetch_timeout()`.
     async fn fetch_multiple(
@@ -130,14 +127,27 @@ pub(super) trait CacheStorage {
         let batch_size = cache_keys.len();
 
         let now = Instant::now();
-        let result = flatten_storage_error(
-            self.internal_fetch_multiple(cache_keys)
-                .timeout(self.fetch_timeout())
-                .await,
-        );
+        let result = self
+            .internal_fetch_multiple(cache_keys)
+            .timeout(self.fetch_timeout())
+            .await;
 
         record_fetch_duration(now.elapsed(), subgraph_name, batch_size);
-        result.inspect_err(|err| record_fetch_error(err, subgraph_name))
+
+        let values = result
+            .map_err(Into::into)
+            .inspect_err(|err| record_fetch_error(err, subgraph_name))?;
+
+        // individually inspect each error in the Vec, in case we had partial success
+        let values = values
+            .into_iter()
+            .map(|value| {
+                value
+                    .inspect_err(|err| record_fetch_error(err, subgraph_name))
+                    .ok()
+            })
+            .collect();
+        Ok(values)
     }
 
     #[doc(hidden)]
