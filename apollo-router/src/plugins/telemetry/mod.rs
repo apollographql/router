@@ -2127,7 +2127,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_enabled_features() {
-        // Explicitly enabled
+        // Explicitly enabled except response caching because entity caching and response caching are mutually exclusive
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_all_features_enabled.router.yaml"
         ))
@@ -2141,9 +2141,20 @@ mod tests {
             features.entity_cache,
             "Telemetry plugin should consider entity cache feature enabled when explicitly enabled"
         );
+
+        // Explicitly enabled
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/full_config_all_features_enabled_response_cache.router.yaml"
+        ))
+        .await;
+        let features = enabled_features(plugin.as_ref());
         assert!(
             features.response_cache,
             "Telemetry plugin should consider response cache feature enabled when explicitly enabled"
+        );
+        assert!(
+            features.distributed_apq_cache,
+            "Telemetry plugin should consider apq feature enabled when explicitly enabled"
         );
 
         // Explicitly disabled

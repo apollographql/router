@@ -10,8 +10,8 @@ apq:
     all:
       enabled: true
 
-# Enable entity cache
-preview_entity_cache:
+# Enable response cache
+preview_response_cache:
   enabled: true
   subgraph:
     all:
