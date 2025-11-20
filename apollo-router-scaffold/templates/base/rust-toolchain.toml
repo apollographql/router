@@ -2,5 +2,5 @@
 
 [toolchain]
 # renovate-automation: rustc version
-channel = "1.83.0"
+channel = "1.88.0"
 components = ["rustfmt", "clippy"]
