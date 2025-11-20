@@ -14,6 +14,7 @@ use super::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
 use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
+use crate::plugins::response_cache::metrics::record_fetch_errors;
 use crate::plugins::response_cache::metrics::record_insert_duration;
 use crate::plugins::response_cache::metrics::record_insert_error;
 use crate::plugins::response_cache::metrics::record_invalidation_duration;
@@ -136,7 +137,7 @@ pub(super) trait CacheStorage {
 
         let values = result
             .map_err(Into::into)
-            .inspect_err(|err| record_fetch_error(err, subgraph_name))?;
+            .inspect_err(|err| record_fetch_errors(err, subgraph_name, batch_size as u64))?;
 
         // individually inspect each error in the Vec, in case we had partial success
         let values = values
