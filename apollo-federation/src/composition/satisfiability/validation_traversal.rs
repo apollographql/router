@@ -25,6 +25,7 @@ use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::supergraph::CompositionHint;
 
 pub(super) struct ValidationTraversal {
@@ -35,6 +36,13 @@ pub(super) struct ValidationTraversal {
     previous_visits: IndexMap<NodeIndex, Vec<NodeVisit>>,
     validation_errors: Vec<CompositionError>,
     validation_hints: Vec<CompositionHint>,
+    /// When we discover a shared top-level mutation field, we track satisfiability errors for
+    /// each subgraph containing the field separately. This is because the query planner needs to
+    /// avoid calling these fields more than once, which means there must be no satisfiability
+    /// errors for (at least) one subgraph. The first key is the field coordinate, and the second
+    /// key is the subgraph name.
+    satisfiability_errors_by_mutation_field_and_subgraph:
+        IndexMap<FieldDefinitionPosition, IndexMap<Arc<str>, Vec<CompositionError>>>,
     context: ValidationContext,
     total_validation_subgraph_paths: usize,
     max_validation_subgraph_paths: usize,
@@ -96,6 +104,7 @@ impl ValidationTraversal {
             previous_visits: Default::default(),
             validation_errors: vec![],
             validation_hints: vec![],
+            satisfiability_errors_by_mutation_field_and_subgraph: Default::default(),
             context: ValidationContext::new(supergraph_schema)?,
             total_validation_subgraph_paths: 0,
             max_validation_subgraph_paths: composition_options
@@ -113,7 +122,7 @@ impl ValidationTraversal {
     }
 
     fn push_stack(&mut self, state: ValidationState) -> Option<CompositionError> {
-        self.total_validation_subgraph_paths += state.subgraph_paths().len();
+        self.total_validation_subgraph_paths += state.subgraph_path_infos().len();
         self.stack.push(state);
         if self.total_validation_subgraph_paths > self.max_validation_subgraph_paths {
             Some(CompositionError::MaxValidationSubgraphPathsExceeded {
@@ -129,7 +138,7 @@ impl ValidationTraversal {
 
     fn pop_stack(&mut self) -> Option<ValidationState> {
         if let Some(state) = self.stack.pop() {
-            self.total_validation_subgraph_paths -= state.subgraph_paths().len();
+            self.total_validation_subgraph_paths -= state.subgraph_path_infos().len();
             Some(state)
         } else {
             None
@@ -150,6 +159,52 @@ impl ValidationTraversal {
                 return Ok(());
             }
         }
+
+        // Check if any shared top-level mutation fields have errors in all subgraphs
+        for (field_coordinate, errors_by_subgraph) in
+            &self.satisfiability_errors_by_mutation_field_and_subgraph
+        {
+            // Check if some subgraph has no satisfiability errors. If so, then that subgraph
+            // can be used to satisfy all queries to the top-level mutation field, and we can
+            // ignore the errors in other subgraphs.
+            let some_subgraph_has_no_errors = errors_by_subgraph.values().any(|e| e.is_empty());
+            if some_subgraph_has_no_errors {
+                continue;
+            }
+
+            // Otherwise, queries on the top-level mutation field can't be satisfied through
+            // only one call to that field.
+            let mut message_parts = vec![format!(
+                "Supergraph API queries using the mutation field \"{}\" at top-level must be \
+                satisfiable without needing to call that field from multiple subgraphs, but \
+                every subgraph with that field encounters satisfiability errors. Please fix \
+                these satisfiability errors for (at least) one of the following subgraphs with \
+                the mutation field:",
+                field_coordinate
+            )];
+
+            for (subgraph, subgraph_errors) in errors_by_subgraph {
+                message_parts.push(format!(
+                    "- When calling \"{}\" at top-level from subgraph \"{}\":",
+                    field_coordinate, subgraph
+                ));
+                for error in subgraph_errors {
+                    for line in error.to_string().lines() {
+                        if line.is_empty() {
+                            message_parts.push(String::new());
+                        } else {
+                            message_parts.push(format!("  {}", line));
+                        }
+                    }
+                }
+            }
+
+            self.validation_errors
+                .push(CompositionError::SatisfiabilityError {
+                    message: message_parts.join("\n"),
+                });
+        }
+
         errors.append(&mut self.validation_errors);
         hints.append(&mut self.validation_hints);
         Ok(())
@@ -251,6 +306,7 @@ impl ValidationTraversal {
                 &mut self.top_level_condition_resolver,
                 &mut self.validation_errors,
                 &mut self.validation_hints,
+                &mut self.satisfiability_errors_by_mutation_field_and_subgraph,
             )?;
             if num_errors != self.validation_errors.len() {
                 drop(guard);
