@@ -166,7 +166,7 @@ where
             tracing::error!("couldn't serialize value to redis {}. This is a bug in the router, please file an issue: https://github.com/apollographql/router/issues/new", e);
             RedisError::new(
                 RedisErrorKind::Parse,
-                format!("couldn't serialize value to redis {}", e),
+                format!("couldn't serialize value to redis {e}"),
             )
         })?;
 
@@ -334,8 +334,7 @@ impl RedisCacheStorage {
                     return Err(RedisError::new(
                         RedisErrorKind::Config,
                         format!(
-                            "invalid Redis URL scheme, expected a scheme from {SUPPORTED_REDIS_SCHEMES:?}, got: {}",
-                            scheme
+                            "invalid Redis URL scheme, expected a scheme from {SUPPORTED_REDIS_SCHEMES:?}, got: {scheme}"
                         ),
                     ));
                 }

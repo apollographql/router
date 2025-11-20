@@ -386,9 +386,7 @@ impl Query {
                 Value::Array(input_array) => {
                     if output.is_null() {
                         *output = Value::Array(
-                            std::iter::repeat(Value::Null)
-                                .take(input_array.len())
-                                .collect(),
+                            std::iter::repeat_n(Value::Null, input_array.len()).collect(),
                         );
                     }
                     let output_array = output.as_array_mut().ok_or(InvalidValue)?;
@@ -795,8 +793,7 @@ impl Query {
                     } else if field_type.is_non_null() {
                         parameters.errors.push(Error {
                             message: format!(
-                                "Cannot return null for non-nullable field {}.{field_name_str}",
-                                root_type_name
+                                "Cannot return null for non-nullable field {root_type_name}.{field_name_str}"
                             ),
                             path: Some(Path::from_response_slice(path)),
                             ..Error::default()

@@ -1009,7 +1009,7 @@ async fn cache_lookup_entities(
                 })
                 .collect()
         })
-        .unwrap_or_else(|| std::iter::repeat(None).take(keys.len()).collect());
+        .unwrap_or_else(|| std::iter::repeat_n(None, keys.len()).collect());
 
     let representations = body
         .variables

@@ -283,7 +283,7 @@ where
             })?;
         if !matches!(resp, Some(Ok(ServerMessage::ConnectionAck))) {
             return Err(graphql::Error::builder()
-                .message(format!("didn't receive the connection ack from websocket connection but instead got: {:?}", resp))
+                .message(format!("didn't receive the connection ack from websocket connection but instead got: {resp:?}"))
                 .extension_code("WEBSOCKET_ACK_ERROR")
                 .build());
         }

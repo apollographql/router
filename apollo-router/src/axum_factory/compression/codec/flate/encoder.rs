@@ -56,7 +56,7 @@ impl Encode for FlateEncoder {
         match self.encode(input, output, FlushCompress::None)? {
             Status::Ok => Ok(()),
             Status::StreamEnd => unreachable!(),
-            Status::BufError => Err(Error::new(ErrorKind::Other, "unexpected BufError")),
+            Status::BufError => Err(Error::other("unexpected BufError")),
         }
     }
 
@@ -104,7 +104,7 @@ impl Encode for FlateEncoder {
         )? {
             Status::Ok => Ok(false),
             Status::StreamEnd => Ok(true),
-            Status::BufError => Err(Error::new(ErrorKind::Other, "unexpected BufError")),
+            Status::BufError => Err(Error::other("unexpected BufError")),
         }
     }
 }

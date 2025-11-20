@@ -173,7 +173,7 @@ where
             let filename = field
                 .file_name()
                 .or_else(|| field.name())
-                .map(|name| format!("'{}'", name))
+                .map(|name| format!("'{name}'"))
                 .unwrap_or_else(|| "unknown".to_owned());
 
             let field = Pin::new(field);
@@ -225,10 +225,7 @@ where
 
                     let files = mem::take(&mut self.file_names);
                     return Poll::Ready(Some(Err(FileUploadError::MissingFiles(
-                        files
-                            .into_iter()
-                            .map(|file| format!("'{}'", file))
-                            .join(", "),
+                        files.into_iter().map(|file| format!("'{file}'")).join(", "),
                     ))));
                 }
                 Poll::Ready(Ok(Some(field))) => {

@@ -236,10 +236,9 @@ impl PersistedQueryManifestPoller {
                         .await
                         .map_err(|e| -> BoxError {
                             format!(
-                                "could not read local persisted query list file {}: {}",
-                                local_pq_list, e
-                            )
-                            .into()
+                            "could not read local persisted query list file {local_pq_list}: {e}"
+                        )
+                        .into()
                         })?;
 
                 let manifest_file: SignedUrlChunk =
@@ -320,8 +319,7 @@ impl PersistedQueryManifestPoller {
             let http_client = Client::builder().timeout(uplink_config.timeout).gzip(true).build()
             .map_err(|e| -> BoxError {
                 format!(
-                    "could not initialize HTTP client for fetching persisted queries manifest chunks: {}",
-                    e
+                    "could not initialize HTTP client for fetching persisted queries manifest chunks: {e}"
                 ).into()
             })?;
 
@@ -466,7 +464,7 @@ async fn poll_uplink(
                         .await
                         .map(Some)
                         .map_err(|err| {
-                            format!("could not download persisted query lists: {}", err).into()
+                            format!("could not download persisted query lists: {err}").into()
                         }),
                     None => Ok(None),
                 }
@@ -664,20 +662,13 @@ async fn fetch_chunk(http_client: Client, chunk_url: &String) -> Result<SignedUr
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| -> BoxError {
-            format!(
-                "error fetching persisted queries manifest chunk from {}: {}",
-                chunk_url, e
-            )
-            .into()
+            format!("error fetching persisted queries manifest chunk from {chunk_url}: {e}").into()
         })?
         .json::<SignedUrlChunk>()
         .await
         .map_err(|e| -> BoxError {
-            format!(
-                "error reading body of persisted queries manifest chunk from {}: {}",
-                chunk_url, e
-            )
-            .into()
+            format!("error reading body of persisted queries manifest chunk from {chunk_url}: {e}")
+                .into()
         })?;
 
     if chunk.format != "apollo-persisted-query-manifest" {

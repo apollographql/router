@@ -311,7 +311,7 @@ fn cmd_extract(file_path: &Path, dest: Option<&PathBuf>) -> Result<(), Federatio
             message: "Error: directory creation failed".into(),
         })?;
         for (name, subgraph) in subgraphs {
-            let subgraph_path = dest.join(format!("{}.graphql", name));
+            let subgraph_path = dest.join(format!("{name}.graphql"));
             fs::write(subgraph_path, subgraph.schema.schema().to_string()).map_err(|_| {
                 SingleFederationError::Internal {
                     message: "Error: file output failed".into(),
@@ -320,7 +320,7 @@ fn cmd_extract(file_path: &Path, dest: Option<&PathBuf>) -> Result<(), Federatio
         }
     } else {
         for (name, subgraph) in subgraphs {
-            println!("[Subgraph `{}`]", name);
+            println!("[Subgraph `{name}`]");
             println!("{}", subgraph.schema.schema());
             println!(); // newline
         }
@@ -346,7 +346,7 @@ fn cmd_bench(
     println!("| operation_name | time (ms) | evaluated_plans (max 10000) | error |");
     println!("|----------------|----------------|-----------|-----------------------------|");
     for r in results {
-        println!("{}", r);
+        println!("{r}");
     }
     Ok(())
 }

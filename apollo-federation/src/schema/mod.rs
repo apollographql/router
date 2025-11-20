@@ -119,7 +119,7 @@ impl FederationSchema {
                 .types
                 .get(&type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", type_name),
+                    message: format!("Schema has no type \"{type_name}\""),
                 })?;
         Ok(match type_ {
             ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name }.into(),
@@ -208,8 +208,7 @@ impl FederationSchema {
                 type_name: FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
             })),
             Some(_) => Err(FederationError::internal(format!(
-                "Unexpectedly found non-union for federation spec's `{}` type definition",
-                FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
+                "Unexpectedly found non-union for federation spec's `{FEDERATION_ENTITY_TYPE_NAME_IN_SPEC}` type definition"
             ))),
             None => Ok(None),
         }

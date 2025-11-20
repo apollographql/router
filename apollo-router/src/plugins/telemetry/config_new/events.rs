@@ -239,7 +239,7 @@ impl Instrumented
 
             attrs.push(KeyValue::new(
                 Key::from_static_str("http.request.headers"),
-                opentelemetry::Value::String(format!("{:?}", headers).into()),
+                opentelemetry::Value::String(format!("{headers:?}").into()),
             ));
             attrs.push(KeyValue::new(
                 Key::from_static_str("http.request.method"),
@@ -289,7 +289,7 @@ impl Instrumented
             let headers = response.response.headers();
             attrs.push(KeyValue::new(
                 Key::from_static_str("http.response.headers"),
-                opentelemetry::Value::String(format!("{:?}", headers).into()),
+                opentelemetry::Value::String(format!("{headers:?}").into()),
             ));
             attrs.push(KeyValue::new(
                 Key::from_static_str("http.response.status"),
@@ -368,7 +368,7 @@ impl Instrumented
             let headers = request.supergraph_request.headers();
             attrs.push(KeyValue::new(
                 Key::from_static_str("http.request.headers"),
-                opentelemetry::Value::String(format!("{:?}", headers).into()),
+                opentelemetry::Value::String(format!("{headers:?}").into()),
             ));
             attrs.push(KeyValue::new(
                 Key::from_static_str("http.request.method"),

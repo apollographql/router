@@ -344,10 +344,10 @@ where
                     DisplayTraceIdFormat::Bool(false) => None,
                 };
                 if let Some(trace_id) = trace_id {
-                    write!(writer, "trace_id: {} ", trace_id)?;
+                    write!(writer, "trace_id: {trace_id} ")?;
                 }
                 if self.config.display_span_id {
-                    write!(writer, "span_id: {} ", span_id)?;
+                    write!(writer, "span_id: {span_id} ")?;
                 }
             }
         }
@@ -553,7 +553,7 @@ impl<'a> DefaultVisitor<'a> {
 
         self.maybe_pad();
         self.result = match field_name {
-            "message" => write!(self.writer, "{:?}", value),
+            "message" => write!(self.writer, "{value:?}"),
             name if name.starts_with("r#") => write!(
                 self.writer,
                 "{}{}{:?}",
@@ -579,7 +579,7 @@ impl field::Visit for DefaultVisitor<'_> {
         }
 
         if field.name() == "message" {
-            self.record_debug(field, &format_args!("{}", value))
+            self.record_debug(field, &format_args!("{value}"))
         } else {
             self.record_debug(field, &value)
         }
@@ -600,7 +600,7 @@ impl field::Visit for DefaultVisitor<'_> {
                 ),
             )
         } else {
-            self.record_debug(field, &format_args!("{}", value))
+            self.record_debug(field, &format_args!("{value}"))
         }
     }
 
@@ -629,7 +629,7 @@ impl std::fmt::Display for ErrorSourceList<'_> {
         let mut list = f.debug_list();
         let mut curr = Some(self.0);
         while let Some(curr_err) = curr {
-            list.entry(&format_args!("{}", curr_err));
+            list.entry(&format_args!("{curr_err}"));
             curr = curr_err.source();
         }
         list.finish()

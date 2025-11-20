@@ -387,12 +387,12 @@ impl fmt::Display for Link {
         let alias = self
             .spec_alias
             .as_ref()
-            .map(|a| format!(r#", as: "{}""#, a))
+            .map(|a| format!(r#", as: "{a}""#))
             .unwrap_or("".to_string());
         let purpose = self
             .purpose
             .as_ref()
-            .map(|p| format!(r#", for: {}"#, p))
+            .map(|p| format!(r#", for: {p}"#))
             .unwrap_or("".to_string());
         write!(f, r#"@link(url: "{}"{alias}{imports}{purpose})"#, self.url)
     }

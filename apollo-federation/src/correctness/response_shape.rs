@@ -1202,8 +1202,8 @@ impl fmt::Display for Clause {
                     write!(f, " ∧ ")?;
                 }
                 match l {
-                    Literal::Pos(v) => write!(f, "{}", v)?,
-                    Literal::Neg(v) => write!(f, "¬{}", v)?,
+                    Literal::Pos(v) => write!(f, "{v}")?,
+                    Literal::Neg(v) => write!(f, "¬{v}")?,
                 }
             }
             Ok(())
@@ -1289,7 +1289,7 @@ impl PossibleDefinitions {
         for (type_condition, per_type_cond) in &self.0 {
             for variant in &per_type_cond.conditional_variants {
                 let field_display = &variant.representative_field;
-                let type_cond_str = format!(" on {}", type_condition);
+                let type_cond_str = format!(" on {type_condition}");
                 let boolean_str = if !variant.boolean_clause.is_always_true() {
                     format!(" if {}", variant.boolean_clause)
                 } else {
@@ -1334,7 +1334,7 @@ impl ResponseShape {
                 for variant in &per_type_cond.conditional_variants {
                     let field_display = &variant.representative_field;
                     let type_cond_str = if has_type_cond {
-                        format!(" on {}", type_condition)
+                        format!(" on {type_condition}")
                     } else {
                         "".to_string()
                     };

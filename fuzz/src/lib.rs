@@ -27,7 +27,7 @@ pub fn generate_valid_operation(
             .map(|err| err.message())
             .collect::<Vec<&str>>()
             .join("\n");
-        debug!("parser errors ========== \n{:?}", errors);
+        debug!("parser errors ========== \n{errors:?}");
         debug!("========================");
         panic!("cannot parse the supergraph");
     }

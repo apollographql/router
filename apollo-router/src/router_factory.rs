@@ -447,12 +447,8 @@ fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
     tracing::debug!("loading root certificates");
 
     // Load and return certificate.
-    let certs = rustls_pemfile::certs(&mut certificates.as_bytes()).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "failed to load certificate".to_string(),
-        )
-    })?;
+    let certs = rustls_pemfile::certs(&mut certificates.as_bytes())
+        .map_err(|_| io::Error::other("failed to load certificate".to_string()))?;
     Ok(certs.into_iter().map(rustls::Certificate).collect())
 }
 

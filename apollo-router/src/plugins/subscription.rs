@@ -697,8 +697,8 @@ fn ensure_id_consistency(
     id_from_path: &str,
     id_from_body: &str,
 ) -> Result<(), router::Response> {
-    (id_from_path != id_from_body)
-        .then(|| {
+    if id_from_path != id_from_body {
+        {
             Err(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::BAD_REQUEST)
@@ -706,8 +706,10 @@ fn ensure_id_consistency(
                     .expect("this body is valid"),
                 context: context.clone(),
             })
-        })
-        .unwrap_or_else(|| Ok(()))
+        }
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

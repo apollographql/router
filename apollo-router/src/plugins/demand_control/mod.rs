@@ -199,7 +199,7 @@ impl DemandControlError {
 
 impl<T> From<WithErrors<T>> for DemandControlError {
     fn from(value: WithErrors<T>) -> Self {
-        DemandControlError::QueryParseFailure(format!("{}", value))
+        DemandControlError::QueryParseFailure(format!("{value}"))
     }
 }
 
@@ -211,8 +211,7 @@ impl From<FieldLookupError<'_>> for DemandControlError {
             ),
             FieldLookupError::NoSuchField(type_name, _) => {
                 DemandControlError::QueryParseFailure(format!(
-                    "Attempted to look up a field on type {}, but the field does not exist",
-                    type_name
+                    "Attempted to look up a field on type {type_name}, but the field does not exist"
                 ))
             }
         }

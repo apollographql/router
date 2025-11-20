@@ -604,7 +604,7 @@ fn is_valid_input_type_redefinition(
 fn default_value_message(value: Option<&Value>) -> String {
     match value {
         None => "no default value".to_string(),
-        Some(value) => format!("default value {}", value),
+        Some(value) => format!("default value {value}"),
     }
 }
 
@@ -694,8 +694,7 @@ fn ensure_same_fields(
         if expected_field.is_none() {
             errors.push(SingleFederationError::TypeDefinitionInvalid {
                 message: format!(
-                    "Invalid definition of type {}: missing field {}",
-                    obj_type_name, actual_field_name
+                    "Invalid definition of type {obj_type_name}: missing field {actual_field_name}"
                 ),
             });
             continue;

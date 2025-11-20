@@ -1653,7 +1653,7 @@ mod tests {
 
         let schema = result.schema.into_inner();
         let validation = schema.clone().validate();
-        assert!(validation.is_ok(), "{:?}", validation);
+        assert!(validation.is_ok(), "{validation:?}");
 
         assert_snapshot!(schema.serialize());
     }
@@ -1689,7 +1689,7 @@ mod tests {
 
         let schema = result.schema.into_inner();
         let validation = schema.clone().validate();
-        assert!(validation.is_ok(), "{:?}", validation);
+        assert!(validation.is_ok(), "{validation:?}");
 
         assert_snapshot!(schema.serialize());
     }
@@ -1725,7 +1725,7 @@ mod tests {
 
         let schema = result.schema.into_inner();
         let validation = schema.clone().validate();
-        assert!(validation.is_ok(), "{:?}", validation);
+        assert!(validation.is_ok(), "{validation:?}");
 
         assert_snapshot!(schema.serialize());
     }

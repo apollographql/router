@@ -309,7 +309,7 @@ impl Opt {
                 .split(',')
                 .map(|endpoint| Url::parse(endpoint.trim()))
                 .collect::<Result<Vec<Url>, ParseError>>()
-                .map_err(|err| anyhow!("invalid Apollo Uplink endpoint, {}", err))?,
+                .map_err(|err| anyhow!("invalid Apollo Uplink endpoint, {err}"))?,
         ))
     }
 
@@ -593,7 +593,7 @@ impl Executable {
                     #[cfg(unix)]
                     {
                         let meta = std::fs::metadata(apollo_key_path.clone())
-                            .map_err(|err| anyhow!("Failed to read Apollo key file: {}", err))?;
+                            .map_err(|err| anyhow!("Failed to read Apollo key file: {err}"))?;
                         let mode = meta.mode();
                         // If our mode isn't "safe", fail...
                         // safe == none of the "group" or "other" bits set.
@@ -617,7 +617,7 @@ impl Executable {
                             opt.apollo_key = Some(apollo_key.trim().to_string());
                         }
                         Err(err) => {
-                            return Err(anyhow!("Failed to read Apollo key file: {}", err));
+                            return Err(anyhow!("Failed to read Apollo key file: {err}"));
                         }
                     };
                     SchemaSource::Registry(opt.uplink_config()?)

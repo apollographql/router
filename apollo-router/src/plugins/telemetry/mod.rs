@@ -605,7 +605,7 @@ impl PluginPrivate for Telemetry {
                 // Append the trace ID with the right format, based on the config
                 let format_id = |trace_id: TraceId| {
                     let id = match config.exporters.tracing.response_trace_id.format {
-                        TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => format!("{:032x}", trace_id),
+                        TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => format!("{trace_id:032x}"),
                         TraceIdFormat::Decimal => format!("{}", u128::from_be_bytes(trace_id.to_bytes())),
                         TraceIdFormat::Datadog => trace_id.to_datadog(),
                         TraceIdFormat::Uuid => Uuid::from_bytes(trace_id.to_bytes()).to_string(),

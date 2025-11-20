@@ -78,8 +78,7 @@ pub(crate) trait SpecDefinition {
                 .ok_or_else(|| {
                     SingleFederationError::Internal {
                         message: format!(
-                            "Unexpectedly could not find spec directive \"@{}\" in schema",
-                            name
+                            "Unexpectedly could not find spec directive \"@{name}\" in schema"
                         ),
                     }
                     .into()
@@ -102,8 +101,7 @@ pub(crate) trait SpecDefinition {
                 .ok_or_else(|| {
                     SingleFederationError::Internal {
                         message: format!(
-                            "Unexpectedly could not find spec type \"{}\" in schema",
-                            name
+                            "Unexpectedly could not find spec type \"{name}\" in schema"
                         ),
                     }
                     .into()

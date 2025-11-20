@@ -53,7 +53,7 @@ impl BrotliEncoder {
             &mut |_, _, _, _| (),
         ) <= 0
         {
-            return Err(Error::new(ErrorKind::Other, "brotli error"));
+            return Err(Error::other("brotli error"));
         }
 
         input.advance(input_len);
