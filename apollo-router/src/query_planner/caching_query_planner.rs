@@ -1179,13 +1179,14 @@ mod tests {
             .await;
 
         if let (Err(e), Err(e2)) = (r, r2) {
-            assert_eq!(
-                e.to_string(),
-                "value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 2 panicked"
+            // Rust 1.88+ includes panic message in error, earlier versions don't
+            assert!(
+                e.to_string().starts_with("value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 2 panicked"),
+                "unexpected error: {}", e
             );
-            assert_eq!(
-                e2.to_string(),
-                "value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 4 panicked"
+            assert!(
+                e2.to_string().starts_with("value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 4 panicked"),
+                "unexpected error: {}", e2
             );
         } else {
             panic!("Expected both calls to return specific errors");

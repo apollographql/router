@@ -1,5 +1,5 @@
 [tools]
-rust = "1.85.0"
+rust = "1.88.0"
 "aqua:cargo-bins/cargo-binstall" = "1.12.3"
 "cargo:cargo-nextest" = "0.9.70"
 "cargo:cargo-deny" = "0.14.21"
