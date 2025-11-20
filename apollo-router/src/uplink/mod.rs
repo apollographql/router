@@ -964,7 +964,7 @@ mod test {
 
     fn to_friendly<R: std::fmt::Debug>(r: Result<R, Error>) -> Result<String, String> {
         match r {
-            Ok(e) => Ok(format!("result {:?}", e)),
+            Ok(e) => Ok(format!("result {e:?}")),
             Err(e) => Err(e.to_string()),
         }
     }

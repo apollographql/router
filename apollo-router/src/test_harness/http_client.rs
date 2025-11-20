@@ -67,7 +67,7 @@ where
                 // Convert from axum’s BoxBody to AsyncBufRead
                 let mut body = Box::pin(body);
                 let stream = poll_fn(move |ctx| body.as_mut().poll_data(ctx))
-                    .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+                    .map(|result| result.map_err(io::Error::other));
                 StreamReader::new(stream)
             });
             let content_encoding = response.headers().get("content-encoding");

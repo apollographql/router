@@ -1829,7 +1829,7 @@ fn variable_validation() {
         }}",
         json!({"input":{}})
     );
-    assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
+    assert!(res.is_ok(), "validation should have succeeded: {res:?}");
 }
 
 #[test]

@@ -19,7 +19,7 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
 
     // Start callback server to receive router callbacks
     let (callback_addr, callback_state) = start_callback_server().await;
-    let callback_url = format!("http://{}/callback", callback_addr);
+    let callback_url = format!("http://{callback_addr}/callback");
 
     // Start mock subgraph server that will send callbacks
     let subgraph_server =
@@ -161,7 +161,7 @@ async fn test_subscription_callback_error_scenarios() -> Result<(), BoxError> {
     let (callback_addr, callback_state) = start_callback_server().await;
 
     let client = reqwest::Client::new();
-    let callback_url = format!("http://{}/callback/test-id", callback_addr);
+    let callback_url = format!("http://{callback_addr}/callback/test-id");
 
     // Test invalid payload - missing required fields
     let invalid_payload = serde_json::json!({
@@ -320,7 +320,7 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
 
     // Start callback server to receive router callbacks
     let (callback_addr, callback_state) = start_callback_server().await;
-    let callback_url = format!("http://{}/callback", callback_addr);
+    let callback_url = format!("http://{callback_addr}/callback");
 
     // Start mock subgraph server with custom payloads
     let subgraph_server = start_callback_subgraph_server_with_payloads(
@@ -426,7 +426,7 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
 
     // Start callback server to receive router callbacks
     let (callback_addr, callback_state) = start_callback_server().await;
-    let callback_url = format!("http://{}/callback", callback_addr);
+    let callback_url = format!("http://{callback_addr}/callback");
 
     // Start mock subgraph server with custom payloads
     let subgraph_server = start_callback_subgraph_server_with_payloads(

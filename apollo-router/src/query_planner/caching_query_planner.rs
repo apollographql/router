@@ -674,7 +674,10 @@ impl StructHasher {
         }
     }
     fn finalize(self) -> Vec<u8> {
-        self.hasher.finalize().as_slice().into()
+        {
+            let d = self.hasher.finalize();
+            (&d[..]).into()
+        }
     }
 }
 
@@ -1182,11 +1185,11 @@ mod tests {
             // Rust 1.88+ includes panic message in error, earlier versions don't
             assert!(
                 e.to_string().starts_with("value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 2 panicked"),
-                "unexpected error: {}", e
+                "unexpected error: {e}"
             );
             assert!(
                 e2.to_string().starts_with("value retrieval failed: a spawned task panicked, was cancelled, or was aborted: task 4 panicked"),
-                "unexpected error: {}", e2
+                "unexpected error: {e2}"
             );
         } else {
             panic!("Expected both calls to return specific errors");

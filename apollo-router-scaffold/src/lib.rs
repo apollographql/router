@@ -103,7 +103,7 @@ mod test {
 
         let mut found = false;
         if !diff.is_empty() {
-            println!("generated scaffolding project has changed:\n{:#?}", diff);
+            println!("generated scaffolding project has changed:\n{diff:#?}");
             for file in diff.changed {
                 println!("file: {file:?}");
                 let file = PathBuf::from(file.to_str().unwrap().strip_prefix(left).unwrap());

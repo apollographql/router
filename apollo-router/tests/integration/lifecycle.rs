@@ -308,7 +308,7 @@ async fn test_plugin_ordering() {
         });
         tokio::spawn(async move {
             if let Err(e) = server.await {
-                eprintln!("coprocessor server error: {}", e);
+                eprintln!("coprocessor server error: {e}");
             }
         });
         (coprocessor_url, shutdown_on_drop)

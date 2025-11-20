@@ -73,7 +73,7 @@ async fn one_request(string_variable_bytes: usize) {
                 }
             }
             if VERBOSE {
-                println!("{}", line);
+                println!("{line}");
             }
         }
     });
@@ -154,7 +154,7 @@ async fn spawn_subgraph() -> ShutdownOnDrop {
         });
     tokio::spawn(async move {
         if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
+            eprintln!("server error: {e}");
         }
     });
     shutdown_on_drop

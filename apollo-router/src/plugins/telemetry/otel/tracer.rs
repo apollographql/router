@@ -238,8 +238,7 @@ mod tests {
             assert_eq!(
                 sampled.span().span_context().is_sampled(),
                 is_sampled,
-                "{}",
-                name
+                "{name}"
             )
         }
     }

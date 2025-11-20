@@ -2969,7 +2969,7 @@ mod tests {
             // There's no async in this test, but introducing an async block allows us to separate metrics for each fixture.
             async move {
                 if fixture.ends_with("test.yaml") {
-                    println!("Running test for fixture: {}", fixture);
+                    println!("Running test for fixture: {fixture}");
                     let path = PathBuf::from_str(&fixture).unwrap();
                     let fixture_name = path
                         .parent()

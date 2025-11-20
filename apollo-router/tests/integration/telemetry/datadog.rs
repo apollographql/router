@@ -1012,13 +1012,13 @@ impl Verifier for DatadogTraceSpec {
     async fn get_trace(&self, trace_id: TraceId) -> Result<Value, BoxError> {
         let datadog_id = trace_id.to_datadog();
         let url = format!("http://localhost:8126/test/traces?trace_ids={datadog_id}");
-        println!("url: {}", url);
+        println!("url: {url}");
         let value: serde_json::Value = reqwest::get(url)
             .await
-            .map_err(|e| anyhow!("failed to contact datadog; {}", e))?
+            .map_err(|e| anyhow!("failed to contact datadog; {e}"))?
             .json()
             .await
-            .map_err(|e| anyhow!("failed to contact datadog; {}", e))?;
+            .map_err(|e| anyhow!("failed to contact datadog; {e}"))?;
         Ok(value)
     }
 
@@ -1039,12 +1039,10 @@ impl Verifier for DatadogTraceSpec {
 
     fn measured_span(&self, trace: &Value, name: &str) -> Result<bool, BoxError> {
         let binding1 = trace.select_path(&format!(
-            "$..[?(@.meta.['otel.original_name'] == '{}')].metrics.['_dd.measured']",
-            name
+            "$..[?(@.meta.['otel.original_name'] == '{name}')].metrics.['_dd.measured']"
         ))?;
         let binding2 = trace.select_path(&format!(
-            "$..[?(@.name == '{}')].metrics.['_dd.measured']",
-            name
+            "$..[?(@.name == '{name}')].metrics.['_dd.measured']"
         ))?;
         Ok(binding1
             .first()
@@ -1100,17 +1098,15 @@ impl Verifier for DatadogTraceSpec {
 
     fn validate_span_kind(&self, trace: &Value, name: &str, kind: &str) -> Result<(), BoxError> {
         let binding1 = trace.select_path(&format!(
-            "$..[?(@.meta.['otel.original_name'] == '{}')].meta.['span.kind']",
-            name
+            "$..[?(@.meta.['otel.original_name'] == '{name}')].meta.['span.kind']"
         ))?;
         let binding2 =
-            trace.select_path(&format!("$..[?(@.name == '{}')].meta.['span.kind']", name))?;
+            trace.select_path(&format!("$..[?(@.name == '{name}')].meta.['span.kind']"))?;
         let binding = binding1.first().or(binding2.first());
 
         if binding.is_none() {
             return Err(BoxError::from(format!(
-                "span.kind missing or incorrect {}, {}",
-                name, trace
+                "span.kind missing or incorrect {name}, {trace}"
             )));
         }
 
@@ -1120,8 +1116,7 @@ impl Verifier for DatadogTraceSpec {
             .expect("expected string");
         if binding != kind {
             return Err(BoxError::from(format!(
-                "span.kind mismatch, expected {} got {}",
-                kind, binding
+                "span.kind mismatch, expected {kind} got {binding}"
             )));
         }
 

@@ -675,17 +675,15 @@ mod test {
     fn it_preprocesses_redis_schemas_correctly() {
         // Base Format
         for scheme in ["redis", "rediss"] {
-            let url_s = format!("{}://username:password@host:6666/database", scheme);
+            let url_s = format!("{scheme}://username:password@host:6666/database");
             let url = Url::parse(&url_s).expect("it's a valid url");
             let urls = vec![url.clone(), url];
             assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
         }
         // Cluster Format
         for scheme in ["redis-cluster", "rediss-cluster"] {
-            let url_s = format!(
-                "{}://username:password@host:6666?node=host1:6667&node=host2:6668",
-                scheme
-            );
+            let url_s =
+                format!("{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668");
             let url = Url::parse(&url_s).expect("it's a valid url");
             let urls = vec![url.clone(), url];
             assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
@@ -693,8 +691,7 @@ mod test {
         // Sentinel Format
         for scheme in ["redis-sentinel", "rediss-sentinel"] {
             let url_s = format!(
-                "{}://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2",
-                scheme
+                "{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2"
             );
             let url = Url::parse(&url_s).expect("it's a valid url");
             let urls = vec![url.clone(), url];
@@ -702,7 +699,7 @@ mod test {
         }
         // Make sure it fails on sample invalid schemes
         for scheme in ["wrong", "something"] {
-            let url_s = format!("{}://username:password@host:6666/database", scheme);
+            let url_s = format!("{scheme}://username:password@host:6666/database");
             let url = Url::parse(&url_s).expect("it's a valid url");
             let urls = vec![url.clone(), url];
             assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
