@@ -279,6 +279,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
 struct EnabledFeatures {
     distributed_apq_cache: bool,
     entity_cache: bool,
+    response_cache: bool,
 }
 
 impl EnabledFeatures {
@@ -287,6 +288,7 @@ impl EnabledFeatures {
         [
             ("distributed_apq_cache", self.distributed_apq_cache),
             ("entity_cache", self.entity_cache),
+            ("response_cache", self.response_cache),
         ]
         .iter()
         .filter(|&&(_, enabled)| enabled)
@@ -1736,6 +1738,12 @@ impl Telemetry {
             entity_cache: full_config["preview_entity_cache"]["enabled"]
                 .as_bool()
                 .unwrap_or(false),
+            // Response cache's top-level enabled flag defaults to false. If the top-level flag is
+            // enabled, the feature is considered enabled regardless of the subgraph-level enabled
+            // settings.
+            response_cache: full_config["preview_response_cache"]["enabled"]
+                .as_bool()
+                .unwrap_or(false),
         }
     }
 }
@@ -2133,6 +2141,10 @@ mod tests {
             features.entity_cache,
             "Telemetry plugin should consider entity cache feature enabled when explicitly enabled"
         );
+        assert!(
+            features.response_cache,
+            "Telemetry plugin should consider response cache feature enabled when explicitly enabled"
+        );
 
         // Explicitly disabled
         let plugin = create_plugin_with_config(include_str!(
@@ -2148,6 +2160,10 @@ mod tests {
             !features.entity_cache,
             "Telemetry plugin should consider entity cache feature disabled when explicitly disabled"
         );
+        assert!(
+            !features.response_cache,
+            "Telemetry plugin should consider response cache feature disabled when explicitly disabled"
+        );
 
         // Default Values
         let plugin = create_plugin_with_config(include_str!(
@@ -2162,6 +2178,10 @@ mod tests {
         assert!(
             !features.entity_cache,
             "Telemetry plugin should consider entity cache feature disabled when all values are defaulted"
+        );
+        assert!(
+            !features.response_cache,
+            "Telemetry plugin should consider response cache feature disabled when all values are defaulted"
         );
 
         // APQ enabled when default enabled with redis config defined
