@@ -153,7 +153,10 @@ impl<'a> Builder<'a> {
         let mut builder = MetricsBuilder::new(self.config);
         builder.configure(&self.config.apollo)?;
         if !builder.meter_provider_builders.is_empty() {
-            // We drop this metric only for apollo exporter because it uses the same pattern including `.operations` but should not be forwarded to our apollo exporter
+            // To avoid sending a high cardinality metric to our ingress (which ignores it anyhow),
+            // we throw the entity caching operations metric here. This is handled exceptionally
+            // until we move fully from entity caching to response caching which does NOT
+            // necessitate this as it does not touch the safe-listed `operations.*` namespace.
             builder.with_view(
                 MeterProviderType::Apollo,
                 MetricView {
