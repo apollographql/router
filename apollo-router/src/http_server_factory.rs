@@ -195,6 +195,7 @@ pub(crate) enum Listener {
     },
 }
 
+#[allow(clippy::large_enum_variant)] // TLS stream is inherently large
 pub(crate) enum NetworkStream {
     Tcp(tokio::net::TcpStream),
     #[cfg(unix)]

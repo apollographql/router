@@ -873,6 +873,7 @@ impl Query {
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
+    #[allow(clippy::result_large_err)] // Response is inherently large
     pub(crate) fn validate_variables(
         &self,
         request: &Request,

@@ -2,7 +2,6 @@
 // it will be removed when we find a long lasting solution to https://github.com/Nemo157/async-compression/issues/154
 use std::fmt;
 use std::io::Error;
-use std::io::ErrorKind;
 use std::io::Result;
 
 use brotli::enc::StandardAlloc;
