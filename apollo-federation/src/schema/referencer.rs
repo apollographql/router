@@ -205,6 +205,210 @@ impl Referencers {
                 .map(move |directive_application| (pos.clone(), directive_application))
         }))
     }
+
+    pub(crate) fn rename_object_type(&mut self, old_name: &Name, new_name: &Name) {
+        for (_scalar_name, scalar_refs) in self.scalar_types.iter_mut() {
+            Self::update_object_field_positions(&mut scalar_refs.object_fields, old_name, new_name);
+            Self::update_object_field_argument_positions(
+                &mut scalar_refs.object_field_arguments,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_object_name, object_refs) in self.object_types.iter_mut() {
+            Self::update_object_field_positions(&mut object_refs.object_fields, old_name, new_name);
+        }
+
+        for (_interface_name, interface_refs) in self.interface_types.iter_mut() {
+            Self::update_object_field_positions(
+                &mut interface_refs.object_fields,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_union_name, union_refs) in self.union_types.iter_mut() {
+            Self::update_object_field_positions(&mut union_refs.object_fields, old_name, new_name);
+        }
+
+        for (_enum_name, enum_refs) in self.enum_types.iter_mut() {
+            Self::update_object_field_positions(&mut enum_refs.object_fields, old_name, new_name);
+            Self::update_object_field_argument_positions(
+                &mut enum_refs.object_field_arguments,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_input_name, input_refs) in self.input_object_types.iter_mut() {
+            Self::update_object_field_argument_positions(
+                &mut input_refs.object_field_arguments,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_directive_name, directive_refs) in self.directives.iter_mut() {
+            Self::update_object_field_positions(
+                &mut directive_refs.object_fields,
+                old_name,
+                new_name,
+            );
+            Self::update_object_field_argument_positions(
+                &mut directive_refs.object_field_arguments,
+                old_name,
+                new_name,
+            );
+        }
+    }
+
+    fn update_object_field_positions(
+        fields: &mut IndexSet<ObjectFieldDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_fields: Vec<_> = fields
+            .iter()
+            .filter(|f| &f.type_name == old_type_name)
+            .map(|f| ObjectFieldDefinitionPosition {
+                type_name: new_type_name.clone(),
+                field_name: f.field_name.clone(),
+            })
+            .collect();
+
+        fields.retain(|f| &f.type_name != old_type_name);
+        fields.extend(updated_fields);
+    }
+
+    fn update_object_field_argument_positions(
+        arguments: &mut IndexSet<ObjectFieldArgumentDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_arguments: Vec<_> = arguments
+            .iter()
+            .filter(|a| &a.type_name == old_type_name)
+            .map(|a| ObjectFieldArgumentDefinitionPosition {
+                type_name: new_type_name.clone(),
+                field_name: a.field_name.clone(),
+                argument_name: a.argument_name.clone(),
+            })
+            .collect();
+
+        arguments.retain(|a| &a.type_name != old_type_name);
+        arguments.extend(updated_arguments);
+    }
+
+    pub(crate) fn rename_interface_type(&mut self, old_name: &Name, new_name: &Name) {
+        for (_scalar_name, scalar_refs) in self.scalar_types.iter_mut() {
+            Self::update_interface_field_positions(
+                &mut scalar_refs.interface_fields,
+                old_name,
+                new_name,
+            );
+            Self::update_interface_field_argument_positions(
+                &mut scalar_refs.interface_field_arguments,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_object_name, object_refs) in self.object_types.iter_mut() {
+            Self::update_interface_field_positions(
+                &mut object_refs.interface_fields,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_interface_name, interface_refs) in self.interface_types.iter_mut() {
+            Self::update_interface_field_positions(
+                &mut interface_refs.interface_fields,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_union_name, union_refs) in self.union_types.iter_mut() {
+            Self::update_interface_field_positions(
+                &mut union_refs.interface_fields,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_enum_name, enum_refs) in self.enum_types.iter_mut() {
+            Self::update_interface_field_positions(
+                &mut enum_refs.interface_fields,
+                old_name,
+                new_name,
+            );
+            Self::update_interface_field_argument_positions(
+                &mut enum_refs.interface_field_arguments,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_input_name, input_refs) in self.input_object_types.iter_mut() {
+            Self::update_interface_field_argument_positions(
+                &mut input_refs.interface_field_arguments,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_directive_name, directive_refs) in self.directives.iter_mut() {
+            Self::update_interface_field_positions(
+                &mut directive_refs.interface_fields,
+                old_name,
+                new_name,
+            );
+            Self::update_interface_field_argument_positions(
+                &mut directive_refs.interface_field_arguments,
+                old_name,
+                new_name,
+            );
+        }
+    }
+
+    fn update_interface_field_positions(
+        fields: &mut IndexSet<InterfaceFieldDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_fields: Vec<_> = fields
+            .iter()
+            .filter(|f| &f.type_name == old_type_name)
+            .map(|f| InterfaceFieldDefinitionPosition {
+                type_name: new_type_name.clone(),
+                field_name: f.field_name.clone(),
+            })
+            .collect();
+
+        fields.retain(|f| &f.type_name != old_type_name);
+        fields.extend(updated_fields);
+    }
+
+    fn update_interface_field_argument_positions(
+        arguments: &mut IndexSet<InterfaceFieldArgumentDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_arguments: Vec<_> = arguments
+            .iter()
+            .filter(|a| &a.type_name == old_type_name)
+            .map(|a| InterfaceFieldArgumentDefinitionPosition {
+                type_name: new_type_name.clone(),
+                field_name: a.field_name.clone(),
+                argument_name: a.argument_name.clone(),
+            })
+            .collect();
+
+        arguments.retain(|a| &a.type_name != old_type_name);
+        arguments.extend(updated_arguments);
+    }
 }
 
 #[derive(Debug, Clone, Default)]
