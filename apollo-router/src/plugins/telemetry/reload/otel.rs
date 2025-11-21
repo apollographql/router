@@ -39,6 +39,7 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::Layered;
@@ -46,7 +47,6 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::SpanRef;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
-
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
 use crate::plugins::telemetry::formatters::json::Json;
@@ -81,7 +81,13 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     let hot_tracer =
         ReloadTracer::new(opentelemetry_sdk::trace::SdkTracerProvider::default().tracer("noop"));
     let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
-
+    // handle OpenTelemetry internal logs and stop them from propagating to tracing bridge/appender
+    // capture logs with the opentelemetry prefix and print them to eprintln!
+    let opentelemetry_error_log_layer = tracing_subscriber::fmt::Layer::new()
+        .with_writer(std::io::stderr)
+        .with_filter(filter_fn(|metadata| {
+            metadata.target().starts_with("opentelemetry")
+        }));
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
         FmtLayer::new(Text::default(), std::io::stdout).boxed()
@@ -103,6 +109,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
                 .with(DynAttributeLayer::new())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
+                .with(opentelemetry_error_log_layer)
                 .with(WarnLegacyMetricsLayer)
                 .with(EnvFilter::try_new(log_level)?)
                 .try_init()?;

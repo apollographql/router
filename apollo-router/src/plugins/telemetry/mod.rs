@@ -336,20 +336,6 @@ impl PluginPrivate for Telemetry {
 
         let (activation, custom_endpoints, apollo_metrics_sender) =
             reload::prepare(&init.previous_config, &config)?;
-
-        // handle OpenTelemetry internal logs and stop them from propagating to tracing bridge/appender
-        // capture logs with the opentelemetry prefix and print them to eprintln!
-        let opentelemetry_layer = Layer::new()
-            .with_writer(std::io::stderr)
-            .with_filter(filter_fn(|metadata| {
-                metadata.target().starts_with("opentelemetry")
-            }));
-
-        // register layer in tracing registry
-        tracing_subscriber::registry()
-            .with(opentelemetry_layer) // OpenTelemetry internal logs (filtered out)
-            .init();
-
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!(
                 "telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether"
