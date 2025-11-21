@@ -370,6 +370,7 @@ struct CustomAllocator {
 
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 impl CustomAllocator {
+    #[allow(dead_code)] // only used if feature global-allocator is enabled
     const fn new() -> Self {
         Self {
             inner: tikv_jemallocator::Jemalloc,
@@ -518,6 +519,8 @@ mod tests {
     use super::*;
     use std::ffi::CStr;
     use std::thread;
+
+    use super::*;
 
     #[test]
     fn test_malloc_conf_is_valid_c_string() {
