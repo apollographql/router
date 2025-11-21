@@ -49,6 +49,7 @@ pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false)
 pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
+const INITIAL_OCI_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Subcommands
 #[derive(Subcommand, Debug)]
@@ -248,14 +249,13 @@ impl Opt {
                     .clone()
                     .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?,
             )?,
-            poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
+            poll_interval: INITIAL_OCI_POLL_INTERVAL,
         })
     }
 
     pub fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
-        // Accepts both SHA256 digest format (@sha256:...) and tag format (:tag)
+        // Accepts both SHA256 digest and tag format
         let sha256_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
-        // Tag format: must start with word character, followed by 0-127 word chars, dots, or hyphens
         let tag_regex = Regex::new(r":[\w][\w.-]{0,127}$").unwrap();
         if sha256_regex.is_match(reference) || tag_regex.is_match(reference) {
             tracing::debug!("validated OCI configuration");

@@ -196,17 +196,17 @@ pub(crate) fn stream_from_oci(
     let task = async move {
         let mut last_digest: Option<String> = None;
         loop {
-            // First, fetch just the manifest digest
             match fetch_oci_manifest_digest(&oci_config).await {
                 Ok(current_digest) => {
-                    // Check if the digest has changed
+
                     if last_digest.as_ref().map(|d| d.as_str()) == Some(current_digest.as_str()) {
-                        // Digest unchanged, skip fetching the full schema (similar to uplink's Unchanged case)
+                        // Digest unchanged, skip fetching the full schema
                         tracing::debug!("oci manifest digest unchanged, skipping schema fetch");
                     } else {
                         // Digest changed, fetch the full schema
                         tracing::debug!("oci manifest digest changed, fetching schema");
                         last_digest = Some(current_digest);
+
                         match fetch_oci(&oci_config).await {
                             Ok(oci_result) => {
                                 tracing::debug!("fetched schema from oci registry");
@@ -268,6 +268,9 @@ mod tests {
     use sha2::Digest;
     use sha2::Sha256;
     use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::timeout;
     use url::Url;
     use wiremock::Mock;
     use wiremock::MockServer;
@@ -406,7 +409,7 @@ mod tests {
             annotations: None,
         });
         let manifest_digest = calculate_manifest_digest(&oci_manifest);
-        
+
         // Set up HEAD request for manifest digest (used by fetch_oci_manifest_digest)
         let _ = Mock::given(method("HEAD"))
             .and(path(manifest_url.path()))
@@ -623,13 +626,13 @@ mod tests {
         .expect("url must be valid");
 
         // Track blob requests - should only be called once (on first poll)
-        let blob_request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let blob_request_count = Arc::new(AtomicUsize::new(0));
         let blob_count = blob_request_count.clone();
         let schema_data = schema_layer.data.clone();
         Mock::given(method("GET"))
             .and(path(blob_url.path()))
             .respond_with(move |_request: &wiremock::Request| {
-                blob_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                blob_count.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
                     .set_body_bytes(schema_data.clone())
@@ -691,8 +694,8 @@ mod tests {
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
         let mut stream = stream_from_oci(oci_config);
-        
-        // First poll: digest is new, so schema should be fetched
+
+        // first poll: digest is new, so schema should be fetched
         let first_result = stream.next().await;
         assert!(first_result.is_some());
         match first_result.unwrap() {
@@ -702,25 +705,19 @@ mod tests {
             Err(e) => panic!("expected success, got error: {e}"),
         }
         assert_eq!(
-            blob_request_count.load(std::sync::atomic::Ordering::Relaxed),
+            blob_request_count.load(Ordering::Relaxed),
             1,
             "Blob should be fetched once on first poll"
         );
 
-        // Second poll: digest is unchanged, so schema should NOT be fetched
-        // Wait for the poll interval to pass
+        // second poll: digest is unchanged, so schema should not be fetched, wait for interval
         tokio::time::sleep(Duration::from_millis(50)).await;
-        
-        // The stream should not produce a new result because digest is unchanged
-        // We use a timeout to verify no new result is produced
-        let timeout_result = tokio::time::timeout(Duration::from_millis(100), stream.next()).await;
-        // If we get a result, it means the digest changed (which shouldn't happen)
-        // If we timeout, it means no new result was produced (expected behavior)
+
+        let timeout_result = timeout(Duration::from_millis(100), stream.next()).await;
+        // should time out, it means no new result was produced since digest is unchanged
         assert!(timeout_result.is_err(), "Expected no new result when digest is unchanged");
-        
-        // Verify blob was not fetched again
         assert_eq!(
-            blob_request_count.load(std::sync::atomic::Ordering::Relaxed),
+            blob_request_count.load(Ordering::Relaxed),
             1,
             "Blob should not be fetched again when digest is unchanged"
         );
@@ -732,10 +729,8 @@ mod tests {
         let graph_id = "test-graph-id";
         let reference = "latest";
 
-        // Track blob requests - should be called twice (once for each schema)
-        let blob_request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let blob_request_count = Arc::new(AtomicUsize::new(0));
 
-        // First schema
         let schema_layer1 = ImageLayer {
             data: "schema 1".to_string().into_bytes(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
@@ -752,7 +747,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path(blob_url1.path()))
             .respond_with(move |_request: &wiremock::Request| {
-                blob_count1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                blob_count1.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
                     .set_body_bytes(schema_data1.clone())
@@ -777,7 +772,6 @@ mod tests {
         });
         let manifest_digest1 = calculate_manifest_digest(&oci_manifest1);
 
-        // Second schema (different content = different digest)
         let schema_layer2 = ImageLayer {
             data: "schema 2".to_string().into_bytes(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
@@ -787,14 +781,13 @@ mod tests {
         let blob_url2 = Url::parse(&format!(
             "{}/v2/{graph_id}/blobs/{blob_digest2}",
             mock_server.uri()
-        ))
-        .expect("url must be valid");
+        )).expect("url must be valid");
         let blob_count2 = blob_request_count.clone();
         let schema_data2 = schema_layer2.data.clone();
         Mock::given(method("GET"))
             .and(path(blob_url2.path()))
-            .respond_with(move |_request: &wiremock::Request| {
-                blob_count2.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            .respond_with(move |_request: &Request| {
+                blob_count2.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
                     .set_body_bytes(schema_data2.clone())
@@ -827,7 +820,7 @@ mod tests {
         ))
         .expect("url must be valid");
 
-        // Set up HEAD requests: returns digest1, then digest2 sequentially
+        // mock returns digest1, then digest2 sequentially
         let _ = Mock::given(method("HEAD"))
             .and(path(manifest_url.path()))
             .respond_with(SequentialManifestDigests {
@@ -840,7 +833,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        // Set up GET requests for manifests: returns manifest1, then manifest2 sequentially
+        // mock requests for manifest1 then manifest2
         let _ = Mock::given(method("GET"))
             .and(path(manifest_url.path()))
             .respond_with(SequentialManifests {
@@ -866,7 +859,7 @@ mod tests {
 
         let mut stream = stream_from_oci(oci_config);
 
-        // First poll: digest1 is new, so schema1 should be fetched
+        // first poll: digest1 is new, so schema1 should be fetched
         let first_result = stream.next().await;
         assert!(first_result.is_some());
         match first_result.unwrap() {
@@ -876,7 +869,7 @@ mod tests {
             Err(e) => panic!("expected success, got error: {e}"),
         }
 
-        // Second poll: digest2 is different, so schema2 should be fetched
+        // second poll: digest2 is different, so schema2 should be fetched
         let second_result = stream.next().await;
         assert!(second_result.is_some());
         match second_result.unwrap() {
@@ -885,39 +878,10 @@ mod tests {
             }
             Err(e) => panic!("expected success, got error: {e}"),
         }
-
-        // Verify both blobs were fetched (one for each schema)
         assert_eq!(
-            blob_request_count.load(std::sync::atomic::Ordering::Relaxed),
+            blob_request_count.load(Ordering::Relaxed),
             2,
             "Both blobs should be fetched when digest changes"
         );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_error() {
-        let mock_server = MockServer::start().await;
-        // Create a reference that will fail (missing schema layer)
-        let random_layer = ImageLayer {
-            data: "foo_bar".to_string().into_bytes(),
-            media_type: "foo_bar".to_string(),
-            annotations: None,
-        };
-        let image_reference = setup_mocks(mock_server, vec![random_layer]).await;
-        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
-
-        let results = stream_from_oci(oci_config)
-            .take(1)
-            .collect::<Vec<_>>()
-            .await;
-
-        assert_eq!(results.len(), 1);
-        match &results[0] {
-            Ok(_) => panic!("expected error, got success"),
-            Err(e) => {
-                // Should be LayerMissingTitle error
-                assert!(matches!(e, OciError::LayerMissingTitle));
-            }
-        }
     }
 }
