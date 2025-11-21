@@ -15,6 +15,7 @@ use apollo_federation::Supergraph;
 use apollo_federation::bail;
 use apollo_federation::composition;
 use apollo_federation::composition::validate_satisfiability;
+use apollo_federation::connectors::expand::Connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::error::CompositionError;
@@ -580,10 +581,44 @@ fn print_locations(locations: &[Range<LineColumn>]) {
 }
 
 fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
-    let doc_str = read_input(file_path);
-    let supergraph = new_supergraph::Supergraph::parse(&doc_str).unwrap();
-    _ = validate_satisfiability(supergraph).expect("Supergraph should be satisfiable");
-    Ok(())
+    let original_str = read_input(file_path);
+
+    // Expand connectors for satisfiability validation.
+    let expansion_result = expand_connectors(&original_str, &Default::default())?;
+
+    // verify satisfiability
+    let result = match expansion_result {
+        ExpansionResult::Expanded {
+            raw_sdl,
+            connectors: Connectors {
+                by_service_name: _, ..
+            },
+            ..
+        } => {
+            let supergraph = new_supergraph::Supergraph::parse(&raw_sdl)?;
+            // TODO: Sanitize Connectors issues.
+            validate_satisfiability(supergraph)
+        }
+        ExpansionResult::Unchanged => {
+            let supergraph = new_supergraph::Supergraph::parse(&original_str)?;
+            validate_satisfiability(supergraph)
+        }
+    };
+
+    match result {
+        Ok(_) => {
+            println!("[SUCCESS]");
+            Ok(())
+        }
+        Err(errors) => {
+            // Print composition errors
+            print_composition_errors(&errors);
+            let num_errors = errors.len();
+            Err(anyhow!(
+                "Error: found {num_errors} satisfiability error(s)."
+            ))
+        }
+    }
 }
 
 fn cmd_compose(file_paths: &[PathBuf], config_path: Option<&PathBuf>) -> Result<(), AnyError> {
