@@ -8,7 +8,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 pub(super) use error::Error;
-use tokio_util::future::FutureExt;
+use tokio_util::time::FutureExt;
 
 use super::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
