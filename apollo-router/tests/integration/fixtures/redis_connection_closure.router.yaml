@@ -5,10 +5,8 @@ supergraph:
         required_to_start: true
         urls:
           - redis://localhost:6379
-        ttl: 30s
-        pool_size: 2
-      in_memory:
-        limit: 1
+        ttl: 1s
+        pool_size: 4
 telemetry:
   exporters:
     metrics:
