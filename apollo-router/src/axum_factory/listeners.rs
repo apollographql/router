@@ -369,24 +369,38 @@ pub(super) fn serve_router_on_listen_addr(
                                                 "this should not fail unless the socket is invalid",
                                             );
                                         let tokio_stream = TokioIo::new(stream);
-                                        let hyper_service = hyper::service::service_fn(move |request| {
+                                        let hyper_service = hyper::service::service_fn(move |request: http::Request<hyper::body::Incoming>| {
                                             app.clone().call(request)
                                         });
 
                                         let mut builder = Builder::new(TokioExecutor::new());
+                                        
+                                        // Configure HTTP/2 settings first (via http2() sub-builder)
+                                        // The auto builder will use these settings when HTTP/2 is negotiated
+                                        if let Some(max_header_list_size) = opt_http2_max_header_list_size {
+                                            builder.http2().max_header_list_size(max_header_list_size.as_u64() as u32);
+                                        }
+                                        
+                                        // Configure HTTP/1 settings
                                         let mut http_connection = builder.http1();
                                         let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
+                                            .keep_alive(true)
+                                            .timer(TokioTimer::new())
+                                            .header_read_timeout(header_read_timeout);
+                                        
+                                        // Apply HTTP/1-specific limits
+                                        // Note: These will only apply if the connection uses HTTP/1.1
+                                        // For HTTP/2 connections, max_header_list_size (configured above) will apply
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
-
                                         if let Some(max_buf_size) = opt_max_buf_size {
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
-                                        let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
+                                        
+                                        let connection = http_config
+                                            .serve_connection_with_upgrades(tokio_stream, hyper_service);
+                                        
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     }
                                     #[cfg(unix)]
@@ -397,20 +411,35 @@ pub(super) fn serve_router_on_listen_addr(
                                         let hyper_service = hyper::service::service_fn(move |request| {
                                             app.clone().call(request)
                                         });
+
                                         let mut builder = Builder::new(TokioExecutor::new());
+                                        
+                                        // Configure HTTP/2 settings first (via http2() sub-builder)
+                                        // The auto builder will use these settings when HTTP/2 is negotiated
+                                        if let Some(max_header_list_size) = opt_http2_max_header_list_size {
+                                            builder.http2().max_header_list_size(max_header_list_size.as_u64() as u32);
+                                        }
+                                        
+                                        // Configure HTTP/1 settings
                                         let mut http_connection = builder.http1();
                                         let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
+                                            .keep_alive(true)
+                                            .timer(TokioTimer::new())
+                                            .header_read_timeout(header_read_timeout);
+                                        
+                                        // Apply HTTP/1-specific limits
+                                        // Note: These will only apply if the connection uses HTTP/1.1
+                                        // For HTTP/2 connections, max_header_list_size (configured above) will apply
                                         if let Some(max_headers) = opt_max_headers {
                                             http_config.max_headers(max_headers);
                                         }
-
                                         if let Some(max_buf_size) = opt_max_buf_size {
                                             http_config.max_buf_size(max_buf_size.as_u64() as usize);
                                         }
-                                        let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
+                                        
+                                        let connection = http_config
+                                            .serve_connection_with_upgrades(tokio_stream, hyper_service);
+                                        
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     },
                                     NetworkStream::Tls(stream) => {
