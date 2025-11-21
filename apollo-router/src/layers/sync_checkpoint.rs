@@ -17,8 +17,6 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
-use crate::allocator::WithMemoryTracking;
-
 /// [`Layer`] for Synchronous Checkpoints. See [`ServiceBuilderExt::checkpoint()`](crate::layers::ServiceBuilderExt::checkpoint()).
 #[allow(clippy::type_complexity)]
 pub struct CheckpointLayer<S, Request>
@@ -162,11 +160,7 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         match (self.checkpoint_fn)(req) {
             Ok(ControlFlow::Break(response)) => Box::pin(async move { Ok(response) }),
-            Ok(ControlFlow::Continue(request)) => Box::pin(
-                self.inner
-                    .call(request)
-                    .with_memory_tracking("checkpoint.inner.call"),
-            ),
+            Ok(ControlFlow::Continue(request)) => Box::pin(self.inner.call(request)),
             Err(error) => Box::pin(async move { Err(error) }),
         }
     }
