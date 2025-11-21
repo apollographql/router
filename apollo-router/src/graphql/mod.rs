@@ -126,13 +126,13 @@ impl Error {
 
     pub(crate) fn from_value(value: Value) -> Result<Error, MalformedResponseError> {
         let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
-            reason: format!("invalid error within `errors`: {}", error),
+            reason: format!("invalid error within `errors`: {error}"),
         })?;
 
         let extensions =
             extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
                 .map_err(|err| MalformedResponseError {
-                    reason: format!("invalid `extensions` within error: {}", err),
+                    reason: format!("invalid `extensions` within error: {err}"),
                 })?
                 .unwrap_or_default();
         let message = match extract_key_value_from_object!(object, "message", Value::String(s) => s)
@@ -142,7 +142,7 @@ impl Error {
                 reason: "missing required `message` property within error".to_owned(),
             }),
             Err(err) => Err(MalformedResponseError {
-                reason: format!("invalid `message` within error: {}", err),
+                reason: format!("invalid `message` within error: {err}"),
             }),
         }?;
         let locations = extract_key_value_from_object!(object, "locations")
@@ -150,14 +150,14 @@ impl Error {
             .map(serde_json_bytes::from_value)
             .transpose()
             .map_err(|err| MalformedResponseError {
-                reason: format!("invalid `locations` within error: {}", err),
+                reason: format!("invalid `locations` within error: {err}"),
             })?
             .unwrap_or_default();
         let path = extract_key_value_from_object!(object, "path")
             .map(serde_json_bytes::from_value)
             .transpose()
             .map_err(|err| MalformedResponseError {
-                reason: format!("invalid `path` within error: {}", err),
+                reason: format!("invalid `path` within error: {err}"),
             })?;
 
         Ok(Error {

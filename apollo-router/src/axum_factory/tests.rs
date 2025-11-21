@@ -1937,7 +1937,7 @@ async fn http_deferred_service() -> impl Service<
                 // Convert from axum’s BoxBody to AsyncBufRead
                 let mut body = Box::pin(body);
                 let stream = poll_fn(move |ctx| body.as_mut().poll_data(ctx))
-                    .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+                    .map(|result| result.map_err(io::Error::other));
                 StreamReader::new(stream)
             });
             response.map(|body| Box::pin(body) as _)
@@ -2110,7 +2110,7 @@ async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> S
     let (mut sender, conn) = hyper::client::conn::handshake(stream).await.unwrap();
     tokio::task::spawn(async move {
         if let Err(err) = conn.await {
-            println!("Connection failed: {:?}", err);
+            println!("Connection failed: {err:?}");
         }
     });
 

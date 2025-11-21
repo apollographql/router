@@ -269,7 +269,7 @@ fn hash_operation(operation: &Option<String>, operation_name: &Option<String>) -
     if let Some(operation_name) = operation_name {
         digest.update(operation_name.as_bytes());
     }
-    hex::encode(digest.finalize().as_slice())
+    hex::encode(digest.finalize())
 }
 
 register_plugin!("apollo", "progressive_override", ProgressiveOverridePlugin);

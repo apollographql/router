@@ -67,12 +67,10 @@ impl<T: Send> NamedSender<T> {
         NamedSender {
             name,
             channel_full_message: format!(
-                "cannot send message to batch processor '{}' as the channel is full",
-                name
+                "cannot send message to batch processor '{name}' as the channel is full"
             ),
             channel_closed_message: format!(
-                "cannot send message to batch processor '{}' as the channel is closed",
-                name
+                "cannot send message to batch processor '{name}' as the channel is closed"
             ),
             sender,
         }

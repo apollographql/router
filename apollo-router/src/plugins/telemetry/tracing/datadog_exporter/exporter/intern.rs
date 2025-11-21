@@ -452,13 +452,13 @@ mod tests {
 
         f1.write_to(&mut buffer);
 
-        assert_eq!(&buffer[..], format!("{}", f1).as_bytes());
+        assert_eq!(&buffer[..], format!("{f1}").as_bytes());
 
         buffer.clear();
 
         f2.write_to(&mut buffer);
 
-        assert_eq!(&buffer[..], format!("{}", f2).as_bytes());
+        assert_eq!(&buffer[..], format!("{f2}").as_bytes());
     }
 
     #[test]
@@ -470,13 +470,13 @@ mod tests {
 
         s1.write_to(&mut buffer);
 
-        assert_eq!(&buffer[..], format!("\"{}\"", s1).as_bytes());
+        assert_eq!(&buffer[..], format!("\"{s1}\"").as_bytes());
 
         buffer.clear();
 
         s2.write_to(&mut buffer);
 
-        assert_eq!(&buffer[..], format!("\"{}\"", s2).as_bytes());
+        assert_eq!(&buffer[..], format!("\"{s2}\"").as_bytes());
     }
 
     fn test_encoding_intern_value(value: InternValue<'_>) {

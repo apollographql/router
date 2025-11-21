@@ -352,7 +352,7 @@ mod tests {
                 assert!(reloaded_schema.sdl.contains(&schema.sdl));
                 assert_eq!(reloaded_schema.launch_id, schema.launch_id);
             }
-            _ => panic!("Expected UpdateSchema event, got {:?}", event),
+            _ => panic!("Expected UpdateSchema event, got {event:?}"),
         }
     }
 
@@ -378,7 +378,7 @@ mod tests {
                 // Should be a clone of the original config (different Arc but same contents)
                 assert!(!Arc::ptr_eq(&reloaded_config, &config));
             }
-            _ => panic!("Expected UpdateConfiguration event, got {:?}", event),
+            _ => panic!("Expected UpdateConfiguration event, got {event:?}"),
         }
     }
 

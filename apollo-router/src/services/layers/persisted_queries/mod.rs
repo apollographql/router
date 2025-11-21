@@ -67,6 +67,7 @@ impl PersistedQueryLayer {
     /// 1) resolving a persisted query ID to a query body
     /// 2) matching a freeform GraphQL request against persisted queries, optionally rejecting it based on configuration
     /// 3) continuing to the next stage of the router
+    #[allow(clippy::result_large_err)] // SupergraphResponse is inherently large
     pub(crate) fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -109,6 +110,7 @@ impl PersistedQueryLayer {
     }
 
     /// Places an operation body on a [`SupergraphRequest`] if it has been persisted
+    #[allow(clippy::result_large_err)] // SupergraphResponse is inherently large
     pub(crate) fn replace_query_id_with_operation_body(
         &self,
         mut request: SupergraphRequest,

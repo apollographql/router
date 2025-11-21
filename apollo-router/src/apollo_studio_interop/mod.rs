@@ -416,7 +416,7 @@ impl UsageGenerator<'_> {
             None => "-".into(),
             Some(node) => node.to_string(),
         };
-        let mut result = format!("# {}\n", op_name);
+        let mut result = format!("# {op_name}\n");
 
         // Followed by a sorted list of fragments
         let mut sorted_fragments: Vec<_> = self.fragments_map.iter().collect();
@@ -802,7 +802,7 @@ fn format_operation(
     if !shorthand {
         f.write_str(operation.operation_type.name())?;
         if let Some(name) = &operation.name {
-            write!(f, " {}", name)?;
+            write!(f, " {name}")?;
         }
 
         // print variables sorted by name
@@ -885,7 +885,7 @@ fn format_selection_set(
                 formatter: &ApolloReportingSignatureFormatter::Field(field),
                 normalization_algorithm,
             };
-            let field_str = format!("{}", formatter);
+            let field_str = format!("{formatter}");
             f.write_str(&field_str)?;
 
             // We need to insert a space if this is not the last field and it ends in an alphanumeric character.
@@ -962,7 +962,7 @@ fn format_field(
                     formatter: &ApolloReportingSignatureFormatter::Argument(a),
                     normalization_algorithm,
                 };
-                format!("{}", formatter)
+                format!("{formatter}")
             })
             .collect();
 
@@ -980,7 +980,7 @@ fn format_field(
                         .last()
                         .is_none_or(|c| c.is_alphanumeric() || c == '_'))
             {
-                write!(f, "{}", separator)?;
+                write!(f, "{separator}")?;
             }
         }
         f.write_str(")")?;
@@ -997,7 +997,7 @@ fn format_inline_fragment(
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     if let Some(type_name) = &inline_fragment.type_condition {
-        write!(f, "...on {}", type_name)?;
+        write!(f, "...on {type_name}")?;
     } else {
         f.write_str("...")?;
     }
@@ -1056,7 +1056,7 @@ fn format_directives(
                     formatter: &ApolloReportingSignatureFormatter::Argument(argument),
                     normalization_algorithm,
                 };
-                write!(f, "{}", formatter)?;
+                write!(f, "{formatter}")?;
             }
 
             f.write_str(")")?;
@@ -1081,7 +1081,7 @@ fn format_value(
                     if index != 0 {
                         f.write_str(",")?;
                     }
-                    write!(f, "{}:", name)?;
+                    write!(f, "{name}:")?;
                     format_value(val, normalization_algorithm, f)?;
                 }
                 f.write_str("}")

@@ -43,7 +43,7 @@ impl PluginAction {
 fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
     let plugin_path = plugin_path(name);
     if plugin_path.exists() {
-        return Err(anyhow::anyhow!("plugin '{}' already exists", name));
+        return Err(anyhow::anyhow!("plugin '{name}' already exists"));
     }
 
     let cargo_toml = fs::read_to_string("Cargo.toml")?.parse::<toml::Value>()?;

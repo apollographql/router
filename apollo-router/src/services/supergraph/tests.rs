@@ -2851,9 +2851,7 @@ async fn no_typename_on_interface() {
             .unwrap()
             .get("name")
             .unwrap(),
-        "{:?}\n{:?}",
-        with_typename,
-        no_typename
+        "{with_typename:?}\n{no_typename:?}"
     );
     insta::assert_json_snapshot!(with_typename);
 
@@ -2894,9 +2892,7 @@ async fn no_typename_on_interface() {
             .unwrap()
             .get("name")
             .unwrap(),
-        "{:?}\n{:?}",
-        with_reversed_fragments,
-        no_typename
+        "{with_reversed_fragments:?}\n{no_typename:?}"
     );
     insta::assert_json_snapshot!(with_reversed_fragments);
 }

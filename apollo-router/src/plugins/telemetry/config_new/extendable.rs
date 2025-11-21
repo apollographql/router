@@ -98,10 +98,7 @@ where
                             let mut temp_attributes: Map<String, Value> = Map::new();
                             temp_attributes.insert(key.clone(), value.clone());
                             Att::deserialize(Value::Object(temp_attributes)).map_err(|e| {
-                                A::Error::custom(format!(
-                                    "failed to parse attribute '{}': {}",
-                                    key, e
-                                ))
+                                A::Error::custom(format!("failed to parse attribute '{key}': {e}"))
                             })?;
                             attributes.insert(key, value);
                         }

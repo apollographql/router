@@ -167,7 +167,7 @@ impl GrpcExporter {
         let endpoint = endpoint
             .to_string()
             .parse::<Url>()
-            .map_err(|e| BoxError::from(format!("invalid GRPC endpoint {}, {}", endpoint, e)))?;
+            .map_err(|e| BoxError::from(format!("invalid GRPC endpoint {endpoint}, {e}")))?;
         let domain_name = self.default_tls_domain(&endpoint);
 
         if let (Some(ca), Some(key), Some(cert), Some(domain_name)) =

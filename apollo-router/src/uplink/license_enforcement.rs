@@ -141,7 +141,7 @@ impl ParsedLinkSpec {
     // 3. Otherwise, use the spec name as the prefix.
     fn directive_name(&self, default_name: &str) -> String {
         if let Some(imported_as) = &self.imported_as {
-            format!("{}__{}", imported_as, default_name)
+            format!("{imported_as}__{default_name}")
         } else if self.spec_name == default_name {
             default_name.to_string()
         } else {
@@ -635,7 +635,7 @@ impl Display for SchemaViolation {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
             SchemaViolation::Spec { name, url } => {
-                write!(f, "* @{}\n  {}", name, url)
+                write!(f, "* @{name}\n  {url}")
             }
             SchemaViolation::DirectiveArgument {
                 name,
@@ -643,7 +643,7 @@ impl Display for SchemaViolation {
                 argument,
                 explanation,
             } => {
-                write!(f, "* @{}.{}\n  {}\n\n{}", name, argument, url, explanation)
+                write!(f, "* @{name}.{argument}\n  {url}\n\n{explanation}")
             }
         }
     }

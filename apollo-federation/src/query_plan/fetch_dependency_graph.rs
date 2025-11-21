@@ -2367,8 +2367,7 @@ impl FetchDependencyGraph {
                         .map_or_else(
                             |_| {
                                 Err(FederationError::internal(format!(
-                                    "Invalid call from {} starting at {}: {} is not composite",
-                                    path, parent_type, field_position
+                                    "Invalid call from {path} starting at {parent_type}: {field_position} is not composite"
                                 )))
                             },
                             Ok,
@@ -2382,8 +2381,7 @@ impl FetchDependencyGraph {
                             .map_or_else(
                                 |_| {
                                     Err(FederationError::internal(format!(
-                                        "Invalid call from {} starting at {}: {} is not composite",
-                                        path, parent_type, type_condition_position
+                                        "Invalid call from {path} starting at {parent_type}: {type_condition_position} is not composite"
                                     )))
                                 },
                                 Ok,
@@ -2939,7 +2937,7 @@ impl FetchDependencyGraphNode {
     }
 
     fn add_context_renamer(&mut self, renamer: FetchDataKeyRenamer) {
-        if !self.context_inputs.iter().any(|c| *c == renamer) {
+        if !self.context_inputs.contains(&renamer) {
             self.context_inputs.push(renamer);
         }
     }
@@ -3339,7 +3337,7 @@ impl std::fmt::Display for FetchInputs {
                 // We can safely unwrap because we know the len >= 1.
                 write!(f, "{}", iter.next().unwrap())?;
                 for x in iter {
-                    write!(f, ",{}", x)?;
+                    write!(f, ",{x}")?;
                 }
                 write!(f, "]")
             }

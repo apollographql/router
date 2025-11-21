@@ -120,7 +120,7 @@ async fn overloaded_compute_job_pool() {
     let requests = (0..100).map(|i| {
         let mut body = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
         // Replace the query nameAlias with a new query that has an alias based on i
-        body["query"] = format!(r#"query ExampleQuery{} {{topProducts{{name}}}}"#, i).into();
+        body["query"] = format!(r#"query ExampleQuery{i} {{topProducts{{name}}}}"#).into();
 
         router.execute_query(Query::builder().body(body).build())
     });

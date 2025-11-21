@@ -339,6 +339,7 @@ pub(crate) struct InvalidIdsPayload {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "action", rename = "lowercase")]
+#[allow(clippy::large_enum_variant)] // Response payload is inherently large
 pub(crate) enum SubscriptionPayload {
     #[serde(rename = "check")]
     Check { id: String, verifier: String },
@@ -692,13 +693,14 @@ pub(crate) fn create_verifier(sub_id: &str) -> Result<String, BoxError> {
     Ok(verifier)
 }
 
+#[allow(clippy::result_large_err)] // Router response is inherently large
 fn ensure_id_consistency(
     context: &Context,
     id_from_path: &str,
     id_from_body: &str,
 ) -> Result<(), router::Response> {
-    (id_from_path != id_from_body)
-        .then(|| {
+    if id_from_path != id_from_body {
+        {
             Err(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::BAD_REQUEST)
@@ -706,8 +708,10 @@ fn ensure_id_consistency(
                     .expect("this body is valid"),
                 context: context.clone(),
             })
-        })
-        .unwrap_or_else(|| Ok(()))
+        }
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

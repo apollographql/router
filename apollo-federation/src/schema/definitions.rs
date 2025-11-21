@@ -11,7 +11,7 @@ fn is_composite_type(ty: &NamedType, schema: &Schema) -> Result<bool, Federation
             .types
             .get(ty)
             .ok_or_else(|| SingleFederationError::Internal {
-                message: format!("Cannot find type `'{}\'", ty),
+                message: format!("Cannot find type `'{ty}\'"),
             })?,
         apollo_compiler::schema::ExtendedType::Object(_)
             | apollo_compiler::schema::ExtendedType::Interface(_)

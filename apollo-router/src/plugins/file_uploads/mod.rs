@@ -219,7 +219,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
                         variables,
                         variable_path,
                         serde_json_bytes::Value::String(
-                            format!("<Placeholder for file '{}'>", filename).into(),
+                            format!("<Placeholder for file '{filename}'>").into(),
                         ),
                     )
                     .map_err(|path| FileUploadError::InputValueNotFound(path.join(".")))?;

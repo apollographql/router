@@ -448,8 +448,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 if new_options.len() > options_limit as usize {
                     return Err(SingleFederationError::QueryPlanComplexityExceeded {
                         message: format!(
-                            "Too many options generated for {}, reached the limit of {}.",
-                            selection, options_limit,
+                            "Too many options generated for {selection}, reached the limit of {options_limit}.",
                         ),
                     }
                     .into());
@@ -526,8 +525,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             // validated), but can happen when computing sub-plans for a key condition.
             return if self.is_top_level {
                 Err(FederationError::internal(format!(
-                    "Was not able to find any options for {}: This shouldn't have happened.",
-                    selection,
+                    "Was not able to find any options for {selection}: This shouldn't have happened.",
                 )))
             } else {
                 // Indicate to the caller that query planning should terminate with no plan.

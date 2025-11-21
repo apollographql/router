@@ -119,7 +119,7 @@ async fn spawn_router(graphql_recursion_limit: usize) -> tokio::process::Child {
                 }
             }
             if VERBOSE {
-                println!("{}", line);
+                println!("{line}");
             }
         }
     });
@@ -169,7 +169,7 @@ fn spawn_subgraph() -> ShutdownOnDrop {
         });
     tokio::spawn(async move {
         if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
+            eprintln!("server error: {e}");
         }
     });
     shutdown_on_drop

@@ -323,7 +323,7 @@ async fn test_decimal_trace_id() -> Result<(), BoxError> {
         .unwrap_or_default()
         .parse()
         .expect("expected decimal trace ID");
-    assert_eq!(format!("{:x}", id_from_router), id.to_string());
+    assert_eq!(format!("{id_from_router:x}"), id.to_string());
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -385,13 +385,13 @@ impl Verifier for JaegerTraceSpec {
 
         let id = trace_id.to_string();
         let url = format!("http://localhost:16686/api/traces/{id}?{params}");
-        println!("url: {}", url);
+        println!("url: {url}");
         let value: serde_json::Value = reqwest::get(url)
             .await
-            .map_err(|e| anyhow!("failed to contact jaeger; {}", e))?
+            .map_err(|e| anyhow!("failed to contact jaeger; {e}"))?
             .json()
             .await
-            .map_err(|e| anyhow!("failed to contact jaeger; {}", e))?;
+            .map_err(|e| anyhow!("failed to contact jaeger; {e}"))?;
 
         Ok(value)
     }
@@ -413,12 +413,10 @@ impl Verifier for JaegerTraceSpec {
 
     fn measured_span(&self, trace: &Value, name: &str) -> Result<bool, BoxError> {
         let binding1 = trace.select_path(&format!(
-            "$..[?(@.meta.['otel.original_name'] == '{}')].metrics.['_dd.measured']",
-            name
+            "$..[?(@.meta.['otel.original_name'] == '{name}')].metrics.['_dd.measured']"
         ))?;
         let binding2 = trace.select_path(&format!(
-            "$..[?(@.name == '{}')].metrics.['_dd.measured']",
-            name
+            "$..[?(@.name == '{name}')].metrics.['_dd.measured']"
         ))?;
         Ok(binding1
             .first()

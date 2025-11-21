@@ -488,8 +488,8 @@ impl Selection {
 
     /// Apply the `mapper` to self.selection_set, if it exists, and return a new `Selection`.
     /// - Note: The returned selection may have no subselection set or an empty one if the mapper
-    ///         returns so, which may make the returned selection invalid. It's caller's responsibility
-    ///         to appropriately handle invalid return values.
+    ///   returns so, which may make the returned selection invalid. It's caller's responsibility
+    ///   to appropriately handle invalid return values.
     pub(crate) fn map_selection_set(
         &self,
         mapper: impl FnOnce(&SelectionSet) -> Result<Option<SelectionSet>, FederationError>,
@@ -1016,7 +1016,7 @@ impl FragmentSpreadSelection {
     ) -> Result<Self, FederationError> {
         let fragment_name = &fragment_spread.fragment_name;
         let fragment = named_fragments.get(fragment_name).ok_or_else(|| {
-            FederationError::internal(format!("Fragment {} not found", fragment_name))
+            FederationError::internal(format!("Fragment {fragment_name} not found"))
         })?;
         debug_assert_eq!(fragment_spread.schema, fragment.schema);
         Ok(Self {

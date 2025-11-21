@@ -34,20 +34,12 @@ fuzz_target!(|data: &[u8]| {
         .json::<Value>();
 
     debug!("======= DOCUMENT =======");
-    debug!("{}", generated_operation);
+    debug!("{generated_operation}");
     debug!("========================");
     debug!("======= RESPONSE =======");
     if gateway_fed1_response.is_ok() != gateway_fed2_response.is_ok() {
-        let gateway_fed1_error = if let Err(err) = &gateway_fed1_response {
-            Some(err)
-        } else {
-            None
-        };
-        let gateway_fed2_error = if let Err(err) = &gateway_fed2_response {
-            Some(err)
-        } else {
-            None
-        };
+        let gateway_fed1_error = gateway_fed1_response.as_ref().err();
+        let gateway_fed2_error = gateway_fed2_response.as_ref().err();
         if gateway_fed1_error.is_some() && gateway_fed2_error.is_some() {
             // Do not check errors for now
             return;

@@ -26,7 +26,7 @@ struct ChildProcessGuard(Child);
 impl Drop for ChildProcessGuard {
     fn drop(&mut self) {
         if let Err(e) = self.0.kill() {
-            eprintln!("Could not kill child process: {}", e);
+            eprintln!("Could not kill child process: {e}");
         }
     }
 }

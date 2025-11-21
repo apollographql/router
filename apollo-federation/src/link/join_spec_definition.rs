@@ -194,8 +194,7 @@ impl JoinSpecDefinition {
         } else {
             Err(SingleFederationError::Internal {
                 message: format!(
-                    "Unexpectedly found non-enum for join spec's \"{}\" enum definition",
-                    JOIN_GRAPH_ENUM_NAME_IN_SPEC,
+                    "Unexpectedly found non-enum for join spec's \"{JOIN_GRAPH_ENUM_NAME_IN_SPEC}\" enum definition",
                 ),
             }
             .into())

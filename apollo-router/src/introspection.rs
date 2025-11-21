@@ -14,8 +14,7 @@ use crate::query_planner::QueryKey;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::spec;
 
-const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
-    unsafe { NonZeroUsize::new_unchecked(5) };
+const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 
 #[derive(Clone)]
 pub(crate) enum IntrospectionCache {

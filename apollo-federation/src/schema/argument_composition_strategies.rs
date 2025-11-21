@@ -86,10 +86,7 @@ pub(crate) struct FixedTypeSupportValidator {
 
 impl FixedTypeSupportValidator {
     fn is_type_supported(&self, _schema: &FederationSchema, ty: &Type) -> Result<(), String> {
-        let is_supported = self
-            .supported_types
-            .iter()
-            .any(|supported_ty| *supported_ty == *ty);
+        let is_supported = self.supported_types.contains(ty);
         if is_supported {
             return Ok(());
         }
@@ -259,7 +256,7 @@ impl ArgumentComposition for IntersectionArgumentCompositionStrategy {
                 let mut result = first_ls.to_vec();
                 for val in rest {
                     let val_ls = val.as_list().unwrap();
-                    result.retain(|result_item| val_ls.iter().any(|n| *n == *result_item));
+                    result.retain(|result_item| val_ls.contains(result_item));
                 }
                 Value::List(result)
             })

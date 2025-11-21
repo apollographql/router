@@ -130,13 +130,13 @@ impl Verifier for ZipkinTraceSpec {
 
         let id = trace_id.to_string();
         let url = format!("http://localhost:9411/api/v2/trace/{id}?{params}");
-        println!("url: {}", url);
+        println!("url: {url}");
         let value: serde_json::Value = reqwest::get(url)
             .await
-            .map_err(|e| anyhow!("failed to contact datadog; {}", e))?
+            .map_err(|e| anyhow!("failed to contact datadog; {e}"))?
             .json()
             .await
-            .map_err(|e| anyhow!("failed to contact datadog; {}", e))?;
+            .map_err(|e| anyhow!("failed to contact datadog; {e}"))?;
         Ok(value)
     }
 

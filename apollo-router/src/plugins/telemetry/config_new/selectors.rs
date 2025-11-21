@@ -406,6 +406,7 @@ pub(crate) enum SupergraphSelector {
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[allow(clippy::large_enum_variant)] // SubgraphSelector contains substantial data
 pub(crate) enum SubgraphValue {
     Standard(Standard),
     Custom(SubgraphSelector),

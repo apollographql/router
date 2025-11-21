@@ -433,8 +433,7 @@ impl OpPathElement {
             if let Some(application) = self.directives().get(directive_name) {
                 let Some(arg) = application.specified_argument_by_name("if") else {
                     return Err(FederationError::internal(format!(
-                        "@{} missing required argument \"if\"",
-                        directive_name
+                        "@{directive_name} missing required argument \"if\""
                     )));
                 };
                 let value = match arg.deref() {
@@ -1126,15 +1125,13 @@ where
         let tail_weight = self.graph.node_weight(self.tail)?;
         if self.tail != edge_head {
             return Err(FederationError::internal(format!(
-                "Cannot add edge {} to path ending at {}",
-                edge_weight, tail_weight
+                "Cannot add edge {edge_weight} to path ending at {tail_weight}"
             )));
         }
         if let Some(path_tree) = &condition_path_tree {
             if edge_weight.conditions.is_none() {
                 return Err(FederationError::internal(format!(
-                    "Unexpectedly got conditions paths {} for edge {} without conditions",
-                    path_tree, edge_weight,
+                    "Unexpectedly got conditions paths {path_tree} for edge {edge_weight} without conditions",
                 )));
             }
         }
@@ -1272,7 +1269,7 @@ where
 
         if matches!(
             edge_weight.transition,
-            QueryGraphEdgeTransition::KeyResolution { .. }
+            QueryGraphEdgeTransition::KeyResolution
         ) {
             // We're adding a `@key` edge. If the last edge to that point is an `@interfaceObject`
             // fake downcast, and if our destination type is not an `@interfaceObject` itself, then
@@ -3049,8 +3046,7 @@ impl OpGraphPath {
                             {
                                 let edge_weight = self.graph.edge_weight(edge)?;
                                 return Err(FederationError::internal(format!(
-                                    "Unexpectedly missing {} for {} from path {}",
-                                    operation_field, edge_weight, self,
+                                    "Unexpectedly missing {operation_field} for {edge_weight} from path {self}",
                                 )));
                             }
                             operation_field = Field {
@@ -3119,8 +3115,7 @@ impl OpGraphPath {
                                 let interface_edge_weight =
                                     self.graph.edge_weight(*interface_edge)?;
                                 return Err(FederationError::internal(format!(
-                                    "Interface edge {} unexpectedly had conditions",
-                                    interface_edge_weight
+                                    "Interface edge {interface_edge_weight} unexpectedly had conditions"
                                 )));
                             }
                             field_path
@@ -3316,8 +3311,7 @@ impl OpGraphPath {
                                 // condition (only fragments can).
                                 if field_options_for_implementation.is_empty() {
                                     return Err(FederationError::internal(format!(
-                                        "Unexpected unsatisfiable path after {}",
-                                        operation_field
+                                        "Unexpected unsatisfiable path after {operation_field}"
                                     )));
                                 }
                                 debug!(
@@ -3388,8 +3382,7 @@ impl OpGraphPath {
                         // the query should have been flagged invalid if a field was selected on
                         // something else.
                         Err(FederationError::internal(format!(
-                            "Unexpectedly found field {} on non-composite type {}",
-                            operation_field, tail_type_pos,
+                            "Unexpectedly found field {operation_field} on non-composite type {tail_type_pos}",
                         )))
                     }
                 }
@@ -3625,8 +3618,7 @@ impl OpGraphPath {
                     _ => {
                         // We shouldn't have a fragment on a non-composite type.
                         Err(FederationError::internal(format!(
-                            "Unexpectedly found inline fragment {} on non-composite type {}",
-                            operation_inline_fragment, tail_type_pos,
+                            "Unexpectedly found inline fragment {operation_inline_fragment} on non-composite type {tail_type_pos}",
                         )))
                     }
                 }
@@ -4096,8 +4088,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         // exited the method early).
                         if advance_options.is_empty() {
                             return Err(FederationError::internal(format!(
-                                "Unexpected empty options after non-collecting path {} for {}",
-                                path_with_non_collecting_edges, operation_element,
+                                "Unexpected empty options after non-collecting path {path_with_non_collecting_edges} for {operation_element}",
                             )));
                         }
                         // There is a special case we can deal with now. Namely, suppose we have a

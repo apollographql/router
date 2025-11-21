@@ -573,7 +573,7 @@ async fn test_unix_socket() {
         Ok::<_, hyper::Error>(service_fn(|mut req: http::Request<Body>| async move {
             let data = get_body_bytes(req.body_mut()).await.unwrap();
             let body = std::str::from_utf8(&data).unwrap();
-            println!("{:?}", body);
+            println!("{body:?}");
             let response = http::Response::builder()
                 .status(StatusCode::OK)
                 .header(CONTENT_TYPE, "application/json")

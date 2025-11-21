@@ -980,7 +980,7 @@ fn validate_inaccessible(
                     .collect::<Vec<_>>()
                     .join(", ");
                 errors.push(SingleFederationError::DisallowedInaccessible {
-                    message: format!("Directive `{position}` cannot use @inaccessible because it may be applied to these type-system locations: {}", type_system_locations),
+                    message: format!("Directive `{position}` cannot use @inaccessible because it may be applied to these type-system locations: {type_system_locations}"),
                 }.into());
             }
         } else {

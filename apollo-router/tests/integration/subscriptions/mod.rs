@@ -68,8 +68,7 @@ pub const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
 pub const CALLBACK_CONFIG: &str = include_str!("fixtures/callback.router.yaml");
 pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
     format!(
-        r#"subscription {{  userWasCreated(intervalMs: {}, nbEvents: {}) {{    name reviews {{ body }} }}}}"#,
-        interval_ms, nb_events
+        r#"subscription {{  userWasCreated(intervalMs: {interval_ms}, nbEvents: {nb_events}) {{    name reviews {{ body }} }}}}"#
     )
 }
 

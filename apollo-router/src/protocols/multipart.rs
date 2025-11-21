@@ -38,6 +38,7 @@ struct SubscriptionPayload {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)] // GraphQL response is inherently large
 enum MessageKind {
     Heartbeat,
     Message(graphql::Response),

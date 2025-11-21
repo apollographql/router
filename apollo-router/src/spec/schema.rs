@@ -403,7 +403,10 @@ impl QueryHash {
         hasher.update(query_text);
         hasher.update(&[0xFF][..]);
         hasher.update(operation_name.unwrap_or("-"));
-        Self(hasher.finalize().as_slice().into())
+        {
+            let d = hasher.finalize();
+            Self((&d[..]).into())
+        }
     }
 
     /// Return the hash as a byte slice.
