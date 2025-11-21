@@ -39,14 +39,15 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
+use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::SpanRef;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
+
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
 use crate::plugins::telemetry::formatters::json::Json;

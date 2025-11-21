@@ -55,9 +55,6 @@ use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tracing_subscriber::filter::filter_fn;
-use tracing_subscriber::fmt::Layer;
-use tracing_subscriber::prelude::*;
 use uuid::Uuid;
 
 use self::apollo::ForwardValues;

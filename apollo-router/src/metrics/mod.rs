@@ -157,7 +157,8 @@ impl<I, T> NoopGuard<I, T> {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use std::cmp::Ordering;
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
+    use std::collections::HashMap;
     use std::fmt::Debug;
     use std::fmt::Display;
     use std::sync::Arc;
@@ -251,7 +252,8 @@ pub(crate) mod test_utils {
             (meter_provider, reader)
         }
     }
-    fn create_test_meter_provider_leaked() -> &'static (AggregateMeterProvider, ClonableManualReader) {
+    fn create_test_meter_provider_leaked() -> &'static (AggregateMeterProvider, ClonableManualReader)
+    {
         Box::leak(Box::new(create_test_meter_provider()))
     }
     pub(crate) fn meter_provider_and_readers() -> (AggregateMeterProvider, ClonableManualReader) {
@@ -272,10 +274,12 @@ pub(crate) mod test_utils {
             // access happens during TLS teardown and panics with: "cannot access a Thread Local
             // Storage value during or after destruction: AccessError" To avoid that panic in tests,
             // we never Drop the provider here.
-            AGGREGATE_METER_PROVIDER.with(|cell| {
-                let pair = cell.get_or_init(create_test_meter_provider_leaked);
-                pair.clone()
-            }).clone()
+            AGGREGATE_METER_PROVIDER
+                .with(|cell| {
+                    let pair = cell.get_or_init(create_test_meter_provider_leaked);
+                    (*pair).clone()
+                })
+                .clone()
         }
     }
 
@@ -679,20 +683,15 @@ pub(crate) mod test_utils {
                 return false;
             }
 
-            let actual_map: HashMap<_, _> = actual
-                .iter()
-                .map(|kv| (&kv.key, &kv.value))
-                .collect();
+            let actual_map: HashMap<_, _> = actual.iter().map(|kv| (&kv.key, &kv.value)).collect();
 
             expected
                 .iter()
-                .all(|expected_kv| {
-                    match actual_map.get(&expected_kv.key) {
-                        None => false,
-                        Some(actual_value) => {
-                            *actual_value == &expected_kv.value
-                                || *actual_value == &Value::String(StringValue::from("<any>"))
-                        }
+                .all(|expected_kv| match actual_map.get(&expected_kv.key) {
+                    None => false,
+                    Some(actual_value) => {
+                        *actual_value == &expected_kv.value
+                            || *actual_value == &Value::String(StringValue::from("<any>"))
                     }
                 })
         }

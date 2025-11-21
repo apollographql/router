@@ -294,7 +294,8 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
 
 #[cfg(test)]
 mod test {
-    use opentelemetry::{global, InstrumentationScope};
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::global;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
@@ -310,8 +311,8 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered = meter_provider
-                .meter_with_scope(InstrumentationScope::builder("filtered").build());
+        let filtered =
+            meter_provider.meter_with_scope(InstrumentationScope::builder("filtered").build());
         // Matches allow
         filtered
             .u64_counter("apollo.router.operations")
@@ -422,8 +423,8 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered = meter_provider
-            .meter_with_scope(InstrumentationScope::builder("filtered").build());
+        let filtered =
+            meter_provider.meter_with_scope(InstrumentationScope::builder("filtered").build());
         filtered
             .u64_counter("apollo.router.operations")
             .with_description("desc")
@@ -465,21 +466,17 @@ mod test {
         global::set_meter_provider(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
-                .build()
+                .build(),
         );
-        test_public_metrics(
-            exporter.clone(),
-            global::meter_provider(),
-        )
-        .await;
+        test_public_metrics(exporter.clone(), global::meter_provider()).await;
     }
     async fn test_public_metrics<T: Into<super::MeterProvider>>(
         exporter: InMemoryMetricExporter,
         meter_provider: T,
     ) {
         let meter_provider = FilterMeterProvider::public(meter_provider);
-        let filtered = meter_provider
-            .meter_with_scope(InstrumentationScope::builder("filtered").build());
+        let filtered =
+            meter_provider.meter_with_scope(InstrumentationScope::builder("filtered").build());
         filtered
             .u64_counter("apollo.router.config")
             .build()
@@ -545,8 +542,8 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered = meter_provider
-            .meter_with_scope(InstrumentationScope::builder("filtered").build());
+        let filtered =
+            meter_provider.meter_with_scope(InstrumentationScope::builder("filtered").build());
         filtered
             .u64_counter("apollo.router.operations.error")
             .build()

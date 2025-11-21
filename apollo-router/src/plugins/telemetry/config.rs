@@ -169,13 +169,11 @@ impl TryInto<StreamBuilder> for MetricView {
             }
             MetricAggregation::Drop => opentelemetry_sdk::metrics::Aggregation::Drop,
         });
-        let mut mask = Stream::builder().with_name(
-            if let Some(new_name) = self.rename {
-                new_name
-            } else {
-                self.name.clone()
-            }
-        );
+        let mut mask = Stream::builder().with_name(if let Some(new_name) = self.rename {
+            new_name
+        } else {
+            self.name.clone()
+        });
         if let Some(desc) = self.description {
             mask = mask.with_description(desc);
         }

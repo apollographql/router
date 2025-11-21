@@ -232,8 +232,8 @@ impl Inner {
                         version: version.clone(),
                         schema_url: schema_url.clone(),
                     })
-                    .or_insert_with(|| { provider.meter_with_scope(scope.clone()) })
-                    .clone()
+                    .or_insert_with(|| provider.meter_with_scope(scope.clone()))
+                    .clone(),
             );
         }
         Meter::new(Arc::new(AggregateInstrumentProvider { meters }))
@@ -461,7 +461,6 @@ mod test {
     use std::sync::Arc;
     use std::sync::Weak;
     use std::sync::atomic::AtomicBool;
-    use std::sync::atomic::AtomicI64;
     use std::time::Duration;
 
     use opentelemetry::InstrumentationScope;
@@ -509,33 +508,6 @@ mod test {
         }
     }
 
-    fn get_gauge_value(result: &mut ResourceMetrics) -> i64 {
-        let scope_metrics: Vec<_> = result.scope_metrics().collect();
-        assert_eq!(scope_metrics.len(), 1);
-
-        let metrics: Vec<_> = scope_metrics.first().unwrap().metrics().collect();
-        assert_eq!(metrics.len(), 1);
-
-        let metric = metrics.first().unwrap();
-
-        match metric.data() {
-            opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(_metric_data) => {
-                panic!("Expected i64 gauge metric")
-            }
-            opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(_metric_data) => {
-                panic!("Expected i64 gauge metric")
-            }
-            opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) => {
-                match metric_data {
-                    opentelemetry_sdk::metrics::data::MetricData::Gauge(gauge) => {
-                        gauge.data_points().next().unwrap().value()
-                    }
-                    _ => panic!("Expected gauge metric"),
-                }
-            }
-        }
-    }
-
     #[test]
     fn test_global_meter_provider() {
         // The global meter provider is populated in AggregateMeterProvider::Default, but we can't test that without interacting with statics.
@@ -546,7 +518,7 @@ mod test {
         opentelemetry::global::set_meter_provider(
             MeterProviderBuilder::default()
                 .with_reader(reader.clone())
-                .build()
+                .build(),
         );
         let meter_provider = AggregateMeterProvider::default();
 
@@ -617,7 +589,7 @@ mod test {
         opentelemetry::global::set_meter_provider(
             MeterProviderBuilder::default()
                 .with_reader(periodic_reader)
-                .build()
+                .build(),
         );
 
         meter_provider.set(
@@ -643,7 +615,7 @@ mod test {
         opentelemetry::global::set_meter_provider(
             MeterProviderBuilder::default()
                 .with_reader(periodic_reader)
-                .build()
+                .build(),
         );
 
         meter_provider.set(
@@ -658,7 +630,7 @@ mod test {
         opentelemetry::global::set_meter_provider(
             MeterProviderBuilder::default()
                 .with_reader(periodic_reader)
-                .build()
+                .build(),
         );
 
         meter_provider.set(
