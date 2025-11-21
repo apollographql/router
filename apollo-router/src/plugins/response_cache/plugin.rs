@@ -1836,7 +1836,7 @@ fn extract_cache_keys(
 
     // Get entity key to only get the right fields in representations
     let mut res = Vec::with_capacity(representations.len());
-    let mut entities = HashMap::new();
+    let entities = representations.len() as u64;
     let mut typenames = HashSet::new();
     for representation in representations {
         let representation =
@@ -1858,12 +1858,6 @@ fn extract_cache_keys(
                 reason: "__typename in representation is not a string".to_string(),
             })?;
         typenames.insert(typename.to_string());
-        match entities.get_mut(typename) {
-            Some(entity_nb) => *entity_nb += 1,
-            None => {
-                entities.insert(typename.to_string(), 1u64);
-            }
-        }
 
         // Get the entity key from `representation`, only needed in debug for the cache debugger
         let representation_entity_key = if debug {
@@ -1927,16 +1921,13 @@ fn extract_cache_keys(
         ),
     );
 
-    for (typename, entity_nb) in entities {
-        u64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.fetch.entity",
-            "Number of entities per subgraph fetch node",
-            "{entity}",
-            entity_nb,
-            "subgraph.name" = subgraph_name.to_string(),
-            "graphql.type" = typename
-        );
-    }
+    u64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch.entity",
+        "Number of entities per subgraph fetch node",
+        "{entity}",
+        entities,
+        "subgraph.name" = subgraph_name.to_string()
+    );
 
     Ok(res)
 }
