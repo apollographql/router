@@ -3689,7 +3689,7 @@ expression: "&schema"
           ],
           "description": "A counter of times we have a cache hit or cache miss (deprecated)"
         },
-        "apollo.router.operations.response.cache": {
+        "apollo.router.response.cache": {
           "allOf": [
             {
               "$ref": "#/definitions/StandardInstrumentExtendedCacheAttributesWithSubgraphSelector"
