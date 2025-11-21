@@ -129,7 +129,25 @@ impl Merger {
 
         trace!("Gathering fields to add for type {}", obj_or_itf);
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            // Check interfaces in the subgraph's schema first
             let Ok(interfaces) = obj_or_itf.implemented_interfaces(subgraph.schema()) else {
+                // If the type doesn't exist in this subgraph, check if any of the interfaces
+                // it implements in the merged schema are interface objects in this subgraph
+                if let Ok(merged_interfaces) = obj_or_itf.implemented_interfaces(&self.merged) {
+                    for itf in merged_interfaces {
+                        if subgraph
+                            .schema()
+                            .get_type(itf.name.clone())
+                            .as_ref()
+                            .is_ok_and(|ty| subgraph.is_interface_object_type(ty))
+                        {
+                            // This marks the subgraph as having a relevant @interfaceObject,
+                            // even though we do not actively add that type's fields.
+                            extra_sources.insert(idx, None);
+                            break; // Only need to mark once per subgraph
+                        }
+                    }
+                }
                 continue;
             };
             for itf in interfaces {
@@ -668,14 +686,25 @@ impl Merger {
                     categorize_field(*idx, subgraph, dest);
                 }
             } else {
-                let itf_object_fields =
-                    self.fields_in_source_if_abstracted_by_interface_object(dest, *idx)?;
-                for field in itf_object_fields {
-                    let subgraph_str = format!(
-                        "{} (through @interfaceObject field \"{}.{}\")",
-                        self.names[*idx], field.type_name, field.field_name
-                    );
-                    categorize_field(*idx, subgraph_str, &field.into());
+                // Skip interface object fields if this subgraph is involved in overrides
+                // (either as the source or target of an override)
+                if !merge_context.is_used_overridden(*idx)
+                    && !merge_context.is_unused_overridden(*idx)
+                {
+                    let itf_object_fields =
+                        self.fields_in_source_if_abstracted_by_interface_object(dest, *idx)?;
+                    for field in itf_object_fields {
+                        // Also skip if the interface object field itself has @override
+                        let has_override = self.fields_with_override.object_fields.contains(&field);
+
+                        if !has_override {
+                            let subgraph_str = format!(
+                                "{} (through @interfaceObject field \"{}.{}\")",
+                                self.names[*idx], field.type_name, field.field_name
+                            );
+                            categorize_field(*idx, subgraph_str, &field.into());
+                        }
+                    }
                 }
             }
         }
@@ -1087,6 +1116,18 @@ impl Merger {
                 }
                 _ => continue, // Input object fields and other directive targets don't have @fromContext arguments, skip
             }
+        }
+
+        // Check if any subgraph defines this type as an @interfaceObject
+        // If so, we need @join__field directives to distinguish which subgraphs provide which fields
+        let has_interface_object = self.subgraphs.iter().any(|subgraph| {
+            let obj_pos = ObjectTypeDefinitionPosition {
+                type_name: parent_name.clone(),
+            };
+            subgraph.is_interface_object_type(&obj_pos.into())
+        });
+        if has_interface_object {
+            return Ok(true);
         }
 
         // We can avoid the join__field if:

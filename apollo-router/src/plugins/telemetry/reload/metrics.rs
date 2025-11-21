@@ -49,7 +49,7 @@ pub(crate) trait MetricsConfigurator {
 /// Accumulates configuration from multiple exporters and builds the final meter providers
 /// with appropriate readers, views, and resource attributes.
 pub(crate) struct MetricsBuilder<'a> {
-    meter_provider_builders:
+    pub(super) meter_provider_builders:
         HashMap<MeterProviderType, opentelemetry_sdk::metrics::MeterProviderBuilder>,
     apollo_metrics_sender: Sender,
     prometheus_registry: Option<Registry>,

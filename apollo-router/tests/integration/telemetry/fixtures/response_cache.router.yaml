@@ -32,7 +32,7 @@ preview_response_cache:
         urls:
           - redis://127.0.0.1:6379
         namespace: test_response_cache_metrics
-        pool_size: 3
+        pool_size: 2
     subgraphs:
       products:
         enabled: true
