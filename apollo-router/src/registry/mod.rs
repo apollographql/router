@@ -144,6 +144,26 @@ async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
     }
 }
 
+/// Fetch just the manifest digest without fetching the full manifest
+pub(crate) async fn fetch_oci_manifest_digest(
+    oci_config: &OciConfig,
+) -> Result<String, OciError> {
+    let reference: Reference = oci_config.reference.as_str().parse()?;
+    let auth = build_auth(&reference, &oci_config.apollo_key);
+    let protocol = infer_oci_protocol(reference.resolve_registry()).await;
+
+    let client = Client::new(ClientConfig {
+        protocol,
+        ..Default::default()
+    });
+
+    let digest = client
+        .fetch_manifest_digest(&reference, &auth)
+        .await?;
+
+    Ok(digest)
+}
+
 /// Fetch an OCI bundle
 pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
@@ -174,23 +194,47 @@ pub(crate) fn stream_from_oci(
     let (sender, receiver) = channel(2);
 
     let task = async move {
+        let mut last_digest: Option<String> = None;
         loop {
-            match fetch_oci(&oci_config).await {
-                Ok(oci_result) => {
-                    tracing::debug!("fetched schema from oci registry");
-                    let schema_state = SchemaState {
-                        sdl: oci_result.schema,
-                        launch_id: None, //TODO: Add launch_id
-                    };
-                    if let Err(e) = sender.send(Ok(schema_state)).await {
-                        tracing::debug!(
-                            "failed to push to stream. This is likely to be because the router is shutting down: {e}"
-                        );
-                        break;
+            // First, fetch just the manifest digest
+            match fetch_oci_manifest_digest(&oci_config).await {
+                Ok(current_digest) => {
+                    // Check if the digest has changed
+                    if last_digest.as_ref().map(|d| d.as_str()) == Some(current_digest.as_str()) {
+                        // Digest unchanged, skip fetching the full schema (similar to uplink's Unchanged case)
+                        tracing::debug!("oci manifest digest unchanged, skipping schema fetch");
+                    } else {
+                        // Digest changed, fetch the full schema
+                        tracing::debug!("oci manifest digest changed, fetching schema");
+                        last_digest = Some(current_digest);
+                        match fetch_oci(&oci_config).await {
+                            Ok(oci_result) => {
+                                tracing::debug!("fetched schema from oci registry");
+                                let schema_state = SchemaState {
+                                    sdl: oci_result.schema,
+                                    launch_id: None, //TODO: Add launch_id
+                                };
+                                if let Err(e) = sender.send(Ok(schema_state)).await {
+                                    tracing::debug!(
+                                        "failed to push to stream. This is likely to be because the router is shutting down: {e}"
+                                    );
+                                    break;
+                                }
+                            }
+                            Err(err) => {
+                                tracing::error!("error fetching schema from oci registry: {}", err);
+                                if let Err(e) = sender.send(Err(err)).await {
+                                    tracing::debug!(
+                                        "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                                    );
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
                 Err(err) => {
-                    tracing::error!("error fetching schema from oci registry: {}", err);
+                    tracing::error!("error fetching manifest digest from oci registry: {}", err);
                     if let Err(e) = sender.send(Err(err)).await {
                         tracing::debug!(
                             "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
@@ -220,15 +264,62 @@ mod tests {
     use oci_client::manifest::OciDescriptor;
     use oci_client::manifest::OciImageManifest;
     use oci_client::manifest::OciManifest;
+    use parking_lot::Mutex;
+    use sha2::Digest;
+    use sha2::Sha256;
+    use std::collections::VecDeque;
     use url::Url;
     use wiremock::Mock;
     use wiremock::MockServer;
+    use wiremock::Request;
+    use wiremock::Respond;
     use wiremock::ResponseTemplate;
     use wiremock::matchers::method;
     use wiremock::matchers::path;
 
     use super::*;
     use crate::registry::OciError::LayerMissingTitle;
+
+    fn calculate_manifest_digest(manifest: &OciManifest) -> String {
+        let manifest_bytes = serde_json::to_vec(manifest).unwrap();
+        let hash = Sha256::digest(&manifest_bytes);
+        format!("sha256:{:x}", hash)
+    }
+
+    struct SequentialManifestDigests {
+        digests: Mutex<VecDeque<String>>,
+    }
+
+    impl Respond for SequentialManifestDigests {
+        fn respond(&self, _request: &Request) -> ResponseTemplate {
+            let digest = self
+                .digests
+                .lock()
+                .pop_front()
+                .expect("should have enough digests");
+            ResponseTemplate::new(200)
+                .append_header("Docker-Content-Digest", digest)
+                .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+        }
+    }
+
+    struct SequentialManifests {
+        manifests: Mutex<VecDeque<(String, Vec<u8>)>>,
+    }
+
+    impl Respond for SequentialManifests {
+        fn respond(&self, _request: &Request) -> ResponseTemplate {
+            let (digest, body) = self
+                .manifests
+                .lock()
+                .pop_front()
+                .expect("should have enough manifests");
+            ResponseTemplate::new(200)
+                .append_header("Docker-Content-Digest", digest)
+                .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                .set_body_bytes(body)
+        }
+    }
 
     #[test]
     fn test_build_auth_apollo_registry() {
@@ -314,10 +405,25 @@ mod tests {
             artifact_type: None,
             annotations: None,
         });
+        let manifest_digest = calculate_manifest_digest(&oci_manifest);
+        
+        // Set up HEAD request for manifest digest (used by fetch_oci_manifest_digest)
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", manifest_digest.clone())
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .mount(&mock_server)
+            .await;
+
+        // Set up GET request for full manifest (used by pull_image_manifest)
         let _ = Mock::given(method("GET"))
             .and(path(manifest_url.path()))
             .respond_with(
                 ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", manifest_digest)
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
                     .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
             )
@@ -500,22 +606,267 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_multiple_polls() {
+    async fn stream_from_oci_digest_unchanged_no_fetch() {
         let mock_server = MockServer::start().await;
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+        let schema_layer = ImageLayer {
+            data: "test schema".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let blob_digest = schema_layer.sha256_digest();
+        let blob_url = Url::parse(&format!(
+            "{}/v2/{graph_id}/blobs/{blob_digest}",
+            mock_server.uri()
+        ))
+        .expect("url must be valid");
+
+        // Track blob requests - should only be called once (on first poll)
+        let blob_request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let blob_count = blob_request_count.clone();
+        let schema_data = schema_layer.data.clone();
+        Mock::given(method("GET"))
+            .and(path(blob_url.path()))
+            .respond_with(move |_request: &wiremock::Request| {
+                blob_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(schema_data.clone())
+            })
+            .mount(&mock_server)
+            .await;
+
+        let oci_manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: vec![OciDescriptor {
+                media_type: schema_layer.media_type.clone(),
+                digest: blob_digest,
+                size: schema_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+        });
+        let manifest_digest = calculate_manifest_digest(&oci_manifest);
+
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+
+        // HEAD requests always return the same digest (unchanged)
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", manifest_digest.clone())
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .mount(&mock_server)
+            .await;
+
+        // GET requests for manifest
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", manifest_digest.clone())
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid");
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let mut stream = stream_from_oci(oci_config);
+        
+        // First poll: digest is new, so schema should be fetched
+        let first_result = stream.next().await;
+        assert!(first_result.is_some());
+        match first_result.unwrap() {
+            Ok(schema_state) => {
+                assert_eq!(schema_state.sdl, "test schema");
+            }
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+        assert_eq!(
+            blob_request_count.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "Blob should be fetched once on first poll"
+        );
+
+        // Second poll: digest is unchanged, so schema should NOT be fetched
+        // Wait for the poll interval to pass
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        
+        // The stream should not produce a new result because digest is unchanged
+        // We use a timeout to verify no new result is produced
+        let timeout_result = tokio::time::timeout(Duration::from_millis(100), stream.next()).await;
+        // If we get a result, it means the digest changed (which shouldn't happen)
+        // If we timeout, it means no new result was produced (expected behavior)
+        assert!(timeout_result.is_err(), "Expected no new result when digest is unchanged");
+        
+        // Verify blob was not fetched again
+        assert_eq!(
+            blob_request_count.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "Blob should not be fetched again when digest is unchanged"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_oci_digest_changed_fetches_schema() {
+        let mock_server = MockServer::start().await;
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+
+        // Track blob requests - should be called twice (once for each schema)
+        let blob_request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+        // First schema
         let schema_layer1 = ImageLayer {
             data: "schema 1".to_string().into_bytes(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
+        let blob_digest1 = schema_layer1.sha256_digest();
+        let blob_url1 = Url::parse(&format!(
+            "{}/v2/{graph_id}/blobs/{blob_digest1}",
+            mock_server.uri()
+        ))
+        .expect("url must be valid");
+        let blob_count1 = blob_request_count.clone();
+        let schema_data1 = schema_layer1.data.clone();
+        Mock::given(method("GET"))
+            .and(path(blob_url1.path()))
+            .respond_with(move |_request: &wiremock::Request| {
+                blob_count1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(schema_data1.clone())
+            })
+            .mount(&mock_server)
+            .await;
+
+        let oci_manifest1 = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: vec![OciDescriptor {
+                media_type: schema_layer1.media_type.clone(),
+                digest: blob_digest1,
+                size: schema_layer1.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+        });
+        let manifest_digest1 = calculate_manifest_digest(&oci_manifest1);
+
+        // Second schema (different content = different digest)
         let schema_layer2 = ImageLayer {
             data: "schema 2".to_string().into_bytes(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
-        let image_reference = setup_mocks(mock_server, vec![schema_layer1]).await;
+        let blob_digest2 = schema_layer2.sha256_digest();
+        let blob_url2 = Url::parse(&format!(
+            "{}/v2/{graph_id}/blobs/{blob_digest2}",
+            mock_server.uri()
+        ))
+        .expect("url must be valid");
+        let blob_count2 = blob_request_count.clone();
+        let schema_data2 = schema_layer2.data.clone();
+        Mock::given(method("GET"))
+            .and(path(blob_url2.path()))
+            .respond_with(move |_request: &wiremock::Request| {
+                blob_count2.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(schema_data2.clone())
+            })
+            .mount(&mock_server)
+            .await;
+
+        let oci_manifest2 = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: vec![OciDescriptor {
+                media_type: schema_layer2.media_type.clone(),
+                digest: blob_digest2,
+                size: schema_layer2.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+        });
+        let manifest_digest2 = calculate_manifest_digest(&oci_manifest2);
+
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+
+        // Set up HEAD requests: returns digest1, then digest2 sequentially
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(SequentialManifestDigests {
+                digests: Mutex::new(VecDeque::from([
+                    manifest_digest1.clone(),
+                    manifest_digest2.clone(),
+                ])),
+            })
+            .expect(2..=3)
+            .mount(&mock_server)
+            .await;
+
+        // Set up GET requests for manifests: returns manifest1, then manifest2 sequentially
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(SequentialManifests {
+                manifests: Mutex::new(VecDeque::from([
+                    (
+                        manifest_digest1.clone(),
+                        serde_json::to_vec(&oci_manifest1).unwrap(),
+                    ),
+                    (
+                        manifest_digest2.clone(),
+                        serde_json::to_vec(&oci_manifest2).unwrap(),
+                    ),
+                ])),
+            })
+            .expect(2..=3)
+            .mount(&mock_server)
+            .await;
+
+        let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
         let mut stream = stream_from_oci(oci_config);
+
+        // First poll: digest1 is new, so schema1 should be fetched
         let first_result = stream.next().await;
         assert!(first_result.is_some());
         match first_result.unwrap() {
@@ -525,16 +876,22 @@ mod tests {
             Err(e) => panic!("expected success, got error: {e}"),
         }
 
-        // Note: In a real scenario, the schema would change between polls, but for testing
-        // we're just verifying that multiple polls happen. The second poll will fetch the same schema.
+        // Second poll: digest2 is different, so schema2 should be fetched
         let second_result = stream.next().await;
         assert!(second_result.is_some());
         match second_result.unwrap() {
             Ok(schema_state) => {
-                assert_eq!(schema_state.sdl, "schema 1");
+                assert_eq!(schema_state.sdl, "schema 2");
             }
             Err(e) => panic!("expected success, got error: {e}"),
         }
+
+        // Verify both blobs were fetched (one for each schema)
+        assert_eq!(
+            blob_request_count.load(std::sync::atomic::Ordering::Relaxed),
+            2,
+            "Both blobs should be fetched when digest changes"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
