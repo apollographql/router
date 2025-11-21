@@ -7366,12 +7366,9 @@ expression: "&schema"
           "type": "boolean"
         },
         "datadog": {
-          "default": null,
+          "default": false,
           "description": "Propagate Datadog",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "jaeger": {
           "default": false,
