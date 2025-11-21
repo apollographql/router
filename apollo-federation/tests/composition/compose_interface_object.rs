@@ -1,3 +1,7 @@
+use std::collections::HashSet;
+
+use apollo_federation::composition::compose;
+use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 use test_log::test;
 
@@ -456,4 +460,86 @@ fn interface_object_fed354_repro_failure() {
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     let _supergraph =
         result.expect("Expected composition to succeed - this is a repro test for issue FED-354");
+}
+
+#[test]
+fn interface_object_with_inaccessible_field() {
+    // Regression test for interface object fields not getting @join__field directives.
+    // When an interface has @interfaceObject types in some subgraphs, all fields need
+    // @join__field directives to indicate which subgraphs provide them.
+    //
+    // Setup:
+    // - subgraph_a: defines interface with id @inaccessible
+    // - subgraph_b: defines interface WITHOUT id field
+    // - subgraph_c: @interfaceObject with id in key
+    //
+    // The bug was that subgraph_a and subgraph_c weren't getting @join__field for id.
+
+    let subgraph_a = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@inaccessible"])
+
+        type Query {
+            items: [Item]
+        }
+
+        interface Item {
+            id: ID! @inaccessible
+        }
+
+        type Product implements Item @key(fields: "id") {
+            id: ID!
+            name: String
+        }
+    "#;
+
+    let subgraph_b = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+
+        interface Item {
+            name: String
+        }
+
+        type Special implements Item @key(fields: "id") {
+            id: ID!
+            name: String
+        }
+    "#;
+
+    let subgraph_c = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@interfaceObject"])
+
+        type Item @key(fields: "id") @interfaceObject {
+            id: ID!
+            extra: String
+        }
+    "#;
+
+    let parsed_a = Subgraph::parse("subgraph-a", "http://example.com", subgraph_a).unwrap();
+    let parsed_b = Subgraph::parse("subgraph-b", "http://example.com", subgraph_b).unwrap();
+    let parsed_c = Subgraph::parse("subgraph-c", "http://example.com", subgraph_c).unwrap();
+
+    let supergraph = compose(vec![parsed_a, parsed_b, parsed_c]).unwrap();
+
+    let item_interface = supergraph
+        .schema()
+        .schema()
+        .types
+        .get("Item")
+        .unwrap()
+        .as_interface()
+        .unwrap();
+    let id_field = item_interface.fields.get("id").unwrap();
+    let id_directives: HashSet<_> = id_field.directives.iter().map(|d| d.to_string()).collect();
+
+    assert!(
+        id_directives.contains("@join__field(graph: SUBGRAPH_A)"),
+        "id field should have @join__field for subgraph-a"
+    );
+    assert!(
+        id_directives.contains("@join__field(graph: SUBGRAPH_C)"),
+        "id field should have @join__field for subgraph-c"
+    );
 }

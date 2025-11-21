@@ -1805,6 +1805,18 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                             .build(),
                     );
                     fields_to_insert.insert(itf_field_pos.into(), missing_itf_node);
+                } else {
+                    // If the field already exists on the interface, we still need to add a @join__field
+                    // directive for this subgraph since the @interfaceObject provides this field.
+                    let subgraph_enum_name = self.join_spec_name(idx)?;
+                    let directive = JoinFieldBuilder::new()
+                        .arg(
+                            &JOIN_GRAPH_ARGUMENT_NAME,
+                            Value::Enum(subgraph_enum_name.clone()),
+                        )
+                        .build();
+
+                    itf_field_pos.insert_directive(&mut self.merged, Node::new(directive))?;
                 }
 
                 // If an implementer of that interface is missing the field, merge it in.
