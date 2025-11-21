@@ -13,7 +13,7 @@ use tower::Layer;
 use tower::Service;
 
 use crate::allocator::AllocationStats;
-use crate::allocator::with_memory_tracking;
+use crate::allocator::WithMemoryTracking;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::services::router;
@@ -94,22 +94,19 @@ where
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
-        with_memory_tracking("router.request", || {
-            let fut = self.inner.call(req);
-            Box::pin(async move {
-                // Everything within this future should be tracked
-                crate::allocator::TRACKING_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
+        let fut = self.inner.call(req);
+        Box::pin(
+            async move {
                 let result = fut.await;
-                crate::allocator::TRACKING_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
 
-                // Record allocation metrics if stats are available
                 if let Some(stats) = crate::allocator::current() {
                     record_metrics(&stats);
                 }
 
                 result
-            })
-        })
+            }
+            .with_memory_tracking("router.request"),
+        )
     }
 }
 

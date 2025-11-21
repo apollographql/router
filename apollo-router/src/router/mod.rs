@@ -26,7 +26,6 @@ use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tracing_futures::WithSubscriber;
 
-use crate::allocator::WithMemoryTracking;
 use crate::axum_factory::AxumHttpServerFactory;
 use crate::configuration::ListenAddr;
 use crate::orbiter::OrbiterRouterSuperServiceFactory;
@@ -150,7 +149,6 @@ impl RouterHttpServer {
         let listen_addresses = state_machine.listen_addresses.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
-                .with_memory_tracking("router.process_events")
                 .with_current_subscriber(),
         )
         .map(|r| match r {
@@ -162,7 +160,6 @@ impl RouterHttpServer {
             }
         })
         .with_current_subscriber()
-        .with_memory_tracking("router.spawn")
         .boxed();
 
         RouterHttpServer {

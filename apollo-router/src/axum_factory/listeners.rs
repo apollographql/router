@@ -25,7 +25,6 @@ use tokio_util::time::FutureExt;
 use tower_service::Service;
 
 use crate::ListenAddr;
-use crate::allocator::WithMemoryTracking;
 use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::axum_factory::connection_handle::ConnectionHandle;
 use crate::axum_factory::utils::ConnectionInfo;
@@ -450,7 +449,7 @@ pub(super) fn serve_router_on_listen_addr(
 
                                     }
                                 }
-                            }.with_memory_tracking("serve_router_on_listen_addr.handle_connection"));
+                            });
                         }
                         Err(e) => process_error(e).await
                     }
@@ -463,7 +462,7 @@ pub(super) fn serve_router_on_listen_addr(
         // then return the TCP listen socket
         connection_shutdown.cancel();
         listener
-    }.with_memory_tracking("serve_router_on_listen_addr");
+    };
     (server, shutdown_sender)
 }
 
