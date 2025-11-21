@@ -1,12 +1,15 @@
-use std::alloc::{GlobalAlloc, Layout};
+use std::alloc::GlobalAlloc;
+use std::alloc::Layout;
 use std::cell::Cell;
 use std::ffi::CStr;
 use std::future::Future;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::task::{Context, Poll};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::task::Context;
+use std::task::Poll;
 
 #[cfg(feature = "dhat-heap")]
 use parking_lot::Mutex;
@@ -85,6 +88,7 @@ impl AllocationStats {
     /// Track allocation in this context and all parent contexts.
     /// Uses loop unwrapping instead of recursion for performance.
     #[inline]
+    #[allow(dead_code)] // only used if feature global-allocator is enabled
     fn track_alloc(&self, size: usize) {
         let mut current = Some(self);
         while let Some(stats) = current {
@@ -96,6 +100,7 @@ impl AllocationStats {
     /// Track deallocation in this context and all parent contexts.
     /// Uses loop unwrapping instead of recursion for performance.
     #[inline]
+    #[allow(dead_code)] // only used if feature global-allocator is enabled
     fn track_dealloc(&self, size: usize) {
         let mut current = Some(self);
         while let Some(stats) = current {
@@ -107,6 +112,7 @@ impl AllocationStats {
     /// Track zeroed allocation in this context and all parent contexts.
     /// Uses loop unwrapping instead of recursion for performance.
     #[inline]
+    #[allow(dead_code)] // only used if feature global-allocator is enabled
     fn track_zeroed(&self, size: usize) {
         let mut current = Some(self);
         while let Some(stats) = current {
@@ -118,6 +124,7 @@ impl AllocationStats {
     /// Track reallocation in this context and all parent contexts.
     /// Uses loop unwrapping instead of recursion for performance.
     #[inline]
+    #[allow(dead_code)] // only used if feature global-allocator is enabled
     fn track_realloc(&self, size: usize) {
         let mut current = Some(self);
         while let Some(stats) = current {
@@ -353,6 +360,7 @@ struct CustomAllocator {
 }
 
 impl CustomAllocator {
+    #[allow(dead_code)] // only used if feature global-allocator is enabled
     const fn new() -> Self {
         Self {
             inner: tikv_jemallocator::Jemalloc,
@@ -493,10 +501,12 @@ static malloc_conf: Option<&'static libc::c_char> = Some(unsafe {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::ffi::CStr;
     use std::thread;
+
     use tokio::task;
+
+    use super::*;
 
     #[test]
     fn test_malloc_conf_is_valid_c_string() {
