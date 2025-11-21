@@ -1899,7 +1899,7 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
     router.assert_metrics_does_not_contain(parse_error).await;
 
-    let example_cache_key = "version:1.0:subgraph:reviews:type:Product:representation:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let example_cache_key = "version:1.1:subgraph:reviews:type:Product:representation:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     router
         .assert_redis_cache_contains(example_cache_key, None)
         .await;
@@ -2013,7 +2013,7 @@ async fn test_redis_in_standalone_mode_for_mgets() {
     let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
     router.assert_metrics_does_not_contain(parse_error).await;
 
-    let example_cache_key = "version:1.0:subgraph:reviews:type:Product:representation:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let example_cache_key = "version:1.1:subgraph:reviews:type:Product:representation:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     router
         .assert_redis_cache_contains(example_cache_key, None)
         .await;
