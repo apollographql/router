@@ -305,7 +305,6 @@ async fn process_error(io_error: std::io::Error) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn serve_router_on_listen_addr(
     router: axum::Router,
     pipeline_ref: Arc<PipelineRef>,
