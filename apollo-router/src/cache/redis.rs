@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use fred::clients::Client;
 use fred::clients::Pipeline;
+use fred::clients::Replicas;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
@@ -588,6 +589,10 @@ impl RedisCacheStorage {
         self.inner.next().clone()
     }
 
+    fn replica_client(&self) -> Replicas<Client> {
+        self.client().replicas()
+    }
+
     pub(crate) fn pipeline(&self) -> Pipeline<Client> {
         self.inner.next().pipeline()
     }
@@ -617,28 +622,26 @@ impl RedisCacheStorage {
         options: Options,
     ) -> Result<RedisValue<V>, RedisError> {
         let key = self.make_key(key);
-        if self.reset_ttl
-            && let Some(ttl) = self.ttl
-        {
-            let pipeline = self.pipeline().with_options(&options);
-            let _: () = pipeline
-                .get(&key)
-                .await
-                .inspect_err(|e| self.record_error(e))?;
-            let _: () = pipeline
-                .expire(&key, ttl.as_secs() as i64, None)
-                .await
-                .inspect_err(|e| self.record_error(e))?;
+        match self.ttl {
+            Some(ttl) if self.reset_ttl => {
+                let pipeline = self.pipeline().with_options(&options);
+                let _: () = pipeline
+                    .get(&key)
+                    .await
+                    .inspect_err(|e| self.record_error(e))?;
+                let _: () = pipeline
+                    .expire(&key, ttl.as_secs() as i64, None)
+                    .await
+                    .inspect_err(|e| self.record_error(e))?;
 
-            let (value, _timeout_set): (RedisValue<V>, bool) =
-                pipeline.all().await.inspect_err(|e| self.record_error(e))?;
-            Ok(value)
-        } else if self.is_cluster {
-            let client = self.client().replicas().with_options(&options);
-            client.get(key).await.inspect_err(|e| self.record_error(e))
-        } else {
-            let client = self.client().with_options(&options);
-            client.get(key).await.inspect_err(|e| self.record_error(e))
+                let (value, _timeout_set): (RedisValue<V>, bool) =
+                    pipeline.all().await.inspect_err(|e| self.record_error(e))?;
+                Ok(value)
+            }
+            _ => {
+                let client = self.replica_client().with_options(&options);
+                client.get(key).await.inspect_err(|e| self.record_error(e))
+            }
         }
     }
 
@@ -661,12 +664,11 @@ impl RedisCacheStorage {
         //    - https://redis.io/docs/latest/commands/mget/
 
         tracing::trace!("getting multiple values from redis: {:?}", keys);
-        let client = self.client();
+        let client = self.replica_client().with_options(&options);
 
         if keys.len() == 1 {
             let key = self.make_key(keys.swap_remove(0));
             let res = client
-                .with_options(&options)
                 .get(key)
                 .await
                 .inspect_err(|e| self.record_error(e))
@@ -687,8 +689,6 @@ impl RedisCacheStorage {
             }
 
             // then we query all the key groups at the same time
-            // use `client.replicas()` since we're in a cluster and can take advantage of read-replicas
-            let client = client.replicas().with_options(&options);
             let mut tasks = Vec::new();
             for (_shard, (indexes, keys)) in h {
                 let client = client.clone();
@@ -722,7 +722,6 @@ impl RedisCacheStorage {
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
             client
-                .with_options(&options)
                 .mget(keys)
                 .await
                 .inspect_err(|e| self.record_error(e))

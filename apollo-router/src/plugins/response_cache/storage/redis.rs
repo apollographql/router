@@ -18,7 +18,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tokio_util::time::FutureExt;
+use tokio_util::future::FutureExt;
 use tower::BoxError;
 
 use super::CacheEntry;
