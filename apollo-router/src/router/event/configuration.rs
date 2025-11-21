@@ -61,21 +61,13 @@ impl ConfigurationSource {
         match self {
             ConfigurationSource::Static(mut instance) => {
                 instance.uplink = uplink_config;
-                let config_arc = Arc::new(*instance);
-                let config_event = UpdateConfiguration(config_arc);
-
-                // Chain config event and NoMoreConfiguration
-                stream::once(future::ready(config_event))
-                    .chain(stream::iter(vec![NoMoreConfiguration]))
-                    .boxed()
+                stream::iter(vec![UpdateConfiguration(instance.into())]).boxed()
             }
             ConfigurationSource::Stream(stream) => stream
                 .map(move |mut c| {
                     c.uplink = uplink_config.clone();
-                    let config_arc = Arc::new(c);
-                    UpdateConfiguration(config_arc)
+                    UpdateConfiguration(Arc::new(c))
                 })
-                .chain(stream::iter(vec![NoMoreConfiguration]))
                 .boxed(),
             ConfigurationSource::File { path, watch } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
@@ -251,26 +243,6 @@ mod tests {
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
         ));
-        assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn config_static() {
-        // Test that static config emits UpdateConfiguration and NoMoreConfiguration
-        let config = Configuration::default();
-
-        let config_source = ConfigurationSource::Static(Box::new(config));
-        let mut stream = config_source
-            .into_stream(Some(UplinkConfig::default()))
-            .boxed();
-
-        // Should emit UpdateConfiguration first
-        assert!(matches!(
-            stream.next().await.unwrap(),
-            UpdateConfiguration(_)
-        ));
-
-        // Should end with NoMoreConfiguration
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 }
