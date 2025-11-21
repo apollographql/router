@@ -4,9 +4,9 @@ supergraph:
       redis:
         required_to_start: true
         urls:
-          - redis://localhost:6379
-        ttl: 30s
+          - redis-cluster://127.0.0.1:7000
         pool_size: 2
+        reset_ttl: false
       in_memory:
         limit: 1
 telemetry:

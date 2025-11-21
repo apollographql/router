@@ -1778,6 +1778,14 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 if itf_field_pos.try_get(self.merged.schema()).is_none() {
                     let subgraph_enum_name = self.join_spec_name(idx)?;
                     let mut missing_itf_node = ast_node_to_add.clone();
+                    // This node from the subgraph may have subgraph-only directives, so we filter
+                    // out any directive which isn't defined in the supergraph
+                    missing_itf_node.directives.retain(|d| {
+                        self.merged
+                            .schema()
+                            .directive_definitions
+                            .contains_key(&d.name)
+                    });
                     missing_itf_node.directives.push(
                         JoinFieldBuilder::new()
                             .arg(
@@ -1787,6 +1795,18 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                             .build(),
                     );
                     fields_to_insert.insert(itf_field_pos.into(), missing_itf_node);
+                } else {
+                    // If the field already exists on the interface, we still need to add a @join__field
+                    // directive for this subgraph since the @interfaceObject provides this field.
+                    let subgraph_enum_name = self.join_spec_name(idx)?;
+                    let directive = JoinFieldBuilder::new()
+                        .arg(
+                            &JOIN_GRAPH_ARGUMENT_NAME,
+                            Value::Enum(subgraph_enum_name.clone()),
+                        )
+                        .build();
+
+                    itf_field_pos.insert_directive(&mut self.merged, Node::new(directive))?;
                 }
 
                 // If an implementer of that interface is missing the field, merge it in.
@@ -1800,6 +1820,13 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         // clarifies to the later extraction process that this particular field doesn't come
                         // from any particular subgraph.
                         let mut missing_obj_node = ast_node_to_add.clone();
+                        // Similarly to above, we filter out subgraph-only directives
+                        missing_obj_node.directives.retain(|d| {
+                            self.merged
+                                .schema()
+                                .directive_definitions
+                                .contains_key(&d.name)
+                        });
                         missing_obj_node
                             .directives
                             .push(JoinFieldBuilder::new().build());

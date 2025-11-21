@@ -1,26 +1,18 @@
-# Disable apq
+# Enable distributed apq cache
 apq:
-  enabled: false
+  enabled: true
   router:
     cache:
-      in_memory:
-        limit: 1000
-  subgraph:
-    all:
-      enabled: true
-
-# Disable entity cache
-preview_entity_cache:
-  enabled: false
-  subgraph:
-    all:
-      enabled: true
       redis:
-        urls: ["redis://..."]
+        urls:
+          - https://example.com
+  subgraph:
+    all:
+      enabled: true
 
-# Disable response cache
+# Enable response cache
 preview_response_cache:
-  enabled: false
+  enabled: true
   subgraph:
     all:
       enabled: true
