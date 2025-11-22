@@ -174,7 +174,19 @@ pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
     pub evaluated_plan_paths: Cell<usize>,
     /// `best_plan_cost` can be NaN, if the cost is not computed or irrelevant.
+    #[serde(deserialize_with = "deserialize_f64_nullable")]
     pub best_plan_cost: f64,
+}
+
+/// Deserialize helper for f64 that treats null as NaN.
+/// - This is needed because serde_json deserializes f64 NaN as null.
+fn deserialize_f64_nullable<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    // First deserialize as Option<f64>
+    let opt = Option::<f64>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or(f64::NAN))
 }
 
 #[derive(Clone)]
@@ -1414,5 +1426,26 @@ type User
           },
         }
         "###);
+    }
+
+    #[test]
+    fn test_query_plan_statistics_nan_cost() {
+        let stats = QueryPlanningStatistics {
+            evaluated_plan_count: Cell::new(10),
+            evaluated_plan_paths: Cell::new(20),
+            best_plan_cost: f64::NAN,
+        };
+        let serialized = serde_json::to_string_pretty(&stats).expect("Serializing");
+        insta::assert_snapshot!(serialized, @r###"
+        {
+          "evaluated_plan_count": 10,
+          "evaluated_plan_paths": 20,
+          "best_plan_cost": null
+        }
+        "###);
+
+        let deserialized: QueryPlanningStatistics =
+            serde_json::from_str(&serialized).expect("Deserializing");
+        assert!(deserialized.best_plan_cost.is_nan());
     }
 }
