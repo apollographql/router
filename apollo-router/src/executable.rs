@@ -830,11 +830,6 @@ mod tests {
     fn test_validate_oci_reference_valid_cases() {
         // Test valid OCI references with different hash values
         let valid_hashes = vec![
-            // "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // "@sha256:ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
-            // "@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-            // "@sha256:0000000000000000000000000000000000000000000000000000000000000000",
-            // "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             "artifact.api.apollographql.com/summit-demo-test-4df260ae9be61e7a@sha256:142067152bd8e2c1411c87ef872cb27d2d5053f55a5a70b00068c5789dc27682",
             "registry.example.com/alpine@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "docker.io/library/ubuntu@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

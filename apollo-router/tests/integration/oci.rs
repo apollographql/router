@@ -22,7 +22,7 @@ use crate::integration::common::graph_os_enabled;
 
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 const ARTIFACT_REFERENCE_404: &str =
-    "@sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    "artifact.api.apollographql.com/test@sha256:0000000000000000000000000000000000000000000000000000000000000000";
 const MIN_CONFIG: &str = include_str!("fixtures/minimal-oci.router.yaml");
 const LOCAL_SCHEMA: &str = include_str!("../../../examples/graphql/local.graphql");
 
