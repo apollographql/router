@@ -289,6 +289,14 @@ mod tests {
         format!("sha256:{:x}", hash)
     }
 
+    fn mock_oci_config_with_reference(reference: String) -> OciConfig {
+        OciConfig {
+            apollo_key: "test-api-key".to_string(),
+            reference,
+            poll_interval: Duration::from_millis(10),
+        }
+    }
+
     struct SchemaLayerManifest {
         oci_manifest: OciManifest,
         manifest_digest: String,
@@ -612,14 +620,6 @@ mod tests {
         assert_eq!(result, ClientProtocol::Https);
     }
 
-    fn mock_oci_config_with_reference(reference: String) -> OciConfig {
-        OciConfig {
-            apollo_key: "test-api-key".to_string(),
-            reference,
-            poll_interval: Duration::from_millis(10),
-        }
-    }
-
     #[tokio::test(flavor = "multi_thread")]
     async fn stream_from_oci_success() {
         let mock_server = MockServer::start().await;
@@ -755,14 +755,13 @@ mod tests {
         )).expect("url must be valid");
 
         let blob_count1 = blob_request_count.clone();
-        let schema_data1 = manifest_info1.schema_data.clone();
         Mock::given(method("GET"))
             .and(path(blob_url1.path()))
             .respond_with(move |_request: &Request| {
                 blob_count1.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
-                    .set_body_bytes(schema_data1)
+                    .set_body_bytes(manifest_info1.schema_data.clone())
             })
             .mount(&mock_server)
             .await;
@@ -774,14 +773,13 @@ mod tests {
             manifest_info2.blob_digest
         )).expect("url must be valid");
         let blob_count2 = blob_request_count.clone();
-        let schema_data2 = manifest_info2.schema_data.clone();
         Mock::given(method("GET"))
             .and(path(blob_url2.path()))
             .respond_with(move |_request: &Request| {
                 blob_count2.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
-                    .set_body_bytes(schema_data2)
+                    .set_body_bytes(manifest_info2.schema_data.clone())
             })
             .mount(&mock_server)
             .await;
