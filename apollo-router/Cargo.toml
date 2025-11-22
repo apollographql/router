@@ -137,7 +137,7 @@ libc = "0.2.155"
 linkme = "0.3.30"
 lru = "0.16.0"
 mediatype = "0.21.0"
-mockall = "0.13.0"
+mockall = "0.14.0"
 mime = "0.3.17"
 multer = "3.1.0"
 multimap = "0.9.1" # Warning: part of the public API
@@ -317,7 +317,7 @@ futures-test = "0.3.30"
 insta.workspace = true
 maplit = "1.0.2"
 memchr = { version = "2.7.4", default-features = false }
-mockall = "0.13.0"
+mockall = "0.14.0"
 num-traits = "0.2.19"
 once_cell.workspace = true
 opentelemetry-stdout = { version = "0.5.0", features = ["trace"] }
