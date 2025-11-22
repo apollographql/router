@@ -183,12 +183,6 @@ telemetry:
            format: uuid
 ```
 
-<Note>
-
-You can't use Datadog propagation and other propagation types (except baggage) at the same time. Datadog uses a 64-bit trace ID format while other types use a 128-bit format, which causes conflicts in trace ID handling. If you attempt to enable both, the router returns a configuration error at startup. 
-
-</Note>
-
 #### `request` configuration reference
 
 | Option        | Values                                                        | Default                           | Description                         |
