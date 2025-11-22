@@ -289,6 +289,44 @@ mod tests {
         format!("sha256:{:x}", hash)
     }
 
+    struct SchemaLayerManifest {
+        oci_manifest: OciManifest,
+        manifest_digest: String,
+        blob_digest: String,
+        schema_data: Vec<u8>,
+    }
+
+    fn create_manifest_from_schema_layer(schema_data: &str) -> SchemaLayerManifest {
+        let schema_layer = ImageLayer {
+            data: schema_data.to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let blob_digest = schema_layer.sha256_digest();
+        let oci_manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: vec![OciDescriptor {
+                media_type: schema_layer.media_type.clone(),
+                digest: blob_digest.clone(),
+                size: schema_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+        });
+        let manifest_digest = calculate_manifest_digest(&oci_manifest);
+        SchemaLayerManifest {
+            oci_manifest,
+            manifest_digest,
+            blob_digest,
+            schema_data: schema_layer.data,
+        }
+    }
+
     struct SequentialManifestDigests {
         digests: Mutex<VecDeque<String>>,
     }
@@ -613,22 +651,18 @@ mod tests {
         let mock_server = MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
-        let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
-            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let blob_digest = schema_layer.sha256_digest();
+        let manifest_info = create_manifest_from_schema_layer("test schema");
         let blob_url = Url::parse(&format!(
-            "{}/v2/{graph_id}/blobs/{blob_digest}",
-            mock_server.uri()
+            "{}/v2/{graph_id}/blobs/{}",
+            mock_server.uri(),
+            manifest_info.blob_digest
         ))
         .expect("url must be valid");
 
         // Track blob requests - should only be called once (on first poll)
         let blob_request_count = Arc::new(AtomicUsize::new(0));
         let blob_count = blob_request_count.clone();
-        let schema_data = schema_layer.data.clone();
+        let schema_data = manifest_info.schema_data;
         Mock::given(method("GET"))
             .and(path(blob_url.path()))
             .respond_with(move |_request: &wiremock::Request| {
@@ -639,23 +673,6 @@ mod tests {
             })
             .mount(&mock_server)
             .await;
-
-        let oci_manifest = OciManifest::Image(OciImageManifest {
-            schema_version: 2,
-            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
-            config: Default::default(),
-            layers: vec![OciDescriptor {
-                media_type: schema_layer.media_type.clone(),
-                digest: blob_digest,
-                size: schema_layer.data.len().try_into().unwrap(),
-                urls: None,
-                annotations: None,
-            }],
-            subject: None,
-            artifact_type: None,
-            annotations: None,
-        });
-        let manifest_digest = calculate_manifest_digest(&oci_manifest);
 
         let manifest_url = Url::parse(&format!(
             "{}/v2/{}/manifests/{}",
@@ -670,7 +687,7 @@ mod tests {
             .and(path(manifest_url.path()))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .append_header("Docker-Content-Digest", manifest_digest.clone())
+                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
             )
             .mount(&mock_server)
@@ -681,9 +698,9 @@ mod tests {
             .and(path(manifest_url.path()))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .append_header("Docker-Content-Digest", manifest_digest.clone())
+                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
-                    .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
+                    .set_body_bytes(serde_json::to_vec(&manifest_info.oci_manifest).unwrap()),
             )
             .mount(&mock_server)
             .await;
@@ -728,105 +745,61 @@ mod tests {
         let mock_server = MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
-
         let blob_request_count = Arc::new(AtomicUsize::new(0));
 
-        let schema_layer1 = ImageLayer {
-            data: "schema 1".to_string().into_bytes(),
-            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let blob_digest1 = schema_layer1.sha256_digest();
+        let manifest_info1 = create_manifest_from_schema_layer("schema 1");
         let blob_url1 = Url::parse(&format!(
-            "{}/v2/{graph_id}/blobs/{blob_digest1}",
-            mock_server.uri()
-        ))
-        .expect("url must be valid");
+            "{}/v2/{graph_id}/blobs/{}",
+            mock_server.uri(),
+            manifest_info1.blob_digest
+        )).expect("url must be valid");
+
         let blob_count1 = blob_request_count.clone();
-        let schema_data1 = schema_layer1.data.clone();
+        let schema_data1 = manifest_info1.schema_data.clone();
         Mock::given(method("GET"))
             .and(path(blob_url1.path()))
-            .respond_with(move |_request: &wiremock::Request| {
+            .respond_with(move |_request: &Request| {
                 blob_count1.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
-                    .set_body_bytes(schema_data1.clone())
+                    .set_body_bytes(schema_data1)
             })
             .mount(&mock_server)
             .await;
 
-        let oci_manifest1 = OciManifest::Image(OciImageManifest {
-            schema_version: 2,
-            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
-            config: Default::default(),
-            layers: vec![OciDescriptor {
-                media_type: schema_layer1.media_type.clone(),
-                digest: blob_digest1,
-                size: schema_layer1.data.len().try_into().unwrap(),
-                urls: None,
-                annotations: None,
-            }],
-            subject: None,
-            artifact_type: None,
-            annotations: None,
-        });
-        let manifest_digest1 = calculate_manifest_digest(&oci_manifest1);
-
-        let schema_layer2 = ImageLayer {
-            data: "schema 2".to_string().into_bytes(),
-            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
-            annotations: None,
-        };
-        let blob_digest2 = schema_layer2.sha256_digest();
+        let manifest_info2 = create_manifest_from_schema_layer("schema 2");
         let blob_url2 = Url::parse(&format!(
-            "{}/v2/{graph_id}/blobs/{blob_digest2}",
-            mock_server.uri()
+            "{}/v2/{graph_id}/blobs/{}",
+            mock_server.uri(),
+            manifest_info2.blob_digest
         )).expect("url must be valid");
         let blob_count2 = blob_request_count.clone();
-        let schema_data2 = schema_layer2.data.clone();
+        let schema_data2 = manifest_info2.schema_data.clone();
         Mock::given(method("GET"))
             .and(path(blob_url2.path()))
             .respond_with(move |_request: &Request| {
                 blob_count2.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
-                    .set_body_bytes(schema_data2.clone())
+                    .set_body_bytes(schema_data2)
             })
             .mount(&mock_server)
             .await;
-
-        let oci_manifest2 = OciManifest::Image(OciImageManifest {
-            schema_version: 2,
-            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
-            config: Default::default(),
-            layers: vec![OciDescriptor {
-                media_type: schema_layer2.media_type.clone(),
-                digest: blob_digest2,
-                size: schema_layer2.data.len().try_into().unwrap(),
-                urls: None,
-                annotations: None,
-            }],
-            subject: None,
-            artifact_type: None,
-            annotations: None,
-        });
-        let manifest_digest2 = calculate_manifest_digest(&oci_manifest2);
 
         let manifest_url = Url::parse(&format!(
             "{}/v2/{}/manifests/{}",
             mock_server.uri(),
             graph_id,
             reference
-        ))
-        .expect("url must be valid");
+        )).expect("url must be valid");
 
         // mock returns digest1, then digest2 sequentially
         let _ = Mock::given(method("HEAD"))
             .and(path(manifest_url.path()))
             .respond_with(SequentialManifestDigests {
                 digests: Mutex::new(VecDeque::from([
-                    manifest_digest1.clone(),
-                    manifest_digest2.clone(),
+                    manifest_info1.manifest_digest.clone(),
+                    manifest_info2.manifest_digest.clone(),
                 ])),
             })
             .expect(2..=3)
@@ -839,12 +812,12 @@ mod tests {
             .respond_with(SequentialManifests {
                 manifests: Mutex::new(VecDeque::from([
                     (
-                        manifest_digest1.clone(),
-                        serde_json::to_vec(&oci_manifest1).unwrap(),
+                        manifest_info1.manifest_digest,
+                        serde_json::to_vec(&manifest_info1.oci_manifest).unwrap(),
                     ),
                     (
-                        manifest_digest2.clone(),
-                        serde_json::to_vec(&oci_manifest2).unwrap(),
+                        manifest_info2.manifest_digest,
+                        serde_json::to_vec(&manifest_info2.oci_manifest).unwrap(),
                     ),
                 ])),
             })
