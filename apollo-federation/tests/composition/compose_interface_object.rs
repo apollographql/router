@@ -1,4 +1,9 @@
+use std::collections::HashSet;
+
+use apollo_federation::composition::compose;
+use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
+use test_log::test;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
@@ -10,7 +15,6 @@ use super::print_sdl;
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_composes_valid_usages_correctly() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -61,7 +65,6 @@ fn interface_object_composes_valid_usages_correctly() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_used_with_no_corresponding_interface() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -96,13 +99,12 @@ fn interface_object_errors_if_used_with_no_corresponding_interface() {
         &result,
         &[(
             "INTERFACE_OBJECT_USAGE_ERROR",
-            r#"Type "I" is declared with @interfaceObject in all the subgraphs in which is is defined (it is defined in subgraphs "subgraphA" and "subgraphB" but should be defined as an interface in at least one subgraph)"#,
+            r#"Type "I" is declared with @interfaceObject in all the subgraphs in which it is defined (it is defined in subgraphs "subgraphA" and "subgraphB" but should be defined as an interface in at least one subgraph)"#,
         )],
     );
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_missing_in_some_subgraph() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -162,63 +164,74 @@ fn interface_object_errors_if_missing_in_some_subgraph() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_interface_has_key_but_subgraph_doesnt_know_all_implementations() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
-        type Query {
-          iFromA: I
-        }
+          type Query {
+            iFromA: I
+          }
 
-        interface I @key(fields: "id") {
-          id: ID!
-          x: Int
-        }
+          interface I @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
 
-        type A implements I @key(fields: "id") {
-          id: ID!
-          x: Int
-        }
+          type A implements I @key(fields: "id") {
+            id: ID!
+            x: Int
+            w: Int
+          }
 
-        type B implements I @key(fields: "id") {
-          id: ID!
-          x: Int
-        }
+          type B implements I @key(fields: "id") {
+            id: ID!
+            x: Int
+            z: Int
+          }
         "#,
     };
 
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type Query {
-          iFromB: I
-        }
+          type Query {
+            iFromB: I
+          }
 
-        type I @interfaceObject @key(fields: "id") {
-          id: ID!
-          y: Int
-        }
-
-        type A @key(fields: "id") {
-          id: ID!
-          y: Int
-        }
+          type I @interfaceObject @key(fields: "id") {
+            id: ID!
+            y: Int
+          }
         "#,
     };
 
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let subgraph_c = ServiceDefinition {
+        name: "subgraphC",
+        type_defs: r#"
+          interface I {
+            id: ID!
+            x: Int
+          }
+
+          type C implements I @key(fields: "id") {
+            id: ID!
+            x: Int
+            w: Int
+          }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
     assert_composition_errors(
         &result,
         &[(
-            "INTERFACE_OBJECT_USAGE_ERROR",
-            r#"Interface "I" has a @key in subgraph "subgraphB" but that subgraph does not know all the implementations of "I""#,
+            "INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE",
+            r#"[subgraphA] Interface type "I" has a resolvable key (@key(fields: "id")) in subgraph "subgraphA" but that subgraph is missing some of the supergraph implementation types of "I". Subgraph "subgraphA" should define type "C" (and have it implement "I")."#,
         )],
     );
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_subgraph_defines_both_interface_object_and_implementations() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -276,7 +289,6 @@ fn interface_object_errors_if_subgraph_defines_both_interface_object_and_impleme
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_composes_references_to_interface_object() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -322,7 +334,6 @@ fn interface_object_composes_references_to_interface_object() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_does_not_error_when_optimizing_unnecessary_loops() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -383,7 +394,6 @@ fn interface_object_does_not_error_when_optimizing_unnecessary_loops() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_fed354_repro_failure() {
     let subgraph1 = ServiceDefinition {
         name: "Subgraph1",
@@ -450,4 +460,86 @@ fn interface_object_fed354_repro_failure() {
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     let _supergraph =
         result.expect("Expected composition to succeed - this is a repro test for issue FED-354");
+}
+
+#[test]
+fn interface_object_with_inaccessible_field() {
+    // Regression test for interface object fields not getting @join__field directives.
+    // When an interface has @interfaceObject types in some subgraphs, all fields need
+    // @join__field directives to indicate which subgraphs provide them.
+    //
+    // Setup:
+    // - subgraph_a: defines interface with id @inaccessible
+    // - subgraph_b: defines interface WITHOUT id field
+    // - subgraph_c: @interfaceObject with id in key
+    //
+    // The bug was that subgraph_a and subgraph_c weren't getting @join__field for id.
+
+    let subgraph_a = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@inaccessible"])
+
+        type Query {
+            items: [Item]
+        }
+
+        interface Item {
+            id: ID! @inaccessible
+        }
+
+        type Product implements Item @key(fields: "id") {
+            id: ID!
+            name: String
+        }
+    "#;
+
+    let subgraph_b = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+
+        interface Item {
+            name: String
+        }
+
+        type Special implements Item @key(fields: "id") {
+            id: ID!
+            name: String
+        }
+    "#;
+
+    let subgraph_c = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@interfaceObject"])
+
+        type Item @key(fields: "id") @interfaceObject {
+            id: ID!
+            extra: String
+        }
+    "#;
+
+    let parsed_a = Subgraph::parse("subgraph-a", "http://example.com", subgraph_a).unwrap();
+    let parsed_b = Subgraph::parse("subgraph-b", "http://example.com", subgraph_b).unwrap();
+    let parsed_c = Subgraph::parse("subgraph-c", "http://example.com", subgraph_c).unwrap();
+
+    let supergraph = compose(vec![parsed_a, parsed_b, parsed_c]).unwrap();
+
+    let item_interface = supergraph
+        .schema()
+        .schema()
+        .types
+        .get("Item")
+        .unwrap()
+        .as_interface()
+        .unwrap();
+    let id_field = item_interface.fields.get("id").unwrap();
+    let id_directives: HashSet<_> = id_field.directives.iter().map(|d| d.to_string()).collect();
+
+    assert!(
+        id_directives.contains("@join__field(graph: SUBGRAPH_A)"),
+        "id field should have @join__field for subgraph-a"
+    );
+    assert!(
+        id_directives.contains("@join__field(graph: SUBGRAPH_C)"),
+        "id field should have @join__field for subgraph-c"
+    );
 }

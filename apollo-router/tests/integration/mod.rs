@@ -3,6 +3,10 @@ mod batching;
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[path = "../redis_monitor.rs"]
+pub(crate) mod redis_monitor;
+
 mod allowed_features;
 mod connectors;
 mod coprocessor;
@@ -12,6 +16,7 @@ mod directives;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod entity_cache;
 mod file_upload;
+mod http_server;
 mod introspection;
 mod lifecycle;
 mod metrics;

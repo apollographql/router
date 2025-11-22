@@ -5,7 +5,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.0:subgraph:user:type:Query:hash:fa8ff6a034f5ccb3f49e51bc30ff031104ba420310e67764f9e9f82702437592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.1:subgraph:user:type:Query:hash:fa8ff6a034f5ccb3f49e51bc30ff031104ba420310e67764f9e9f82702437592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "currentUser"
     ],
@@ -25,6 +25,7 @@ expression: cache_keys
       "age": 5,
       "public": true
     },
+    "shouldStore": true,
     "data": {
       "data": {
         "currentUser": {
@@ -34,10 +35,11 @@ expression: cache_keys
           }
         }
       }
-    }
+    },
+    "warnings": []
   },
   {
-    "key": "version:1.0:subgraph:orga:type:Organization:representation:07f0ad9351c409fd3acfae0be59e64f218dc486d6dbe0081e68794673b96df73:hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.1:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "organization",
       "organization-1"
@@ -67,6 +69,7 @@ expression: cache_keys
       "age": 1000000,
       "public": true
     },
+    "shouldStore": false,
     "data": {
       "data": {
         "creatorUser": {
@@ -74,6 +77,22 @@ expression: cache_keys
           "id": 2
         }
       }
-    }
+    },
+    "warnings": [
+      {
+        "code": "CACHE_CONTROL_MAX_AGE_SMALLER_AGE",
+        "links": [
+          {
+            "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching#fresh_and_stale_based_on_age",
+            "title": "Fresh and stale data based on age"
+          },
+          {
+            "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+            "title": "Cache-Control header documentation"
+          }
+        ],
+        "message": "The subgraph returned a 'Cache-Control' header with a max-age smaller than the value of 'Age' header. This means the data has already expired, so the Router will not cache it."
+      }
+    ]
   }
 ]

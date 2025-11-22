@@ -94,7 +94,7 @@ If you're currently using the `preview_entity_caching` plugin, migrate to respon
 
 Follow these steps to migrate your configuration:
 
-1. **Update the plugin name:** Replace `preview_entity_caching` with `preview_response_caching` in your router configuration.
+1. **Update the plugin name:** Replace `preview_entity_cache` with `preview_response_cache` in your router configuration.
 
 2. **Remove the `scan_count` setting:** Delete the `redis.scan_count` configuration option if you have it set. Response caching uses an approach that doesn't require Redis `SCAN` operations, eliminating a key performance bottleneck from the previous entity caching version.
 
@@ -105,8 +105,31 @@ Follow these steps to migrate your configuration:
 
    All timeout settings are optional. Set timeouts based on your application's performance requirements for specific cache operations.
 
-4. **Update your metrics and monitoring:** Response caching introduces new metric names and additional observability options. Check the [observability documentation](/routing/performance/caching/response-caching/observability) for the complete list of available metrics and their updated names. The new implementation also provides additional metrics for better insight into cache performance.
+4. **Update your metrics and monitoring:** Response caching introduces new metric names and additional observability options. Check the [observability documentation](/graphos/routing/performance/caching/response-caching/observability) for the complete list of available metrics and their updated names. The new implementation also provides additional metrics for better insight into cache performance.
 
 ### Can I use response caching in production with earlier router versions?
 
 TTL-based caching works in earlier versions. For API-based invalidation, use the current router version.
+
+### Why can't I see my cache tags generated from responses in the debugger once cached?
+
+For performance, cache tags derived from responses are written to Redis in a debugger‑readable form only when the cache‑populating request runs in debug mode. Cache tags coming from responses written outside debug mode aren’t visible in the debugger.
+
+### What versions of Redis are supported?
+
+Response caching is compatible with caches that support open-source Redis >7.0. It has been thoroughly tested against standalone Redis, Redis cluster, and Google's Memorystore.
+
+### Can I set a limit on my Redis database size?
+
+You can use [Redis's key eviction](https://redis.io/docs/latest/develop/reference/eviction/) to limit the maximum memory to use for the cache data. If an eviction policy is set, you **must** use the `volatile-ttl` eviction policy, which evicts keys with the shortest remaining TTL value.
+
+If you want to set a memory limit per subgraph, you must configure a different Redis instance per subgraph.
+
+### What performance can I expect from Redis?
+
+Performance will be highly dependent on response sizes, query rate, node size, and many other factors.
+
+During internal testing\*, the Router was able to fetch at least 5000 entities per second, with >98% of fetches under 5ms and
+98% of inserts under 15ms.
+
+\*Tests conducted against a single-shard Redis cluster running on a [`redis-standard-small`](https://docs.cloud.google.com/memorystore/docs/cluster/cluster-node-specification#node_type_specification) instance.

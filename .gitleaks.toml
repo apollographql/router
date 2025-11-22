@@ -1,3 +1,9 @@
+[[ rules ]]
+    id = "generic-api-key"
+    [ rules.allowlist ]
+        paths = [
+            '''Cargo.lock$'''
+        ]
 
 [[ rules ]]
     id = "generic-api-key"
@@ -41,6 +47,7 @@
 
         paths = [
             '''^apollo-router\/src\/.+\/testdata\/.+''',
+            '''^apollo-router\/tests\/integration\/fixtures\/.+''',
         ]
 
 [[ rules ]]

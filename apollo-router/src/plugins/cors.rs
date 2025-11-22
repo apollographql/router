@@ -2,9 +2,12 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
+use http::HeaderName;
+use http::HeaderValue;
 use http::Request;
 use http::Response;
 use http::header::ACCESS_CONTROL_ALLOW_CREDENTIALS;
@@ -22,6 +25,13 @@ use tower::Service;
 use crate::configuration::cors::Cors;
 use crate::configuration::cors::Policy;
 
+const ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK: HeaderName =
+    HeaderName::from_static("access-control-allow-private-network");
+const ACCESS_CONTROL_PRIVATE_NETWORK_VALUE: http::HeaderValue = HeaderValue::from_static("true");
+const PRIVATE_NETWORK_ACCESS_NAME: HeaderName =
+    HeaderName::from_static("private-network-access-name");
+const PRIVATE_NETWORK_ACCESS_ID: HeaderName = HeaderName::from_static("private-network-access-id");
+
 /// Our custom CORS layer that supports per-origin configuration
 #[derive(Clone, Debug)]
 pub(crate) struct CorsLayer {
@@ -31,7 +41,9 @@ pub(crate) struct CorsLayer {
 impl CorsLayer {
     pub(crate) fn new(config: Cors) -> Result<Self, String> {
         // Ensure configuration is valid before creating CorsLayer
-        config.ensure_usable_cors_rules()?;
+        config
+            .ensure_usable_cors_rules()
+            .map_err(|e| e.to_string())?;
 
         // Validate global headers
         if !config.allow_headers.is_empty() {
@@ -48,9 +60,9 @@ impl CorsLayer {
 
         // Validate origin configurations
         if let Some(policies) = &config.policies {
-            for policy in policies {
+            for policy in policies.iter() {
                 // Validate origin URLs
-                for origin in &policy.origins {
+                for origin in policy.origins.iter() {
                     http::HeaderValue::from_str(origin).map_err(|_| {
                         format!("origin '{origin}' is not valid: failed to parse header value")
                     })?;
@@ -173,14 +185,14 @@ impl<S> CorsService<S> {
 
         if let Some(policies) = &config.policies {
             for policy in policies.iter() {
-                for url in &policy.origins {
-                    if url == origin_str {
+                for url in policy.origins.iter() {
+                    if &**url == origin_str {
                         return Some(policy);
                     }
                 }
 
                 if !policy.match_origins.is_empty() {
-                    for regex in &policy.match_origins {
+                    for regex in policy.match_origins.iter() {
                         if regex.is_match(origin_str) {
                             return Some(policy);
                         }
@@ -321,6 +333,31 @@ impl<S> CorsService<S> {
             );
         }
 
+        if is_preflight
+            && let Some(Some(pna)) = policy.map(|policy| policy.private_network_access.as_ref())
+        {
+            response.headers_mut().insert(
+                ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK,
+                ACCESS_CONTROL_PRIVATE_NETWORK_VALUE,
+            );
+
+            if let Some(name) = &pna.access_name {
+                response.headers_mut().insert(
+                    PRIVATE_NETWORK_ACCESS_NAME,
+                    http::HeaderValue::from_str(name)
+                        .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+                );
+            }
+
+            if let Some(id) = &pna.access_id {
+                response.headers_mut().insert(
+                    PRIVATE_NETWORK_ACCESS_ID,
+                    http::HeaderValue::from_str(id)
+                        .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+                );
+            }
+        }
+
         // Set Vary header - append to existing values instead of overwriting
         Self::append_vary_header(response, ORIGIN);
 
@@ -360,7 +397,7 @@ impl<S> CorsService<S> {
     }
 }
 
-fn parse_values<T>(values_to_parse: &[String], error_description: &str) -> Result<Vec<T>, String>
+fn parse_values<T>(values_to_parse: &[Arc<str>], error_description: &str) -> Result<Vec<T>, String>
 where
     T: std::str::FromStr,
     <T as std::str::FromStr>::Err: std::fmt::Display,
@@ -402,24 +439,23 @@ mod tests {
     use super::*;
     use crate::configuration::cors::Cors;
     use crate::configuration::cors::Policy;
+    use crate::configuration::cors::PrivateNetworkAccessPolicy;
 
     struct DummyService;
     impl Service<Request<()>> for DummyService {
         type Response = Response<&'static str>;
         type Error = ();
-        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+        type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
 
         fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
 
         fn call(&mut self, _req: Request<()>) -> Self::Future {
-            Box::pin(async {
-                Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .body("ok")
-                    .unwrap())
-            })
+            std::future::ready(Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body("ok")
+                .unwrap()))
         }
     }
 
@@ -610,9 +646,9 @@ mod tests {
         let cors = Cors {
             allow_any_origin: false,
             allow_credentials: false,
-            allow_headers: vec![],
+            allow_headers: Arc::new([]),
             expose_headers: None,
-            methods: vec!["GET".into(), "POST".into(), "PUT".into()],
+            methods: Arc::new(["GET".into(), "POST".into(), "PUT".into()]),
             max_age: None,
             policies: None,
         };
@@ -1176,5 +1212,101 @@ mod tests {
         let headers = resp.headers();
         let vary_header = headers.get(VARY).unwrap().to_str().unwrap();
         assert_eq!(vary_header, "origin, access-control-request-headers");
+    }
+
+    #[test]
+    fn pna_without_other_headers() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(PrivateNetworkAccessPolicy::builder().build())
+                    .origin("https://studio.apollographql.com")
+                    .build(),
+            ])
+            .build();
+        println!("{cors:?}");
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let finder = |header| resp.headers().iter().find(|h| h.0 == header);
+        assert!(finder(ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK).is_some());
+        assert!(finder(PRIVATE_NETWORK_ACCESS_NAME).is_none());
+        assert!(finder(PRIVATE_NETWORK_ACCESS_ID).is_none());
+    }
+
+    #[test]
+    fn pna_with_access_name() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_name("ferris-server")
+                            .build(),
+                    )
+                    .origin("https://studio.apollographql.com")
+                    .build(),
+            ])
+            .allow_any_origin(true)
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let finder = |header| resp.headers().iter().find(|h| h.0 == header);
+        assert!(finder(ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK).is_some());
+        assert!(
+            finder(PRIVATE_NETWORK_ACCESS_NAME).is_some_and(|(_, name)| name == "ferris-server")
+        );
+        assert!(finder(PRIVATE_NETWORK_ACCESS_ID).is_none());
+    }
+
+    #[test]
+    fn pna_with_access_name_and_id() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_name("ferris-server")
+                            .access_id("01:23:45:67:89:0A")
+                            .build(),
+                    )
+                    .origin("https://studio.apollographql.com")
+                    .build(),
+            ])
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        resp.headers()
+            .iter()
+            .for_each(|header| println!("{header:?}"));
+        let finder = |header| resp.headers().iter().find(|h| h.0 == header);
+        assert!(finder(ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK).is_some());
+        assert!(
+            finder(PRIVATE_NETWORK_ACCESS_NAME).is_some_and(|(_, name)| name == "ferris-server")
+        );
+        assert!(finder(PRIVATE_NETWORK_ACCESS_ID).is_some_and(|(_, id)| id == "01:23:45:67:89:0A"));
     }
 }

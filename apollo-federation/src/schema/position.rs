@@ -160,11 +160,14 @@ macro_rules! infallible_conversions {
 pub(crate) trait HasDescription {
     fn description<'schema>(&self, schema: &'schema FederationSchema)
     -> Option<&'schema Node<str>>;
+
     fn set_description(
         &self,
         schema: &mut FederationSchema,
         description: Option<Node<str>>,
     ) -> Result<(), FederationError>;
+
+    fn is_schema_definition() -> bool;
 }
 
 macro_rules! impl_has_description_for {
@@ -184,6 +187,10 @@ macro_rules! impl_has_description_for {
             ) -> Result<(), FederationError> {
                 self.make_mut(&mut schema.schema)?.make_mut().description = description;
                 Ok(())
+            }
+
+            fn is_schema_definition() -> bool {
+                false
             }
         }
     };
@@ -221,6 +228,10 @@ impl HasDescription for SchemaDefinitionPosition {
         self.make_mut(&mut schema.schema).make_mut().description = description;
         Ok(())
     }
+
+    fn is_schema_definition() -> bool {
+        true
+    }
 }
 
 impl HasDescription for ObjectOrInterfaceFieldDefinitionPosition {
@@ -243,6 +254,10 @@ impl HasDescription for ObjectOrInterfaceFieldDefinitionPosition {
             Self::Object(field) => field.set_description(schema, description),
             Self::Interface(field) => field.set_description(schema, description),
         }
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
@@ -269,6 +284,10 @@ impl HasDescription for FieldDefinitionPosition {
             FieldDefinitionPosition::Union(field) => field.set_description(schema, description),
         }
     }
+
+    fn is_schema_definition() -> bool {
+        false
+    }
 }
 
 impl HasDescription for UnionTypenameFieldDefinitionPosition {
@@ -286,6 +305,10 @@ impl HasDescription for UnionTypenameFieldDefinitionPosition {
         _description: Option<Node<str>>,
     ) -> Result<(), FederationError> {
         bail!("Description is immutable for union typename fields")
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
@@ -334,6 +357,10 @@ impl HasDescription for DirectiveTargetPosition {
             )),
         }
     }
+
+    fn is_schema_definition() -> bool {
+        false
+    }
 }
 
 impl HasDescription for FieldArgumentDefinitionPosition {
@@ -356,6 +383,10 @@ impl HasDescription for FieldArgumentDefinitionPosition {
             Self::Object(field) => field.set_description(schema, description),
             Self::Interface(field) => field.set_description(schema, description),
         }
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
@@ -681,6 +712,8 @@ impl TypeDefinitionPosition {
         schema: &mut FederationSchema,
         new_name: Name,
     ) -> Result<(), FederationError> {
+        let old_name = self.type_name().clone();
+
         match self {
             TypeDefinitionPosition::Scalar(type_) => type_.rename(schema, new_name.clone())?,
             TypeDefinitionPosition::Object(type_) => type_.rename(schema, new_name.clone())?,
@@ -691,7 +724,19 @@ impl TypeDefinitionPosition {
         }
 
         if let Some(existing_type) = schema.schema.types.swap_remove(self.type_name()) {
-            schema.schema.types.insert(new_name, existing_type);
+            schema.schema.types.insert(new_name.clone(), existing_type);
+        }
+
+        match self {
+            TypeDefinitionPosition::Object(_) => {
+                schema.referencers.rename_object_type(&old_name, &new_name);
+            }
+            TypeDefinitionPosition::Interface(_) => {
+                schema
+                    .referencers
+                    .rename_interface_type(&old_name, &new_name);
+            }
+            _ => {}
         }
 
         Ok(())
@@ -957,6 +1002,10 @@ impl HasDescription for TypeDefinitionPosition {
             Self::Enum(ty) => ty.set_description(schema, description),
             Self::InputObject(ty) => ty.set_description(schema, description),
         }
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
@@ -1797,7 +1846,9 @@ impl SchemaDefinitionPosition {
     ) -> Result<(), FederationError> {
         let schema_definition = self.make_mut(&mut schema.schema);
         match kind {
-            SchemaRootDefinitionKind::Query => schema_definition.make_mut().query = Some(type_name),
+            SchemaRootDefinitionKind::Query => {
+                schema_definition.make_mut().query = Some(type_name);
+            }
             SchemaRootDefinitionKind::Mutation => {
                 schema_definition.make_mut().mutation = Some(type_name)
             }
@@ -1805,6 +1856,10 @@ impl SchemaDefinitionPosition {
                 schema_definition.make_mut().subscription = Some(type_name)
             }
         }
+
+        let schema_definition = self.get(&schema.schema);
+        self.insert_references(schema_definition, &schema.schema, &mut schema.referencers)?;
+
         Ok(())
     }
 }
@@ -2898,7 +2953,7 @@ impl ObjectTypeDefinitionPosition {
             schema
                 .referencers
                 .object_types
-                .insert(new_name, object_type_referencers);
+                .insert(new_name.clone(), object_type_referencers);
         }
 
         Ok(())
@@ -4270,7 +4325,7 @@ impl InterfaceTypeDefinitionPosition {
             schema
                 .referencers
                 .interface_types
-                .insert(new_name, interface_type_referencers);
+                .insert(new_name.clone(), interface_type_referencers);
         }
 
         Ok(())
@@ -4361,6 +4416,35 @@ impl InterfaceTypeDefinitionPosition {
         obj.make_mut()
             .directives
             .retain(|other_directive| !other_directive.ptr_eq(directive));
+    }
+
+    pub(crate) fn implementers<'a>(
+        &'a self,
+        schema: &'a FederationSchema,
+    ) -> Result<impl Iterator<Item = ObjectOrInterfaceTypeDefinitionPosition> + 'a, FederationError>
+    {
+        let referencers = schema
+            .referencers()
+            .interface_types
+            .get(&self.type_name)
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Schema missing referencers for interface type \"{}\"",
+                    self.type_name
+                ))
+            })?;
+        Ok(referencers
+            .object_types
+            .iter()
+            .cloned()
+            .map(|obj| obj.into())
+            .chain(
+                referencers
+                    .interface_types
+                    .iter()
+                    .cloned()
+                    .map(|interface| interface.into()),
+            ))
     }
 }
 
@@ -7083,18 +7167,12 @@ impl DirectiveDefinitionPosition {
         Ok(())
     }
 
-    pub(crate) fn add_locations(
+    pub(crate) fn set_locations(
         &self,
         schema: &mut FederationSchema,
         locations: Vec<DirectiveLocation>,
     ) -> Result<(), FederationError> {
-        let existing = self.make_mut(&mut schema.schema)?.make_mut();
-
-        for location in locations {
-            if !existing.locations.contains(&location) {
-                existing.locations.push(location);
-            }
-        }
+        self.make_mut(&mut schema.schema)?.make_mut().locations = locations;
         Ok(())
     }
 }
@@ -7993,6 +8071,124 @@ mod tests {
               me: User
             }
         "#);
+    }
+
+    #[test]
+    fn rename_type_updates_all_referencers() {
+        let schema = Schema::parse_and_validate(
+            r#"
+            type Query {
+                user: User
+                users(filter: UserFilter): [User!]!
+            }
+
+            type User {
+                id: ID!
+                name: String!
+                posts: [Post!]!
+            }
+
+            type Post {
+                id: ID!
+                author: User!
+                coAuthor: User
+            }
+
+            input UserFilter {
+                name: String
+            }
+        "#,
+            "test-schema.graphqls",
+        )
+        .unwrap();
+        let mut schema = FederationSchema::new(schema.into_inner()).unwrap();
+
+        let user_position =
+            TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition::new(name!("User")));
+        user_position.rename(&mut schema, name!("Person")).unwrap();
+
+        let referencers = schema.referencers();
+
+        assert!(
+            referencers.object_types.get("User").is_none(),
+            "Referencers should not have old type name 'User' as a key after rename"
+        );
+
+        assert!(
+            referencers.object_types.get("Person").is_some(),
+            "Referencers should have new type name 'Person' as a key after rename"
+        );
+
+        let string_refs = referencers.scalar_types.get("String").unwrap();
+        assert!(
+            string_refs
+                .object_fields
+                .iter()
+                .any(|f| f.type_name == name!("Person") && f.field_name == name!("name")),
+            "String referencers should contain Person.name field"
+        );
+        assert!(
+            !string_refs
+                .object_fields
+                .iter()
+                .any(|f| f.type_name == name!("User")),
+            "String referencers should not contain any fields on User type"
+        );
+
+        let id_refs = referencers.scalar_types.get("ID").unwrap();
+        assert!(
+            id_refs
+                .object_fields
+                .iter()
+                .any(|f| f.type_name == name!("Person") && f.field_name == name!("id")),
+            "ID referencers should contain Person.id field"
+        );
+        assert!(
+            !id_refs
+                .object_fields
+                .iter()
+                .any(|f| f.type_name == name!("User")),
+            "ID referencers should not contain any fields on User type"
+        );
+
+        let post_refs = referencers.object_types.get("Post").unwrap();
+        assert!(
+            post_refs
+                .object_fields
+                .iter()
+                .any(|f| f.type_name == name!("Person") && f.field_name == name!("posts")),
+            "Post referencers should contain Person.posts field"
+        );
+        assert!(
+            !post_refs
+                .object_fields
+                .iter()
+                .any(|f| f.type_name == name!("User")),
+            "Post referencers should not contain any fields on User type"
+        );
+
+        let person_refs = referencers.object_types.get("Person").unwrap();
+        assert!(
+            person_refs
+                .object_fields
+                .iter()
+                .any(|f| f.type_name == name!("Query") && f.field_name == name!("user")),
+            "Person referencers should contain Query.user field"
+        );
+        assert!(
+            person_refs
+                .object_fields
+                .iter()
+                .any(|f| f.type_name == name!("Post") && f.field_name == name!("author")),
+            "Person referencers should contain Post.author field"
+        );
+        assert!(
+            person_refs
+                .object_fields
+                .iter()
+                .any(|f| f.type_name == name!("Post") && f.field_name == name!("coAuthor")),
+            "Person referencers should contain Post.coAuthor field"
+        );
     }
 
     #[test]

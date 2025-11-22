@@ -1,9 +1,12 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::StreamExt;
 use futures::stream::once;
+use http::HeaderMap;
+use http::HeaderValue;
 use http_body_util::BodyExt;
 use tokio::fs;
 use tower::BoxError;
@@ -18,7 +21,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::execution;
-use crate::services::external::externalize_header_map;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -101,8 +103,9 @@ impl Plugin for Record {
                             .with_lock(|lock| lock.remove::<Recording>());
 
                         if let Some(mut recording) = recording {
-                            let res_headers = externalize_header_map(&headers)?;
-                            recording.client_response.headers = res_headers;
+                            let (headers, header_errors) = parse_headers(&headers);
+                            recording.client_response.headers = headers;
+                            recording.client_response.header_errors = header_errors;
 
                             let filename = recording.filename();
                             let contents = serde_json::to_value(recording)?;
@@ -173,8 +176,7 @@ impl Plugin for Record {
                     let query = req.supergraph_request.body().query.clone();
                     let operation_name = req.supergraph_request.body().operation_name.clone();
                     let variables = req.supergraph_request.body().variables.clone();
-                    let headers = externalize_header_map(req.supergraph_request.headers())
-                        .expect("failed to externalize header map");
+                    let (headers, header_errors) = parse_headers(req.supergraph_request.headers());
                     let method = req.supergraph_request.method().to_string();
                     let uri = req.supergraph_request.uri().to_string();
 
@@ -185,6 +187,7 @@ impl Plugin for Record {
                                 operation_name,
                                 variables,
                                 headers,
+                                header_errors,
                                 method,
                                 uri,
                             };
@@ -237,14 +240,18 @@ impl Plugin for Record {
 
         ServiceBuilder::new()
             .map_future_with_request_data(
-                |req: &subgraph::Request| RequestDetails {
-                    query: req.subgraph_request.body().query.clone(),
-                    operation_name: req.subgraph_request.body().operation_name.clone(),
-                    variables: req.subgraph_request.body().variables.clone(),
-                    headers: externalize_header_map(req.subgraph_request.headers())
-                        .expect("failed to externalize header map"),
-                    method: req.subgraph_request.method().to_string(),
-                    uri: req.subgraph_request.uri().to_string(),
+                |req: &subgraph::Request| {
+                    let (headers, header_errors) = parse_headers(req.subgraph_request.headers());
+
+                    RequestDetails {
+                        query: req.subgraph_request.body().query.clone(),
+                        operation_name: req.subgraph_request.body().operation_name.clone(),
+                        variables: req.subgraph_request.body().variables.clone(),
+                        headers,
+                        header_errors,
+                        method: req.subgraph_request.method().to_string(),
+                        uri: req.subgraph_request.uri().to_string(),
+                    }
                 },
                 move |req: RequestDetails, future| {
                     let subgraph_name = subgraph_name.clone();
@@ -257,11 +264,14 @@ impl Plugin for Record {
                             .clone()
                             .unwrap_or_else(|| "UnnamedOperation".to_string());
 
+                        let (headers, header_errors) =
+                            parse_headers(&res.response.headers().clone());
+
                         let subgraph = Subgraph {
                             subgraph_name,
                             response: ResponseDetails {
-                                headers: externalize_header_map(&res.response.headers().clone())
-                                    .expect("failed to externalize header map"),
+                                headers,
+                                header_errors,
                                 chunks: vec![res.response.body().clone()],
                             },
                             request: req,
@@ -306,4 +316,22 @@ fn is_introspection(request: &supergraph::Request) -> bool {
                 })
             })
     })
+}
+
+/// Parse headers into a HashMap of keys/values and a HashMap of keys/errors
+/// for any invalid UTF-8 values.
+fn parse_headers(
+    input: &HeaderMap<HeaderValue>,
+) -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
+    let mut headers: HashMap<String, Vec<String>> = HashMap::new();
+    let mut header_errors: HashMap<String, Vec<String>> = HashMap::new();
+
+    for (k, v) in input {
+        let k = k.as_str().to_owned();
+        match String::from_utf8(v.as_bytes().to_vec()) {
+            Ok(v) => headers.entry(k).or_default().push(v),
+            Err(e) => header_errors.entry(k).or_default().push(e.to_string()),
+        };
+    }
+    (headers, header_errors)
 }

@@ -118,6 +118,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
         max_requests: None,
         entity_resolver: None,
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "User",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {},
@@ -321,6 +326,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
             Explicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "User",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -536,6 +546,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
             Implicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "User",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {

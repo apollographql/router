@@ -19,7 +19,7 @@ telemetry:
   instrumentation:
     instruments:
       cache: # Cache instruments configuration
-        apollo.router.operations.response.cache: # A counter which counts the number of cache hit and miss for subgraph requests
+        apollo.router.response.cache: # A counter which counts the number of cache hit and miss for subgraph requests
           attributes:
             graphql.type.name: true # Include the entity type name. default: false
             subgraph.name: # Custom attributes to include the subgraph name in the metric
@@ -151,6 +151,57 @@ telemetry:
                   - response_cache: hit
                   - 0
 ```
+
+## Selectors
+
+A [_selector_](/router/configuration/telemetry/instrumentation/selectors) extracts data from the GraphOS Router's request lifecycle (pipeline) and attaches it to telemetry, such as spans, metrics, and logs. For response caching, the subgraph service provides selectors that you can use to create custom metrics or add custom attributes to your telemetry data.
+
+| Selector                    | Defaultable | Values           | Description                                                                    |
+|-----------------------------|-------------|------------------|--------------------------------------------------------------------------------|
+| `response_cache`            | No          | `hit` \| `miss`    | Returns the number of cache hit or miss for this subgraph request              |
+| `response_cache_status`    | No          | `hit` \| `partial_hit`\| `miss`\| `status`    | Indicates the cache status for the subgraph request: `hit` (all data from cache), `miss` (all data from subgraph), or `partial_hit` (some entities from cache).   |
+| `response_cache_control`    | No          | `max_age` \| `scope`\| `no_store`    | Provides data from the computed `Cache-Control` header, such as `max_age`, `scope` (`public`/`private`), or `no_store` status.  |
+
+### Example
+
+- To create a metric that tracks the computed `max-age` (TTL) at the subgraph level, create a custom instrument using the `response_cache_control` selector. For an example, see the `subgraph.response.cache_control.max_age` instrument in the following configuration.
+
+- To determine if a subgraph request was served from the cache, use the `response_cache_status` selector. Setting its value to `status` adds an attribute to the standard `http.client.request.duration` instrument that indicates a `hit`, `partial_hit`, or `miss`.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        views:
+          - name: subgraph.response.cache_control.max_age # This is to make sure it will use the correct buckets for the max age histogram
+            aggregation:
+              histogram:
+                buckets: # Override default buckets configured for this histogram
+                - 10
+                - 100
+                - 1000
+                - 10000
+                - 100000
+  #highlight-start
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true
+            response.cache.status: # Will be either `hit`, `partial_hit` or `miss`
+              response_cache_status: status
+        subgraph.response.cache_control.max_age:
+          value:
+            response_cache_control: max_age
+          type: histogram
+          unit: s # Seconds
+          description: A histogram of the computed TTL for a subgraph response
+  #highlight-end
+```
+
 
 ## Cache debugger
 

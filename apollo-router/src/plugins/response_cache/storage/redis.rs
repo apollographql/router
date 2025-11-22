@@ -42,6 +42,8 @@ pub(crate) type Config = super::config::Config;
 struct CacheValue {
     data: serde_json_bytes::Value,
     cache_control: CacheControl,
+    // Only set in debug mode
+    cache_tags: Option<HashSet<String>>,
 }
 
 impl ValueType for CacheValue {}
@@ -52,6 +54,7 @@ impl From<(&str, CacheValue)> for CacheEntry {
             key: cache_key.to_string(),
             data: cache_value.data,
             control: cache_value.cache_control,
+            cache_tags: cache_value.cache_tags,
         }
     }
 }
@@ -258,9 +261,16 @@ impl CacheStorage for Storage {
 
         let now = now();
 
+        // Only useful for caching debugger, it will only contains entries if the doc is set to debug
+        let mut original_cache_tags = Vec::with_capacity(batch_docs.len());
         // phase 1
         for document in &mut batch_docs {
             document.key = self.make_key(&document.key);
+            if document.debug {
+                original_cache_tags.push(document.invalidation_keys.clone());
+            } else {
+                original_cache_tags.push(Vec::new());
+            }
             document.invalidation_keys =
                 self.namespaced_cache_tags(&document.invalidation_keys, subgraph_name);
         }
@@ -288,7 +298,7 @@ impl CacheStorage for Storage {
             timeout: Some(self.insert_timeout()),
             ..Options::default()
         };
-        let pipeline = self.storage.client().pipeline().with_options(&options);
+        let pipeline = self.storage.pipeline().with_options(&options);
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             self.send_to_maintenance_queue(cache_tag_key.clone());
 
@@ -335,11 +345,12 @@ impl CacheStorage for Storage {
         }
 
         // phase 3
-        let pipeline = self.storage.client().pipeline().with_options(&options);
-        for document in batch_docs.into_iter() {
+        let pipeline = self.storage.pipeline().with_options(&options);
+        for (document, cache_tags) in batch_docs.into_iter().zip(original_cache_tags.into_iter()) {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
+                cache_tags: document.debug.then(|| cache_tags.into_iter().collect()),
             };
             let _: () = pipeline
                 .set::<(), _, _>(
@@ -541,14 +552,17 @@ mod tests {
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
     use tokio::sync::broadcast;
+    use tokio::time::Instant;
     use tower::BoxError;
     use uuid::Uuid;
 
     use super::Config;
     use super::Storage;
     use super::now;
+    use crate::plugins::response_cache::ErrorCode;
     use crate::plugins::response_cache::storage::CacheStorage;
     use crate::plugins::response_cache::storage::Document;
+    use crate::plugins::response_cache::storage::Error;
 
     const SUBGRAPH_NAME: &str = "test";
 
@@ -567,6 +581,7 @@ mod tests {
             control: Default::default(),
             invalidation_keys: vec!["invalidate".to_string()],
             expire: Duration::from_secs(60),
+            debug: true,
         }
     }
 
@@ -979,6 +994,7 @@ mod tests {
         use super::SUBGRAPH_NAME;
         use super::common_document;
         use super::redis_config;
+        use crate::plugins::response_cache::ErrorCode;
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
         use crate::plugins::response_cache::storage::redis::Storage;
@@ -998,11 +1014,10 @@ mod tests {
                 storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
 
             let insert_invalid_cache_tag = |key: String| async {
-                let expiration = config.ttl.map(|ttl| Expiration::EX(ttl.as_secs() as i64));
                 let _: () = storage
                     .storage
                     .client()
-                    .set(key, 1, expiration, None, false)
+                    .set(key, 1, Some(Expiration::EX(60)), None, false)
                     .await?;
                 Ok::<(), BoxError>(())
             };
@@ -1094,7 +1109,8 @@ mod tests {
 
             let result = storage.insert(document, SUBGRAPH_NAME).await;
             let error = result.expect_err("should have timed out via redis");
-            assert!(matches!(error, StorageError::Database(e) if e.details() == "timeout"));
+            assert!(matches!(error, StorageError::Database(ref e) if e.details() == "timeout"));
+            assert_eq!(error.code(), "TIMEOUT");
 
             // make sure the insert function did not try to operate on the document key
             for command in mock_storage.0.read().iter() {
@@ -1350,5 +1366,35 @@ mod tests {
 
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn timeout_errors_are_captured() -> Result<(), BoxError> {
+        let config = Config {
+            fetch_timeout: Duration::from_nanos(0),
+            ..redis_config(false)
+        };
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&config, drop_rx).await?;
+        storage.truncate_namespace().await?;
+
+        let document = common_document();
+
+        // because of how tokio::timeout polls, it's possible for a command to finish before the
+        // timeout is polled (even if the duration is 0). perform the check in a loop to give it
+        // a few changes to trigger.
+        let now = Instant::now();
+        while now.elapsed() < Duration::from_secs(5) {
+            let error = storage.fetch(&document.key, "S1").await.unwrap_err();
+            if error.is_row_not_found() {
+                continue;
+            }
+
+            assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
+            assert_eq!(error.code(), "TIMEOUT");
+            return Ok(());
+        }
+
+        panic!("Never observed a timeout");
     }
 }

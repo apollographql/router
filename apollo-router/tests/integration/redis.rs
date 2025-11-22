@@ -22,6 +22,8 @@
 // "EX" "10"
 // ```
 
+use std::collections::HashMap;
+
 use apollo_router::Context;
 use apollo_router::MockedSubgraphs;
 use apollo_router::plugin::test::MockSubgraph;
@@ -41,13 +43,59 @@ use http::Method;
 use http::header::CACHE_CONTROL;
 use serde_json::Value;
 use serde_json::json;
+use tokio::task::JoinSet;
 use tower::BoxError;
 use tower::ServiceExt;
+use uuid::Uuid;
+use wiremock::Mock;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path_regex;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::redis_monitor::Monitor as RedisMonitor;
 use crate::integration::response_cache::namespace;
+
+const REDIS_STANDALONE_PORT: [&str; 1] = ["6379"];
+const REDIS_CLUSTER_PORTS: [&str; 6] = ["7000", "7001", "7002", "7003", "7004", "7005"];
+
+fn make_redis_url(ports: &[&str]) -> Option<String> {
+    let port = ports.first()?;
+    let scheme = if ports.len() == 1 {
+        "redis"
+    } else {
+        "redis-cluster"
+    };
+    let url = format!("{scheme}://localhost:{port}");
+    Some(url)
+}
+
+// TODO: consider centralizing this fn and the same one in entity_cache.rs?
+fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {
+    let mut reviews = vec![];
+    let mut top_products = vec![];
+    for upc in 1..=count {
+        top_products.push(json!({ "upc": upc.to_string() }));
+        reviews.push(json!({
+            "__typename": "Product",
+            "upc": upc.to_string(),
+            "reviews": [{ "id": format!("r{upc}") }],
+        }));
+    }
+
+    json!({
+        "products": {
+            "headers": {"cache-control": "public"},
+            "query": { "topProducts": top_products },
+        },
+        "reviews": {
+            "headers": {"cache-control": "public"},
+            "entities": reviews,
+        },
+    })
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_cache() -> Result<(), BoxError> {
@@ -62,7 +110,8 @@ async fn query_planner_cache() -> Result<(), BoxError> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let redis_url = make_redis_url(&REDIS_STANDALONE_PORT).unwrap();
+    let config = RedisConfig::from_url(&redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.init().await.unwrap();
 
@@ -78,8 +127,9 @@ async fn query_planner_cache() -> Result<(), BoxError> {
                             "limit": 2
                         },
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "10s"
                         }
                     }
@@ -152,8 +202,9 @@ async fn query_planner_cache() -> Result<(), BoxError> {
                             "limit": 2
                         },
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "10s"
                         }
                     }
@@ -199,7 +250,8 @@ async fn apq() -> Result<(), BoxError> {
     }
     let namespace = namespace();
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let redis_url = make_redis_url(&REDIS_STANDALONE_PORT).unwrap();
+    let config = RedisConfig::from_url(&redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.init().await.unwrap();
 
@@ -211,8 +263,9 @@ async fn apq() -> Result<(), BoxError> {
                         "limit": 2
                     },
                     "redis": {
-                        "urls": ["redis://127.0.0.1:6379"],
+                        "urls": [redis_url],
                         "namespace": namespace,
+                            "required_to_start": true,
                         "ttl": "10s"
                     }
                 }
@@ -347,7 +400,8 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     }
     let namespace = namespace();
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let redis_url = make_redis_url(&REDIS_STANDALONE_PORT).unwrap();
+    let config = RedisConfig::from_url(&redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.init().await.unwrap();
 
@@ -417,9 +471,10 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                     "all": {
                         "enabled": false,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "2s",
+                            "required_to_start": true,
                             "pool_size": 3
                         },
                     },
@@ -466,15 +521,13 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     // if this is failing due to a cache key change, hook up redis-cli with the MONITOR command to see the keys being set
-    let s:String = client
+    let v:Value = client
           .get(format!("{namespace}:version:1.1:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
           .await
           .unwrap();
-    let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let s: String = client.get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")).await.unwrap();
-    let v: Value = serde_json::from_str(&s).unwrap();
+    let v: Value = client.get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:representation:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")).await.unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
     // we abuse the query shape to return a response with a different but overlapping set of entities
@@ -538,8 +591,9 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                     "all": {
                         "enabled": false,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "2s"
                         },
                     },
@@ -585,11 +639,10 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let s:String = client
-        .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:080fc430afd3fb953a05525a6a00999226c34436466eff7ace1d33d004adaae3:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
+    let v:Value = client
+        .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:8487b68a26af72c427e461b27b66b16a930533c49d64370a2a85eaa518d7db26:representation:8487b68a26af72c427e461b27b66b16a930533c49d64370a2a85eaa518d7db26:hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
         .await
         .unwrap();
-    let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
     const SECRET_SHARED_KEY: &str = "supersecret";
@@ -606,8 +659,9 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                     "all": {
                         "enabled": true,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "2s"
                         },
                         "invalidation": {
@@ -716,7 +770,8 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
     let namespace = namespace();
     let schema = include_str!("../../src/testdata/supergraph_nested_fields.graphql");
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let redis_url = make_redis_url(&REDIS_STANDALONE_PORT).unwrap();
+    let config = RedisConfig::from_url(&redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
     client.wait_for_connect().await.unwrap();
@@ -757,9 +812,10 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": true,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "2s",
+                            "required_to_start": true,
                             "pool_size": 3
                         },
                     }
@@ -801,7 +857,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
     let s: String = client
-        .get(format!("{namespace}:version:1.1:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:2820563c632c1ab498e06030084acf95c97e62afba71a3d4b7c5e81a11cb4d13:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
+        .get(format!("{namespace}:version:1.1:subgraph:users:type:User:entity:3a57ab80cd28b0d17c4d12ae4a72f2fefc3b891797083a20fae029fb48b6f40e:representation:3a57ab80cd28b0d17c4d12ae4a72f2fefc3b891797083a20fae029fb48b6f40e:hash:2820563c632c1ab498e06030084acf95c97e62afba71a3d4b7c5e81a11cb4d13:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -820,8 +876,9 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": false,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "2s"
                         },
                     },
@@ -864,7 +921,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s: String = client
-        .get(format!("{namespace}:version:1.1:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:2820563c632c1ab498e06030084acf95c97e62afba71a3d4b7c5e81a11cb4d13:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
+        .get(format!("{namespace}:version:1.1:subgraph:users:type:User:entity:3a57ab80cd28b0d17c4d12ae4a72f2fefc3b891797083a20fae029fb48b6f40e:representation:3a57ab80cd28b0d17c4d12ae4a72f2fefc3b891797083a20fae029fb48b6f40e:hash:2820563c632c1ab498e06030084acf95c97e62afba71a3d4b7c5e81a11cb4d13:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -884,8 +941,9 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": true,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "5s"
                         },
                         "invalidation": {
@@ -972,7 +1030,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
 
     // This should be in error because we invalidated this entity
     assert!(client
-        .get::<String, _>(format!("{namespace}:version:1.1:subgraph:users:type:User:entity:210e26346d676046faa9fb55d459273a43e5b5397a1a056f179a3521dc5643aa:representation:7cd02a08f4ea96f0affa123d5d3f56abca20e6014e060fe5594d210c00f64b27:hash:cfc5f467f767710804724ff6a05c3f63297328cd8283316adb25f5642e1439ad:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
+        .get::<String, _>(format!("{namespace}:version:1.1:subgraph:users:type:User:entity:3a57ab80cd28b0d17c4d12ae4a72f2fefc3b891797083a20fae029fb48b6f40e:representation:3a57ab80cd28b0d17c4d12ae4a72f2fefc3b891797083a20fae029fb48b6f40e:hash:2820563c632c1ab498e06030084acf95c97e62afba71a3d4b7c5e81a11cb4d13:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
         .await.is_err());
     // This entry should still be in redis because we didn't invalidate this entry
     assert!(client
@@ -992,7 +1050,8 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     }
     let namespace = namespace();
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let redis_url = make_redis_url(&REDIS_STANDALONE_PORT).unwrap();
+    let config = RedisConfig::from_url(&redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.init().await.unwrap();
 
@@ -1141,8 +1200,9 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
                     "all": {
                         "enabled": false,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "2s"
                         },
                     },
@@ -1224,7 +1284,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     );
 
     let s: String = client
-        .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation::hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
+        .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:representation:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -1256,7 +1316,6 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .method(Method::POST)
         .build()
         .unwrap();
-
     let response = supergraph
         .clone()
         .oneshot(request)
@@ -1267,13 +1326,12 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let s:String = client
-          .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation::hash:cb85bbec2ae755057b4229863ea810c364179017179eba6a11afe1e247afd322:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
+    let s:Value = client
+          .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:representation:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:hash:cb85bbec2ae755057b4229863ea810c364179017179eba6a11afe1e247afd322:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
           .await
           .unwrap();
-    let v: Value = serde_json::from_str(&s).unwrap();
     assert_eq!(
-        v.as_object().unwrap().get("data").unwrap(),
+        s.as_object().unwrap().get("data").unwrap(),
         &json! {{
             "reviews": [{
                 "body": "I can sit on it",
@@ -1281,13 +1339,12 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
             }]
         }}
     );
-    let s:String = client
-          .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:472484d4df9e800bbb846447c4c077787860c4c9ec59579d50009bfcba275c3b:representation::hash:cb85bbec2ae755057b4229863ea810c364179017179eba6a11afe1e247afd322:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
+    let s:Value = client
+          .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:f1494ef9a7866493fa3ffe10727b4c61467c24ed84ebf90e5082bed84055e1a2:representation:f1494ef9a7866493fa3ffe10727b4c61467c24ed84ebf90e5082bed84055e1a2:hash:cb85bbec2ae755057b4229863ea810c364179017179eba6a11afe1e247afd322:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
           .await
           .unwrap();
-    let v: Value = serde_json::from_str(&s).unwrap();
     assert_eq!(
-        v.as_object().unwrap().get("data").unwrap(),
+        s.as_object().unwrap().get("data").unwrap(),
         &json! {{
             "reviews": [{
                 "body": "I can sit on it",
@@ -1348,54 +1405,41 @@ async fn connection_failure_blocks_startup() {
         return;
     }
 
-    let _ = apollo_router::TestHarness::builder()
-        .with_subgraph_network_requests()
-        .configuration_json(json!({
-            "supergraph": {
-                "query_planning": {
-                    "cache": {
-                        "in_memory": {
-                            "limit": 2
-                        },
-                        "redis": {
-                            // invalid port
-                            "urls": ["redis://127.0.0.1:6378"]
+    let build_router = |required_to_start: bool| {
+        apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "supergraph": {
+                    "query_planning": {
+                        "cache": {
+                            "in_memory": {
+                                "limit": 2
+                            },
+                            "redis": {
+                                // invalid port
+                                "urls": ["redis://127.0.0.1:6378"],
+                                "required_to_start": required_to_start
+                            }
                         }
                     }
                 }
-            }
-        }))
-        .unwrap()
-        .schema(include_str!("../fixtures/supergraph.graphql"))
-        .build_supergraph()
-        .await
-        .unwrap();
+            }))
+            .unwrap()
+            .schema(include_str!("../fixtures/supergraph.graphql"))
+            .build_supergraph()
+    };
 
-    let e = apollo_router::TestHarness::builder()
-        .with_subgraph_network_requests()
-        .configuration_json(json!({
-            "supergraph": {
-                "query_planning": {
-                    "cache": {
-                        "in_memory": {
-                            "limit": 2
-                        },
-                        "redis": {
-                            // invalid port
-                            "urls": ["redis://127.0.0.1:6378"],
-                            "required_to_start": true
-                        }
-                    }
-                }
-            }
-        }))
-        .unwrap()
-        .schema(include_str!("../fixtures/supergraph.graphql"))
-        .build_supergraph()
-        .await
-        .unwrap_err();
-    //OSX has a different error code for connection refused
-    let e = e.to_string().replace("61", "111"); //
+    // when redis is not required to start, the result should be Ok even with the invalid port
+    let router_result = build_router(false).await;
+    assert!(router_result.is_ok());
+
+    // when redis is required to start, this should error
+    let router_result = build_router(true).await;
+    assert!(router_result.is_err());
+
+    let err = router_result.unwrap_err();
+    // OSX has a different error code for connection refused
+    let e = err.to_string().replace("61", "111");
     assert_eq!(
         e,
         "couldn't build Router service: IO Error: Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }"
@@ -1532,7 +1576,7 @@ async fn test_redis_connections_are_closed_on_router_reload() {
     router.start().await;
     router.assert_started().await;
 
-    let expected_metric = r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 4"#;
+    let expected_metric = r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 2"#;
     router.assert_metrics_contains(expected_metric, None).await;
 
     // check that reloading the schema yields the same number of redis connections
@@ -1541,4 +1585,436 @@ async fn test_redis_connections_are_closed_on_router_reload() {
     router.assert_reloaded().await;
 
     router.assert_metrics_contains(expected_metric, None).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_emits_response_size_avg_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    router.execute_several_default_queries(2).await;
+
+    let experimental_response_avg_metric = r#"experimental_apollo_router_cache_redis_response_size_avg{kind="query planner",otel_scope_name="apollo/router"}"#;
+    router
+        .assert_metric_non_zero(experimental_response_avg_metric, None)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_emits_request_size_avg_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    router.execute_several_default_queries(2).await;
+
+    let experimental_response_avg_metric = r#"experimental_apollo_router_cache_redis_request_size_avg{kind="query planner",otel_scope_name="apollo/router"}"#;
+    router
+        .assert_metric_non_zero(experimental_response_avg_metric, None)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_emits_configuration_error_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let config = json!({
+        "include_subgraph_errors": {
+            "all": true,
+        },
+        "preview_entity_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "redis": {
+                        "urls": ["invalid-redis-schem://127.0.0.1:7000"], // invalid schema!
+                        "ttl": "10m",
+                        "required_to_start": false, // don't fail startup, allow errors during runtime
+                    },
+                },
+            },
+        },
+        "telemetry": {
+            "exporters": {
+                "metrics": {
+                    "prometheus": {
+                        "enabled": true,
+                        "listen": "127.0.0.1:0",
+                        "path": "/metrics",
+                    },
+                },
+            },
+        },
+        "experimental_mock_subgraphs": subgraphs_with_many_entities(10),
+    });
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config).unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute queries that will attempt Redis operations and fail
+    for _ in 0..3 {
+        let query = Query::builder()
+            .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+            .build();
+        let (_trace_id, response) = router.execute_query(query).await;
+        // The query should still succeed (using fallback) even though Redis fails
+        assert_eq!(response.status(), 200);
+    }
+
+    router
+        .assert_metric_non_zero(
+            r#"apollo_router_cache_redis_errors_total{error_type="config",kind="entity",otel_scope_name="apollo/router"}"#,
+            None,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_uses_replicas_when_clustered() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let namespace = Uuid::new_v4().to_string();
+    let redis_monitor = RedisMonitor::new(&REDIS_CLUSTER_PORTS).await;
+
+    // NB: `reset_ttl` must be false in the config, otherwise GETs will be sent to primary
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .redis_namespace(&namespace)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    router.execute_several_default_queries(2).await;
+
+    let redis_monitor_output = redis_monitor.collect().await;
+    assert!(
+        redis_monitor_output
+            .namespaced(&namespace)
+            .command_sent_to_replicas_only("GET")
+    );
+
+    let replicas_output = redis_monitor_output.replicas(true);
+    assert!(replicas_output.command_sent_to_all("READONLY"));
+
+    let primaries_output = redis_monitor_output.replicas(false);
+    assert!(!primaries_output.command_sent_to_any("READONLY"));
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
+
+    // check that there were no parse errors; these might show up when fred can't read the cluster
+    // state properly
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(parse_error).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let namespace = Uuid::new_v4().to_string();
+    let redis_monitor = RedisMonitor::new(&REDIS_STANDALONE_PORT).await;
+
+    let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .log("trace,jsonpath_lib=info")
+        .redis_namespace(&namespace)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let expected_metric = r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 2"#;
+    router.assert_metrics_contains(expected_metric, None).await;
+
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    let responses = router.execute_several_default_queries(2).await;
+    for response in responses {
+        let r = response.1.text().await;
+        eprintln!("{r:?}");
+    }
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
+
+    // check that there were no parse errors; these might show up when fred can't read the cluster
+    // state properly
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(parse_error).await;
+
+    let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
+    assert_eq!(redis_monitor_output.num_nodes(), 1);
+    assert!(redis_monitor_output.command_sent_to_any("GET"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_uses_replicas_in_clusters_for_mgets() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/response_cache_redis_cluster.router.yaml");
+    let mut subgraph_overrides = HashMap::new();
+
+    let products_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "topProducts": [
+                {"__typename":"Product","upc":"1","name":"Table","reviews":[{"id":"review1"}]},
+                {"__typename":"Product","upc":"2","name":"Chair","reviews":[{"id":"review2"}]},
+                {"__typename":"Product","upc":"3","name":"Desk","reviews":[{"id":"review3"}]},
+                {"__typename":"Product","upc":"4","name":"Lamp","reviews":[{"id":"review4"}]},
+                {"__typename":"Product","upc":"5","name":"Sofa","reviews":[{"id":"review5"}]}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let reviews_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"Review","id":"review1","author":{"__typename":"User","id":"user1"}},
+                {"__typename":"Review","id":"review2","author":{"__typename":"User","id":"user2"}},
+                {"__typename":"Review","id":"review3","author":{"__typename":"User","id":"user3"}},
+                {"__typename":"Review","id":"review4","author":{"__typename":"User","id":"user4"}},
+                {"__typename":"Review","id":"review5","author":{"__typename":"User","id":"user5"}}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let accounts_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"User","id":"user1"},
+                {"__typename":"User","id":"user2"},
+                {"__typename":"User","id":"user3"},
+                {"__typename":"User","id":"user4"},
+                {"__typename":"User","id":"user5"}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let mock_products_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_reviews_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_accounts_subgraph = wiremock::MockServer::builder().start().await;
+
+    for (name, mock_server, response) in [
+        ("products", &mock_products_subgraph, products_response),
+        ("reviews", &mock_reviews_subgraph, reviews_response),
+        ("accounts", &mock_accounts_subgraph, accounts_response),
+    ] {
+        let http_method = Method::POST;
+        let mocked_response = Mock::given(method(http_method))
+            .and(path_regex(".*"))
+            .respond_with(response);
+
+        mocked_response.mount(mock_server).await;
+        subgraph_overrides.insert(name.to_string(), mock_server.uri());
+    }
+
+    let namespace = namespace();
+
+    let mut router = IntegrationTest::builder()
+        .redis_namespace(&namespace)
+        .config(router_config)
+        .subgraph_overrides(subgraph_overrides)
+        .log("trace,jsonpath_lib=info")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let redis_monitor = RedisMonitor::new(&REDIS_CLUSTER_PORTS).await;
+
+    // send a few different queries to ensure a redis cache hit
+    let mut join_set = JoinSet::new();
+    for _ in 0..5 {
+        let query = Query::builder()
+            .body(
+                json!({"query":"{ topProducts(first: 5) { name reviews { id } } }","variables":{}}),
+            )
+            .header("cache-control", "public")
+            .build();
+
+        join_set.spawn(router.execute_query(query));
+    }
+    let _ = join_set.join_all().await;
+
+    let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
+    assert!(redis_monitor_output.command_sent_to_replicas_only("MGET"));
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
+
+    // check that there were no parse errors; parse errors happen whenever a response from redis to
+    // fred can't be understood by fred, which can be redis config issues, type conversion
+    // shenanigans, or things like being in the middle of a transaction (pipeline) and trying to
+    // convert a value
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
+    router.assert_metrics_does_not_contain(parse_error).await;
+
+    let example_cache_key = "version:1.1:subgraph:reviews:type:Product:representation:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    router
+        .assert_redis_cache_contains(example_cache_key, None)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_in_standalone_mode_for_mgets() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/response_cache_redis_standalone.router.yaml");
+
+    // name, url
+    let mut subgraph_overrides = HashMap::new();
+
+    let products_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "topProducts": [
+                {"__typename":"Product","upc":"1","name":"Table","reviews":[{"id":"review1"}]},
+                {"__typename":"Product","upc":"2","name":"Chair","reviews":[{"id":"review2"}]},
+                {"__typename":"Product","upc":"3","name":"Desk","reviews":[{"id":"review3"}]},
+                {"__typename":"Product","upc":"4","name":"Lamp","reviews":[{"id":"review4"}]},
+                {"__typename":"Product","upc":"5","name":"Sofa","reviews":[{"id":"review5"}]}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let reviews_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"Review","id":"review1","author":{"__typename":"User","id":"user1"}},
+                {"__typename":"Review","id":"review2","author":{"__typename":"User","id":"user2"}},
+                {"__typename":"Review","id":"review3","author":{"__typename":"User","id":"user3"}},
+                {"__typename":"Review","id":"review4","author":{"__typename":"User","id":"user4"}},
+                {"__typename":"Review","id":"review5","author":{"__typename":"User","id":"user5"}}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let accounts_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"User","id":"user1"},
+                {"__typename":"User","id":"user2"},
+                {"__typename":"User","id":"user3"},
+                {"__typename":"User","id":"user4"},
+                {"__typename":"User","id":"user5"}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let mock_products_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_reviews_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_accounts_subgraph = wiremock::MockServer::builder().start().await;
+
+    for (name, mock_server, response) in [
+        ("products", &mock_products_subgraph, products_response),
+        ("reviews", &mock_reviews_subgraph, reviews_response),
+        ("accounts", &mock_accounts_subgraph, accounts_response),
+    ] {
+        let http_method = Method::POST;
+        let mocked_response = Mock::given(method(http_method))
+            .and(path_regex(".*"))
+            .respond_with(response);
+
+        mocked_response.mount(mock_server).await;
+        subgraph_overrides.insert(name.to_string(), mock_server.uri());
+    }
+
+    let namespace = namespace();
+    let redis_monitor = RedisMonitor::new(&REDIS_STANDALONE_PORT).await;
+
+    let mut router = IntegrationTest::builder()
+        .redis_namespace(&namespace)
+        .config(router_config)
+        .subgraph_overrides(subgraph_overrides)
+        .log("trace,jsonpath_lib=info")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // send a few different queries to ensure a redis cache hit
+    let mut join_set = JoinSet::new();
+    for _ in 0..5 {
+        let query = Query::builder()
+            .body(
+                json!({"query":"{ topProducts(first: 5) { name reviews { id } } }","variables":{}}),
+            )
+            .header("cache-control", "public")
+            .build();
+        join_set.spawn(router.execute_query(query));
+    }
+    let _ = join_set.join_all().await;
+
+    // when there's only 1 node, the MGET will be sent to it
+    let redis_monitor_output = redis_monitor.collect().await;
+    assert_eq!(redis_monitor_output.num_nodes(), 1);
+    assert!(redis_monitor_output.command_sent_to_any("MGET"));
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
+
+    // check that there were no parse errors; parse errors happen whenever a response from redis to
+    // fred can't be understood by fred, which can be redis config issues, type conversion
+    // shenanigans, or things like being in the middle of a transaction (pipeline) and trying to
+    // convert a value
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
+    router.assert_metrics_does_not_contain(parse_error).await;
+
+    let example_cache_key = "version:1.1:subgraph:reviews:type:Product:representation:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    router
+        .assert_redis_cache_contains(example_cache_key, None)
+        .await;
 }

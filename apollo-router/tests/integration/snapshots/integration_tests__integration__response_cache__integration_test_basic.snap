@@ -45,7 +45,7 @@ expression: response
       "version": "1.0",
       "data": [
         {
-          "key": "version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.1:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "rootFields": [
@@ -62,6 +62,7 @@ expression: response
             "maxAge": 60,
             "public": true
           },
+          "shouldStore": true,
           "data": {
             "data": {
               "topProducts": [
@@ -82,10 +83,22 @@ expression: response
                 }
               ]
             }
-          }
+          },
+          "warnings": [
+            {
+              "code": "NO_CACHE_TAG_ON_ROOT_FIELD",
+              "links": [
+                {
+                  "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods",
+                  "title": "Add '@cacheTag' in your schema"
+                }
+              ],
+              "message": "No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."
+            }
+          ]
         },
         {
-          "key": "version:1.0:subgraph:reviews:type:Product:representation:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.1:subgraph:reviews:type:Product:representation:dd668a3ba05fb2fcd9e372b7063fe717f3ff1c209c29fa8367b8324e49775115:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "typename": "Product",
@@ -119,6 +132,7 @@ expression: response
             "maxAge": 10,
             "public": true
           },
+          "shouldStore": true,
           "data": {
             "data": {
               "reviews": [
@@ -127,10 +141,26 @@ expression: response
                 }
               ]
             }
-          }
+          },
+          "warnings": [
+            {
+              "code": "CACHE_CONTROL_SMALL_MAX_AGE",
+              "links": [
+                {
+                  "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/observability",
+                  "title": "Monitor with telemetry"
+                },
+                {
+                  "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                  "title": "Cache-Control header documentation"
+                }
+              ],
+              "message": "The subgraph returned a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
+            }
+          ]
         },
         {
-          "key": "version:1.0:subgraph:reviews:type:Product:representation:2c6d8b73241e1bc016ddc35bff648f693687d3181d18815493a32f69614f6507:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.1:subgraph:reviews:type:Product:representation:17df34346610d06f667e1d99b701934ccc3c3985b0043ff253b109f2212824a0:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "typename": "Product",
@@ -164,6 +194,7 @@ expression: response
             "maxAge": 10,
             "public": true
           },
+          "shouldStore": true,
           "data": {
             "data": {
               "reviews": [
@@ -175,10 +206,26 @@ expression: response
                 }
               ]
             }
-          }
+          },
+          "warnings": [
+            {
+              "code": "CACHE_CONTROL_SMALL_MAX_AGE",
+              "links": [
+                {
+                  "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/observability",
+                  "title": "Monitor with telemetry"
+                },
+                {
+                  "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                  "title": "Cache-Control header documentation"
+                }
+              ],
+              "message": "The subgraph returned a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
+            }
+          ]
         },
         {
-          "key": "version:1.0:subgraph:reviews:type:Product:representation:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.1:subgraph:reviews:type:Product:representation:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "typename": "Product",
@@ -212,6 +259,7 @@ expression: response
             "maxAge": 10,
             "public": true
           },
+          "shouldStore": true,
           "data": {
             "data": {
               "reviews": [
@@ -226,7 +274,23 @@ expression: response
                 }
               ]
             }
-          }
+          },
+          "warnings": [
+            {
+              "code": "CACHE_CONTROL_SMALL_MAX_AGE",
+              "links": [
+                {
+                  "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/observability",
+                  "title": "Monitor with telemetry"
+                },
+                {
+                  "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                  "title": "Cache-Control header documentation"
+                }
+              ],
+              "message": "The subgraph returned a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
+            }
+          ]
         }
       ]
     }

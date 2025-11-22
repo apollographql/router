@@ -4,7 +4,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.0:subgraph:user:type:Query:hash:fa8ff6a034f5ccb3f49e51bc30ff031104ba420310e67764f9e9f82702437592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6:e5f2f41088e29e53b255bb3555658905ddbabeefa5b37f6aa36f7e102511df2c",
+    "key": "version:1.1:subgraph:user:type:Query:hash:fa8ff6a034f5ccb3f49e51bc30ff031104ba420310e67764f9e9f82702437592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6:e5f2f41088e29e53b255bb3555658905ddbabeefa5b37f6aa36f7e102511df2c",
     "invalidationKeys": [
       "currentUser"
     ],
@@ -23,6 +23,7 @@ expression: cache_keys
       "maxAge": 86400,
       "private": true
     },
+    "shouldStore": true,
     "hashedPrivateId": "e5f2f41088e29e53b255bb3555658905ddbabeefa5b37f6aa36f7e102511df2c",
     "data": {
       "data": {
@@ -33,10 +34,11 @@ expression: cache_keys
           }
         }
       }
-    }
+    },
+    "warnings": []
   },
   {
-    "key": "version:1.0:subgraph:orga:type:Organization:representation:07f0ad9351c409fd3acfae0be59e64f218dc486d6dbe0081e68794673b96df73:hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6:e5f2f41088e29e53b255bb3555658905ddbabeefa5b37f6aa36f7e102511df2c",
+    "key": "version:1.1:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6:e5f2f41088e29e53b255bb3555658905ddbabeefa5b37f6aa36f7e102511df2c",
     "invalidationKeys": [
       "organization",
       "organization-1"
@@ -65,6 +67,8 @@ expression: cache_keys
       "maxAge": 86400,
       "private": true
     },
+    "shouldStore": true,
+    "hashedPrivateId": "e5f2f41088e29e53b255bb3555658905ddbabeefa5b37f6aa36f7e102511df2c",
     "data": {
       "data": {
         "creatorUser": {
@@ -72,6 +76,7 @@ expression: cache_keys
           "id": 2
         }
       }
-    }
+    },
+    "warnings": []
   }
 ]

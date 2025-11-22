@@ -5,6 +5,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::errors::Error;
@@ -73,6 +75,11 @@ pub struct Request {
 
     /// Original request to the Router.
     pub(crate) supergraph_request: Arc<http::Request<graphql::Request>>,
+
+    /// The operation being executed. Together with
+    /// req.connector.schema_subtypes_map, this document enables GraphQL
+    /// execution of the document.
+    pub(crate) operation: Option<Arc<Valid<ExecutableDocument>>>,
 }
 
 /// Response type for a connector
@@ -284,6 +291,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                 debug_request,
                 debug.as_ref(),
                 request.supergraph_request,
+                request.operation.clone(),
             )
             .await)
         })
