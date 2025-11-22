@@ -254,11 +254,13 @@ impl Opt {
     }
 
     pub fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
+        tracing::debug!("validating reference: {}", reference.to_string());
         // Accepts both SHA256 digest and tag format
-        let sha256_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
-        let tag_regex = Regex::new(r":[\w][\w.-]{0,127}$").unwrap();
+        let sha256_regex =
+            Regex::new(r"^[\w.-]+(?::\d+)?(?:/[\w.-]+)+@sha256:[0-9a-fA-F]{64}$").unwrap();
+        let tag_regex = Regex::new(r"^[\w.-]+(?::\d+)?(?:/[\w.-]+)+:[\w][\w.-]{0,127}$").unwrap();
         if sha256_regex.is_match(reference) || tag_regex.is_match(reference) {
-            tracing::debug!("validated OCI configuration");
+            tracing::debug!("validated OCI configuration: {}", reference.to_string());
             Ok(reference.to_string())
         } else {
             Err(anyhow!("invalid graph artifact reference: {reference}"))
@@ -828,11 +830,30 @@ mod tests {
     fn test_validate_oci_reference_valid_cases() {
         // Test valid OCI references with different hash values
         let valid_hashes = vec![
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha256:ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
-            "@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-            "@sha256:0000000000000000000000000000000000000000000000000000000000000000",
-            "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            // "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // "@sha256:ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
+            // "@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+            // "@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            // "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "artifact.api.apollographql.com/summit-demo-test-4df260ae9be61e7a@sha256:142067152bd8e2c1411c87ef872cb27d2d5053f55a5a70b00068c5789dc27682",
+            "registry.example.com/alpine@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "docker.io/library/ubuntu@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ghcr.io/org/project@sha256:1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd",
+            "registry.example.com/repo/image@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+            "my.custom.registry:5000/team/app@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "us.gcr.io/project/image@sha256:abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            "artifact.api.apollographql.com/summit-demo-test-4df260ae9be61e7a:test-9f86d081884c7d65",
+            "registry.example.com/alpine:latest",
+            "docker.io/library/ubuntu:22.04",
+            "ghcr.io/org/project:v1.2.3",
+            "my.custom.registry:5000/app/service:prod-build.1",
+            "registry.example.com/ns/image:dev",
+            "us.gcr.io/project/api:v0.0.0-alpha",
+            "quay.io/org/myapp:release-2025",
+            "registry.example.com/x/y:z",
+            "registry.example.com/app:LATEST",
+            "registry.example.com/app:ProdBuild",
+            "registry.example.com/app:RC_1",
         ];
 
         for hash in valid_hashes {
@@ -846,35 +867,59 @@ mod tests {
     fn test_validate_oci_reference_invalid_cases() {
         let invalid_references = vec![
             // Missing @sha256: prefix
-            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "artifact.api.apollographql.com/summit-demo-test-4df21234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
             // Wrong prefix
-            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
             // Too short
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
             // Too long
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
             // Invalid characters
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
             // Empty string
             "",
             // Just the prefix
-            "@sha256:",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256:",
             // Hash with spaces
-            "@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ",
             // Hash with dashes
-            "@sha256:12345678-90abcdef-12345678-90abcdef-12345678-90abcdef-12345678-90abcdef",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256:12345678-90abcdef-12345678-90abcdef-12345678-90abcdef-12345678-90abcdef",
             // Hash with colons
-            "@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef",
             // Missing hash entirely
-            "@sha256",
-            // Wrong format entirely
-            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256",
             // Extra characters at the end
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef:latest",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef:latest",
+            "artifact.api.apollographql.com/summit-demo-test-4df2@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
+            // no image name
+            "registry.example.com/@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "registry.example.com//@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            // tag begins with invalid character
+            "registry.example.com/app:-latest",
+            "registry.example.com/app:.123",
+            "registry.example.com/app:!boom",
+            "registry.example.com/app: latest",
+            // tag contains invalid chars
+            "registry.example.com/app:my tag",      // spaces
+            "registry.example.com/app:ver#1",       // # not allowed
+            "registry.example.com/app:hello/world", // / not allowed
+            "registry.example.com/app:alpha@beta",  // @ not allowed
+            "registry.example.com/app:tag?test",    // ? not allowed
+            // missing tag after colon
+            "registry.example.com/app:",
+            "registry.example.com/app::",
+            "registry.example.com/app:",
+            // tag exceeds chars
+            "registry.example.com/app:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            // missing image name
+            "registry.example.com/:latest",
+            "registry.example.com:latest",
+            "registry.example.com/app@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "registry.example.com/app@shaXYZ:abcd",
+            "registry.example.com/app@sha256:ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
         ];
 
         for reference in invalid_references {
