@@ -1,5 +1,6 @@
 use std::string::FromUtf8Error;
 use std::time::Duration;
+
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
 use futures::Stream;
@@ -145,9 +146,7 @@ async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
 }
 
 /// Fetch just the manifest digest without fetching the full manifest
-pub(crate) async fn fetch_oci_manifest_digest(
-    oci_config: &OciConfig,
-) -> Result<String, OciError> {
+pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<String, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
     let protocol = infer_oci_protocol(reference.resolve_registry()).await;
@@ -157,9 +156,7 @@ pub(crate) async fn fetch_oci_manifest_digest(
         ..Default::default()
     });
 
-    let digest = client
-        .fetch_manifest_digest(&reference, &auth)
-        .await?;
+    let digest = client.fetch_manifest_digest(&reference, &auth).await?;
 
     Ok(digest)
 }
@@ -198,8 +195,7 @@ pub(crate) fn stream_from_oci(
         loop {
             match fetch_oci_manifest_digest(&oci_config).await {
                 Ok(current_digest) => {
-
-                    if last_digest.as_ref().map(|d| d.as_str()) == Some(current_digest.as_str()) {
+                    if last_digest.as_deref() == Some(current_digest.as_str()) {
                         // Digest unchanged, skip fetching the full schema
                         tracing::debug!("oci manifest digest unchanged, skipping schema fetch");
                     } else {
@@ -254,8 +250,13 @@ pub(crate) fn stream_from_oci(
 
 #[cfg(test)]
 mod tests {
-    use futures::future::join_all;
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
     use futures::StreamExt;
+    use futures::future::join_all;
     use oci_client::client::ClientConfig;
     use oci_client::client::ClientProtocol;
     use oci_client::client::ImageLayer;
@@ -267,9 +268,6 @@ mod tests {
     use parking_lot::Mutex;
     use sha2::Digest;
     use sha2::Sha256;
-    use std::collections::VecDeque;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::timeout;
     use url::Url;
     use wiremock::Mock;
@@ -732,7 +730,10 @@ mod tests {
 
         let timeout_result = timeout(Duration::from_millis(100), stream.next()).await;
         // should time out, it means no new result was produced since digest is unchanged
-        assert!(timeout_result.is_err(), "Expected no new result when digest is unchanged");
+        assert!(
+            timeout_result.is_err(),
+            "Expected no new result when digest is unchanged"
+        );
         assert_eq!(
             blob_request_count.load(Ordering::Relaxed),
             1,
@@ -752,7 +753,8 @@ mod tests {
             "{}/v2/{graph_id}/blobs/{}",
             mock_server.uri(),
             manifest_info1.blob_digest
-        )).expect("url must be valid");
+        ))
+        .expect("url must be valid");
 
         let blob_count1 = blob_request_count.clone();
         Mock::given(method("GET"))
@@ -771,7 +773,8 @@ mod tests {
             "{}/v2/{graph_id}/blobs/{}",
             mock_server.uri(),
             manifest_info2.blob_digest
-        )).expect("url must be valid");
+        ))
+        .expect("url must be valid");
         let blob_count2 = blob_request_count.clone();
         Mock::given(method("GET"))
             .and(path(blob_url2.path()))
@@ -789,7 +792,8 @@ mod tests {
             mock_server.uri(),
             graph_id,
             reference
-        )).expect("url must be valid");
+        ))
+        .expect("url must be valid");
 
         // mock returns digest1, then digest2 sequentially
         let _ = Mock::given(method("HEAD"))
