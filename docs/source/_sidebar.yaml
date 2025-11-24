@@ -287,6 +287,8 @@ items:
             href: "./cloud/"
           - label: "Configuration"
             href: "./cloud/configuration"
+          - label: "Migrate to Self-Hosted"
+            href: "./cloud/migrate-to-self-hosted"
           - label: "Secure Subgraphs"
             href: "./cloud/secure-subgraphs"
           - label: "Subscriptions"

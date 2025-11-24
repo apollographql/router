@@ -1,0 +1,88 @@
+---
+title: Migrate Cloud Graphs to Self-Hosted
+subtitle: Migrate your graph from cloud-hosted to self-hosted
+description: Migrate all Apollo GraphOS cloud graphs (Serverless and Dedicated) to self-hosted Apollo Router instances as part of Cloud Router retirement.
+---
+
+<Note>
+
+Apollo is retiring the Serverless and Dedicated plans and will sunset hosted cloud routers on &lt;TODO SUNSET DATE&gt;. You must migrate all graphs to self-hosted mode before moving your organization to a [supported plan](https://www.apollographql.com/pricing) (Free, Developer, or Standard).
+
+During the migration window, your cloud router continues to receive traffic, receive schema, and configuration updates. The migration window ends on &lt;TODO SUNSET DATE&gt;.
+
+</Note>
+
+## Steps
+
+### Export your cloud router configuration
+
+To self-host the Apollo Router with the same configuration as your cloud router, first export the current cloud router configuration.
+
+In Studio, navigate to your graph’s Cloud Router page to download the config. Alternatively, use the [Rover CLI's `cloud config fetch` command](https://www.apollographql.com/docs/rover/commands/cloud#cloud-config-fetch).
+
+```bash
+rover cloud config fetch <GRAPH_REF> > router.yaml
+```
+
+[Install](https://www.apollographql.com/docs/rover/getting-started) and [configure](https://www.apollographql.com/docs/rover/configuring) the Rover CLI to run this command.
+
+### Change the graph’s hosting mode to self-hosted
+
+In Studio, change the graph’s hosting mode from cloud-hosted to self-hosted using the **Start the migration process** action in the retirement banner at the top of your variant’s page.
+During the migration window, the cloud router remains running and continues to receive schema and configuration updates.
+
+### Deploy a self-hosted router
+
+Deploy a self‑hosted router using your preferred platform. See [the self-hosted routing documentation](https://www.apollographql.com/docs/graphos/routing/self-hosted) for details. For a production-grade self-hosted deployment, Apollo recommends the [Apollo GraphOS Operator](https://www.apollographql.com/docs/apollo-operator).
+
+### Validate and shift traffic
+
+Validate the new endpoint, then gradually shift production traffic from the cloud router to your self-hosted endpoint.
+
+### Move your organization to a supported plan
+
+After you migrate all graphs to self-hosted mode, go to &lt;TODO&gt; to move your organization to a supported plan.
+
+## Frequently asked questions
+
+### What happens to my running cloud routers when I change my graph’s hosting mode?
+
+Changing a graph’s hosting mode does not affect running cloud routers. Cloud routers continue to receive traffic, emit telemetry, and receive schema and configuration updates until a [shutdown event occurs for Serverless routers](https://www.apollographql.com/docs/graphos/routing/cloud/serverless#automatic-deletion-of-unused-routers) or the migration period ends on &lt;TODO SUNSET DATE&gt;.
+
+### How can I publish schema updates after converting to self-hosted mode?
+
+Publish schema updates with the Rover CLI as usual. For example, to publish a subgraph update (adding a new subgraph or updating an existing one):
+
+```bash
+APOLLO_KEY=<YOUR_API_KEY> rover subgraph publish <GRAPH_REF> \
+  --name <SUBGRAPH_NAME> \
+  --routing-url <SUBGRAPH_URL> \
+  --schema ./updated-schema.graphql
+```
+
+[Install](https://www.apollographql.com/docs/rover/getting-started) and [configure](https://www.apollographql.com/docs/rover/configuring) the Rover CLI to run this command.
+
+### How do I retrieve the configuration of my running cloud routers after converting to self-hosted mode?
+
+Use the [Rover CLI's `cloud config fetch` command](https://www.apollographql.com/docs/rover/commands/cloud#cloud-config-fetch) to fetch your cloud router configuration:
+
+```bash
+rover cloud config fetch <GRAPH_REF> > router.yaml
+```
+
+[Install](https://www.apollographql.com/docs/rover/getting-started) and [configure](https://www.apollographql.com/docs/rover/configuring) the Rover CLI to run this command.
+
+### How can I update the configuration of my running cloud routers after converting to self-hosted mode?
+
+Use the [Rover CLI's `cloud config update` command](https://www.apollographql.com/docs/rover/commands/cloud#cloud-config-update) to update your running cloud routers’ configuration. For example, to apply changes from a local `router.yaml`:
+
+```bash
+rover cloud config update <GRAPH_REF> < router.yaml
+```
+[Install](https://www.apollographql.com/docs/rover/getting-started) and [configure](https://www.apollographql.com/docs/rover/configuring) the Rover CLI to run this command.
+
+### How long will my cloud routers run after the associated graph is converted to self-hosted mode?
+
+Cloud routers continue to follow existing policies during the migration window. The migration window ends on &lt;TODO SUNSET DATE&gt;.
+
+
