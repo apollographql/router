@@ -270,6 +270,9 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-credential-types",
+ "aws-sdk-sso",
+ "aws-sdk-ssooidc",
+ "aws-sdk-sts",
  "aws-sigv4",
  "aws-smithy-runtime-api",
  "aws-types",
@@ -303,6 +306,7 @@ dependencies = [
  "hex",
  "hickory-resolver",
  "hmac",
+ "home",
  "http 0.2.12",
  "http-body 0.4.6",
  "http-serde",
@@ -1158,6 +1162,7 @@ dependencies = [
  "base64-simd",
  "bytes",
  "bytes-utils",
+ "futures-core",
  "http 0.2.12",
  "http 1.3.1",
  "http-body 0.4.6",
@@ -1170,6 +1175,8 @@ dependencies = [
  "ryu",
  "serde",
  "time",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -3351,7 +3358,7 @@ dependencies = [
  "itoa",
  "pin-project-lite",
  "smallvec",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
