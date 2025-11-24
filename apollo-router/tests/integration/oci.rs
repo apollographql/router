@@ -183,7 +183,7 @@ async fn test_router_oci_cannot_fetch_schema() -> Result<(), BoxError> {
 
     router.start().await;
     router
-        .wait_for_log_message("no valid schema was supplied")
+        .wait_for_log_message("error fetching manifest digest from oci registry")
         .await;
     Ok(())
 }
