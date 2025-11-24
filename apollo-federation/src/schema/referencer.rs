@@ -250,6 +250,12 @@ impl Referencers {
         }
 
         for (_directive_name, directive_refs) in self.directives.iter_mut() {
+            Self::update_object_type_positions(
+                &mut directive_refs.object_types,
+                old_name,
+                new_name,
+            );
+
             Self::update_object_field_positions(
                 &mut directive_refs.object_fields,
                 old_name,
@@ -261,6 +267,23 @@ impl Referencers {
                 new_name,
             );
         }
+    }
+
+    fn update_object_type_positions(
+        types: &mut IndexSet<ObjectTypeDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_types: Vec<_> = types
+            .iter()
+            .filter(|t| &t.type_name == old_type_name)
+            .map(|_| ObjectTypeDefinitionPosition {
+                type_name: new_type_name.clone(),
+            })
+            .collect();
+
+        types.retain(|t| &t.type_name != old_type_name);
+        types.extend(updated_types);
     }
 
     fn update_object_field_positions(
