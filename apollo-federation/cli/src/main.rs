@@ -303,14 +303,7 @@ fn compose_files_inner(
 fn compose_from_config_inner(
     config_path: &Path,
 ) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
-    let config_str = std::fs::read_to_string(config_path).map_err(|e| {
-        vec![CompositionError::MergeError {
-            error: SingleFederationError::Internal {
-                message: format!("Failed to read config file: {}", e),
-            },
-        }]
-    })?;
-
+    let config_str = read_input(config_path);
     let config: SupergraphConfig = serde_yaml::from_str(&config_str).map_err(|e| {
         vec![CompositionError::MergeError {
             error: SingleFederationError::Internal {
