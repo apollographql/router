@@ -962,7 +962,20 @@ impl InstrumentsConfig {
                 ),
             );
         }
-
+        if self.cache.attributes.response_cache.is_enabled() {
+            static_instruments.insert(
+                RESPONSE_CACHE_METRIC.to_string(),
+                StaticInstrument::CounterF64(
+                    meter
+                        .f64_counter(RESPONSE_CACHE_METRIC)
+                        .with_unit("ops")
+                        .with_description(
+                            "Response cache hit/miss operations at the subgraph level",
+                        )
+                        .build()
+                ),
+            );
+        }
         static_instruments
     }
 
