@@ -7,7 +7,7 @@ use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::{Instrument, Stream};
 use opentelemetry_sdk::metrics::StreamBuilder;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
@@ -156,11 +156,15 @@ pub(crate) struct MetricView {
     pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
 }
 
-impl TryInto<StreamBuilder> for MetricView {
+pub (crate) type OTelMetricView = Box<dyn Fn(&Instrument) -> Option<Stream> + Send + Sync>;
+
+impl TryInto<OTelMetricView> for MetricView {
     type Error = String;
 
-    fn try_into(self) -> Result<StreamBuilder, Self::Error> {
-        let aggregation = self.aggregation.map(|aggregation| match aggregation {
+    fn try_into(self) -> Result<OTelMetricView, Self::Error> {
+        let target_name = self.rename.clone().unwrap_or_else(|| self.name.clone());
+
+        let otel_aggregation = self.aggregation.map(|aggregation| match aggregation {
             MetricAggregation::Histogram { buckets } => {
                 opentelemetry_sdk::metrics::Aggregation::ExplicitBucketHistogram {
                     boundaries: buckets,
@@ -169,26 +173,33 @@ impl TryInto<StreamBuilder> for MetricView {
             }
             MetricAggregation::Drop => opentelemetry_sdk::metrics::Aggregation::Drop,
         });
-        let mut mask = Stream::builder().with_name(if let Some(new_name) = self.rename {
-            new_name
-        } else {
-            self.name.clone()
-        });
-        if let Some(desc) = self.description {
-            mask = mask.with_description(desc);
-        }
-        if let Some(unit) = self.unit {
-            mask = mask.with_unit(unit);
-        }
-        if let Some(aggregation) = aggregation {
-            mask = mask.with_aggregation(aggregation);
-        }
-        if let Some(allowed_attribute_keys) = self.allowed_attribute_keys {
-            mask =
-                mask.with_allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
-        }
 
-        Ok(mask)
+        let allowed_keys: Option<Vec<Key>> = self.allowed_attribute_keys.map(|set| {
+            set.into_iter().map(Key::new).collect()
+        });
+
+        Ok(Box::new(move |i: &Instrument| {
+            if i.name() != self.name {
+                return None;
+            }
+
+            let mut builder = Stream::builder().with_name(target_name.clone());
+
+            if let Some(desc) = &self.description {
+                builder = builder.with_description(desc.clone());
+            }
+            if let Some(unit) = &self.unit {
+                builder = builder.with_unit(unit.clone());
+            }
+            if let Some(ref agg) = otel_aggregation {
+                builder = builder.with_aggregation(agg.clone());
+            }
+            if let Some(ref keys) = allowed_keys {
+                builder = builder.with_allowed_attribute_keys(keys.clone().into_iter());
+            }
+
+            builder.build().ok()
+        }))
     }
 }
 

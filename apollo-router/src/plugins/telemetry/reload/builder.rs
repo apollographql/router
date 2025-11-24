@@ -22,10 +22,12 @@
 //! External exporters may perform blocking I/O during construction, so the entire build process
 //! runs in [`block_in_place`] to avoid blocking the async runtime.
 
+use std::io::ErrorKind;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use multimap::MultiMap;
+use opentelemetry_sdk::metrics::{Instrument, Stream, StreamBuilder};
 use tokio::task::block_in_place;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -35,7 +37,7 @@ use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::apollo;
 use crate::plugins::telemetry::apollo_exporter::Sender;
-use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::{Conf, OTelMetricView};
 use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config_new::cache::CACHE_METRIC;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
@@ -157,8 +159,7 @@ impl<'a> Builder<'a> {
             // we throw the entity caching operations metric here. This is handled exceptionally
             // until we move fully from entity caching to response caching which does NOT
             // necessitate this as it does not touch the safe-listed `operations.*` namespace.
-            builder.with_view(
-                MeterProviderType::Apollo,
+            let view: OTelMetricView =
                 MetricView {
                     name: String::from(CACHE_METRIC),
                     rename: None,
@@ -167,7 +168,10 @@ impl<'a> Builder<'a> {
                     aggregation: Some(crate::plugins::telemetry::config::MetricAggregation::Drop),
                     allowed_attribute_keys: None,
                 }
-                .try_into()?,
+                .try_into()?;
+            builder.with_view(
+                MeterProviderType::Apollo,
+                view,
             );
         }
 

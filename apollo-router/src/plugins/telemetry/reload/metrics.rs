@@ -34,7 +34,7 @@ use crate::_private::telemetry::ConfigResource;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
-use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::{Conf, OTelMetricView};
 use crate::plugins::telemetry::config::MetricsCommon;
 
 /// Trait for metric exporters to contribute to meter provider construction
@@ -182,17 +182,7 @@ impl<'a> MetricsBuilder<'a> {
         meter_provider_type: MeterProviderType,
     ) -> Result<(), BoxError> {
         for metric_view in self.metrics_common().views.clone() {
-            let view = move |i: &Instrument| {
-                let stream_builder: Result<StreamBuilder, String> = metric_view.clone().try_into();
-                if i.name() == metric_view.name {
-                    match stream_builder {
-                        Ok(stream_builder) => stream_builder.build().ok(),
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            };
+            let view: OTelMetricView = metric_view.clone().try_into()?;
             self.with_view(meter_provider_type, view);
         }
         Ok(())
