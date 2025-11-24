@@ -591,7 +591,7 @@ impl From<InstrumentData> for Metrics {
                         .with_callback(move |observer| {
                             observer.observe(value, &attributes);
                         })
-                        .init()
+                        .build()
                 })
                 .collect(),
         }
@@ -615,17 +615,24 @@ mod test {
     #[test]
     fn test_metrics() {
         for file_name in Asset::iter() {
-            let source = Asset::get(&file_name).expect("test file must exist");
-            let input = std::str::from_utf8(&source.data)
-                .expect("expected utf8")
-                .to_string();
-            let yaml = &serde_yaml::from_str::<serde_json::Value>(&input)
-                .expect("config must be valid yaml");
+            let file_name = file_name.to_string();
+            // Spawn a new thread (and therefore meter provider) per file so metrics don't carry
+            // over to next iteration.
+            std::thread::spawn(move || {
+                let source = Asset::get(&file_name).expect("test file must exist");
+                let input = std::str::from_utf8(&source.data)
+                    .expect("expected utf8")
+                    .to_string();
+                let yaml = &serde_yaml::from_str::<serde_json::Value>(&input)
+                    .expect("config must be valid yaml");
 
-            let mut data = InstrumentData::default();
-            data.populate_config_instruments(yaml);
-            let _metrics: Metrics = data.into();
-            assert_non_zero_metrics_snapshot!(file_name);
+                let mut data = InstrumentData::default();
+                data.populate_config_instruments(yaml);
+                let _metrics: Metrics = data.into();
+                assert_non_zero_metrics_snapshot!(file_name);
+            })
+            .join()
+            .expect("metrics test thread panicked")
         }
     }
 

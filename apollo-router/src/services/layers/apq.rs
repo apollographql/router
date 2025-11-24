@@ -187,7 +187,9 @@ async fn apq_request(
 fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
     let mut digest = Sha256::new();
     digest.update(query.as_bytes());
-    hash == digest.finalize().as_slice()
+    let binding = digest.finalize();
+    let digest_bytes: &[u8] = binding.as_ref();
+    hash == digest_bytes
 }
 
 fn redis_key(query_hash: &str) -> String {

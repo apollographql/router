@@ -22,9 +22,11 @@
 
 use ahash::HashMap;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::StreamBuilder;
 use prometheus::Registry;
 use tower::BoxError;
 
@@ -32,7 +34,7 @@ use crate::_private::telemetry::ConfigResource;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
-use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::{Conf, OTelMetricView};
 use crate::plugins::telemetry::config::MetricsCommon;
 
 /// Trait for metric exporters to contribute to meter provider construction
@@ -128,11 +130,14 @@ impl<'a> MetricsBuilder<'a> {
         self
     }
 
-    pub(crate) fn with_view(
+    pub(crate) fn with_view<T>(
         &mut self,
         meter_provider_type: MeterProviderType,
-        view: Box<dyn View>,
-    ) -> &mut Self {
+        view: T,
+    ) -> &mut Self
+    where
+        T: Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static,
+    {
         let meter_provider = self.meter_provider(meter_provider_type);
         *meter_provider = std::mem::take(meter_provider).with_view(view);
         self
@@ -177,7 +182,8 @@ impl<'a> MetricsBuilder<'a> {
         meter_provider_type: MeterProviderType,
     ) -> Result<(), BoxError> {
         for metric_view in self.metrics_common().views.clone() {
-            self.with_view(meter_provider_type, metric_view.try_into()?);
+            let view: OTelMetricView = metric_view.clone().try_into()?;
+            self.with_view(meter_provider_type, view);
         }
         Ok(())
     }

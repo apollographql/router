@@ -75,3 +75,7 @@ sha1 = "0.10.6"
 tempfile = "3.10.1"
 tokio = { version = "1.36.0", features = ["full"] }
 tower = { version = "0.5.1", features = ["full"] }
+
+
+[patch.crates-io]
+opentelemetry-prometheus = { git = "https://github.com/sandhose/opentelemetry-rust.git", branch = "otel-prometheus-0.30"}

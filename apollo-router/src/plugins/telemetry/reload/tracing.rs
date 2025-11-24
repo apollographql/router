@@ -22,10 +22,13 @@
 
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry_sdk::trace::Sampler;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::trace::SpanProcessor;
-use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
 use tower::BoxError;
 
+use crate::_private::telemetry::ConfigResource;
 use crate::plugins::telemetry::CustomTraceIdPropagator;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::Propagation;
@@ -37,7 +40,7 @@ use crate::plugins::telemetry::config_new::spans::Spans;
 pub(crate) struct TracingBuilder<'a> {
     common: &'a TracingCommon,
     spans: &'a Spans,
-    builder: opentelemetry_sdk::trace::Builder,
+    builder: TracerProviderBuilder,
 }
 
 impl<'a> TracingBuilder<'a> {
@@ -45,8 +48,21 @@ impl<'a> TracingBuilder<'a> {
         Self {
             common: &config.exporters.tracing.common,
             spans: &config.instrumentation.spans,
-            builder: opentelemetry_sdk::trace::TracerProvider::builder()
-                .with_config((&config.exporters.tracing.common).into()),
+            builder: opentelemetry_sdk::trace::SdkTracerProvider::builder()
+                .with_resource(config.exporters.tracing.common.to_resource())
+                .with_sampler::<Sampler>(config.exporters.tracing.common.sampler.clone().into())
+                .with_max_events_per_span(config.exporters.tracing.common.max_events_per_span)
+                .with_max_attributes_per_span(
+                    config.exporters.tracing.common.max_attributes_per_span,
+                )
+                .with_max_attributes_per_event(
+                    config.exporters.tracing.common.max_attributes_per_event,
+                )
+                .with_max_attributes_per_link(
+                    config.exporters.tracing.common.max_attributes_per_link,
+                ),
+            //TODO DD agent sampling
+            //TODO parent_based_sampler
         }
     }
 
@@ -70,7 +86,7 @@ impl<'a> TracingBuilder<'a> {
         self.builder = builder.with_span_processor(span_processor);
     }
 
-    pub(crate) fn build(self) -> TracerProvider {
+    pub(crate) fn build(self) -> SdkTracerProvider {
         self.builder.build()
     }
 }
@@ -93,9 +109,7 @@ pub(crate) fn create_propagator(
         propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
     }
     if propagation.datadog || tracing.datadog.enabled {
-        propagators.push(Box::<
-            crate::plugins::telemetry::tracing::datadog_exporter::DatadogPropagator,
-        >::default());
+        propagators.push(Box::<opentelemetry_datadog::DatadogPropagator>::default());
     }
     if propagation.aws_xray {
         propagators.push(Box::<opentelemetry_aws::trace::XrayPropagator>::default());

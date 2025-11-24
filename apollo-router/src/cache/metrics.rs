@@ -206,7 +206,7 @@ impl RedisMetricsCollector {
                     &[KeyValue::new("kind", caller)],
                 );
             })
-            .init()
+            .build()
     }
 
     /// Generic method to create a weighted average gauge
@@ -237,7 +237,7 @@ impl RedisMetricsCollector {
 
                 gauge.observe(average, &[KeyValue::new("kind", caller)]);
             })
-            .init()
+            .build()
     }
 
     fn create_client_count_gauge() -> ObservableGauge<u64> {
@@ -249,7 +249,7 @@ impl RedisMetricsCollector {
             .with_callback(move |gauge| {
                 gauge.observe(ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed), &[]);
             })
-            .init()
+            .build()
     }
 
     /// Spawn the metrics collection task
@@ -521,7 +521,7 @@ mod tests {
             // Verify Redis connection metrics are emitted.
             // Since this metric is based on a global AtomicU64, it's not unique across tests - so
             // we can only reliably check for metric existence, rather than a specific value.
-            crate::metrics::collect_metrics().metric_exists::<u64>(
+            crate::metrics::collect_metrics().metric_exists(
                 "apollo.router.cache.redis.clients",
                 MetricType::Gauge,
                 &[],

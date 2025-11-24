@@ -173,7 +173,7 @@ pub(crate) fn trace_id() -> Option<TraceId> {
 pub(crate) fn get_baggage(key: &str) -> Option<opentelemetry::Value> {
     let context = Span::current().context();
     let baggage = context.baggage();
-    baggage.get(key).cloned()
+    baggage.get(key).map(|v| v.as_str().to_string().into())
 }
 
 pub(crate) trait ToOtelValue {
@@ -248,6 +248,7 @@ impl From<opentelemetry::Value> for AttributeValue {
             opentelemetry::Value::F64(v) => AttributeValue::F64(v),
             opentelemetry::Value::String(v) => AttributeValue::String(v.into()),
             opentelemetry::Value::Array(v) => AttributeValue::Array(v.into()),
+            _ => unreachable!(),
         }
     }
 }

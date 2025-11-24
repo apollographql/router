@@ -1,118 +1,15 @@
 use std::fmt::Debug;
 use std::time::Duration;
-use std::time::Instant;
 
 use async_trait::async_trait;
-use dashmap::DashMap;
-use futures::future::BoxFuture;
-use once_cell::sync::OnceCell;
-use opentelemetry::metrics::MetricsError;
-use opentelemetry_sdk::export::trace::ExportResult;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::export::trace::SpanExporter;
-use opentelemetry_sdk::metrics::Aggregation;
-use opentelemetry_sdk::metrics::InstrumentKind;
+use futures::TryFutureExt;
+use opentelemetry_sdk::error::OTelSdkError;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
-use opentelemetry_sdk::metrics::data::Temporality;
-use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
-use opentelemetry_sdk::metrics::reader::AggregationSelector;
-use opentelemetry_sdk::metrics::reader::TemporalitySelector;
-
-#[derive(Eq, PartialEq, Hash)]
-enum ErrorType {
-    Trace,
-    Metric,
-    Other,
-}
-static OTEL_ERROR_LAST_LOGGED: OnceCell<DashMap<ErrorType, Instant>> = OnceCell::new();
-
-pub(crate) fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
-    // We have to rate limit these errors because when they happen they are very frequent.
-    // Use a dashmap to store the message type with the last time it was logged.
-    handle_error_with_map(err, OTEL_ERROR_LAST_LOGGED.get_or_init(DashMap::new));
-}
-
-// Allow for map injection to avoid using global map in tests
-fn handle_error_with_map<T: Into<opentelemetry::global::Error>>(
-    err: T,
-    last_logged_map: &DashMap<ErrorType, Instant>,
-) {
-    let err = err.into();
-
-    // We don't want the dashmap to get big, so we key the error messages by type.
-    let error_type = match err {
-        opentelemetry::global::Error::Trace(_) => ErrorType::Trace,
-        opentelemetry::global::Error::Metric(_) => ErrorType::Metric,
-        _ => ErrorType::Other,
-    };
-    #[cfg(not(test))]
-    let threshold = Duration::from_secs(10);
-    #[cfg(test)]
-    let threshold = Duration::from_millis(100);
-
-    if let opentelemetry::global::Error::Metric(err) = &err {
-        // For now we have to suppress Metrics error: reader is shut down or not registered
-        // https://github.com/open-telemetry/opentelemetry-rust/issues/1244
-
-        if err.to_string() == "Metrics error: reader is shut down or not registered" {
-            return;
-        }
-
-        // Keep track of the number of cardinality overflow errors otel emits. This can be removed after upgrading to 0.28.0 when the cardinality limit is removed.
-        // The version upgrade will also cause this log to be removed from our visibility even if we were set up custom a cardinality limit.
-        // https://github.com/open-telemetry/opentelemetry-rust/pull/2528
-        if err.to_string()
-            == "Metrics error: Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged."
-        {
-            u64_counter!(
-                "apollo.router.telemetry.metrics.cardinality_overflow",
-                "A count of how often a telemetry metric hit the hard cardinality limit",
-                1
-            );
-        }
-    }
-
-    // Copy here so that we don't retain a mutable reference into the dashmap and lock the shard
-    let now = Instant::now();
-    let last_logged = *last_logged_map
-        .entry(error_type)
-        .and_modify(|last_logged| {
-            if last_logged.elapsed() > threshold {
-                *last_logged = now;
-            }
-        })
-        .or_insert_with(|| now);
-
-    if last_logged == now {
-        // These events are logged with explicitly no parent. This allows them to be detached from traces.
-        match err {
-            opentelemetry::global::Error::Trace(err) => {
-                ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
-            }
-            opentelemetry::global::Error::Metric(err) => {
-                if let MetricsError::Other(msg) = &err {
-                    if msg.contains("Warning") {
-                        ::tracing::warn!(parent: None, "OpenTelemetry metric warning occurred: {}", msg);
-                        return;
-                    }
-
-                    // TODO: We should be able to remove this after upgrading to 0.26.0, which addresses the double-shutdown
-                    // called out in https://github.com/open-telemetry/opentelemetry-rust/issues/1661
-                    if msg == "metrics provider already shut down" {
-                        return;
-                    }
-                }
-                ::tracing::error!(parent: None, "OpenTelemetry metric error occurred: {}", err);
-            }
-            opentelemetry::global::Error::Other(err) => {
-                ::tracing::error!(parent: None, "OpenTelemetry error occurred: {}", err)
-            }
-            other => {
-                ::tracing::error!(parent: None, "OpenTelemetry error occurred: {:?}", other)
-            }
-        }
-    }
-}
+use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
+use opentelemetry_sdk::trace::SpanData;
+use opentelemetry_sdk::trace::SpanExporter;
 
 /// Wrapper that modifies trace export errors to include exporter name
 pub(crate) struct NamedSpanExporter<E> {
@@ -135,18 +32,20 @@ impl<E: SpanExporter> Debug for NamedSpanExporter<E> {
 }
 
 impl<E: SpanExporter> SpanExporter for NamedSpanExporter<E> {
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&self, batch: Vec<SpanData>) -> impl Future<Output = OTelSdkResult> + Send {
         let name = self.name;
         let fut = self.inner.export(batch);
         Box::pin(async move {
             fut.await.map_err(|err| {
                 let modified = format!("[{} traces] {}", name, err);
-                opentelemetry::trace::TraceError::from(modified)
+                // Recreate as an internal failure to allow us to write a tagged message. This has
+                // the unfortunate side effect of removing the original type
+                OTelSdkError::InternalFailure(modified)
             })
         })
     }
 
-    fn shutdown(&mut self) {
+    fn shutdown(&mut self) -> OTelSdkResult {
         self.inner.shutdown()
     }
 
@@ -167,7 +66,7 @@ impl<E> NamedMetricsExporter<E> {
     }
 }
 
-impl<E: PushMetricsExporter> Debug for NamedMetricsExporter<E> {
+impl<E: PushMetricExporter> Debug for NamedMetricsExporter<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NamedMetricsExporter")
             .field("name", &self.name)
@@ -175,53 +74,39 @@ impl<E: PushMetricsExporter> Debug for NamedMetricsExporter<E> {
     }
 }
 
-impl<E: AggregationSelector> AggregationSelector for NamedMetricsExporter<E> {
-    fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
-        self.inner.aggregation(kind)
-    }
-}
-
-impl<E: TemporalitySelector> TemporalitySelector for NamedMetricsExporter<E> {
-    fn temporality(&self, kind: InstrumentKind) -> Temporality {
-        self.inner.temporality(kind)
-    }
-}
-
-fn prefix_metrics_error(name: &'static str, err: MetricsError) -> MetricsError {
-    match err {
-        MetricsError::Other(msg) => MetricsError::Other(format!("[{} metrics] {}", name, msg)),
-        MetricsError::Config(msg) => MetricsError::Config(format!("[{} metrics] {}", name, msg)),
-        MetricsError::ExportErr(inner) => {
-            MetricsError::Other(format!("[{} metrics] {}", name, inner))
-        }
-        // Don't modify instrument configuration errors - not related to export
-        MetricsError::InvalidInstrumentConfiguration(msg) => {
-            MetricsError::InvalidInstrumentConfiguration(msg)
-        }
-        _ => MetricsError::Other(format!("[{} metrics] {}", name, err)),
-    }
+fn prefix_metrics_error(name: &'static str, err: OTelSdkError) -> OTelSdkError {
+    let modified = format!("[{} traces] {}", name, err);
+    // Recreate as an internal failure to allow us to write a tagged message. This has
+    // the unfortunate side effect of removing the original type
+    OTelSdkError::InternalFailure(modified)
 }
 
 #[async_trait]
-impl<E: PushMetricsExporter> PushMetricsExporter for NamedMetricsExporter<E> {
-    async fn export(&self, metrics: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
+impl<E: PushMetricExporter> PushMetricExporter for NamedMetricsExporter<E> {
+    fn export(&self, metrics: &ResourceMetrics) -> impl Future<Output = OTelSdkResult> + Send {
         self.inner
             .export(metrics)
-            .await
             .map_err(|err| prefix_metrics_error(self.name, err))
     }
 
-    async fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         self.inner
             .force_flush()
-            .await
             .map_err(|err| prefix_metrics_error(self.name, err))
     }
 
-    fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.inner.shutdown_with_timeout(timeout)
+    }
+
+    fn shutdown(&self) -> OTelSdkResult {
         self.inner
             .shutdown()
             .map_err(|err| prefix_metrics_error(self.name, err))
+    }
+
+    fn temporality(&self) -> Temporality {
+        self.inner.temporality()
     }
 }
 
@@ -232,13 +117,13 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use dashmap::DashMap;
-    use futures::future::BoxFuture;
-    use opentelemetry::metrics::MetricsError;
-    use opentelemetry_sdk::export::trace::SpanData;
-    use opentelemetry_sdk::export::trace::SpanExporter;
+    use opentelemetry_sdk::error::OTelSdkError;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
+    use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
+    use opentelemetry_sdk::trace::SpanData;
+    use opentelemetry_sdk::trace::SpanExporter;
     use parking_lot::Mutex;
     use tracing_core::Event;
     use tracing_core::Field;
@@ -250,11 +135,9 @@ mod tests {
     use tracing_subscriber::layer::SubscriberExt;
 
     use crate::metrics::FutureMetricsExt;
-    use crate::plugins::telemetry::error_handler::handle_error_with_map;
 
     #[tokio::test]
     async fn test_handle_error_throttling() {
-        let error_map = DashMap::new();
         // Set up a fake subscriber so we can check log events. If this is useful then maybe it can be factored out into something reusable
         #[derive(Default)]
         struct TestVisitor {
@@ -293,18 +176,7 @@ mod tests {
 
         async {
             // Log twice rapidly, they should get deduped
-            handle_error_with_map(
-                opentelemetry::global::Error::Other("other error".to_string()),
-                &error_map,
-            );
-            handle_error_with_map(
-                opentelemetry::global::Error::Other("other error".to_string()),
-                &error_map,
-            );
-            handle_error_with_map(
-                opentelemetry::global::Error::Trace("trace error".to_string().into()),
-                &error_map,
-            );
+            ::tracing::error!("other error");
         }
         .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
         .await;
@@ -315,10 +187,7 @@ mod tests {
         // Sleep a bit and then log again, it should get logged
         tokio::time::sleep(Duration::from_millis(200)).await;
         async {
-            handle_error_with_map(
-                opentelemetry::global::Error::Other("other error".to_string()),
-                &error_map,
-            );
+            ::tracing::error!("other error");
         }
         .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
         .await;
@@ -328,12 +197,8 @@ mod tests {
     #[tokio::test]
     async fn test_cardinality_overflow() {
         async {
-            let error_map = DashMap::new();
             let msg = "Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged.";
-            handle_error_with_map(
-                opentelemetry::global::Error::Metric(opentelemetry::metrics::MetricsError::Other(msg.to_string())),
-                &error_map,
-            );
+            ::tracing::warn!("{}", msg);
 
             assert_counter!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
@@ -350,13 +215,15 @@ mod tests {
 
     impl SpanExporter for FailingSpanExporter {
         fn export(
-            &mut self,
+            &self,
             _batch: Vec<SpanData>,
-        ) -> BoxFuture<'static, opentelemetry_sdk::export::trace::ExportResult> {
-            Box::pin(async { Err(opentelemetry::trace::TraceError::from("connection failed")) })
+        ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+            Box::pin(async { Err(OTelSdkError::InternalFailure("connection failed".into())) })
         }
 
-        fn shutdown(&mut self) {}
+        fn shutdown(&mut self) -> OTelSdkResult {
+            Ok(())
+        }
 
         fn set_resource(&mut self, _resource: &opentelemetry_sdk::Resource) {}
     }
@@ -364,7 +231,7 @@ mod tests {
     #[tokio::test]
     async fn test_named_span_exporter_adds_prefix() {
         let inner = FailingSpanExporter;
-        let mut named = super::NamedSpanExporter::new(inner, "test-exporter");
+        let named = super::NamedSpanExporter::new(inner, "test-exporter");
 
         let result = named.export(vec![]).await;
 
@@ -381,51 +248,29 @@ mod tests {
         error_type: &'static str,
     }
 
-    #[async_trait::async_trait]
-    impl PushMetricsExporter for FailingMetricsExporter {
-        async fn export(
-            &self,
-            _metrics: &mut ResourceMetrics,
-        ) -> opentelemetry::metrics::Result<()> {
+    impl PushMetricExporter for FailingMetricsExporter {
+        async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
             match self.error_type {
-                "other" => Err(MetricsError::Other("export failed".to_string())),
-                "config" => Err(MetricsError::Config("invalid config".to_string())),
+                "other" => Err(OTelSdkError::InternalFailure("export failed".to_string())),
+                "config" => Err(OTelSdkError::InternalFailure("invalid config".to_string())),
                 _ => Ok(()),
             }
         }
 
-        async fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+        fn force_flush(&self) -> OTelSdkResult {
             Ok(())
         }
 
-        fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
             Ok(())
         }
-    }
 
-    impl opentelemetry_sdk::metrics::reader::AggregationSelector for FailingMetricsExporter {
-        fn aggregation(
-            &self,
-            _kind: opentelemetry_sdk::metrics::InstrumentKind,
-        ) -> opentelemetry_sdk::metrics::Aggregation {
-            opentelemetry_sdk::metrics::Aggregation::Default
+        fn shutdown(&self) -> OTelSdkResult {
+            Ok(())
         }
-    }
 
-    impl opentelemetry_sdk::metrics::reader::TemporalitySelector for FailingMetricsExporter {
-        fn temporality(
-            &self,
-            _kind: opentelemetry_sdk::metrics::InstrumentKind,
-        ) -> opentelemetry_sdk::metrics::data::Temporality {
-            opentelemetry_sdk::metrics::data::Temporality::Cumulative
-        }
-    }
-
-    fn empty_resource_metrics() -> ResourceMetrics {
-        use opentelemetry_sdk::Resource;
-        ResourceMetrics {
-            resource: Resource::empty(),
-            scope_metrics: vec![],
+        fn temporality(&self) -> Temporality {
+            Temporality::Cumulative
         }
     }
 
@@ -436,12 +281,12 @@ mod tests {
         };
         let named = super::NamedMetricsExporter::new(inner, "test-exporter");
 
-        let result = named.export(&mut empty_resource_metrics()).await;
+        let result = named.export(&ResourceMetrics::default()).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
         match err {
-            MetricsError::Other(msg) => {
+            OTelSdkError::InternalFailure(msg) => {
                 assert!(msg.contains("[test-exporter metrics]"));
                 assert!(msg.contains("export failed"));
             }
@@ -451,11 +296,11 @@ mod tests {
 
     #[test]
     fn test_prefix_metrics_error() {
-        let err = MetricsError::Config("bad config".to_string());
+        let err = OTelSdkError::InternalFailure("bad config".to_string());
         let prefixed = super::prefix_metrics_error("test-exporter", err);
 
         match prefixed {
-            MetricsError::Config(msg) => {
+            OTelSdkError::InternalFailure(msg) => {
                 assert_eq!(msg, "[test-exporter metrics] bad config");
             }
             _ => panic!("Expected Config variant"),

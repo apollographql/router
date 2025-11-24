@@ -237,11 +237,11 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
         field: &tracing_core::Field,
         value: &(dyn std::error::Error + 'static),
     ) {
-        let mut chain: Vec<StringValue> = Vec::new();
+        let mut chain: Vec<String> = Vec::new();
         let mut next_err = value.source();
 
         while let Some(err) = next_err {
-            chain.push(err.to_string().into());
+            chain.push(err.to_string());
             next_err = err.source();
         }
 
@@ -250,7 +250,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
         if self.exception_config.record {
             self.event_builder
                 .attributes
-                .push(Key::new(FIELD_EXCEPTION_MESSAGE).string(error_msg.clone()));
+                .push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
 
             // NOTE: This is actually not the stacktrace of the exception. This is
             // the "source chain". It represents the hierarchy of errors from the
@@ -258,9 +258,12 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
             // of the callsites in the code that led to the error happening.
             // `std::error::Error::backtrace` is a nightly-only API and cannot be
             // used here until the feature is stabilized.
-            self.event_builder
-                .attributes
-                .push(Key::new(FIELD_EXCEPTION_STACKTRACE).array(chain.clone()));
+            self.event_builder.attributes.push(KeyValue::new(
+                FIELD_EXCEPTION_STACKTRACE,
+                opentelemetry::Value::Array(opentelemetry::Array::String(
+                    chain.clone().into_iter().map(|s| s.into()).collect(),
+                )),
+            ));
         }
 
         if self.exception_config.propagate
@@ -277,16 +280,20 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
             // used here until the feature is stabilized.
             attrs.push(KeyValue::new(
                 FIELD_EXCEPTION_STACKTRACE,
-                Value::Array(chain.clone().into()),
+                Value::Array(opentelemetry::Array::String(
+                    chain.clone().into_iter().map(|s| s.into()).collect(),
+                )),
             ));
         }
-
         self.event_builder
             .attributes
-            .push(Key::new(field.name()).string(error_msg));
-        self.event_builder
-            .attributes
-            .push(Key::new(format!("{}.chain", field.name())).array(chain));
+            .push(KeyValue::new(field.name(), error_msg));
+        self.event_builder.attributes.push(KeyValue::new(
+            format!("{}.chain", field.name()),
+            opentelemetry::Value::Array(opentelemetry::Array::String(
+                chain.clone().into_iter().map(|s| s.into()).collect(),
+            )),
+        ));
     }
 }
 
@@ -367,7 +374,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
             OTEL_STATUS_MESSAGE => {
                 self.span_builder.status = otel::Status::error(format!("{value:?}"))
             }
-            _ => self.record(Key::new(field.name()).string(format!("{value:?}"))),
+            _ => self.record(KeyValue::new(field.name(), format!("{value:?}"))),
         }
     }
 
@@ -391,7 +398,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
         let error_msg = value.to_string();
 
         if self.exception_config.record {
-            self.record(Key::new(FIELD_EXCEPTION_MESSAGE).string(error_msg.clone()));
+            self.record(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
 
             // NOTE: This is actually not the stacktrace of the exception. This is
             // the "source chain". It represents the hierarchy of errors from the
@@ -399,11 +406,24 @@ impl field::Visit for SpanAttributeVisitor<'_> {
             // of the callsites in the code that led to the error happening.
             // `std::error::Error::backtrace` is a nightly-only API and cannot be
             // used here until the feature is stabilized.
-            self.record(Key::new(FIELD_EXCEPTION_STACKTRACE).array(chain.clone()));
+            self.record(KeyValue::new(
+                FIELD_EXCEPTION_STACKTRACE,
+                opentelemetry::Value::Array(opentelemetry::Array::String(
+                    chain
+                        .iter()
+                        .map(|s| s.as_str().to_string().into())
+                        .collect(),
+                )),
+            ));
         }
 
-        self.record(Key::new(field.name()).string(error_msg));
-        self.record(Key::new(format!("{}.chain", field.name())).array(chain));
+        self.record(KeyValue::new(field.name(), error_msg));
+        self.record(KeyValue::new(
+            format!("{}.chain", field.name()),
+            opentelemetry::Value::Array(opentelemetry::Array::String(
+                chain.clone().into_iter().collect(),
+            )),
+        ));
     }
 }
 
@@ -939,9 +959,8 @@ where
             // Performing read operations before getting a write lock to avoid a deadlock
             // See https://github.com/tokio-rs/tracing/issues/763
             let meta = event.metadata();
-            let target = Key::new("target");
 
-            let target = target.string(meta.target());
+            let target = KeyValue::new("target", meta.target());
 
             let mut extensions = span.extensions_mut();
             let mut otel_data = extensions.get_mut::<OtelData>();
@@ -950,7 +969,7 @@ where
             let mut otel_event = otel::Event::new(
                 String::new(),
                 SystemTime::now(),
-                vec![Key::new("level").string(meta.level().as_str()), target],
+                vec![KeyValue::new("level", meta.level().as_str()), target],
                 0,
             );
             let mut span_event_visit = SpanEventVisitor {

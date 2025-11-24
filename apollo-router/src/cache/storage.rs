@@ -128,7 +128,7 @@ where
                     ],
                 )
             })
-            .init()
+            .build()
     }
 
     fn create_cache_estimated_storage_size_gauge(&self) -> ObservableGauge<i64> {
@@ -153,7 +153,7 @@ where
                     )
                 }
             })
-            .init()
+            .build()
     }
 
     /// `init_from_redis` is called with values newly deserialized from Redis cache
@@ -346,6 +346,7 @@ mod test {
             cache.activate();
 
             cache.insert("test".to_string(), Stuff {}).await;
+
             assert_gauge!(
                 "apollo.router.cache.storage.estimated_size",
                 1,

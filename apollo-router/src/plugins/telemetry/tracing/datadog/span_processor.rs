@@ -1,9 +1,9 @@
 use opentelemetry::Context;
 use opentelemetry::trace::SpanContext;
-use opentelemetry::trace::TraceResult;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::Span;
+use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanProcessor;
 
 /// When using the Datadog agent we need spans to always be exported. However, the batch span processor will only export spans that are sampled.
@@ -39,16 +39,20 @@ impl<T: SpanProcessor> SpanProcessor for DatadogSpanProcessor<T> {
         self.delegate.on_end(span)
     }
 
-    fn force_flush(&self) -> TraceResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
 
-    fn shutdown(&self) -> TraceResult<()> {
+    fn shutdown(&self) -> OTelSdkResult {
         self.delegate.shutdown()
     }
 
     fn set_resource(&mut self, resource: &Resource) {
         self.delegate.set_resource(resource)
+    }
+
+    fn shutdown_with_timeout(&self, timeout: std::time::Duration) -> OTelSdkResult {
+        self.delegate.shutdown_with_timeout(timeout)
     }
 }
 
@@ -89,11 +93,15 @@ mod tests {
             self.spans.lock().push(span);
         }
 
-        fn force_flush(&self) -> TraceResult<()> {
+        fn force_flush(&self) -> OTelSdkResult {
             Ok(())
         }
 
-        fn shutdown(&self) -> TraceResult<()> {
+        fn shutdown(&self) -> OTelSdkResult {
+            Ok(())
+        }
+
+        fn shutdown_with_timeout(&self, _timeout: std::time::Duration) -> OTelSdkResult {
             Ok(())
         }
     }
@@ -120,7 +128,7 @@ mod tests {
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: Default::default(),
-            instrumentation_lib: Default::default(),
+            instrumentation_scope: Default::default(),
             dropped_attributes_count: 0,
         };
 

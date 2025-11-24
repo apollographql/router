@@ -191,7 +191,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_REQUEST_DURATION_METRIC)
                         .with_unit("s")
                         .with_description("Duration of HTTP server requests.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -209,7 +209,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_REQUEST_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP server request bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -227,7 +227,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP server response bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -245,7 +245,7 @@ impl InstrumentsConfig {
                         .i64_up_down_counter(HTTP_SERVER_ACTIVE_REQUESTS)
                         .with_unit("request")
                         .with_description("Number of active HTTP server requests.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -266,7 +266,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -278,7 +278,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -471,7 +471,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -483,7 +483,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -525,7 +525,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_CLIENT_REQUEST_DURATION_METRIC)
                         .with_unit("s")
                         .with_description("Duration of HTTP client requests.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -543,7 +543,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP client request bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -561,7 +561,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP client response bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -576,7 +576,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -588,7 +588,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -767,7 +767,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -779,7 +779,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -813,7 +813,7 @@ impl InstrumentsConfig {
                     meter
                         .f64_histogram(FIELD_LENGTH)
                         .with_description("Length of a selected field in the GraphQL response")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -825,7 +825,7 @@ impl InstrumentsConfig {
                     meter
                         .f64_counter(FIELD_EXECUTION)
                         .with_description("Number of times a field is used.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -840,7 +840,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -852,7 +852,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -958,21 +958,7 @@ impl InstrumentsConfig {
                         .with_description(
                             "Entity cache hit/miss operations at the subgraph level (deprecated)",
                         )
-                        .init(),
-                ),
-            );
-        }
-        if self.cache.attributes.response_cache.is_enabled() {
-            static_instruments.insert(
-                RESPONSE_CACHE_METRIC.to_string(),
-                StaticInstrument::CounterF64(
-                    meter
-                        .f64_counter(RESPONSE_CACHE_METRIC)
-                        .with_unit("ops")
-                        .with_description(
-                            "Response cache hit/miss operations at the subgraph level",
-                        )
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -1698,6 +1684,7 @@ fn value_to_f64(value: &opentelemetry::Value) -> Option<f64> {
         opentelemetry::Value::String(s) => s.as_str().parse::<f64>().ok(),
         opentelemetry::Value::Bool(_) => None,
         opentelemetry::Value::Array(_) => None,
+        _ => unreachable!(),
     }
 }
 

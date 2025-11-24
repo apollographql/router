@@ -7,12 +7,8 @@ use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry::metrics::MetricsError;
-use opentelemetry_sdk::metrics::Aggregation;
-use opentelemetry_sdk::metrics::Instrument;
-use opentelemetry_sdk::metrics::Stream;
-use opentelemetry_sdk::metrics::View;
-use opentelemetry_sdk::metrics::new_view;
+use opentelemetry_sdk::metrics::{Instrument, Stream};
+use opentelemetry_sdk::metrics::StreamBuilder;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -24,7 +20,6 @@ use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
-use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -161,36 +156,50 @@ pub(crate) struct MetricView {
     pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
 }
 
-impl TryInto<Box<dyn View>> for MetricView {
-    type Error = MetricsError;
+pub (crate) type OTelMetricView = Box<dyn Fn(&Instrument) -> Option<Stream> + Send + Sync>;
 
-    fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
-        let aggregation = self.aggregation.map(|aggregation| match aggregation {
-            MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
-                boundaries: buckets,
-                record_min_max: true,
-            },
-            MetricAggregation::Drop => Aggregation::Drop,
+impl TryInto<OTelMetricView> for MetricView {
+    type Error = String;
+
+    fn try_into(self) -> Result<OTelMetricView, Self::Error> {
+        let target_name = self.rename.clone().unwrap_or_else(|| self.name.clone());
+
+        let otel_aggregation = self.aggregation.map(|aggregation| match aggregation {
+            MetricAggregation::Histogram { buckets } => {
+                opentelemetry_sdk::metrics::Aggregation::ExplicitBucketHistogram {
+                    boundaries: buckets,
+                    record_min_max: true,
+                }
+            }
+            MetricAggregation::Drop => opentelemetry_sdk::metrics::Aggregation::Drop,
         });
-        let instrument = Instrument::new().name(self.name);
-        let mut mask = Stream::new();
-        if let Some(new_name) = self.rename {
-            mask = mask.name(new_name);
-        }
-        if let Some(desc) = self.description {
-            mask = mask.description(desc);
-        }
-        if let Some(unit) = self.unit {
-            mask = mask.unit(unit);
-        }
-        if let Some(aggregation) = aggregation {
-            mask = mask.aggregation(aggregation);
-        }
-        if let Some(allowed_attribute_keys) = self.allowed_attribute_keys {
-            mask = mask.allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
-        }
 
-        new_view(instrument, mask)
+        let allowed_keys: Option<Vec<Key>> = self.allowed_attribute_keys.map(|set| {
+            set.into_iter().map(Key::new).collect()
+        });
+
+        Ok(Box::new(move |i: &Instrument| {
+            if i.name() != self.name {
+                return None;
+            }
+
+            let mut builder = Stream::builder().with_name(target_name.clone());
+
+            if let Some(desc) = &self.description {
+                builder = builder.with_description(desc.clone());
+            }
+            if let Some(unit) = &self.unit {
+                builder = builder.with_unit(unit.clone());
+            }
+            if let Some(ref agg) = otel_aggregation {
+                builder = builder.with_aggregation(agg.clone());
+            }
+            if let Some(ref keys) = allowed_keys {
+                builder = builder.with_allowed_attribute_keys(keys.clone().into_iter());
+            }
+
+            builder.build().ok()
+        }))
     }
 }
 
@@ -622,6 +631,7 @@ impl From<opentelemetry::Array> for AttributeArray {
             opentelemetry::Array::String(v) => {
                 AttributeArray::String(v.into_iter().map(|v| v.into()).collect())
             }
+            _ => AttributeArray::String(vec![]),
         }
     }
 }
@@ -664,36 +674,9 @@ impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
 }
 
 impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
-    fn from(config: &TracingCommon) -> Self {
-        let mut common = opentelemetry_sdk::trace::Config::default();
-
-        let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
-        if config.parent_based_sampler {
-            sampler = parent_based(sampler);
-        }
-        if config.preview_datadog_agent_sampling.unwrap_or_default() {
-            common = common.with_sampler(DatadogAgentSampling::new(
-                sampler,
-                config.parent_based_sampler,
-            ));
-        } else {
-            common = common.with_sampler(sampler);
-        }
-
-        common = common.with_max_events_per_span(config.max_events_per_span);
-        common = common.with_max_attributes_per_span(config.max_attributes_per_span);
-        common = common.with_max_links_per_span(config.max_links_per_span);
-        common = common.with_max_attributes_per_event(config.max_attributes_per_event);
-        common = common.with_max_attributes_per_link(config.max_attributes_per_link);
-
-        // Take the default first, then config, then env resources, then env variable. Last entry wins
-        common = common.with_resource(config.to_resource());
-        common
+    fn from(_tracing_common: &TracingCommon) -> Self {
+        opentelemetry_sdk::trace::Config::default()
     }
-}
-
-fn parent_based(sampler: opentelemetry_sdk::trace::Sampler) -> opentelemetry_sdk::trace::Sampler {
-    opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(sampler))
 }
 
 impl Conf {
