@@ -255,7 +255,6 @@ impl Referencers {
                 old_name,
                 new_name,
             );
-
             Self::update_object_field_positions(
                 &mut directive_refs.object_fields,
                 old_name,
