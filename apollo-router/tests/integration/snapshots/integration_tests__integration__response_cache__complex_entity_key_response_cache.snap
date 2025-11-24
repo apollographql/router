@@ -7,7 +7,7 @@ expression: body.extensions
     "version": "1.0",
     "data": [
       {
-        "key": "version:1.0:subgraph:stuff:type:Query:hash:ef359c62e83e6496c40482235c5ceda7013fe2b45bb8246e1d65818e592fd325:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+        "key": "version:1.1:subgraph:stuff:type:Query:hash:ef359c62e83e6496c40482235c5ceda7013fe2b45bb8246e1d65818e592fd325:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
         "invalidationKeys": [],
         "kind": {
           "rootFields": [
@@ -77,7 +77,7 @@ expression: body.extensions
         ]
       },
       {
-        "key": "version:1.0:subgraph:status:type:Status:representation:d037f5b89075fb6a3fde6b247bec2befe39e360cd0d703e342a8143895b3f92c:hash:37a5901a54e23d59712e2bbecee7dd96030d81c668d01629df96e5a9ec9608c6:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+        "key": "version:1.1:subgraph:status:type:Status:representation:7c35a77a9a775295a0cf19124ff9df08664a82d92460b35e109bd12c7f636db7:hash:37a5901a54e23d59712e2bbecee7dd96030d81c668d01629df96e5a9ec9608c6:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
         "invalidationKeys": [],
         "kind": {
           "typename": "Status",

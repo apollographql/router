@@ -27,7 +27,7 @@ use crate::services::subgraph;
 pub(crate) mod attributes;
 
 pub(crate) const CACHE_METRIC: &str = "apollo.router.operations.entity.cache";
-pub(crate) const RESPONSE_CACHE_METRIC: &str = "apollo.router.operations.response.cache";
+pub(crate) const RESPONSE_CACHE_METRIC: &str = "apollo.router.response.cache";
 const ENTITY_TYPE: Key = Key::from_static_str("graphql.type.name");
 const CACHE_HIT: Key = Key::from_static_str("cache.hit");
 
@@ -38,7 +38,7 @@ pub(crate) struct CacheInstrumentsConfig {
     #[serde(rename = "apollo.router.operations.entity.cache")]
     pub(crate) cache: DefaultedStandardInstrument<Extendable<CacheAttributes, SubgraphSelector>>,
     /// A counter of times we have a cache hit or cache miss
-    #[serde(rename = "apollo.router.operations.response.cache")]
+    #[serde(rename = "apollo.router.response.cache")]
     pub(crate) response_cache:
         DefaultedStandardInstrument<Extendable<CacheAttributes, SubgraphSelector>>,
 }

@@ -275,7 +275,7 @@ impl Merger {
         dest: &T,
     ) -> Result<(), FederationError>
     where
-        T: Display + HasDefaultValue,
+        T: Display + HasDefaultValue + HasType,
     {
         trace!("Merging default value for \"{dest}\"");
         let mut dest_default: Option<Node<Value>> = None;
@@ -283,6 +283,9 @@ impl Merger {
         let mut has_seen_source = false;
         let mut is_inconsistent = false;
         let mut is_incompatible = false;
+
+        // Get the target type for coercibility checking
+        let target_type = dest.get_type(&self.merged)?;
 
         // Because default values are always in input/contra-variant positions, we use an intersection strategy. Namely,
         // the result only has a default if _all_ have a default (which has to be the same, but we error if we found
@@ -312,8 +315,11 @@ impl Merger {
                     }
                 }
                 Some(current) => {
-                    // We have `&Node<Value>` here, so we need the double deref to get value equality.
-                    if source_default.is_none_or(|next| **next != **current) {
+                    // We have `&Node<Value>` here, so we need the double deref to get the values.
+                    // Check if values are equivalent considering type coercibility (e.g., Int to Float)
+                    if source_default.is_none_or(|next| {
+                        !Self::are_default_values_equivalent(next, current, target_type)
+                    }) {
                         is_inconsistent = true;
                         // It's only incompatible if neither is undefined
                         if source_default.is_some() {
@@ -382,5 +388,36 @@ impl Merger {
         }
 
         Ok(())
+    }
+
+    /// Check if two default values are equivalent, considering type coercibility.
+    /// For example, Int value 200 is equivalent to Float value 200.0 when the target type is Float.
+    fn are_default_values_equivalent(value1: &Value, value2: &Value, target_type: &Type) -> bool {
+        // TODO: This coercibility check should really come from `apollo_compiler`
+        // First check for direct equality
+        if value1 == value2 {
+            return true;
+        }
+
+        // Check for Int to Float coercibility
+        // According to GraphQL spec, Int values can be coerced to Float
+        if target_type.inner_named_type() == "Float" {
+            match (value1, value2) {
+                // Int literal coercible to Float literal
+                (Value::Int(int_val), Value::Float(float_val))
+                | (Value::Float(float_val), Value::Int(int_val)) => {
+                    let Ok(int_val_parsed) = int_val.try_to_f64() else {
+                        return false;
+                    };
+                    let Ok(float_val_parsed) = float_val.try_to_f64() else {
+                        return false;
+                    };
+                    int_val_parsed == float_val_parsed
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
     }
 }
