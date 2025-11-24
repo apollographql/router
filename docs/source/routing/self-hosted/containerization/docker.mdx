@@ -30,9 +30,7 @@ Before you start:
 
 ## Quick start
 
-Run the Router by setting the [`APOLLO_GRAPH_REF`](/graphos/routing/configuration/envvars#apollo_graph_ref) and [`APOLLO_KEY`](/graphos/routing/configuration/envvars#apollo_key) environment variables to your graph ref and API key.
-
-This example runs an Apollo Runtime image with Docker. It downloads your supergraph schema from Apollo and uses a default configuration that listens on port `4000`.
+Run the following command, replacing the `APOLLO_GRAPH_REF` and `APOLLO_KEY` values with your own.
 
 ```bash title="Docker"
 docker run \
@@ -43,7 +41,7 @@ docker run \
   ghcr.io/apollographql/apollo-runtime:latest
 ```
 
-Replace `<your-graph-ref>` and `<your-graph-api-key>` with your graph reference and API key.
+This command runs the Apollo Runtime image with Docker, downloads your supergraph schema from Apollo and uses a default configuration that listens on port `4000`.
 
 ## Enabling MCP
 
@@ -116,14 +114,45 @@ The Router uses the schema from the specified graph artifact instead of Apollo U
 
 ## Running a specific Router and MCP version
 
-The container uses a tagging scheme with three parts: container version, Apollo Router version, and MCP Server version, separated by underscores.
+The Apollo Runtime uses a three-part tagging scheme separated by underscores: container version, Apollo Router version, and MCP Server version. This allows you to pin specific versions of the runtime components.
 
-Learn more in the [tagging documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
+### Tag format examples
 
-## Next steps
+**Latest of everything:**
 
-For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Router Configuration](/graphos/routing/configuration/overview/).
+```bash
+ghcr.io/apollographql/apollo-runtime:latest
+```
 
-## Router-only Docker container
+This retrieves the newest versions of all components.
 
-To use a Docker container with only the Apollo Router (without MCP Server), see the [Router-only Docker container documentation](docker-router-only).
+**Pinned container and router:**
+
+```bash
+ghcr.io/apollographql/apollo-runtime:v0.1.0_router2.1.2
+```
+
+This locks the runtime container and router versions while always fetching the latest MCP server.
+
+**Pinned router and MCP server:**
+
+```bash
+ghcr.io/apollographql/apollo-runtime:latest_router2.1.2_mcp-server0.2.1
+```
+
+This fixes specific router and MCP server versions but keeps the container version current.
+
+<Note>
+
+Not all tag combinations are supported. Verify your desired tag exists before attempting to use it.
+
+</Note>
+
+### Alternative registry
+
+If `ghcr.io` is inaccessible to you, all images are also available on DockerHub as of `0.0.13_router2.5.0_mcp-server0.7.0` onwards:
+
+```bash
+docker pull apollograph/apollo-runtime
+```
+
