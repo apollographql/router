@@ -69,6 +69,12 @@ Defaults to:
 * http://127.0.0.1:4317 for gRPC
 * http://127.0.0.1:4318 for HTTP
 
+<Note>
+
+If your environment sets `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, these variables take precedence over the `endpoint` configured in your `router.yaml`. If metrics aren't appearing at your expected endpoint, check if these environment variables are set and unset them if necessary.
+
+</Note>
+
 ### `grpc`
 
 Settings specific to the gRPC protocol for setting a custom SSL certificate, domain name, and metadata.

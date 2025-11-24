@@ -52,6 +52,7 @@ pub(crate) static APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE: Mutex<Option<String>> 
 pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(false);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
+const INITIAL_OCI_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Subcommands
 #[derive(Subcommand, Debug)]
@@ -253,9 +254,9 @@ impl Opt {
             reference: validated_reference,
             graph_artifact_reference: graph_artifact_reference.clone(),
             hot_reload: APOLLO_ROUTER_HOT_RELOAD_CLI.load(Ordering::Relaxed),
+            poll_interval: INITIAL_OCI_POLL_INTERVAL,
         })
     }
-
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
         Ok(Endpoints::fallback(
             endpoints
