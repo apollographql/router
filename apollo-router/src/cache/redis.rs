@@ -377,7 +377,12 @@ impl RedisCacheStorage {
                 };
 
                 // PR-8405: must not use lazy connections or else commands will queue rather than being sent
-                config.replica.lazy_connections = false;
+                // PR-8671: must only disable lazy connections in cluster mode. otherwise, fred will
+                //  try to connect to unreachable replicas and fall over.
+                //  https://github.com/aembke/fred.rs/blob/f222ad7bfba844dbdc57e93da61b0a5483858df9/src/router/replicas.rs#L34
+                if is_cluster {
+                    config.replica.lazy_connections = false;
+                }
             })
             .with_performance_config(|config| {
                 config.default_command_timeout = timeout;
