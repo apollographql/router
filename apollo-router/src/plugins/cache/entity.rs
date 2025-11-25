@@ -1008,7 +1008,7 @@ async fn cache_lookup_entities(
     )?;
 
     let cache_result: Vec<Option<CacheEntry>> = cache
-        .get_multiple(keys.iter().map(|k| k.clone()).collect::<Vec<_>>())
+        .get_multiple(keys.clone())
         .await
         .into_iter()
         .map(|v: Option<CacheEntry>| match v {

@@ -6,7 +6,7 @@ mod metrics;
 mod value;
 
 pub(crate) use gateway::RedisCacheStorage as Gateway;
-pub(self) use key::Key;
+use key::Key;
 pub(crate) use key::KeyType;
-pub(self) use value::Value;
+use value::Value;
 pub(crate) use value::ValueType;
