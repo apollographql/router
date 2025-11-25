@@ -11,5 +11,3 @@ configuration had errors:
   cors:
     allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
                                    ^----- "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" is not of type "string"
-
-

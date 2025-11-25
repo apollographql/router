@@ -11,5 +11,3 @@ configuration had errors:
       - Content-Type
       - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
         ^----- "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}" is not of type "string"
-
-

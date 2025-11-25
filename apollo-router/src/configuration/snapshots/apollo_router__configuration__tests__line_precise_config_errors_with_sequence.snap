@@ -11,5 +11,3 @@ configuration had errors:
       - Content-Type
       - 5
         ^----- 5 is not of type "string"
-
-

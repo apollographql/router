@@ -20,5 +20,3 @@ configuration had errors:
     bad: "donotwork"
 ┌   another_one: true
 └-----> Additional properties are not allowed ('another_one' was unexpected)
-
-

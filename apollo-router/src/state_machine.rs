@@ -602,7 +602,7 @@ where
                 .expect("must have listen address guard"),
         };
 
-        // Process all the events in turn until we get to error state or we run out of events.
+        // Process all the events in turn until we get to error state, or we run out of events.
         while let Some(event) = messages.next().await {
             let event_name = event.to_string();
 

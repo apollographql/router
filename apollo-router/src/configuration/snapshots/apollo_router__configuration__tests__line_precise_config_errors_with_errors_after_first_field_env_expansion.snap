@@ -20,5 +20,3 @@ configuration had errors:
     ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}: 5
 ┌   another_one: foo
 └-----> Additional properties are not allowed ('another_one' was unexpected)
-
-

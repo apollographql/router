@@ -33,6 +33,7 @@ use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::registry::OciConfig;
+use crate::registry::validate_oci_reference;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -47,8 +48,11 @@ pub(crate) static APOLLO_ROUTER_LICENCE_IS_SET: AtomicBool = AtomicBool::new(fal
 pub(crate) static APOLLO_ROUTER_LICENCE_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
+pub(crate) static APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE: Mutex<Option<String>> = Mutex::new(None);
+pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(false);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
+const INITIAL_OCI_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Subcommands
 #[derive(Subcommand, Debug)]
@@ -237,32 +241,22 @@ impl Opt {
     }
 
     pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        let graph_artifact_reference = self
+            .graph_artifact_reference
+            .clone()
+            .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
+        let (validated_reference, _) = validate_oci_reference(&graph_artifact_reference)?;
         Ok(OciConfig {
             apollo_key: self
                 .apollo_key
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
-            reference: Self::validate_oci_reference(
-                &self
-                    .graph_artifact_reference
-                    .clone()
-                    .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?,
-            )?,
+            reference: validated_reference,
+            graph_artifact_reference: graph_artifact_reference.clone(),
+            hot_reload: APOLLO_ROUTER_HOT_RELOAD_CLI.load(Ordering::Relaxed),
+            poll_interval: INITIAL_OCI_POLL_INTERVAL,
         })
     }
-
-    pub fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
-        // Currently only shas are allowed to be passed as graph artifact references
-        // TODO Update when tag reloading is implemented
-        let valid_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
-        if valid_regex.is_match(reference) {
-            tracing::debug!("validated OCI configuration");
-            Ok(reference.to_string())
-        } else {
-            Err(anyhow!("invalid graph artifact reference: {reference}"))
-        }
-    }
-
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
         Ok(Endpoints::fallback(
             endpoints
@@ -372,6 +366,11 @@ impl Executable {
         *crate::services::APOLLO_KEY.lock() = opt.apollo_key.clone();
         *crate::services::APOLLO_GRAPH_REF.lock() = opt.apollo_graph_ref.clone();
         *APOLLO_ROUTER_LISTEN_ADDRESS.lock() = opt.listen_address;
+        *APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE.lock() = opt.graph_artifact_reference.clone();
+        // Only set hot_reload if explicitly true
+        if opt.hot_reload {
+            APOLLO_ROUTER_HOT_RELOAD_CLI.store(true, Ordering::Relaxed);
+        }
         APOLLO_ROUTER_DEV_MODE.store(opt.dev, Ordering::Relaxed);
         APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET
             .store(opt.supergraph_path.is_some(), Ordering::Relaxed);
@@ -501,12 +500,26 @@ impl Executable {
         // 1. Cli --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE
-        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF
+        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE (CLI/env only)
+        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF (CLI/env only)
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
         #[cfg(not(unix))]
         let akp: &Option<PathBuf> = &None;
+
+        // Validate that schema sources are not conflicting
+        // Check both builder API schema and CLI supergraph_path (both map to -s/--supergraph)
+        let has_supergraph_file = schema.is_some() || opt.supergraph_path.is_some();
+        if has_supergraph_file && opt.graph_artifact_reference.is_some() {
+            return Err(anyhow!(
+                "--supergraph (-s) and --graph-artifact-reference cannot be used together. Please specify only one schema source."
+            ));
+        }
+        if opt.supergraph_urls.is_some() && opt.graph_artifact_reference.is_some() {
+            return Err(anyhow!(
+                "APOLLO_ROUTER_SUPERGRAPH_URLS and --graph-artifact-reference cannot be used together. Please specify only one schema source."
+            ));
+        }
 
         let schema_source = match (
             schema,
@@ -822,76 +835,175 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_validate_oci_reference_valid_cases() {
-        // Test valid OCI references with different hash values
-        let valid_hashes = vec![
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha256:ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
-            "@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-            "@sha256:0000000000000000000000000000000000000000000000000000000000000000",
-            "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-        ];
+    mod validation_tests {
+        use tokio::time::Duration;
 
-        for hash in valid_hashes {
-            let result = super::Opt::validate_oci_reference(hash);
-            assert!(result.is_ok(), "Hash '{}' should be valid", hash);
-            assert_eq!(result.unwrap(), hash);
-        }
-    }
+        use super::super::Executable;
+        use super::super::Opt;
+        use crate::router::SchemaSource;
 
-    #[test]
-    fn test_validate_oci_reference_invalid_cases() {
-        let invalid_references = vec![
-            // Missing @sha256: prefix
-            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Wrong prefix
-            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Too short
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
-            // Too long
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
-            // Invalid characters
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
-            // Empty string
-            "",
-            // Just the prefix
-            "@sha256:",
-            // Hash with spaces
-            "@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ",
-            // Hash with dashes
-            "@sha256:12345678-90abcdef-12345678-90abcdef-12345678-90abcdef-12345678-90abcdef",
-            // Hash with colons
-            "@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef",
-            // Missing hash entirely
-            "@sha256",
-            // Wrong format entirely
-            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Extra characters at the end
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef:latest",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
-        ];
+        #[tokio::test]
+        async fn test_conflicting_supergraph_file_and_graph_artifact_reference() {
+            // Test that --supergraph and --graph-artifact-reference cannot be used together
+            let temp_dir = tempfile::tempdir().unwrap();
+            let supergraph_path = temp_dir.path().join("supergraph.graphql");
+            std::fs::File::create(&supergraph_path).unwrap();
 
-        for reference in invalid_references {
-            let result = super::Opt::validate_oci_reference(reference);
-            assert!(
-                result.is_err(),
-                "Reference '{}' should be invalid",
-                reference
-            );
+            let schema = Some(SchemaSource::File {
+                path: supergraph_path,
+                watch: false,
+            });
+
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: Some("test-key".to_string()),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            // Provide an explicit minimal config to avoid default Configuration parsing issues
+            use crate::router::ConfigurationSource;
+            let supergraph = crate::configuration::Supergraph::builder().build();
+            let config = ConfigurationSource::Static(Box::new(crate::Configuration {
+                supergraph,
+                health_check: Default::default(),
+                sandbox: Default::default(),
+                homepage: Default::default(),
+                server: Default::default(),
+                cors: Default::default(),
+                tls: Default::default(),
+                apq: Default::default(),
+                persisted_queries: Default::default(),
+                limits: Default::default(),
+                experimental_chaos: Default::default(),
+                batching: Default::default(),
+                experimental_type_conditioned_fetching: false,
+                plugins: Default::default(),
+                apollo_plugins: Default::default(),
+                notify: Default::default(),
+                uplink: None,
+                validated_yaml: None,
+                raw_yaml: None,
+            }));
+
+            let result = Executable::inner_start(
+                None,
+                schema,
+                Some(config),
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            assert!(result.is_err(), "Should fail with conflicting options");
             let error_msg = result.unwrap_err().to_string();
             assert!(
-                error_msg.contains("invalid graph artifact reference"),
-                "Error message should contain 'invalid graph artifact reference' for '{}'",
-                reference
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
             );
             assert!(
-                error_msg.contains(reference),
-                "Error message should contain the invalid reference '{}'",
-                reference
+                error_msg.contains("--supergraph")
+                    || error_msg.contains("--graph-artifact-reference"),
+                "Error should mention the conflicting options"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_conflicting_supergraph_urls_and_graph_artifact_reference() {
+            // Test that APOLLO_ROUTER_SUPERGRAPH_URLS and --graph-artifact-reference cannot be used together
+            use url::Url;
+            let test_url = Url::parse("https://example.com/schema.graphql").unwrap();
+            let schema = Some(SchemaSource::URLs {
+                urls: vec![test_url],
+            });
+
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: Some(vec![Url::parse("https://example.com/schema.graphql").unwrap()]),
+                command: None,
+                apollo_key: Some("test-key".to_string()),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            // Provide an explicit minimal config to avoid default Configuration parsing issues
+            use crate::router::ConfigurationSource;
+            let supergraph = crate::configuration::Supergraph::builder().build();
+            let config = ConfigurationSource::Static(Box::new(crate::Configuration {
+                supergraph,
+                health_check: Default::default(),
+                sandbox: Default::default(),
+                homepage: Default::default(),
+                server: Default::default(),
+                cors: Default::default(),
+                tls: Default::default(),
+                apq: Default::default(),
+                persisted_queries: Default::default(),
+                limits: Default::default(),
+                experimental_chaos: Default::default(),
+                batching: Default::default(),
+                experimental_type_conditioned_fetching: false,
+                plugins: Default::default(),
+                apollo_plugins: Default::default(),
+                notify: Default::default(),
+                uplink: None,
+                validated_yaml: None,
+                raw_yaml: None,
+            }));
+
+            let result = Executable::inner_start(
+                None,
+                schema,
+                Some(config),
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            assert!(result.is_err(), "Should fail with conflicting options");
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
+            );
+            assert!(
+                error_msg.contains("APOLLO_ROUTER_SUPERGRAPH_URLS")
+                    || error_msg.contains("--graph-artifact-reference"),
+                "Error should mention the conflicting options"
             );
         }
     }
