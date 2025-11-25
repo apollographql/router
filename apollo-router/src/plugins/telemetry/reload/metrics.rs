@@ -26,7 +26,6 @@ use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::Stream;
-use opentelemetry_sdk::metrics::StreamBuilder;
 use prometheus::Registry;
 use tower::BoxError;
 
@@ -34,8 +33,9 @@ use crate::_private::telemetry::ConfigResource;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
-use crate::plugins::telemetry::config::{Conf, OTelMetricView};
+use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::config::OTelMetricView;
 
 /// Trait for metric exporters to contribute to meter provider construction
 pub(crate) trait MetricsConfigurator {

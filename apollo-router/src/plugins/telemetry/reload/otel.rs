@@ -87,11 +87,15 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     // We filter out raw opentelemetry logs so we can modify and show them in the otel_error_layer
     let fmt = if std::io::stdout().is_terminal() {
         FmtLayer::new(Text::default(), std::io::stdout)
-            .with_filter(filter_fn(|meta| !meta.target().starts_with("opentelemetry")))
+            .with_filter(filter_fn(|meta| {
+                !meta.target().starts_with("opentelemetry")
+            }))
             .boxed()
     } else {
         FmtLayer::new(Json::default(), std::io::stdout)
-            .with_filter(filter_fn(|meta| !meta.target().starts_with("opentelemetry")))
+            .with_filter(filter_fn(|meta| {
+                !meta.target().starts_with("opentelemetry")
+            }))
             .boxed()
     };
 

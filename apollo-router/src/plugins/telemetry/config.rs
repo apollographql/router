@@ -7,8 +7,8 @@ use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry_sdk::metrics::{Instrument, Stream};
-use opentelemetry_sdk::metrics::StreamBuilder;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -156,7 +156,7 @@ pub(crate) struct MetricView {
     pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
 }
 
-pub (crate) type OTelMetricView = Box<dyn Fn(&Instrument) -> Option<Stream> + Send + Sync>;
+pub(crate) type OTelMetricView = Box<dyn Fn(&Instrument) -> Option<Stream> + Send + Sync>;
 
 impl TryInto<OTelMetricView> for MetricView {
     type Error = String;
@@ -174,9 +174,9 @@ impl TryInto<OTelMetricView> for MetricView {
             MetricAggregation::Drop => opentelemetry_sdk::metrics::Aggregation::Drop,
         });
 
-        let allowed_keys: Option<Vec<Key>> = self.allowed_attribute_keys.map(|set| {
-            set.into_iter().map(Key::new).collect()
-        });
+        let allowed_keys: Option<Vec<Key>> = self
+            .allowed_attribute_keys
+            .map(|set| set.into_iter().map(Key::new).collect());
 
         Ok(Box::new(move |i: &Instrument| {
             if i.name() != self.name {
@@ -195,7 +195,7 @@ impl TryInto<OTelMetricView> for MetricView {
                 builder = builder.with_aggregation(agg.clone());
             }
             if let Some(ref keys) = allowed_keys {
-                builder = builder.with_allowed_attribute_keys(keys.clone().into_iter());
+                builder = builder.with_allowed_attribute_keys(keys.clone());
             }
 
             builder.build().ok()

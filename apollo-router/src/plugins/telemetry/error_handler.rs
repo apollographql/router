@@ -1,5 +1,6 @@
 use std::fmt::Debug;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -11,11 +12,13 @@ use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
-use tracing_core::{Event, Field, Subscriber};
+use tracing_core::Event;
+use tracing_core::Field;
+use tracing_core::Subscriber;
 use tracing_core::field::Visit;
+use tracing_core::metadata::Level;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
-use tracing_core::metadata::Level;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 enum ErrorType {
@@ -24,12 +27,12 @@ enum ErrorType {
     Other,
 }
 
-pub  struct OtelErrorLayer {
-    last_logged: DashMap<ErrorType, Instant>
+pub(super) struct OtelErrorLayer {
+    last_logged: DashMap<ErrorType, Instant>,
 }
 
 impl OtelErrorLayer {
-    pub  fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             last_logged: DashMap::new(),
         }
@@ -37,7 +40,7 @@ impl OtelErrorLayer {
 
     // Allow for map injection to avoid using global map in tests
     #[cfg(test)]
-    pub fn with_map(last_logged: DashMap<ErrorType, Instant>) -> Self {
+    fn with_map(last_logged: DashMap<ErrorType, Instant>) -> Self {
         Self { last_logged }
     }
 
@@ -52,13 +55,13 @@ impl OtelErrorLayer {
         }
     }
 
-    fn classify(&self, target: &str, msg:&str) -> ErrorType {
+    fn classify(&self, target: &str, msg: &str) -> ErrorType {
         // TODO workshop this
         if target.contains("metrics") || msg.contains("Metrics error:") {
             ErrorType::Metric
         } else if target.contains("trace") {
             ErrorType::Trace
-        } else{
+        } else {
             ErrorType::Other
         }
     }
@@ -87,15 +90,15 @@ impl OtelErrorLayer {
         let now = Instant::now();
         let threshold = Self::threshold();
 
-        let last_logged =
-            *self.last_logged
-                .entry(error_type)
-                .and_modify(|last| {
-                    if last.elapsed() > threshold {
-                        *last = now;
-                    }
-                })
-                .or_insert(now);
+        let last_logged = *self
+            .last_logged
+            .entry(error_type)
+            .and_modify(|last| {
+                if last.elapsed() > threshold {
+                    *last = now;
+                }
+            })
+            .or_insert(now);
 
         last_logged == now
     }
@@ -121,7 +124,8 @@ impl Visit for MessageVisitor {
 }
 
 impl<S> Layer<S> for OtelErrorLayer
-where S:Subscriber,
+where
+    S: Subscriber,
 {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
         let meta = event.metadata();
@@ -144,8 +148,7 @@ where S:Subscriber,
 
         // Keep track of the number of cardinality overflow errors otel emits. This can be removed
         // after we introduce a way for users to configure custom cardinality limits.
-        if msg.contains("Warning: Maximum data points for metric stream exceeded.")
-        {
+        if msg.contains("Warning: Maximum data points for metric stream exceeded.") {
             u64_counter!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 "A count of how often a telemetry metric hit the hard cardinality limit",
@@ -288,6 +291,7 @@ impl<E: PushMetricExporter> PushMetricExporter for NamedMetricsExporter<E> {
 mod tests {
     use std::fmt::Debug;
     use std::time::Duration;
+
     use dashmap::DashMap;
     use opentelemetry_sdk::error::OTelSdkError;
     use opentelemetry_sdk::error::OTelSdkResult;
@@ -297,6 +301,7 @@ mod tests {
     use opentelemetry_sdk::trace::SpanData;
     use opentelemetry_sdk::trace::SpanExporter;
     use tracing_core::Level;
+
     use crate::metrics::FutureMetricsExt;
 
     #[tokio::test]
@@ -320,10 +325,7 @@ mod tests {
 
     #[test]
     fn test_message_prefix_error_metric() {
-        let prefix = super::OtelErrorLayer::message_prefix(
-            Level::ERROR,
-            super::ErrorType::Metric,
-        )
+        let prefix = super::OtelErrorLayer::message_prefix(Level::ERROR, super::ErrorType::Metric)
             .expect("prefix should be generated for metric errors");
 
         assert_eq!(prefix, "OpenTelemetry metric error occurred");
@@ -331,10 +333,7 @@ mod tests {
 
     #[test]
     fn test_message_prefix_error_trace() {
-        let prefix = super::OtelErrorLayer::message_prefix(
-            Level::ERROR,
-            super::ErrorType::Trace,
-        )
+        let prefix = super::OtelErrorLayer::message_prefix(Level::ERROR, super::ErrorType::Trace)
             .expect("prefix should be generated for trace errors");
 
         assert_eq!(prefix, "OpenTelemetry trace error occurred");
@@ -342,10 +341,7 @@ mod tests {
 
     #[test]
     fn test_message_prefix_error_other() {
-        let prefix = super::OtelErrorLayer::message_prefix(
-            Level::ERROR,
-            super::ErrorType::Other,
-        )
+        let prefix = super::OtelErrorLayer::message_prefix(Level::ERROR, super::ErrorType::Other)
             .expect("prefix should be generated for generic errors");
 
         assert_eq!(prefix, "OpenTelemetry error occurred");
@@ -353,10 +349,7 @@ mod tests {
 
     #[test]
     fn test_message_prefix_warn_metric() {
-        let prefix = super::OtelErrorLayer::message_prefix(
-            Level::WARN,
-            super::ErrorType::Metric,
-        )
+        let prefix = super::OtelErrorLayer::message_prefix(Level::WARN, super::ErrorType::Metric)
             .expect("prefix should be generated for metric warnings");
 
         assert_eq!(prefix, "OpenTelemetry metric warning occurred");
@@ -364,10 +357,7 @@ mod tests {
 
     #[test]
     fn test_message_prefix_warn_trace() {
-        let prefix = super::OtelErrorLayer::message_prefix(
-            Level::WARN,
-            super::ErrorType::Trace,
-        )
+        let prefix = super::OtelErrorLayer::message_prefix(Level::WARN, super::ErrorType::Trace)
             .expect("prefix should be generated for trace warnings");
 
         assert_eq!(prefix, "OpenTelemetry trace warning occurred");
@@ -375,10 +365,7 @@ mod tests {
 
     #[test]
     fn test_message_prefix_warn_other() {
-        let prefix = super::OtelErrorLayer::message_prefix(
-            Level::WARN,
-            super::ErrorType::Other,
-        )
+        let prefix = super::OtelErrorLayer::message_prefix(Level::WARN, super::ErrorType::Other)
             .expect("prefix should be generated for generic warnings");
 
         assert_eq!(prefix, "OpenTelemetry warning occurred");
@@ -387,29 +374,17 @@ mod tests {
     #[test]
     fn test_message_prefix_non_error_levels_return_none() {
         assert!(
-            super::OtelErrorLayer::message_prefix(
-                Level::INFO,
-                super::ErrorType::Metric,
-            )
-                .is_none(),
+            super::OtelErrorLayer::message_prefix(Level::INFO, super::ErrorType::Metric,).is_none(),
             "INFO level should not produce a prefix",
         );
 
         assert!(
-            super::OtelErrorLayer::message_prefix(
-                Level::DEBUG,
-                super::ErrorType::Trace,
-            )
-                .is_none(),
+            super::OtelErrorLayer::message_prefix(Level::DEBUG, super::ErrorType::Trace,).is_none(),
             "DEBUG level should not produce a prefix",
         );
 
         assert!(
-            super::OtelErrorLayer::message_prefix(
-                Level::TRACE,
-                super::ErrorType::Other,
-            )
-                .is_none(),
+            super::OtelErrorLayer::message_prefix(Level::TRACE, super::ErrorType::Other,).is_none(),
             "TRACE level should not produce a prefix",
         );
     }
@@ -433,10 +408,7 @@ mod tests {
                 "{msg}"
             );
 
-            assert_counter!(
-                "apollo.router.telemetry.metrics.cardinality_overflow",
-                1
-            );
+            assert_counter!("apollo.router.telemetry.metrics.cardinality_overflow", 1);
         }
         .with_metrics()
         .await;

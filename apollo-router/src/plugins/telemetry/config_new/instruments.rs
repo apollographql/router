@@ -972,7 +972,7 @@ impl InstrumentsConfig {
                         .with_description(
                             "Response cache hit/miss operations at the subgraph level",
                         )
-                        .build()
+                        .build(),
                 ),
             );
         }
