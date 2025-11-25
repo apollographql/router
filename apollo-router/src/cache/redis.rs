@@ -1117,7 +1117,7 @@ mod test {
             // test the `mget` functionality
             let values = storage.get_multiple(keys).await;
             for value in values {
-                let value: RedisValue<usize> = value.ok_or("missing value")?;
+                let value: RedisValue<usize> = value?;
                 assert_eq!(value.0, expected_value);
             }
 
@@ -1162,7 +1162,7 @@ mod test {
 
                 let values = storage.get_multiple(keys).await;
                 let parsed_values: Vec<Option<String>> =
-                    values.into_iter().map(|v| v.map(|v| v.0)).collect();
+                    values.into_iter().map(|v| v.ok().map(|v| v.0)).collect();
                 assert_eq!(parsed_values, expected_values);
             }
 
