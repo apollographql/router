@@ -24,16 +24,18 @@ For each version of the Apollo Router, Apollo provides:
 - [A Docker image](#container)
 - [A binary](#local-binary)
 
-## Kubernetes using the Apollo GraphOS Operator
+## Kubernetes
 
-For a production-grade self-hosted deployment Apollo recommends the [Apollo GraphOS Operator](/apollo-operator/). The Operator provides declarative Kubernetes resources for managing routers, supergraphs, graph schemas, and subgraphs. It can simplify complex multi-service architectures.
+### Apollo GraphOS Operator
 
-The Operator offers different [workflow patterns](/apollo-operator/workflows/) depending on your infrastructure:
+For a production-grade self-hosted deployment, Apollo recommends the [Apollo GraphOS Operator](/apollo-operator/). The Operator provides declarative Kubernetes resources to manage routers, supergraphs, graph schemas, and subgraphs. It simplifies complex multi-service architectures.
+
+The Operator supports different [workflow patterns](/apollo-operator/workflows/) based on your infrastructure:
 - Single-cluster setups for simpler deployments
 - Multi-cluster and hybrid configurations for distributed services
 - Deploy-only patterns for existing CI/CD workflows
 
-## Kubernetes using Helm
+### Helm
 
 Helm is a package manager for Kubernetes. Apollo provides a Helm chart with each release of Apollo Router in the GitHub Container Registry. Since router v0.14.0, Apollo has released each router Helm chart as an Open Container Initiative (OCI) image in `oci://ghcr.io/apollographql/helm-charts/router`.
 
