@@ -34,7 +34,20 @@ During the migration window, the cloud router remains running and continues to r
 
 ### Deploy a self-hosted router
 
-Deploy a self‑hosted router using your preferred platform. See [the self-hosted routing documentation](https://www.apollographql.com/docs/graphos/routing/self-hosted) for details. For a production-grade self-hosted deployment, Apollo recommends the [Apollo GraphOS Operator](https://www.apollographql.com/docs/apollo-operator).
+Deploy a self‑hosted router using your preferred platform. 
+
+We recommend using the [Apollo GraphOS Operator](/apollo-operator) for Kubernetes deployments.
+
+We also provide guides for the following platforms:
+- [Kubernetes](/graphos/routing/self-hosted/containerization/kubernetes)
+- [Docker](/graphos/routing/self-hosted/containerization/docker)
+- [AWS](/graphos/routing/self-hosted/containerization/aws)
+- [Azure](/graphos/routing/self-hosted/containerization/azure)
+- [GCP](/graphos/routing/self-hosted/containerization/gcp)
+- [Railway](/graphos/routing/self-hosted/managed-hosting/railway)
+- [Render](/graphos/routing/self-hosted/managed-hosting/render)
+
+Use the router configuration YAML you exported in the previous step to configure your self-hosted router.
 
 ### Validate and shift traffic
 
