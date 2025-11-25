@@ -668,6 +668,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_with_jaeger_propagation_fails() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.propagation = Propagation {
             datadog: Some(true),
@@ -676,14 +678,16 @@ mod tests {
         };
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "datadog propagation cannot be used with any other propagator except for baggage",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+        assert!(tracing_test::logs_contain(
+            "datadog propagation should not be used with any other propagator except for baggage to avoid trace id conflicts",
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_with_trace_context_propagation_fails() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.propagation = Propagation {
             datadog: Some(true),
@@ -692,14 +696,16 @@ mod tests {
         };
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "datadog propagation cannot be used with any other propagator except for baggage",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+        assert!(tracing_test::logs_contain(
+            "datadog propagation should not be used with any other propagator except for baggage to avoid trace id conflicts",
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_with_zipkin_propagation_fails() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.propagation = Propagation {
             datadog: Some(true),
@@ -708,14 +714,16 @@ mod tests {
         };
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "datadog propagation cannot be used with any other propagator except for baggage",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+        assert!(tracing_test::logs_contain(
+            "datadog propagation should not be used with any other propagator except for baggage to avoid trace id conflicts",
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_with_aws_xray_propagation_fails() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.propagation = Propagation {
             datadog: Some(true),
@@ -724,14 +732,16 @@ mod tests {
         };
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "datadog propagation cannot be used with any other propagator except for baggage",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+        assert!(tracing_test::logs_contain(
+            "datadog propagation should not be used with any other propagator except for baggage to avoid trace id conflicts",
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_exporter_enabled_with_datadog_propagation_only_passes() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.datadog.enabled = true;
         config.exporters.tracing.propagation = Propagation {
@@ -745,6 +755,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_exporter_enabled_with_datadog_baggage_propagation_passes() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.datadog.enabled = true;
         config.exporters.tracing.propagation = Propagation {
@@ -759,6 +771,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_exporter_enabled_with_jaeger_propagation_only_fails() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.datadog.enabled = true;
         config.exporters.tracing.propagation = Propagation {
@@ -767,14 +781,16 @@ mod tests {
         };
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "datadog propagation must be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+        assert!(tracing_test::logs_contain(
+            "datadog propagation should be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled to avoid trace id conflicts",
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_exporter_enabled_with_datadog_jaeger_propagation_fails() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.datadog.enabled = true;
         config.exporters.tracing.propagation = Propagation {
@@ -784,14 +800,16 @@ mod tests {
         };
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+        assert!(tracing_test::logs_contain(
+            "if the datadog exporter is enabled and any other propagator except for baggage is enabled, the datadog propagator should be disabled to avoid trace id conflicts",
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_exporter_enabled_with_datadog_trace_context_propagation_fails() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.datadog.enabled = true;
         config.exporters.tracing.propagation = Propagation {
@@ -801,14 +819,16 @@ mod tests {
         };
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+        assert!(tracing_test::logs_contain(
+            "if the datadog exporter is enabled and any other propagator except for baggage is enabled, the datadog propagator should be disabled to avoid trace id conflicts",
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_exporter_enabled_with_datadog_zipkin_propagation_fails() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.datadog.enabled = true;
         config.exporters.tracing.propagation = Propagation {
@@ -818,14 +838,16 @@ mod tests {
         };
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+        assert!(tracing_test::logs_contain(
+            "if the datadog exporter is enabled and any other propagator except for baggage is enabled, the datadog propagator should be disabled to avoid trace id conflicts",
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_exporter_enabled_with_datadog_aws_xray_propagation_fails() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.datadog.enabled = true;
         config.exporters.tracing.propagation = Propagation {
@@ -835,35 +857,44 @@ mod tests {
         };
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+        assert!(tracing_test::logs_contain(
+            "if the datadog exporter is enabled and any other propagator except for baggage is enabled, the datadog propagator should be disabled to avoid trace id conflicts",
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_datadog_exporter_enabled_with_otlp_exporter_enabled_fails() {
+    async fn test_datadog_exporter_enabled_with_otlp_exporter_enabled_passes() {
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.datadog.enabled = true;
         config.exporters.tracing.otlp.enabled = true;
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "datadog propagation must be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_propagation_with_otlp_exporter_enabled_passes() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.otlp.enabled = true;
+        config.exporters.tracing.propagation.datadog = Some(true);
+
+        let builder = Builder::new(&None, &config);
+        assert!(builder.build().is_ok());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_datadog_exporter_enabled_with_zipkin_exporter_enabled_fails() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
         let mut config = create_config_with_apollo_enabled();
         config.exporters.tracing.datadog.enabled = true;
         config.exporters.tracing.zipkin.enabled = true;
 
         let builder = Builder::new(&None, &config);
-        assert_eq!(
-            "datadog propagation must be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled",
-            builder.build().err().unwrap().to_string()
-        );
+        assert!(builder.build().is_ok());
+        assert!(tracing_test::logs_contain(
+            "datadog propagation should be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled to avoid trace id conflicts",
+        ));
     }
 }
