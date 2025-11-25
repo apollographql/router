@@ -1381,13 +1381,14 @@ mod tests {
 
             // because of how tokio::timeout polls, it's possible for a command to finish before the
             // timeout is polled (even if the duration is 0). perform the check in a loop to give it
-            // a few changes to trigger.
+            // a few chances to trigger.
             let now = Instant::now();
             while now.elapsed() < Duration::from_secs(5) {
-                let error = storage.fetch_multiple(&keys, "S1").await.unwrap_err();
-                if error.is_row_not_found() {
-                    continue;
-                }
+                let error = match storage.fetch_multiple(&keys, "S1").await {
+                    Ok(_) => continue,
+                    Err(err) if err.is_row_not_found() => continue,
+                    Err(err) => err,
+                };
 
                 assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
                 assert_eq!(error.code(), "TIMEOUT");
