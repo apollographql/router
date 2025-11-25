@@ -39,9 +39,6 @@ use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::batching::BatchQuery;
-use crate::cache::redis::RedisCacheStorage;
-use crate::cache::redis::RedisKey;
-use crate::cache::redis::RedisValue;
 use crate::cache::storage::ValueType;
 use crate::configuration::RedisCache;
 use crate::configuration::subgraph::SubgraphConfiguration;
@@ -57,6 +54,7 @@ use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::response_cache::plugin::find_matching_key_field_set;
 use crate::query_planner::OperationKind;
+use crate::redis;
 use crate::services::subgraph;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
@@ -90,12 +88,12 @@ pub(crate) struct EntityCache {
 }
 
 pub(crate) struct Storage {
-    pub(crate) all: Option<RedisCacheStorage>,
-    pub(crate) subgraphs: HashMap<String, RedisCacheStorage>,
+    pub(crate) all: Option<redis::Gateway>,
+    pub(crate) subgraphs: HashMap<String, redis::Gateway>,
 }
 
 impl Storage {
-    pub(crate) fn get(&self, subgraph: &str) -> Option<&RedisCacheStorage> {
+    pub(crate) fn get(&self, subgraph: &str) -> Option<&redis::Gateway> {
         self.subgraphs.get(subgraph).or(self.all.as_ref())
     }
 }
@@ -211,7 +209,7 @@ impl Plugin for EntityCache {
             let required_to_start = redis_config.required_to_start;
             // we need to explicitly disable TTL reset because it is managed directly by this plugin
             redis_config.reset_ttl = false;
-            all = match RedisCacheStorage::new(redis_config, "entity").await {
+            all = match redis::Gateway::new(redis_config, "entity").await {
                 Ok(storage) => Some(storage),
                 Err(e) => {
                     tracing::error!(
@@ -233,7 +231,7 @@ impl Plugin for EntityCache {
                 // we need to explicitly disable TTL reset because it is managed directly by this plugin
                 let mut redis_config = redis.clone();
                 redis_config.reset_ttl = false;
-                let storage = match RedisCacheStorage::new(redis_config, "entity").await {
+                let storage = match redis::Gateway::new(redis_config, "entity").await {
                     Ok(storage) => Some(storage),
                     Err(e) => {
                         tracing::error!(
@@ -469,7 +467,7 @@ pub(super) const INVALIDATION_SHARED_KEY: &str = "supersecret";
 impl EntityCache {
     #[cfg(test)]
     pub(crate) async fn with_mocks(
-        storage: RedisCacheStorage,
+        storage: redis::Gateway,
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
     ) -> Result<Self, BoxError>
@@ -534,7 +532,7 @@ impl EntityCache {
     }
 
     // Returns the configured ttl for this subgraph
-    fn subgraph_ttl(&self, subgraph_name: &str, storage: &RedisCacheStorage) -> Option<Duration> {
+    fn subgraph_ttl(&self, subgraph_name: &str, storage: &redis::Gateway) -> Option<Duration> {
         self.subgraphs
             .get(subgraph_name)
             .ttl
@@ -573,7 +571,7 @@ struct CacheService {
     service: subgraph::BoxCloneService,
     name: String,
     entity_type: Option<String>,
-    storage: RedisCacheStorage,
+    storage: redis::Gateway,
     subgraph_ttl: Option<Duration>,
     private_queries: Arc<RwLock<HashSet<String>>>,
     private_id: Option<String>,
@@ -909,7 +907,7 @@ impl CacheService {
 async fn cache_lookup_root(
     name: String,
     entity_type_opt: Option<&str>,
-    cache: RedisCacheStorage,
+    cache: redis::Gateway,
     is_known_private: bool,
     private_id: Option<&str>,
     expose_keys_in_context: bool,
@@ -928,7 +926,8 @@ async fn cache_lookup_root(
         private_id,
     );
 
-    let cache_result: Result<RedisValue<CacheEntry>, _> = cache.get(RedisKey(key.clone())).await;
+    let cache_result: Result<redis::Value<CacheEntry>, _> =
+        cache.get(redis::Key(key.clone())).await;
 
     match cache_result {
         Ok(value) => {
@@ -993,7 +992,7 @@ async fn cache_lookup_entities(
     name: String,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
-    cache: RedisCacheStorage,
+    cache: redis::Gateway,
     is_known_private: bool,
     private_id: Option<&str>,
     mut request: subgraph::Request,
@@ -1013,10 +1012,14 @@ async fn cache_lookup_entities(
     )?;
 
     let cache_result: Vec<Option<CacheEntry>> = cache
-        .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
+        .get_multiple(
+            keys.iter()
+                .map(|k| redis::Key(k.clone()))
+                .collect::<Vec<_>>(),
+        )
         .await
         .into_iter()
-        .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
+        .map(|r| r.map(|v: redis::Value<CacheEntry>| v.0))
         .map(|v| match v {
             None => None,
             Some(v) => {
@@ -1136,7 +1139,7 @@ impl ValueType for CacheEntry {
 }
 
 async fn cache_store_root_from_response(
-    cache: RedisCacheStorage,
+    cache: redis::Gateway,
     subgraph_ttl: Option<Duration>,
     response: &subgraph::Response,
     cache_control: CacheControl,
@@ -1186,8 +1189,8 @@ async fn cache_store_root_from_response(
             tokio::spawn(async move {
                 cache
                     .insert(
-                        RedisKey(cache_key),
-                        RedisValue(CacheEntry {
+                        redis::Key(cache_key),
+                        redis::Value(CacheEntry {
                             control: cache_control,
                             data,
                         }),
@@ -1203,7 +1206,7 @@ async fn cache_store_root_from_response(
 }
 
 async fn cache_store_entities_from_response(
-    cache: RedisCacheStorage,
+    cache: redis::Gateway,
     subgraph_ttl: Option<Duration>,
     response: &mut subgraph::Response,
     cache_control: CacheControl,
@@ -1622,7 +1625,7 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
-    cache: RedisCacheStorage,
+    cache: redis::Gateway,
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
@@ -1694,8 +1697,8 @@ async fn insert_entities_in_result(
 
                 if !has_errors && cache_control.should_store() && should_cache_private {
                     to_insert.push((
-                        RedisKey(key),
-                        RedisValue(CacheEntry {
+                        redis::Key(key),
+                        redis::Value(CacheEntry {
                             control: cache_control.clone(),
                             data: value.clone(),
                         }),
@@ -1805,7 +1808,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
             .await
             .unwrap();
         let map = serde_json::json!({
@@ -1847,7 +1850,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let mut redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        let mut redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
             .await
             .unwrap();
         let map = serde_json::json!({

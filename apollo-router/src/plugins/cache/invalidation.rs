@@ -16,9 +16,9 @@ use tower::BoxError;
 use tracing::Instrument;
 
 use super::entity::Storage as EntityStorage;
-use crate::cache::redis::RedisCacheStorage;
 use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
 use crate::plugins::cache::entity::hash_representation;
+use crate::redis;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -96,7 +96,7 @@ impl Invalidation {
 
     async fn handle_request(
         &self,
-        redis_storage: &RedisCacheStorage,
+        redis_storage: &redis::Gateway,
         origin: &'static str,
         request: &mut InvalidationRequest,
     ) -> Result<u64, InvalidationError> {

@@ -39,13 +39,13 @@ use tokio::task::AbortHandle;
 use tower::BoxError;
 use url::Url;
 
-use super::KeyType;
-use super::ValueType;
 use super::metrics::RedisMetricsCollector;
+use crate::cache::storage::KeyType;
+use crate::cache::storage::ValueType;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
 
-pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
+pub(crate) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "redis",
@@ -877,8 +877,8 @@ mod test {
 
     use url::Url;
 
-    use super::RedisCacheStorage;
     use crate::cache::storage::ValueType;
+    use crate::redis;
 
     #[test]
     fn ensure_invalid_payload_serialization_doesnt_fail() {
@@ -892,7 +892,7 @@ mod test {
             }
         }
 
-        let invalid_json_payload = super::RedisValue(Stuff {
+        let invalid_json_payload = redis::Value(Stuff {
             // this systemtime is invalid, serialization will fail
             time: std::time::UNIX_EPOCH - std::time::Duration::new(1, 0),
         });
@@ -918,7 +918,7 @@ mod test {
         let url = Url::parse(url).expect("invalid URL");
         let urls = vec![url; num_urls];
 
-        let preprocess_result = RedisCacheStorage::preprocess_urls(urls);
+        let preprocess_result = redis::Gateway::preprocess_urls(urls);
         assert!(
             preprocess_result.is_ok(),
             "error = {:?}",
@@ -938,7 +938,7 @@ mod test {
         let url = Url::parse(url).expect("invalid URL");
         let urls = vec![url; num_urls];
 
-        let preprocess_result = RedisCacheStorage::preprocess_urls(urls);
+        let preprocess_result = redis::Gateway::preprocess_urls(urls);
         assert!(
             preprocess_result.is_err(),
             "error = {:?}",
@@ -968,7 +968,7 @@ mod test {
             vec![url2.clone(), url1.clone()],
         ];
         for url_pairing in url_pairings {
-            let preprocess_result = RedisCacheStorage::preprocess_urls(url_pairing);
+            let preprocess_result = redis::Gateway::preprocess_urls(url_pairing);
             assert!(
                 preprocess_result.is_ok(),
                 "error = {:?}",
@@ -1008,7 +1008,7 @@ mod test {
             vec![url2.clone(), url1.clone()],
         ];
         for url_pairing in url_pairings {
-            let preprocess_result = RedisCacheStorage::preprocess_urls(url_pairing.clone());
+            let preprocess_result = redis::Gateway::preprocess_urls(url_pairing.clone());
             assert!(preprocess_result.is_err(), "url pairing = {url_pairing:?}");
         }
     }
@@ -1033,9 +1033,7 @@ mod test {
         use tower::BoxError;
         use uuid::Uuid;
 
-        use crate::cache::redis::RedisCacheStorage;
-        use crate::cache::redis::RedisKey;
-        use crate::cache::redis::RedisValue;
+        use crate::redis;
 
         fn random_namespace() -> String {
             Uuid::new_v4().to_string()
@@ -1065,17 +1063,17 @@ mod test {
         /// used on keys which map to different hash slots, even if those hash slots are on the same node.
         ///
         /// This test inserts data that is guaranteed to hash to different slots to verify that
-        /// `RedisCacheStorage` is well-behaved when operating against a cluster.
+        /// `redis::Gateway` is well-behaved when operating against a cluster.
         #[tokio::test(flavor = "multi_thread")]
         async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
             let clustered = true;
             let storage =
-                RedisCacheStorage::new(redis_config(clustered), "test_redis_storage").await?;
+                redis::Gateway::new(redis_config(clustered), "test_redis_storage").await?;
 
             // insert values which reflect different cluster slots
             let mut data = HashMap::default();
             let expected_value = rand::rng().next_u32() as usize;
-            let unique_cluster_slot_count = |data: &HashMap<RedisKey<String>, _>| {
+            let unique_cluster_slot_count = |data: &HashMap<redis::Key<String>, _>| {
                 data.keys()
                     .map(|key| ClusterRouting::hash_key(key.0.as_bytes()))
                     .unique()
@@ -1090,7 +1088,10 @@ mod test {
                     .take(10)
                     .map(char::from)
                     .collect::<String>();
-                data.insert(RedisKey(format!("{{{}}}", key)), RedisValue(expected_value));
+                data.insert(
+                    redis::Key(format!("{{{}}}", key)),
+                    redis::Value(expected_value),
+                );
             }
 
             // insert values
@@ -1101,14 +1102,14 @@ mod test {
             // make a `get` call for each key and ensure that it has the expected value. this tests both
             // the `get` and `insert_multiple` functions
             for key in &keys {
-                let value: RedisValue<usize> = storage.get(key.clone()).await?;
+                let value: redis::Value<usize> = storage.get(key.clone()).await?;
                 assert_eq!(value.0, expected_value);
             }
 
             // test the `mget` functionality
             let values = storage.get_multiple(keys).await;
             for value in values {
-                let value: RedisValue<usize> = value.ok_or("missing value")?;
+                let value: redis::Value<usize> = value.ok_or("missing value")?;
                 assert_eq!(value.0, expected_value);
             }
 
@@ -1122,11 +1123,11 @@ mod test {
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let storage =
-                RedisCacheStorage::new(redis_config(clustered), "test_get_multiple_is_ordered")
+                redis::Gateway::new(redis_config(clustered), "test_get_multiple_is_ordered")
                     .await?;
 
             let data = [("a", "1"), ("b", "2"), ("c", "3")]
-                .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
+                .map(|(k, v)| (redis::Key(k.to_string()), redis::Value(v.to_string())));
             storage.insert_multiple(&data, None).await;
 
             // check different orders of fetches to make everything is ordered correctly, including
@@ -1142,9 +1143,9 @@ mod test {
             ];
 
             for (keys, expected_values) in test_cases {
-                let keys: Vec<RedisKey<_>> = keys
+                let keys: Vec<redis::Key<_>> = keys
                     .into_iter()
-                    .map(|key| RedisKey(key.to_string()))
+                    .map(|key| redis::Key(key.to_string()))
                     .collect();
                 let expected_values: Vec<Option<String>> = expected_values
                     .into_iter()

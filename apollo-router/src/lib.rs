@@ -83,6 +83,7 @@ mod uplink;
 pub(crate) mod allocator;
 #[doc(hidden)]
 pub mod otel_compat;
+pub(crate) mod redis;
 mod registry;
 
 pub use crate::configuration::Configuration;

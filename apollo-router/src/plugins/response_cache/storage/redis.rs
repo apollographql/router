@@ -25,9 +25,6 @@ use super::CacheEntry;
 use super::CacheStorage;
 use super::Document;
 use super::StorageResult;
-use crate::cache::redis::RedisCacheStorage;
-use crate::cache::redis::RedisKey;
-use crate::cache::redis::RedisValue;
 use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
 use crate::plugins::response_cache::cache_control::CacheControl;
@@ -35,6 +32,7 @@ use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
 use crate::plugins::response_cache::metrics::record_maintenance_queue_error;
 use crate::plugins::response_cache::metrics::record_maintenance_success;
+use crate::redis;
 
 pub(crate) type Config = super::config::Config;
 
@@ -61,7 +59,7 @@ impl From<(&str, CacheValue)> for CacheEntry {
 
 #[derive(Clone)]
 pub(crate) struct Storage {
-    storage: RedisCacheStorage,
+    storage: redis::Gateway,
     cache_tag_tx: mpsc::Sender<String>,
     fetch_timeout: Duration,
     insert_timeout: Duration,
@@ -85,7 +83,7 @@ impl Storage {
         //  on the same cache tag multiple times a second, and perhaps a world where we actually want multiple
         //  consumers running at the same time.
 
-        let storage = RedisCacheStorage::new(config.into(), "response-cache").await?;
+        let storage = redis::Gateway::new(config.into(), "response-cache").await?;
         let (cache_tag_tx, cache_tag_rx) = mpsc::channel(1000);
         let s = Self {
             storage,
@@ -100,7 +98,7 @@ impl Storage {
     }
 
     fn make_key<K: KeyType>(&self, key: K) -> String {
-        self.storage.make_key(RedisKey(key))
+        self.storage.make_key(redis::Key(key))
     }
 
     async fn invalidate_keys(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
@@ -380,9 +378,9 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let value: RedisValue<CacheValue> = self
+        let value: redis::Value<CacheValue> = self
             .storage
-            .get_with_options(RedisKey(cache_key), options)
+            .get_with_options(redis::Key(cache_key), options)
             .await?;
         Ok(CacheEntry::from((cache_key, value.0)))
     }
@@ -391,15 +389,15 @@ impl CacheStorage for Storage {
         &self,
         cache_keys: &[&str],
     ) -> StorageResult<Vec<Option<CacheEntry>>> {
-        let keys: Vec<RedisKey<String>> = cache_keys
+        let keys: Vec<redis::Key<String>> = cache_keys
             .iter()
-            .map(|key| RedisKey(key.to_string()))
+            .map(|key| redis::Key(key.to_string()))
             .collect();
         let options = Options {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Option<RedisValue<CacheValue>>> =
+        let values: Vec<Option<redis::Value<CacheValue>>> =
             self.storage.get_multiple_with_options(keys, options).await;
 
         let entries = values
@@ -472,7 +470,7 @@ impl Storage {
         mock_storage: std::sync::Arc<dyn fred::mocks::Mocks>,
         drop_rx: broadcast::Receiver<()>,
     ) -> Result<Storage, BoxError> {
-        let storage = RedisCacheStorage::from_mocks_and_config(
+        let storage = redis::Gateway::from_mocks_and_config(
             mock_storage,
             config.into(),
             "response-cache",

@@ -366,12 +366,10 @@ mod tests {
 
     use fred::mocks::SimpleMap;
 
-    use crate::cache::redis::RedisCacheStorage;
-    use crate::cache::redis::RedisKey;
-    use crate::cache::redis::RedisValue;
     use crate::cache::storage::ValueType;
     use crate::metrics::FutureMetricsExt;
     use crate::metrics::test_utils::MetricType;
+    use crate::redis;
 
     #[test]
     fn test_weighted_sum_calculation() {
@@ -488,7 +486,7 @@ mod tests {
     async fn test_redis_storage_with_mocks() {
         async {
             let simple_map = Arc::new(SimpleMap::new());
-            let storage = RedisCacheStorage::from_mocks(simple_map.clone())
+            let storage = redis::Gateway::from_mocks(simple_map.clone())
                 .await
                 .expect("Failed to create Redis storage with mocks");
 
@@ -503,8 +501,8 @@ mod tests {
                 }
             }
 
-            let test_key = RedisKey("test_key".to_string());
-            let test_value = RedisValue(TestValue {
+            let test_key = redis::Key("test_key".to_string());
+            let test_value = redis::Value(TestValue {
                 data: "test_value".to_string(),
             });
 
@@ -512,7 +510,7 @@ mod tests {
             storage
                 .insert(test_key.clone(), test_value.clone(), None)
                 .await;
-            let retrieved: Result<RedisValue<TestValue>, _> = storage.get(test_key.clone()).await;
+            let retrieved: Result<redis::Value<TestValue>, _> = storage.get(test_key.clone()).await;
 
             // Verify the mock actually worked
             assert!(retrieved.is_ok(), "Should have retrieved value from mock");

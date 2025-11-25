@@ -16,10 +16,10 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tower::BoxError;
 
-use super::redis::*;
 use crate::configuration::RedisCache;
 use crate::metrics;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
+use crate::redis;
 
 pub(crate) trait KeyType:
     Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync
@@ -53,7 +53,7 @@ pub(crate) type InMemoryCache<K, V> = Arc<Mutex<LruCache<K, V>>>;
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     caller: &'static str,
     inner: Arc<Mutex<LruCache<K, V>>>,
-    redis: Option<RedisCacheStorage>,
+    redis: Option<redis::Gateway>,
     cache_size: Arc<AtomicI64>,
     cache_estimated_storage: Arc<AtomicI64>,
     // It's OK for these to be mutexes as they are only initialized once
@@ -80,7 +80,7 @@ where
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis: if let Some(config) = config {
                 let required_to_start = config.required_to_start;
-                match RedisCacheStorage::new(config, caller).await {
+                match redis::Gateway::new(config, caller).await {
                     Err(e) => {
                         tracing::error!(
                             cache = caller,
@@ -189,9 +189,9 @@ where
                 );
 
                 let instant_redis = Instant::now();
-                if let Some(redis) = self.redis.as_ref() {
-                    let inner_key = RedisKey(key.clone());
-                    let redis_value = redis.get(inner_key).await.ok().and_then(|mut v| {
+                if let Some(redis_gateway) = self.redis.as_ref() {
+                    let inner_key = redis::Key(key.clone());
+                    let redis_value = redis_gateway.get(inner_key).await.ok().and_then(|mut v| {
                         match init_from_redis(&mut v.0) {
                             Ok(()) => Some(v),
                             Err(e) => {
@@ -236,7 +236,7 @@ where
     pub(crate) async fn insert(&self, key: K, value: V) {
         if let Some(redis) = self.redis.as_ref() {
             redis
-                .insert(RedisKey(key.clone()), RedisValue(value.clone()), None)
+                .insert(redis::Key(key.clone()), redis::Value(value.clone()), None)
                 .await;
         }
 

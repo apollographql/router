@@ -19,7 +19,6 @@ use super::entity::EntityCache;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
-use crate::cache::redis::RedisCacheStorage;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
@@ -27,6 +26,7 @@ use crate::plugins::cache::entity::CacheKeyContext;
 use crate::plugins::cache::entity::CacheKeysContext;
 use crate::plugins::cache::entity::Subgraph;
 use crate::plugins::cache::entity::hash_representation;
+use crate::redis;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -187,7 +187,7 @@ async fn insert() {
         },
     });
 
-    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
     let map = [
@@ -330,7 +330,7 @@ async fn insert_with_requires() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
     let map = [
@@ -462,7 +462,7 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
     let map = [
@@ -605,7 +605,7 @@ async fn no_cache_control() {
         ).build())
     ].into_iter().collect());
 
-    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
     let entity_cache =
@@ -699,7 +699,7 @@ async fn private() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("private")).build())
     ].into_iter().collect());
 
-    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
     let map = [
@@ -857,7 +857,7 @@ async fn no_data() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
     let map = [
@@ -1046,7 +1046,7 @@ async fn missing_entities() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
     let map = [
@@ -1194,7 +1194,7 @@ async fn invalidate() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
     let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
