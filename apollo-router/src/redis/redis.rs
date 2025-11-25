@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -23,7 +22,6 @@ use fred::prelude::Pool as RedisPool;
 use fred::prelude::TcpConfig;
 use fred::types::Builder;
 use fred::types::Expiration;
-use fred::types::FromValue;
 use fred::types::cluster::ClusterRouting;
 use fred::types::config::ClusterDiscoveryPolicy;
 use fred::types::config::Config as RedisConfig;
@@ -39,6 +37,8 @@ use tokio::task::AbortHandle;
 use tower::BoxError;
 use url::Url;
 
+use super::Key;
+use super::Value;
 use super::metrics::RedisMetricsCollector;
 use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
@@ -105,16 +105,6 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct RedisKey<K>(pub(crate) K)
-where
-    K: KeyType;
-
-#[derive(Clone, Debug)]
-pub(crate) struct RedisValue<V>(pub(crate) V)
-where
-    V: ValueType;
-
 /// `DropSafeRedisPool` is a wrapper for `fred::prelude::RedisPool` which closes the pool's Redis
 /// connections when it is dropped.
 //
@@ -163,87 +153,6 @@ pub(crate) struct RedisCacheStorage {
     pub(crate) ttl: Option<Duration>,
     is_cluster: bool,
     reset_ttl: bool,
-}
-
-fn get_type_of<T>(_: &T) -> &'static str {
-    std::any::type_name::<T>()
-}
-
-impl<K> fmt::Display for RedisKey<K>
-where
-    K: KeyType,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<K> From<RedisKey<K>> for fred::types::Key
-where
-    K: KeyType,
-{
-    fn from(val: RedisKey<K>) -> Self {
-        val.to_string().into()
-    }
-}
-
-impl<V> fmt::Display for RedisValue<V>
-where
-    V: ValueType,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}|{:?}", get_type_of(&self.0), self.0)
-    }
-}
-
-impl<V> FromValue for RedisValue<V>
-where
-    V: ValueType,
-{
-    fn from_value(value: fred::types::Value) -> Result<Self, RedisError> {
-        match value {
-            fred::types::Value::Bytes(data) => {
-                serde_json::from_slice(&data).map(RedisValue).map_err(|e| {
-                    RedisError::new(
-                        RedisErrorKind::Parse,
-                        format!("can't deserialize from JSON: {e}"),
-                    )
-                })
-            }
-            fred::types::Value::String(s) => {
-                serde_json::from_str(&s).map(RedisValue).map_err(|e| {
-                    RedisError::new(
-                        RedisErrorKind::Parse,
-                        format!("can't deserialize from JSON: {e}"),
-                    )
-                })
-            }
-            fred::types::Value::Null => Err(RedisError::new(RedisErrorKind::NotFound, "not found")),
-            _res => Err(RedisError::new(
-                RedisErrorKind::Parse,
-                "the data is the wrong type",
-            )),
-        }
-    }
-}
-
-impl<V> TryInto<fred::types::Value> for RedisValue<V>
-where
-    V: ValueType,
-{
-    type Error = RedisError;
-
-    fn try_into(self) -> Result<fred::types::Value, Self::Error> {
-        let v = serde_json::to_vec(&self.0).map_err(|e| {
-            tracing::error!("couldn't serialize value to redis {}. This is a bug in the router, please file an issue: https://github.com/apollographql/router/issues/new", e);
-            RedisError::new(
-                RedisErrorKind::Parse,
-                format!("couldn't serialize value to redis {e}"),
-            )
-        })?;
-
-        Ok(fred::types::Value::Bytes(v.into()))
-    }
 }
 
 impl RedisCacheStorage {
@@ -602,7 +511,7 @@ impl RedisCacheStorage {
         Some(Expiration::EX(ttl.as_secs() as i64))
     }
 
-    pub(crate) fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
+    pub(crate) fn make_key<K: KeyType>(&self, key: Key<K>) -> String {
         match &self.namespace {
             Some(namespace) => format!("{namespace}:{key}"),
             None => key.to_string(),
@@ -611,16 +520,16 @@ impl RedisCacheStorage {
 
     pub(crate) async fn get<K: KeyType, V: ValueType>(
         &self,
-        key: RedisKey<K>,
-    ) -> Result<RedisValue<V>, RedisError> {
+        key: Key<K>,
+    ) -> Result<Value<V>, RedisError> {
         self.get_with_options(key, Options::default()).await
     }
 
     pub(crate) async fn get_with_options<K: KeyType, V: ValueType>(
         &self,
-        key: RedisKey<K>,
+        key: Key<K>,
         options: Options,
-    ) -> Result<RedisValue<V>, RedisError> {
+    ) -> Result<Value<V>, RedisError> {
         let key = self.make_key(key);
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
@@ -634,7 +543,7 @@ impl RedisCacheStorage {
                     .await
                     .inspect_err(|e| self.record_error(e))?;
 
-                let (value, _timeout_set): (RedisValue<V>, bool) =
+                let (value, _timeout_set): (Value<V>, bool) =
                     pipeline.all().await.inspect_err(|e| self.record_error(e))?;
                 Ok(value)
             }
@@ -647,17 +556,17 @@ impl RedisCacheStorage {
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
-        keys: Vec<RedisKey<K>>,
-    ) -> Vec<Option<RedisValue<V>>> {
+        keys: Vec<Key<K>>,
+    ) -> Vec<Option<Value<V>>> {
         self.get_multiple_with_options(keys, Options::default())
             .await
     }
 
     pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
         &self,
-        mut keys: Vec<RedisKey<K>>,
+        mut keys: Vec<Key<K>>,
         options: Options,
-    ) -> Vec<Option<RedisValue<V>>> {
+    ) -> Vec<Option<Value<V>>> {
         // NB: MGET is different from GET in that it returns `Option`s rather than `Result`s.
         //  > For every key that does not hold a string value or does not exist, the special value
         //    nil is returned. Because of this, the operation never fails.
@@ -693,7 +602,7 @@ impl RedisCacheStorage {
             for (_shard, (indexes, keys)) in h {
                 let client = client.clone();
                 tasks.push(async move {
-                    let result: Result<Vec<Option<RedisValue<V>>>, _> = client.mget(keys).await;
+                    let result: Result<Vec<Option<Value<V>>>, _> = client.mget(keys).await;
                     (indexes, result)
                 });
             }
@@ -731,8 +640,8 @@ impl RedisCacheStorage {
 
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
         &self,
-        key: RedisKey<K>,
-        value: RedisValue<V>,
+        key: Key<K>,
+        value: Value<V>,
         ttl: Option<Duration>,
     ) {
         let key = self.make_key(key);
@@ -752,7 +661,7 @@ impl RedisCacheStorage {
 
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
-        data: &[(RedisKey<K>, RedisValue<V>)],
+        data: &[(Key<K>, Value<V>)],
         ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:#?}", data);
@@ -827,7 +736,7 @@ impl RedisCacheStorage {
         pattern: String,
         count: Option<u32>,
     ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
-        let pattern = self.make_key(RedisKey(pattern));
+        let pattern = self.make_key(Key(pattern));
         if self.is_cluster {
             // NOTE: scans might be better send to only the read replicas, but the read-only client
             // doesn't have a scan_cluster(), just a paginated version called scan_page()
@@ -852,7 +761,7 @@ impl RedisCacheStorage {
         }
 
         // find all members of this namespace via `SCAN`
-        let pattern = self.make_key(RedisKey("*"));
+        let pattern = self.make_key(Key("*"));
         let client = self.client();
         let mut stream: Pin<Box<dyn Stream<Item = Result<Key, RedisError>>>> = if self.is_cluster {
             Box::pin(client.scan_cluster_buffered(pattern, None, None))

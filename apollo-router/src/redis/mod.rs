@@ -1,8 +1,10 @@
 //! Redis [gateway](https://martinfowler.com/articles/gateway-pattern.html).
 
+mod key;
 mod metrics;
 pub(crate) mod redis;
+mod value;
 
+pub(crate) use key::Key;
 pub(crate) use redis::RedisCacheStorage as Gateway;
-pub(crate) use redis::RedisKey as Key;
-pub(crate) use redis::RedisValue as Value;
+pub(crate) use value::Value;
