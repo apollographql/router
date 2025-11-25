@@ -3689,7 +3689,7 @@ expression: "&schema"
           ],
           "description": "A counter of times we have a cache hit or cache miss (deprecated)"
         },
-        "apollo.router.operations.response.cache": {
+        "apollo.router.response.cache": {
           "allOf": [
             {
               "$ref": "#/definitions/StandardInstrumentExtendedCacheAttributesWithSubgraphSelector"
@@ -6357,6 +6357,14 @@ expression: "&schema"
             "null"
           ]
         },
+        "http2_max_headers_list_bytes": {
+          "default": null,
+          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "http_max_request_bytes": {
           "default": 2000000,
           "description": "Limit the size of incoming HTTP requests read from the network,\nto protect against running out of memory. Default: 2000000 (2 MB)",
@@ -7358,12 +7366,9 @@ expression: "&schema"
           "type": "boolean"
         },
         "datadog": {
-          "default": null,
+          "default": false,
           "description": "Propagate Datadog",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "jaeger": {
           "default": false,
