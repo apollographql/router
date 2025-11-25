@@ -665,9 +665,7 @@ impl RedisCacheStorage {
 
         let values = if keys.len() == 1 {
             let key = self.make_key(keys.remove(0));
-            let res = client
-                .get(key)
-                .await;
+            let res = client.get(key).await;
             vec![res]
         } else if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
