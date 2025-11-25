@@ -24,7 +24,8 @@ In Studio, navigate to your graph’s Cloud Router page to download the config. 
 rover cloud config fetch <GRAPH_REF> > router.yaml
 ```
 
-[Install](https://www.apollographql.com/docs/rover/getting-started) and [configure](https://www.apollographql.com/docs/rover/configuring) the Rover CLI to run this command.
+You'll need to [install](/rover/getting-started) and [configure](/rover/configuring) the Rover CLI to run this command.
+
 
 ### Change the graph’s hosting mode to self-hosted
 
@@ -45,22 +46,22 @@ After you migrate all graphs to self-hosted mode, go to &lt;TODO&gt; to move you
 
 ## Frequently asked questions
 
-### What happens to my running cloud routers when I change my graph’s hosting mode?
+### What happens to my running cloud routers when I change my graph's hosting mode?
 
-Changing a graph’s hosting mode does not affect running cloud routers. Cloud routers continue to receive traffic, emit telemetry, and receive schema and configuration updates until a [shutdown event occurs for Serverless routers](https://www.apollographql.com/docs/graphos/routing/cloud/serverless#automatic-deletion-of-unused-routers) or the migration period ends on &lt;TODO SUNSET DATE&gt;.
+Changing a graph's hosting mode does not affect running cloud routers. Cloud routers continue to receive traffic, emit telemetry, and receive schema and configuration updates until a [shutdown event occurs for Serverless routers](/graphos/routing/cloud/serverless#automatic-deletion-of-unused-routers) or the migration period ends on [TODO SUNSET DATE].
 
 ### How do I retrieve and update the configuration of my running cloud routers after converting to self-hosted mode?
 
-Use the [Rover CLI's `cloud config fetch` command](https://www.apollographql.com/docs/rover/commands/cloud#cloud-config-fetch) to fetch your cloud router configuration:
+Use the [Rover CLI's `cloud config fetch` command](/rover/commands/cloud#cloud-config-fetch) to fetch your cloud router configuration:
 
 ```bash
 rover cloud config fetch <GRAPH_REF> > router.yaml
 ```
 
-Use the [Rover CLI's `cloud config update` command](https://www.apollographql.com/docs/rover/commands/cloud#cloud-config-update) to update your running cloud routers’ configuration. For example, to apply changes from a local `router.yaml`:
+Use the [Rover CLI's `cloud config update` command](/rover/commands/cloud#cloud-config-update) to update your running cloud routers' configuration. For example, to apply changes from a local `router.yaml`:
 
 ```bash
 rover cloud config update <GRAPH_REF> < router.yaml
 ```
 
-[Install](https://www.apollographql.com/docs/rover/getting-started) and [configure](https://www.apollographql.com/docs/rover/configuring) the Rover CLI to run this command.
+[Install](/rover/getting-started) and [configure](/rover/configuring) the Rover CLI to run this command.
