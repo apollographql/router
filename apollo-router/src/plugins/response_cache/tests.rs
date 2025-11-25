@@ -2920,7 +2920,7 @@ async fn invalidate_by_cache_tag() {
           }
         }
         "#);
-        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 1u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
+        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 1u64, "subgraph.name" = "orga");
 
         // Now testing without any mock subgraphs, all the data should come from the cache
         wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
@@ -2950,7 +2950,7 @@ async fn invalidate_by_cache_tag() {
         assert!(cache_control_contains_public(&cache_control_header));
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
-        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 2u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
+        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 2u64, "subgraph.name" = "orga");
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3022,7 +3022,7 @@ async fn invalidate_by_cache_tag() {
           }
         }
         "#);
-        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 3u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
+        assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 3u64, "subgraph.name" = "orga");
     }.with_metrics().await;
 }
 
