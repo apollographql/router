@@ -308,6 +308,7 @@ pub enum Severity {
 mod test_validate_source {
     use std::fs::read_to_string;
 
+    use insta::assert_debug_snapshot;
     use insta::assert_snapshot;
     use insta::glob;
     use pretty_assertions::assert_str_eq;
@@ -322,7 +323,7 @@ mod test_validate_source {
                 let start_time = std::time::Instant::now();
                 let result = validate(schema.clone(), path.to_str().unwrap());
                 let end_time = std::time::Instant::now();
-                assert_snapshot!(format!("{:#?}", result.errors));
+                assert_debug_snapshot!(result.errors);
                 if path.parent().is_some_and(|parent| parent.ends_with("transformed")) {
                     assert_snapshot!(&diff::lines(&schema, &result.transformed).into_iter().filter_map(|res| match res {
                         diff::Result::Left(line) => Some(format!("- {line}")),
