@@ -1132,6 +1132,8 @@ struct CacheEntry {
     data: Value,
 }
 
+impl redis::ValueType for CacheEntry {}
+
 impl ValueType for CacheEntry {
     fn estimated_size(&self) -> Option<usize> {
         None

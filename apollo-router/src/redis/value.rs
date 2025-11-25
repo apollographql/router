@@ -3,8 +3,13 @@ use std::fmt;
 use fred::error::Error as RedisError;
 use fred::error::ErrorKind as RedisErrorKind;
 use fred::prelude::FromValue;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
-use crate::cache::storage::ValueType;
+pub(crate) trait ValueType:
+    Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned
+{
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct Value<V>(pub(crate) V)
@@ -71,3 +76,7 @@ where
 fn get_type_of<T>(_: &T) -> &'static str {
     std::any::type_name::<T>()
 }
+
+impl ValueType for String {}
+impl ValueType for crate::graphql::Response {}
+impl ValueType for usize {}

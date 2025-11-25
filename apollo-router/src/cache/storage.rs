@@ -22,11 +22,12 @@ use crate::plugins::telemetry::config_new::instruments::METER_NAME;
 use crate::redis;
 
 pub(crate) trait KeyType:
-    Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync
+    Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync + redis::KeyType
 {
 }
+
 pub(crate) trait ValueType:
-    Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned
+    Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned + redis::ValueType
 {
     /// Returns an estimated size of the cache entry in bytes.
     fn estimated_size(&self) -> Option<usize> {
@@ -327,11 +328,13 @@ mod test {
     use crate::cache::storage::CacheStorage;
     use crate::cache::storage::ValueType;
     use crate::metrics::FutureMetricsExt;
+    use crate::redis;
 
     #[tokio::test]
     async fn test_metrics() {
         #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
         struct Stuff {}
+        impl redis::ValueType for Stuff {}
         impl ValueType for Stuff {
             fn estimated_size(&self) -> Option<usize> {
                 Some(1)
@@ -368,6 +371,7 @@ mod test {
     async fn test_metrics_not_emitted_where_no_estimated_size() {
         #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
         struct Stuff {}
+        impl redis::ValueType for Stuff {}
         impl ValueType for Stuff {
             fn estimated_size(&self) -> Option<usize> {
                 None
@@ -400,6 +404,7 @@ mod test {
         struct Stuff {
             test: String,
         }
+        impl redis::ValueType for Stuff {}
         impl ValueType for Stuff {
             fn estimated_size(&self) -> Option<usize> {
                 Some(estimate_size(self))

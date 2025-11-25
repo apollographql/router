@@ -10,7 +10,7 @@ use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::task::AbortHandle;
 
-use super::redis::ACTIVE_CLIENT_COUNT;
+use super::gateway::ACTIVE_CLIENT_COUNT;
 use crate::metrics::meter_provider;
 
 /// Collection of Redis metrics gauges
@@ -366,7 +366,6 @@ mod tests {
 
     use fred::mocks::SimpleMap;
 
-    use crate::cache::storage::ValueType;
     use crate::metrics::FutureMetricsExt;
     use crate::metrics::test_utils::MetricType;
     use crate::redis;
@@ -495,11 +494,7 @@ mod tests {
                 data: String,
             }
 
-            impl ValueType for TestValue {
-                fn estimated_size(&self) -> Option<usize> {
-                    Some(self.data.len())
-                }
-            }
+            impl redis::ValueType for TestValue {}
 
             let test_key = redis::Key("test_key".to_string());
             let test_value = redis::Value(TestValue {

@@ -25,8 +25,6 @@ use super::CacheEntry;
 use super::CacheStorage;
 use super::Document;
 use super::StorageResult;
-use crate::cache::storage::KeyType;
-use crate::cache::storage::ValueType;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
@@ -44,7 +42,7 @@ struct CacheValue {
     cache_tags: Option<HashSet<String>>,
 }
 
-impl ValueType for CacheValue {}
+impl redis::ValueType for CacheValue {}
 
 impl From<(&str, CacheValue)> for CacheEntry {
     fn from((cache_key, cache_value): (&str, CacheValue)) -> Self {
@@ -97,7 +95,7 @@ impl Storage {
         Ok(s)
     }
 
-    fn make_key<K: KeyType>(&self, key: K) -> String {
+    fn make_key<K: redis::KeyType>(&self, key: K) -> String {
         self.storage.make_key(redis::Key(key))
     }
 

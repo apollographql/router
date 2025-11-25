@@ -38,10 +38,10 @@ use tower::BoxError;
 use url::Url;
 
 use super::Key;
+use super::KeyType;
 use super::Value;
+use super::ValueType;
 use super::metrics::RedisMetricsCollector;
-use crate::cache::storage::KeyType;
-use crate::cache::storage::ValueType;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
 
@@ -786,7 +786,6 @@ mod test {
 
     use url::Url;
 
-    use crate::cache::storage::ValueType;
     use crate::redis;
 
     #[test]
@@ -795,11 +794,7 @@ mod test {
         struct Stuff {
             time: SystemTime,
         }
-        impl ValueType for Stuff {
-            fn estimated_size(&self) -> Option<usize> {
-                None
-            }
-        }
+        impl redis::ValueType for Stuff {}
 
         let invalid_json_payload = redis::Value(Stuff {
             // this systemtime is invalid, serialization will fail

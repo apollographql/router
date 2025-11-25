@@ -38,6 +38,7 @@ use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::QueryPlannerService;
 use crate::query_planner::fetch::SubgraphSchemas;
+use crate::redis;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -837,6 +838,7 @@ impl Hasher for StructHasher {
     }
 }
 
+impl redis::ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {}
 impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     fn estimated_size(&self) -> Option<usize> {
         match self {
