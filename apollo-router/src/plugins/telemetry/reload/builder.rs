@@ -85,7 +85,7 @@ impl<'a> Builder<'a> {
             self.setup_public_tracing()?;
             self.setup_public_metrics()?;
             self.setup_apollo_metrics()?;
-            self.setup_propagation()?;
+            self.setup_propagation();
             Ok((self.activation, self.endpoints, self.apollo_sender))
         })
     }
@@ -206,13 +206,12 @@ impl<'a> Builder<'a> {
             || previous_config.exporters.tracing.common != self.config.exporters.tracing.common
     }
 
-    fn setup_propagation(&mut self) -> Result<(), BoxError> {
+    fn setup_propagation(&mut self) {
         let propagators = create_propagator(
             &self.config.exporters.tracing.propagation,
             &self.config.exporters.tracing,
-        )?;
+        );
         self.activation.with_tracer_propagator(propagators);
-        Ok(())
     }
 
     fn setup_logging(&mut self) {

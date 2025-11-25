@@ -78,7 +78,7 @@ impl<'a> TracingBuilder<'a> {
 pub(crate) fn create_propagator(
     propagation: &Propagation,
     tracing: &Tracing,
-) -> Result<TextMapCompositePropagator, BoxError> {
+) -> TextMapCompositePropagator {
     let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
 
     if tracing.is_jaeger_propagation_enabled() {
@@ -130,7 +130,7 @@ pub(crate) fn create_propagator(
             propagation.request.format.clone(),
         )));
     }
-    Ok(TextMapCompositePropagator::new(propagators))
+    TextMapCompositePropagator::new(propagators)
 }
 
 /// Trait for trace exporters to contribute to tracer provider construction
