@@ -30,7 +30,7 @@ impl<'schema> SchemaTypeRef<'schema> {
             .map(|(_index, name, extended)| Self(schema, name, extended))
     }
 
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub(super) fn from_node(
         schema: &'schema Schema,
         node: &'schema Node<ObjectType>,
