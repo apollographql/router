@@ -10,6 +10,8 @@ Pin several transitive dependencies to versions compatible with our current MSRV
 - `aws-sdk-sts` to `1.55.0` (MSRV 1.81.0)
 - `home` to `0.5.9` (MSRV 1.70.0)
 - `async-graphql` / `async-graphql-axum` to `7.0.10` in fuzz subgraph (avoids 1.86.0 requirement from 7.0.15+)
+- `async-graphql-derive`, `async-graphql-parser`, `async-graphql-value` to `7.0.10` (transitive deps must match to avoid macro incompatibilities)
+- `apollo-smith` to `0.15.0` (0.15.2+ uses unstable feature `unsigned_is_multiple_of` requiring Rust 1.87+)
 
 **Trade-offs:**
 
