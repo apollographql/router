@@ -145,7 +145,7 @@ impl<'schema> SchemaTypeRef<'schema> {
         Shape::one([shape, Shape::null([])], [])
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(super) fn shape_from_type(&self, ty: &Type) -> Shape {
         self.shape_from_type_with_visited(ty, &mut IndexSet::default())
     }
@@ -174,7 +174,7 @@ impl<'schema> SchemaTypeRef<'schema> {
         }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(super) fn schema(&self) -> &'schema Schema {
         self.0
     }
@@ -187,42 +187,38 @@ impl<'schema> SchemaTypeRef<'schema> {
         self.2
     }
 
-    #[allow(dead_code)]
     pub(super) fn is_object(&self) -> bool {
         self.2.is_object()
     }
 
-    #[allow(dead_code)]
     pub(super) fn is_interface(&self) -> bool {
         self.2.is_interface()
     }
 
-    #[allow(dead_code)]
     pub(super) fn is_union(&self) -> bool {
         self.2.is_union()
     }
 
-    #[allow(dead_code)]
     pub(super) fn is_abstract(&self) -> bool {
         self.is_interface() || self.is_union()
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(super) fn is_input_object(&self) -> bool {
         self.2.is_input_object()
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(super) fn is_enum(&self) -> bool {
         self.2.is_enum()
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(super) fn is_scalar(&self) -> bool {
         self.2.is_scalar()
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(super) fn is_built_in(&self) -> bool {
         self.2.is_built_in()
     }
@@ -236,32 +232,28 @@ impl<'schema> SchemaTypeRef<'schema> {
             .get(self.1)
             .into_iter()
             .flat_map(|ty| match ty {
-                ExtendedType::Object(o) => {
-                    let mut map = IndexMap::default();
-                    if let Some(field_def) = o.fields.get(field_name) {
-                        map.insert(o.name.to_string(), field_def);
-                    }
-                    map
-                }
+                ExtendedType::Object(o) => o
+                    .fields
+                    .get(field_name)
+                    .map(|field_def| {
+                        std::iter::once((o.name.to_string(), field_def)).collect::<IndexMap<_, _>>()
+                    })
+                    .unwrap_or_default(),
 
-                ExtendedType::Interface(i) => {
-                    let mut map = IndexMap::default();
-                    if let Some(implementers) = self.0.implementers_map().get(i.name.as_str()) {
-                        for obj_name in &implementers.objects {
-                            if let Some(impl_obj) = SchemaTypeRef::new(self.0, obj_name.as_str()) {
-                                map.extend(impl_obj.get_fields(field_name).into_iter());
-                            }
-                        }
-                        for iface_name in &implementers.interfaces {
-                            if let Some(impl_iface) =
-                                SchemaTypeRef::new(self.0, iface_name.as_str())
-                            {
-                                map.extend(impl_iface.get_fields(field_name).into_iter());
-                            }
-                        }
-                    }
-                    map
-                }
+                ExtendedType::Interface(i) => self
+                    .0
+                    .implementers_map()
+                    .get(i.name.as_str())
+                    .map(|implementers| {
+                        implementers
+                            .objects
+                            .iter()
+                            .chain(&implementers.interfaces)
+                            .filter_map(|name| SchemaTypeRef::new(self.0, name.as_str()))
+                            .flat_map(|type_ref| type_ref.get_fields(field_name))
+                            .collect::<IndexMap<_, _>>()
+                    })
+                    .unwrap_or_default(),
 
                 ExtendedType::Union(u) => u
                     .members
