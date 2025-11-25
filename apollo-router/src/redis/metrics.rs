@@ -496,20 +496,18 @@ mod tests {
 
             impl redis::ValueType for TestValue {}
 
-            let test_key = redis::Key("test_key".to_string());
-            let test_value = redis::Value(TestValue {
+            let test_key = "test_key";
+            let test_value = TestValue {
                 data: "test_value".to_string(),
-            });
+            };
 
             // Perform Redis operations
-            storage
-                .insert(test_key.clone(), test_value.clone(), None)
-                .await;
-            let retrieved: Result<redis::Value<TestValue>, _> = storage.get(test_key.clone()).await;
+            storage.insert(test_key, test_value.clone(), None).await;
+            let retrieved: Result<TestValue, _> = storage.get(test_key).await;
 
             // Verify the mock actually worked
             assert!(retrieved.is_ok(), "Should have retrieved value from mock");
-            assert_eq!(retrieved.unwrap().0.data, "test_value");
+            assert_eq!(retrieved.unwrap().data, "test_value");
 
             // Verify Redis connection metrics are emitted.
             // Since this metric is based on a global AtomicU64, it's not unique across tests - so

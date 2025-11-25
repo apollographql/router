@@ -96,7 +96,7 @@ impl Storage {
     }
 
     fn make_key<K: redis::KeyType>(&self, key: K) -> String {
-        self.storage.make_key(redis::Key(key))
+        self.storage.make_key(key)
     }
 
     async fn invalidate_keys(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
@@ -376,33 +376,27 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let value: redis::Value<CacheValue> = self
-            .storage
-            .get_with_options(redis::Key(cache_key), options)
-            .await?;
-        Ok(CacheEntry::from((cache_key, value.0)))
+        let value: CacheValue = self.storage.get_with_options(cache_key, options).await?;
+        Ok(CacheEntry::from((cache_key, value)))
     }
 
     async fn internal_fetch_multiple(
         &self,
         cache_keys: &[&str],
     ) -> StorageResult<Vec<Option<CacheEntry>>> {
-        let keys: Vec<redis::Key<String>> = cache_keys
-            .iter()
-            .map(|key| redis::Key(key.to_string()))
-            .collect();
+        let keys: Vec<String> = cache_keys.iter().map(|key| key.to_string()).collect();
         let options = Options {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Option<redis::Value<CacheValue>>> =
+        let values: Vec<Option<CacheValue>> =
             self.storage.get_multiple_with_options(keys, options).await;
 
         let entries = values
             .into_iter()
             .zip(cache_keys)
             .map(|(opt_value, cache_key)| {
-                opt_value.map(|value| CacheEntry::from((*cache_key, value.0)))
+                opt_value.map(|value| CacheEntry::from((*cache_key, value)))
             })
             .collect();
 

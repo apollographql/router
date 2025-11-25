@@ -926,17 +926,16 @@ async fn cache_lookup_root(
         private_id,
     );
 
-    let cache_result: Result<redis::Value<CacheEntry>, _> =
-        cache.get(redis::Key(key.clone())).await;
+    let cache_result: Result<CacheEntry, _> = cache.get(key.clone()).await;
 
     match cache_result {
         Ok(value) => {
-            if value.0.control.can_use() {
-                let control = value.0.control.clone();
+            if value.control.can_use() {
+                let control = value.control.clone();
                 update_cache_control(&request.context, &control);
                 if expose_keys_in_context {
                     let request_id = request.id.clone();
-                    let cache_control_header = value.0.control.to_cache_control_header()?;
+                    let cache_control_header = value.control.to_cache_control_header()?;
                     request.context.upsert::<_, CacheKeysContext>(
                         CONTEXT_CACHE_KEYS,
                         |mut val| {
@@ -966,16 +965,13 @@ async fn cache_lookup_root(
                 }
 
                 let mut response = subgraph::Response::builder()
-                    .data(value.0.data)
+                    .data(value.data)
                     .extensions(Object::new())
                     .context(request.context)
                     .subgraph_name(request.subgraph_name.clone())
                     .build();
 
-                value
-                    .0
-                    .control
-                    .to_headers(response.response.headers_mut())?;
+                value.control.to_headers(response.response.headers_mut())?;
                 Ok(ControlFlow::Break(response))
             } else {
                 Ok(ControlFlow::Continue((request, key)))
@@ -1012,15 +1008,10 @@ async fn cache_lookup_entities(
     )?;
 
     let cache_result: Vec<Option<CacheEntry>> = cache
-        .get_multiple(
-            keys.iter()
-                .map(|k| redis::Key(k.clone()))
-                .collect::<Vec<_>>(),
-        )
+        .get_multiple(keys.iter().map(|k| k.clone()).collect::<Vec<_>>())
         .await
         .into_iter()
-        .map(|r| r.map(|v: redis::Value<CacheEntry>| v.0))
-        .map(|v| match v {
+        .map(|v: Option<CacheEntry>| match v {
             None => None,
             Some(v) => {
                 if v.control.can_use() {
@@ -1191,11 +1182,11 @@ async fn cache_store_root_from_response(
             tokio::spawn(async move {
                 cache
                     .insert(
-                        redis::Key(cache_key),
-                        redis::Value(CacheEntry {
+                        cache_key,
+                        CacheEntry {
                             control: cache_control,
                             data,
-                        }),
+                        },
                         ttl,
                     )
                     .instrument(span)
@@ -1699,11 +1690,11 @@ async fn insert_entities_in_result(
 
                 if !has_errors && cache_control.should_store() && should_cache_private {
                     to_insert.push((
-                        redis::Key(key),
-                        redis::Value(CacheEntry {
+                        key,
+                        CacheEntry {
                             control: cache_control.clone(),
                             data: value.clone(),
-                        }),
+                        },
                     ));
                 }
 

@@ -3,8 +3,15 @@ use std::hash::Hash;
 
 pub(crate) trait KeyType: Clone + fmt::Debug + fmt::Display + Send + Sync {}
 
+// TODO: namespaced vs simple?
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct Key<K: KeyType>(pub(crate) K);
+
+impl<K: KeyType> From<K> for Key<K> {
+    fn from(key: K) -> Self {
+        Key(key)
+    }
+}
 
 impl<K: KeyType> fmt::Display for Key<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

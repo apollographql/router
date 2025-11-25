@@ -511,25 +511,22 @@ impl RedisCacheStorage {
         Some(Expiration::EX(ttl.as_secs() as i64))
     }
 
-    pub(crate) fn make_key<K: KeyType>(&self, key: Key<K>) -> String {
+    pub(crate) fn make_key<K: KeyType>(&self, key: K) -> String {
         match &self.namespace {
             Some(namespace) => format!("{namespace}:{key}"),
             None => key.to_string(),
         }
     }
 
-    pub(crate) async fn get<K: KeyType, V: ValueType>(
-        &self,
-        key: Key<K>,
-    ) -> Result<Value<V>, RedisError> {
+    pub(crate) async fn get<K: KeyType, V: ValueType>(&self, key: K) -> Result<V, RedisError> {
         self.get_with_options(key, Options::default()).await
     }
 
     pub(crate) async fn get_with_options<K: KeyType, V: ValueType>(
         &self,
-        key: Key<K>,
+        key: K,
         options: Options,
-    ) -> Result<Value<V>, RedisError> {
+    ) -> Result<V, RedisError> {
         let key = self.make_key(key);
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
@@ -545,28 +542,32 @@ impl RedisCacheStorage {
 
                 let (value, _timeout_set): (Value<V>, bool) =
                     pipeline.all().await.inspect_err(|e| self.record_error(e))?;
-                Ok(value)
+                Ok(value.0)
             }
             _ => {
                 let client = self.replica_client().with_options(&options);
-                client.get(key).await.inspect_err(|e| self.record_error(e))
+                client
+                    .get(key)
+                    .await
+                    .inspect_err(|e| self.record_error(e))
+                    .map(|v: Value<V>| v.0)
             }
         }
     }
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
-        keys: Vec<Key<K>>,
-    ) -> Vec<Option<Value<V>>> {
+        keys: Vec<K>,
+    ) -> Vec<Option<V>> {
         self.get_multiple_with_options(keys, Options::default())
             .await
     }
 
     pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
         &self,
-        mut keys: Vec<Key<K>>,
+        mut keys: Vec<K>,
         options: Options,
-    ) -> Vec<Option<Value<V>>> {
+    ) -> Vec<Option<V>> {
         // NB: MGET is different from GET in that it returns `Option`s rather than `Result`s.
         //  > For every key that does not hold a string value or does not exist, the special value
         //    nil is returned. Because of this, the operation never fails.
@@ -577,12 +578,12 @@ impl RedisCacheStorage {
 
         if keys.len() == 1 {
             let key = self.make_key(keys.swap_remove(0));
-            let res = client
+            let res: Option<Value<V>> = client
                 .get(key)
                 .await
                 .inspect_err(|e| self.record_error(e))
                 .ok();
-            vec![res]
+            vec![res.map(|v| v.0)]
         } else if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
@@ -614,7 +615,7 @@ impl RedisCacheStorage {
                 match result_value {
                     Ok(values) => {
                         for (index, value) in indexes.into_iter().zip(values.into_iter()) {
-                            result[index] = value;
+                            result[index] = value.map(|v| v.0);
                         }
                     }
                     Err(e) => {
@@ -630,18 +631,19 @@ impl RedisCacheStorage {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            client
+            let values: Vec<Option<Value<V>>> = client
                 .mget(keys)
                 .await
                 .inspect_err(|e| self.record_error(e))
-                .unwrap_or_else(|_| vec![None; len])
+                .unwrap_or_else(|_| vec![None; len]);
+            values.into_iter().map(|value| value.map(|v| v.0)).collect()
         }
     }
 
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
         &self,
-        key: Key<K>,
-        value: Value<V>,
+        key: K,
+        value: V,
         ttl: Option<Duration>,
     ) {
         let key = self.make_key(key);
@@ -650,7 +652,13 @@ impl RedisCacheStorage {
         // NOTE: we need a writer, so don't use replicas() here
         let result: Result<(), _> = self
             .client()
-            .set(key, value, self.expiration(ttl), None, false)
+            .set(
+                Key::from(key),
+                Value::from(value),
+                self.expiration(ttl),
+                None,
+                false,
+            )
             .await;
         tracing::trace!("insert result {:?}", result);
 
@@ -661,7 +669,7 @@ impl RedisCacheStorage {
 
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
-        data: &[(Key<K>, Value<V>)],
+        data: &[(K, V)],
         ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:#?}", data);
@@ -673,7 +681,13 @@ impl RedisCacheStorage {
         for (key, value) in data {
             let key = self.make_key(key.clone());
             let _: Result<(), _> = pipeline
-                .set(key, value.clone(), expiration.clone(), None, false)
+                .set(
+                    key,
+                    Value::from(value.clone()),
+                    expiration.clone(),
+                    None,
+                    false,
+                )
                 .await;
         }
 
@@ -977,9 +991,9 @@ mod test {
             // insert values which reflect different cluster slots
             let mut data = HashMap::default();
             let expected_value = rand::rng().next_u32() as usize;
-            let unique_cluster_slot_count = |data: &HashMap<redis::Key<String>, _>| {
+            let unique_cluster_slot_count = |data: &HashMap<String, _>| {
                 data.keys()
-                    .map(|key| ClusterRouting::hash_key(key.0.as_bytes()))
+                    .map(|key| ClusterRouting::hash_key(key.as_bytes()))
                     .unique()
                     .count()
             };
@@ -992,10 +1006,7 @@ mod test {
                     .take(10)
                     .map(char::from)
                     .collect::<String>();
-                data.insert(
-                    redis::Key(format!("{{{}}}", key)),
-                    redis::Value(expected_value),
-                );
+                data.insert(format!("{{{}}}", key), expected_value);
             }
 
             // insert values
@@ -1006,15 +1017,15 @@ mod test {
             // make a `get` call for each key and ensure that it has the expected value. this tests both
             // the `get` and `insert_multiple` functions
             for key in &keys {
-                let value: redis::Value<usize> = storage.get(key.clone()).await?;
-                assert_eq!(value.0, expected_value);
+                let value: usize = storage.get(key.clone()).await?;
+                assert_eq!(value, expected_value);
             }
 
             // test the `mget` functionality
             let values = storage.get_multiple(keys).await;
             for value in values {
-                let value: redis::Value<usize> = value.ok_or("missing value")?;
-                assert_eq!(value.0, expected_value);
+                let value: usize = value.ok_or("missing value")?;
+                assert_eq!(value, expected_value);
             }
 
             Ok(())
@@ -1030,8 +1041,8 @@ mod test {
                 redis::Gateway::new(redis_config(clustered), "test_get_multiple_is_ordered")
                     .await?;
 
-            let data = [("a", "1"), ("b", "2"), ("c", "3")]
-                .map(|(k, v)| (redis::Key(k.to_string()), redis::Value(v.to_string())));
+            let data =
+                [("a", "1"), ("b", "2"), ("c", "3")].map(|(k, v)| (k.to_string(), v.to_string()));
             storage.insert_multiple(&data, None).await;
 
             // check different orders of fetches to make everything is ordered correctly, including
@@ -1047,19 +1058,13 @@ mod test {
             ];
 
             for (keys, expected_values) in test_cases {
-                let keys: Vec<redis::Key<_>> = keys
-                    .into_iter()
-                    .map(|key| redis::Key(key.to_string()))
-                    .collect();
                 let expected_values: Vec<Option<String>> = expected_values
                     .into_iter()
                     .map(|value| value.map(ToString::to_string))
                     .collect();
 
                 let values = storage.get_multiple(keys).await;
-                let parsed_values: Vec<Option<String>> =
-                    values.into_iter().map(|v| v.map(|v| v.0)).collect();
-                assert_eq!(parsed_values, expected_values);
+                assert_eq!(values, expected_values);
             }
 
             Ok(())

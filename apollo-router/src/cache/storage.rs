@@ -191,9 +191,9 @@ where
 
                 let instant_redis = Instant::now();
                 if let Some(redis_gateway) = self.redis.as_ref() {
-                    let inner_key = redis::Key(key.clone());
+                    let inner_key = key.clone();
                     let redis_value = redis_gateway.get(inner_key).await.ok().and_then(|mut v| {
-                        match init_from_redis(&mut v.0) {
+                        match init_from_redis(&mut v) {
                             Ok(()) => Some(v),
                             Err(e) => {
                                 tracing::error!("Invalid value from Redis cache: {e}");
@@ -203,7 +203,7 @@ where
                     });
                     match redis_value {
                         Some(v) => {
-                            self.insert_in_memory(key.clone(), v.0.clone()).await;
+                            self.insert_in_memory(key.clone(), v.clone()).await;
 
                             let duration = instant_redis.elapsed();
                             f64_histogram!(
@@ -213,7 +213,7 @@ where
                                 kind = self.caller,
                                 storage = CacheStorageName::Redis.to_string()
                             );
-                            Some(v.0)
+                            Some(v)
                         }
                         None => {
                             let duration = instant_redis.elapsed();
@@ -236,9 +236,7 @@ where
 
     pub(crate) async fn insert(&self, key: K, value: V) {
         if let Some(redis) = self.redis.as_ref() {
-            redis
-                .insert(redis::Key(key.clone()), redis::Value(value.clone()), None)
-                .await;
+            redis.insert(key.clone(), value.clone(), None).await;
         }
 
         self.insert_in_memory(key, value).await;
