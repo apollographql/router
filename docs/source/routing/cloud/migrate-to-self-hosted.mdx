@@ -4,15 +4,21 @@ subtitle: Migrate your graph from cloud-hosted to self-hosted
 description: Migrate all Apollo GraphOS cloud graphs (Serverless and Dedicated) to self-hosted Apollo Router instances as part of Cloud Router retirement.
 ---
 
-<Note>
+The Serverless and Dedicated plans will be discontinued on [TODO SUNSET DATE], which means cloud routers will no longer be available. 
 
-Apollo is retiring the Serverless and Dedicated plans and will sunset hosted cloud routers on &lt;TODO SUNSET DATE&gt;. You must migrate all graphs to self-hosted mode before moving your organization to a [supported plan](https://www.apollographql.com/pricing) (Free, Developer, or Standard).
+If you are on a Serverless or Dedicated plan, you will need to migrate your graphs to use self-hosted routers by [TODO SUNSET DATE]. After migration, move your organization to a [supported plan](https://www.apollographql.com/pricing).
 
-During the migration window, your cloud router continues to receive traffic, receive schema, and configuration updates. The migration window ends on &lt;TODO SUNSET DATE&gt;.
+During the migration window, your cloud router continues to receive traffic, schema updates, and configuration updates. The migration window ends on [TODO SUNSET DATE].
 
-</Note>
+This guide provides step-by-step instructions to migrate Serverless or Dedicate plans using cloud routers to self-hosted graphs on a supported plan. Complete these steps before [TODO SUNSET DATE]:
 
-## Steps
+1. Export your cloud router configuration
+1. Change your graph's hosting mode to self-hosted
+1. Deploy a self-hosted router
+1. Validate and shift traffic to your self-hosted endpoint
+1. Move your organization to a supported plan
+
+## Steps to migrate
 
 ### Export your cloud router configuration
 
