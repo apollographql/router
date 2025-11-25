@@ -22,20 +22,32 @@ This guide provides step-by-step instructions to migrate Serverless or Dedicate 
 
 ### Export your cloud router configuration
 
-To self-host the Apollo Router with the same configuration as your cloud router, first export the current cloud router configuration.
+You'll need this router configuration in a later step when you deploy your self-hosted router.
 
-In Studio, navigate to your graph’s Cloud Router page to download the config. Alternatively, use the [Rover CLI's `cloud config fetch` command](https://www.apollographql.com/docs/rover/commands/cloud#cloud-config-fetch).
+You can export your cloud router configuration in two ways:
 
-```bash
+#### Using Studio
+
+In Studio, navigate to your graph's **Cloud Router** page and click the **Router configuration YAML** tab to download the config.
+
+[TODO SCREENSHOT]
+
+#### Using the Rover CLI
+
+Use the Rover CLI's [`cloud config fetch` command](/rover/commands/cloud#cloud-config-fetch).
+
+Replace the `<GRAPH_REF>` placeholder in the following command with your own graph ref to download the router configuration YAML to a local `router.yaml` file.
+
+```bash showLineNumbers={false}
 rover cloud config fetch <GRAPH_REF> > router.yaml
 ```
 
 You'll need to [install](/rover/getting-started) and [configure](/rover/configuring) the Rover CLI to run this command.
 
+### Change the graph's hosting mode to self-hosted
 
-### Change the graph’s hosting mode to self-hosted
+In Studio, click the **Start the migration process** button at the top of the graph variant's page to change the graph's hosting mode to self-hosted.
 
-In Studio, change the graph’s hosting mode from cloud-hosted to self-hosted using the **Start the migration process** action in the retirement banner at the top of your variant’s page.
 During the migration window, the cloud router remains running and continues to receive schema and configuration updates.
 
 ### Deploy a self-hosted router
