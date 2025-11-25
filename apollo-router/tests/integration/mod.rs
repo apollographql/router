@@ -16,6 +16,7 @@ mod directives;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod entity_cache;
 mod file_upload;
+mod http_server;
 mod introspection;
 mod lifecycle;
 mod metrics;

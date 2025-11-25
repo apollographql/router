@@ -1082,7 +1082,13 @@ impl Merger {
 
         // First, process all subgraphs to check for @interfaceObject fields
         for idx in 0..self.subgraphs.len() {
-            if !sources.contains_key(&idx) {
+            // Check for interface objects if the subgraph either:
+            // 1. Is not in sources at all, OR
+            // 2. Is in sources with a None value (meaning it has interface objects but not the concrete type)
+            let should_check_interface_objects =
+                !sources.contains_key(&idx) || sources.get(&idx).is_some_and(|v| v.is_none());
+
+            if should_check_interface_objects {
                 // Check if the field is abstracted by @interfaceObject
                 // This checks if the parent implements interfaces that are @interfaceObject
                 let mut interface_object_abstracting_fields =
@@ -1293,6 +1299,13 @@ impl Merger {
                 continue;
             }
 
+            // Get the source subgraph index
+            let from_idx = self
+                .names
+                .iter()
+                .position(|n| n == &source_subgraph_name)
+                .unwrap();
+
             // Check if field is abstracted by @interfaceObject in source
             let source_mapped = subgraph_map.get(&source_subgraph_name).unwrap();
             if !source_mapped.interface_object_abstracting_fields.is_empty() {
@@ -1302,15 +1315,12 @@ impl Merger {
                         dest, subgraph_name, source_subgraph_name, dest
                     ),
                 });
+                // Mark the source as overridden so field sharing validation skips it
+                result.set_used_overridden(from_idx);
                 continue;
             }
 
             // Check for conflicts with other directives
-            let from_idx = self
-                .names
-                .iter()
-                .position(|n| n == &source_subgraph_name)
-                .unwrap();
             if let Some((conflicting_directive_name, conflicting_subgraph_name)) =
                 self.override_conflicts_with_other_directive(idx, from_idx, dest)?
             {

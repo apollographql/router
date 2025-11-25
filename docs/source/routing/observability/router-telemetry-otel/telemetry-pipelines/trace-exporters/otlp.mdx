@@ -65,6 +65,12 @@ Specify only the base URL in the endpoint parameter. The router automatically ad
 
 </Note>
 
+<Note>
+
+If your environment sets `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, these variables take precedence over the `endpoint` configured in your `router.yaml`. If traces aren't appearing at your expected endpoint, check if these environment variables are set and unset them if necessary.
+
+</Note>
+
 ### `grpc`
 Settings specific to the gRPC protocol for setting a custom SSL certificate, domain name, and metadata.
 
