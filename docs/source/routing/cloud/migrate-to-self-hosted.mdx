@@ -93,8 +93,8 @@ rover cloud config fetch <GRAPH_REF> > router.yaml
 
 Use the [Rover CLI's `cloud config update` command](/rover/commands/cloud#cloud-config-update) to update your running cloud routers' configuration. For example, to apply changes from a local `router.yaml`:
 
-```bash showLineNumbers={false}
-rover cloud config update <GRAPH_REF> < router.yaml
+```bash
+rover cloud config update --file router.yaml <GRAPH_REF>
 ```
 
 [Install](/rover/getting-started) and [configure](/rover/configuring) the Rover CLI to run this command.
