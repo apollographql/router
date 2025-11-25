@@ -49,6 +49,7 @@ use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
+use crate::plugins::telemetry::error_handler::OtelErrorLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
@@ -82,18 +83,16 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     let hot_tracer =
         ReloadTracer::new(opentelemetry_sdk::trace::SdkTracerProvider::default().tracer("noop"));
     let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
-    // handle OpenTelemetry internal logs and stop them from propagating to tracing bridge/appender
-    // capture logs with the opentelemetry prefix and print them to eprintln!
-    let opentelemetry_error_log_layer = tracing_subscriber::fmt::Layer::new()
-        .with_writer(std::io::stderr)
-        .with_filter(filter_fn(|metadata| {
-            metadata.target().starts_with("opentelemetry")
-        }));
-    // We choose json or plain based on tty
+    // We choose json or plain based on tty.
+    // We filter out raw opentelemetry logs so we can modify and show them in the otel_error_layer
     let fmt = if std::io::stdout().is_terminal() {
-        FmtLayer::new(Text::default(), std::io::stdout).boxed()
+        FmtLayer::new(Text::default(), std::io::stdout)
+            .with_filter(filter_fn(|meta| !meta.target().starts_with("opentelemetry")))
+            .boxed()
     } else {
-        FmtLayer::new(Json::default(), std::io::stdout).boxed()
+        FmtLayer::new(Json::default(), std::io::stdout)
+            .with_filter(filter_fn(|meta| !meta.target().starts_with("opentelemetry")))
+            .boxed()
     };
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
@@ -110,7 +109,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
                 .with(DynAttributeLayer::new())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
-                .with(opentelemetry_error_log_layer)
+                .with(OtelErrorLayer::new())
                 .with(WarnLegacyMetricsLayer)
                 .with(EnvFilter::try_new(log_level)?)
                 .try_init()?;
