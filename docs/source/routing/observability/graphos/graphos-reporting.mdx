@@ -67,6 +67,12 @@ telemetry:
         sampler: 0.01
 ```
 
+<Note>
+
+If your environment defines `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, they take precedence over your Router settings and may send traces to a different destination. Verify whether these variables are set and unset them if needed. For details, see the [OTLP exporter documentation](/router/configuration/telemetry/exporters/tracing/otlp).
+
+</Note>
+
 ## Reporting field-level traces
 
 In their responses to your router, your subgraphs can include [field-level traces](/federation/metrics) that indicate how long the subgraph took to resolve each field in an operation. By analyzing this data in GraphOS Studio, you can identify and optimize your slower fields:
