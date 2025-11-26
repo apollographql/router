@@ -255,8 +255,8 @@ impl Context {
         }
     }
 
-    pub(crate) fn remove<K: Into<String>>(&self, key: K) -> Option<(String, Value)> {
-        self.entries.remove(&key.into())
+    pub(crate) fn retain(&self, f: impl Fn(&String, &Value) -> bool) {
+        self.entries.retain(|k, v| f(k, v));
     }
 
     /// Read only access to the executable document for internal router plugins.

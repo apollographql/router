@@ -495,38 +495,6 @@ fn default_response_validation() -> bool {
     true
 }
 
-/// Extract the keys that would be sent to the coprocessor from the target context.
-/// Returns the actual keys (not deprecated names) that would be sent.
-/// This extracts keys directly from target_context based on the config, avoiding
-/// the need to translate deprecated names since we only need the actual keys for deletion tracking.
-pub(crate) fn extract_context_keys_sent(
-    target_context: &Context,
-    context_config: &ContextConf,
-) -> HashSet<String> {
-    match context_config {
-        ContextConf::NewContextConf(NewContextConf::All) => {
-            // All keys are sent, use actual keys directly
-            target_context.iter().map(|elt| elt.key().clone()).collect()
-        }
-        ContextConf::NewContextConf(NewContextConf::Deprecated) | ContextConf::Deprecated(true) => {
-            // All keys are sent, but with deprecated names. However, we want actual keys
-            // for deletion tracking, so just extract actual keys directly
-            target_context.iter().map(|elt| elt.key().clone()).collect()
-        }
-        ContextConf::NewContextConf(NewContextConf::Selective(context_keys)) => {
-            // Only selected keys are sent, use actual keys directly
-            target_context
-                .iter()
-                .filter_map(|elt| context_keys.get(elt.key()).map(|_| elt.key().clone()))
-                .collect()
-        }
-        ContextConf::Deprecated(false) => {
-            // No keys sent
-            HashSet::new()
-        }
-    }
-}
-
 /// Update the target context based on the context returned from the coprocessor.
 /// This function handles both updates/inserts and deletions:
 /// - Keys present in the returned context (with non-null values) are updated/inserted
@@ -534,7 +502,6 @@ pub(crate) fn extract_context_keys_sent(
 /// - Keys with null values in the returned context are deleted
 pub(crate) fn update_context_from_coprocessor(
     target_context: &Context,
-    keys_sent: &HashSet<String>,
     context_returned: Context,
     context_config: &ContextConf,
 ) -> Result<(), BoxError> {
@@ -558,12 +525,26 @@ pub(crate) fn update_context_from_coprocessor(
         }
     }
 
-    // Delete keys that were sent but are missing from the returned context
-    // or have null values
-    for key in keys_sent {
-        if !keys_returned.contains(key) || keys_with_null.contains(key) {
-            target_context.remove(key);
+    // Delete keys that match any of the following conditions:
+    // - were sent but are missing from the returned context
+    // - have null values
+    match context_config {
+        ContextConf::NewContextConf(NewContextConf::Selective(context_keys)) => {
+            target_context.retain(|key, _v| {
+                if keys_with_null.contains(key) {
+                    return false;
+                }
+                if keys_returned.contains(key) {
+                    return true;
+                }
+                if context_keys.contains(key) && !keys_returned.contains(key) {
+                    return false;
+                }
+                true
+            });
         }
+        _ => target_context
+            .retain(|key, _v| keys_returned.contains(key) && !keys_with_null.contains(key)),
     }
 
     Ok(())
@@ -1058,8 +1039,6 @@ where
         .transpose()?;
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.get_context(&response.context);
-    // Extract keys that would be sent from target_context directly (no translation needed)
-    let keys_sent = extract_context_keys_sent(&response.context, &response_config.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -1101,12 +1080,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &response.context,
-            &keys_sent,
-            context,
-            &response_config.context,
-        )?;
+        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -1139,8 +1113,6 @@ where
                     .transpose()?;
                 let generator_map_context = generator_map_context.clone();
                 let context_to_send = context_conf.get_context(&generator_map_context);
-                // Extract keys that would be sent from target_context directly (no translation needed)
-                let keys_sent = extract_context_keys_sent(&generator_map_context, &context_conf);
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -1175,7 +1147,6 @@ where
                 if let Some(context) = co_processor_output.context {
                     update_context_from_coprocessor(
                         &generator_map_context,
-                        &keys_sent,
                         context,
                         &context_conf,
                     )?;
@@ -1391,8 +1362,6 @@ where
         .then(|| serde_json_bytes::to_value(&body))
         .transpose()?;
     let context_to_send = response_config.context.get_context(&response.context);
-    // Extract keys that would be sent from target_context directly (no translation needed)
-    let keys_sent = extract_context_keys_sent(&response.context, &response_config.context);
     let service_name = response_config.service_name.then_some(service_name);
     let subgraph_request_id = response_config
         .subgraph_request_id
@@ -1442,12 +1411,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &response.context,
-            &keys_sent,
-            context,
-            &response_config.context,
-        )?;
+        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
     }
 
     if let Some(headers) = co_processor_output.headers {

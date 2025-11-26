@@ -4003,52 +4003,6 @@ mod tests {
     // Tests for context key deletion functionality
 
     #[test]
-    fn test_extract_context_keys_sent() {
-        use crate::Context;
-        use crate::plugins::coprocessor::extract_context_keys_sent;
-
-        let context = Context::new();
-        context.insert("k1", "v1".to_string()).unwrap();
-        context.insert("k2", "v2".to_string()).unwrap();
-        context.insert("k3", "v3".to_string()).unwrap();
-
-        // Test with All context config
-        let keys =
-            extract_context_keys_sent(&context, &ContextConf::NewContextConf(NewContextConf::All));
-        assert_eq!(keys.len(), 3);
-        assert!(keys.contains("k1"));
-        assert!(keys.contains("k2"));
-        assert!(keys.contains("k3"));
-
-        // Test with Selective context config - only selected keys should be extracted
-        let selective_keys: std::collections::HashSet<String> =
-            ["k1".to_string(), "k2".to_string()].into();
-        let keys = extract_context_keys_sent(
-            &context,
-            &ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(selective_keys))),
-        );
-        // Only selected keys should be extracted
-        assert_eq!(keys.len(), 2);
-        assert!(keys.contains("k1"));
-        assert!(keys.contains("k2"));
-        assert!(!keys.contains("k3"));
-
-        // Test with Deprecated config - all keys should be extracted (actual keys, not deprecated)
-        let keys = extract_context_keys_sent(
-            &context,
-            &ContextConf::NewContextConf(NewContextConf::Deprecated),
-        );
-        assert_eq!(keys.len(), 3);
-        assert!(keys.contains("k1"));
-        assert!(keys.contains("k2"));
-        assert!(keys.contains("k3"));
-
-        // Test with Deprecated(false) - no keys should be extracted
-        let keys = extract_context_keys_sent(&context, &ContextConf::Deprecated(false));
-        assert_eq!(keys.len(), 0);
-    }
-
-    #[test]
     fn test_update_context_from_coprocessor_deletes_missing_keys() {
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
@@ -4058,10 +4012,6 @@ mod tests {
         target_context.insert("k1", "v1".to_string()).unwrap();
         target_context.insert("k2", "v2".to_string()).unwrap();
         target_context.insert("k3", "v3".to_string()).unwrap();
-
-        // Keys that were sent to coprocessor
-        let keys_sent: std::collections::HashSet<String> =
-            ["k1".to_string(), "k2".to_string(), "k3".to_string()].into();
 
         // Coprocessor returns context without k2 (deleted)
         let returned_context = Context::new();
@@ -4074,7 +4024,6 @@ mod tests {
         // Update context
         update_context_from_coprocessor(
             &target_context,
-            &keys_sent,
             returned_context,
             &ContextConf::NewContextConf(NewContextConf::All),
         )
@@ -4105,10 +4054,6 @@ mod tests {
         target_context.insert("k1", "v1".to_string()).unwrap();
         target_context.insert("k2", "v2".to_string()).unwrap();
 
-        // Keys that were sent to coprocessor
-        let keys_sent: std::collections::HashSet<String> =
-            ["k1".to_string(), "k2".to_string()].into();
-
         // Coprocessor returns context with k2 set to null (indicating deletion)
         let returned_context = Context::new();
         returned_context
@@ -4119,7 +4064,6 @@ mod tests {
         // Update context
         update_context_from_coprocessor(
             &target_context,
-            &keys_sent,
             returned_context,
             &ContextConf::NewContextConf(NewContextConf::All),
         )
@@ -4143,9 +4087,6 @@ mod tests {
         let target_context = Context::new();
         target_context.insert("k1", "v1".to_string()).unwrap();
 
-        // Keys that were sent to coprocessor
-        let keys_sent: std::collections::HashSet<String> = ["k1".to_string()].into();
-
         // Coprocessor returns context with a new key
         let returned_context = Context::new();
         returned_context
@@ -4156,7 +4097,6 @@ mod tests {
         // Update context
         update_context_from_coprocessor(
             &target_context,
-            &keys_sent,
             returned_context,
             &ContextConf::NewContextConf(NewContextConf::All),
         )
@@ -4178,6 +4118,8 @@ mod tests {
     fn test_update_context_from_coprocessor_preserves_keys_not_sent() {
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
+        use std::collections::HashSet;
+        use std::sync::Arc;
 
         // Create a context with some keys
         let target_context = Context::new();
@@ -4186,20 +4128,17 @@ mod tests {
             .insert("key_not_sent", "preserved_value".to_string())
             .unwrap();
 
-        // Only k1 was sent to coprocessor
-        let keys_sent: std::collections::HashSet<String> = ["k1".to_string()].into();
-
         // Coprocessor returns context without k1 (deleted)
         let returned_context = Context::new();
 
+        // Use Selective config to only send "k1", not "key_not_sent"
+        let selective_keys: HashSet<String> = ["k1".to_string()].into();
+        let context_config =
+            ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(selective_keys)));
+
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            &keys_sent,
-            returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &context_config)
+            .unwrap();
 
         // k1 should be deleted (was sent but missing from returned context)
         assert!(!target_context.contains_key("k1"));
