@@ -18,6 +18,10 @@ Consider these advanced customization options when:
 
 For basic response caching setup, see the [Quickstart](/router/performance/caching/response-caching/quickstart) page.
 
+<Note>
+    Response caching is happening at the subgraph service level and this plugin is happening right after coprocessor and Rhai plugins which means you'll always call the coprocessor or Rhai script even if the response is cached (both at request and response level).
+</Note>
+
 ## Private data caching
 
 A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router can recognize different users and store their data in different parts of the cache.
