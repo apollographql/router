@@ -65,25 +65,10 @@ struct TopLevelConditionResolver {
 ///
 /// If we ever re-visit the node with at least more options than a prior visit while making at least
 /// as many assumptions, then we know we can skip re-visiting.
-struct NodeVisit {
-    subgraph_context_keys: IndexSet<SubgraphContextKey>,
-    override_conditions: Arc<OverrideConditions>,
-}
-
-impl NodeVisit {
-    /// Determines if this visit is a non-strict superset of the `other` visit, meaning that this
-    /// visit has at least as many options as the `other` visit while making at least as many
-    /// assumptions.
-    // PORT_NOTE: Named `isSupersetOrEqual()` in the JS codebase, but supersets are by default
-    // non-strict and Rust typically names such methods as `is_superset()`.
-    fn is_superset(&self, other: &NodeVisit) -> bool {
-        self.subgraph_context_keys
-            .is_superset(&other.subgraph_context_keys)
-            && other
-                .override_conditions
-                .iter()
-                .all(|(label, is_enabled)| self.override_conditions.get(label) == Some(is_enabled))
-    }
+#[derive(Clone)]
+pub(super) struct NodeVisit {
+    pub(super) subgraph_context_keys: IndexSet<SubgraphContextKey>,
+    pub(super) override_conditions: Arc<OverrideConditions>,
 }
 
 impl ValidationTraversal {
@@ -221,31 +206,15 @@ impl ValidationTraversal {
         );
         let span = debug_span!(" |");
         let guard = span.enter();
-        let current_node = state.supergraph_path().tail();
-        let current_visit = NodeVisit {
-            subgraph_context_keys: state.current_subgraph_context_keys()?,
-            override_conditions: state.selected_override_conditions().clone(),
-        };
-        let previous_visits_for_node = self.previous_visits.entry(current_node).or_default();
-        for previous_visit in previous_visits_for_node.iter() {
-            if current_visit.is_superset(previous_visit) {
-                // This means that we've already seen the type and subgraph we're currently on in
-                // the supergraph, and for that previous visit, we've either finished validating we
-                // could reach anything from there, or are in the middle of it (in which case, we're
-                // in a loop). Since we have at least as many options while making at least as many
-                // assumptions as the previous visit, we can handle downstream operation elements
-                // the same way we did previously, and so we skip the node entirely.
-                drop(guard);
-                debug!("Have already validated this node.");
-                return Ok(None);
-            }
+
+        if state.can_skip_visit(&mut self.previous_visits)? {
+            drop(guard);
+            debug!("Can skip visit for this state.");
+            return Ok(None);
         }
-        // We have to validate this node, but we can save the visit here to potentially avoid later
-        // visits.
-        previous_visits_for_node.push(current_visit);
 
         // Pre-collect the next edges for `state.supergraph_path()`, since as we iterate through
-        // these edges, we're going to be mutating the cache in `state.subgraph_paths()`.
+        // these edges, we're going to be mutating the cache in `state.subgraph_path_infos`.
         //
         // Note that if the `supergraph_path()` is terminal, this method is a no-op, which is
         // expected/desired as it means we've successfully "validated" a path to its end.
