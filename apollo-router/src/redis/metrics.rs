@@ -503,11 +503,12 @@ mod tests {
 
             // Perform Redis operations
             storage.insert(test_key, test_value.clone(), None).await;
-            let retrieved: Result<TestValue, _> = storage.get(test_key).await;
+            let retrieved: Result<Option<TestValue>, _> = storage.get(test_key).await;
 
             // Verify the mock actually worked
             assert!(retrieved.is_ok(), "Should have retrieved value from mock");
-            assert_eq!(retrieved.unwrap().data, "test_value");
+            let value = retrieved.unwrap().expect("not found");
+            assert_eq!(value.data, "test_value");
 
             // Verify Redis connection metrics are emitted.
             // Since this metric is based on a global AtomicU64, it's not unique across tests - so

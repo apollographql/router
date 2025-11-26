@@ -373,14 +373,14 @@ impl CacheStorage for Storage {
         Ok(())
     }
 
-    async fn internal_fetch(&self, cache_key: &str) -> StorageResult<CacheEntry> {
+    async fn internal_fetch(&self, cache_key: &str) -> StorageResult<Option<CacheEntry>> {
         // NB: don't need `make_key` for `get` - the storage layer already runs it
         let options = Options {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let value: CacheValue = self.storage.get_with_options(cache_key, options).await?;
-        Ok(CacheEntry::from((cache_key, value)))
+        let value: Option<CacheValue> = self.storage.get_with_options(cache_key, options).await?;
+        Ok(value.map(|v| CacheEntry::from((cache_key, v))))
     }
 
     async fn internal_fetch_multiple(
@@ -888,7 +888,10 @@ mod tests {
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was stored
-            let stored_data = storage.fetch(&common_document().key, SUBGRAPH_NAME).await?;
+            let stored_data = storage
+                .fetch(&common_document().key, SUBGRAPH_NAME)
+                .await?
+                .expect("not found");
             assert_eq!(stored_data.data, document.data);
 
             let keys = storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
@@ -915,7 +918,10 @@ mod tests {
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was updated
-            let stored_data = storage.fetch(&document.key, SUBGRAPH_NAME).await?;
+            let stored_data = storage
+                .fetch(&document.key, SUBGRAPH_NAME)
+                .await?
+                .expect("not found");
             assert_eq!(stored_data.data, document.data);
 
             // the TTL on the document should be aligned with the new document expiry time
@@ -956,7 +962,10 @@ mod tests {
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was stored
-            let stored_data = storage.fetch(&common_document().key, SUBGRAPH_NAME).await?;
+            let stored_data = storage
+                .fetch(&common_document().key, SUBGRAPH_NAME)
+                .await?
+                .expect("not found");
             assert_eq!(stored_data.data, document.data);
 
             let keys = storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
@@ -971,7 +980,10 @@ mod tests {
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was updated
-            let stored_data = storage.fetch(&document.key, SUBGRAPH_NAME).await?;
+            let stored_data = storage
+                .fetch(&document.key, SUBGRAPH_NAME)
+                .await?
+                .expect("not found");
             assert_eq!(stored_data.data, document.data);
 
             // the TTL on the document should be aligned with the new document expiry time

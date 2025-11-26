@@ -470,7 +470,7 @@ impl RedisCacheStorage {
         }
     }
 
-    pub(crate) async fn get<K: KeyType, V: ValueType>(&self, key: K) -> Result<V, Error> {
+    pub(crate) async fn get<K: KeyType, V: ValueType>(&self, key: K) -> Result<Option<V>, Error> {
         self.get_with_options(key, Options::default()).await
     }
 
@@ -478,7 +478,7 @@ impl RedisCacheStorage {
         &self,
         key: K,
         options: Options,
-    ) -> Result<V, Error> {
+    ) -> Result<Option<V>, Error> {
         let key = self.make_key(key);
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
@@ -494,21 +494,21 @@ impl RedisCacheStorage {
                     .map_err(Into::into)
                     .inspect_err(|e| self.record_error(e))?;
 
-                let (value, _timeout_set): (Value<V>, bool) = pipeline
+                let (value, _timeout_set): (Option<Value<V>>, bool) = pipeline
                     .all()
                     .await
                     .map_err(Into::into)
                     .inspect_err(|e| self.record_error(e))?;
-                Ok(value.0)
+                Ok(value.map(|v| v.0))
             }
             _ => {
                 let client = self.replica_client().with_options(&options);
-                client
+                let value: Option<Value<V>> = client
                     .get(key)
                     .await
                     .map_err(Into::into)
-                    .inspect_err(|e| self.record_error(e))
-                    .map(|v: Value<V>| v.0)
+                    .inspect_err(|e| self.record_error(e))?;
+                Ok(value.map(|v| v.0))
             }
         }
     }
@@ -991,7 +991,7 @@ mod test {
             // make a `get` call for each key and ensure that it has the expected value. this tests both
             // the `get` and `insert_multiple` functions
             for key in &keys {
-                let value: usize = storage.get(key.clone()).await?;
+                let value: usize = storage.get(key.clone()).await?.expect("not found");
                 assert_eq!(value, expected_value);
             }
 

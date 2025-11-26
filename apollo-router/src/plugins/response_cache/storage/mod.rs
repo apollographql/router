@@ -100,10 +100,14 @@ pub(super) trait CacheStorage {
     }
 
     #[doc(hidden)]
-    async fn internal_fetch(&self, cache_key: &str) -> StorageResult<CacheEntry>;
+    async fn internal_fetch(&self, cache_key: &str) -> StorageResult<Option<CacheEntry>>;
 
     /// Fetch the value belonging to `cache_key`. Command will be timed out after `self.fetch_timeout()`.
-    async fn fetch(&self, cache_key: &str, subgraph_name: &str) -> StorageResult<CacheEntry> {
+    async fn fetch(
+        &self,
+        cache_key: &str,
+        subgraph_name: &str,
+    ) -> StorageResult<Option<CacheEntry>> {
         let now = Instant::now();
         let result = flatten_storage_error(
             self.internal_fetch(cache_key)

@@ -1240,7 +1240,7 @@ async fn cache_lookup_root(
     Span::current().record("cache.key", key.clone());
 
     match cache.fetch(&key, &request.subgraph_name).await {
-        Ok(value) => {
+        Ok(Some(value)) => {
             if value.control.can_use() {
                 let control = value.control.clone();
                 // Keep original cache control for every subgraph request (useful for telemetry)
@@ -1320,6 +1320,14 @@ async fn cache_lookup_root(
                 );
                 Ok(ControlFlow::Continue((request, key, invalidation_keys)))
             }
+        }
+        Ok(None) => {
+            let span = Span::current();
+            span.set_span_dyn_attribute(
+                opentelemetry::Key::new("cache.status"),
+                opentelemetry::Value::String("miss".into()),
+            );
+            Ok(ControlFlow::Continue((request, key, invalidation_keys)))
         }
         Err(err) => {
             let span = Span::current();

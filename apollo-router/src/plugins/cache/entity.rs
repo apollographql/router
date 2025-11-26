@@ -926,10 +926,10 @@ async fn cache_lookup_root(
         private_id,
     );
 
-    let cache_result: Result<CacheEntry, _> = cache.get(key.clone()).await;
+    let cache_result: Result<Option<CacheEntry>, _> = cache.get(key.clone()).await;
 
     match cache_result {
-        Ok(value) => {
+        Ok(Some(value)) => {
             if value.control.can_use() {
                 let control = value.control.clone();
                 update_cache_control(&request.context, &control);
@@ -977,7 +977,7 @@ async fn cache_lookup_root(
                 Ok(ControlFlow::Continue((request, key)))
             }
         }
-        Err(_) => Ok(ControlFlow::Continue((request, key))),
+        Ok(None) | Err(_) => Ok(ControlFlow::Continue((request, key))),
     }
 }
 
