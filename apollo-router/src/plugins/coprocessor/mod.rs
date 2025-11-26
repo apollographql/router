@@ -495,6 +495,80 @@ fn default_response_validation() -> bool {
     true
 }
 
+/// Extract the keys that would be sent to the coprocessor from the target context.
+/// Returns the actual keys (not deprecated names) that would be sent.
+/// This extracts keys directly from target_context based on the config, avoiding
+/// the need to translate deprecated names since we only need the actual keys for deletion tracking.
+pub(crate) fn extract_context_keys_sent(
+    target_context: &Context,
+    context_config: &ContextConf,
+) -> HashSet<String> {
+    match context_config {
+        ContextConf::NewContextConf(NewContextConf::All) => {
+            // All keys are sent, use actual keys directly
+            target_context.iter().map(|elt| elt.key().clone()).collect()
+        }
+        ContextConf::NewContextConf(NewContextConf::Deprecated) | ContextConf::Deprecated(true) => {
+            // All keys are sent, but with deprecated names. However, we want actual keys
+            // for deletion tracking, so just extract actual keys directly
+            target_context.iter().map(|elt| elt.key().clone()).collect()
+        }
+        ContextConf::NewContextConf(NewContextConf::Selective(context_keys)) => {
+            // Only selected keys are sent, use actual keys directly
+            target_context
+                .iter()
+                .filter_map(|elt| context_keys.get(elt.key()).map(|_| elt.key().clone()))
+                .collect()
+        }
+        ContextConf::Deprecated(false) => {
+            // No keys sent
+            HashSet::new()
+        }
+    }
+}
+
+/// Update the target context based on the context returned from the coprocessor.
+/// This function handles both updates/inserts and deletions:
+/// - Keys present in the returned context (with non-null values) are updated/inserted
+/// - Keys that were sent to the coprocessor but are missing from the returned context are deleted
+/// - Keys with null values in the returned context are deleted
+pub(crate) fn update_context_from_coprocessor(
+    target_context: &Context,
+    keys_sent: &HashSet<String>,
+    context_returned: Context,
+    context_config: &ContextConf,
+) -> Result<(), BoxError> {
+    // Collect keys that are in the returned context
+    let mut keys_returned = HashSet::new();
+    let mut keys_with_null = HashSet::new();
+
+    for (mut key, value) in context_returned.try_into_iter()? {
+        // Handle deprecated key names - convert back to actual key names
+        if let ContextConf::NewContextConf(NewContextConf::Deprecated) = context_config {
+            key = context_key_from_deprecated(key);
+        }
+
+        // Check if value is null (indicates deletion)
+        if matches!(value, Value::Null) {
+            keys_with_null.insert(key);
+        } else {
+            keys_returned.insert(key.clone());
+            // Update/insert the key
+            target_context.upsert_json_value(key, move |_current| value);
+        }
+    }
+
+    // Delete keys that were sent but are missing from the returned context
+    // or have null values
+    for key in keys_sent {
+        if !keys_returned.contains(key) || keys_with_null.contains(key) {
+            target_context.remove(key);
+        }
+    }
+
+    Ok(())
+}
+
 fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
     f64_histogram!(
         "apollo.router.operations.coprocessor.duration",
@@ -984,6 +1058,8 @@ where
         .transpose()?;
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.get_context(&response.context);
+    // Extract keys that would be sent from target_context directly (no translation needed)
+    let keys_sent = extract_context_keys_sent(&response.context, &response_config.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -1025,16 +1101,12 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                &response_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
-            response
-                .context
-                .upsert_json_value(key, move |_current| value);
-        }
+        update_context_from_coprocessor(
+            &response.context,
+            &keys_sent,
+            context,
+            &response_config.context,
+        )?;
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -1067,6 +1139,8 @@ where
                     .transpose()?;
                 let generator_map_context = generator_map_context.clone();
                 let context_to_send = context_conf.get_context(&generator_map_context);
+                // Extract keys that would be sent from target_context directly (no translation needed)
+                let keys_sent = extract_context_keys_sent(&generator_map_context, &context_conf);
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -1099,14 +1173,12 @@ where
                 };
 
                 if let Some(context) = co_processor_output.context {
-                    for (mut key, value) in context.try_into_iter()? {
-                        if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                            &context_conf
-                        {
-                            key = context_key_from_deprecated(key);
-                        }
-                        generator_map_context.upsert_json_value(key, move |_current| value);
-                    }
+                    update_context_from_coprocessor(
+                        &generator_map_context,
+                        &keys_sent,
+                        context,
+                        &context_conf,
+                    )?;
                 }
 
                 // We return the final_bytes into our stream of response chunks
@@ -1319,6 +1391,8 @@ where
         .then(|| serde_json_bytes::to_value(&body))
         .transpose()?;
     let context_to_send = response_config.context.get_context(&response.context);
+    // Extract keys that would be sent from target_context directly (no translation needed)
+    let keys_sent = extract_context_keys_sent(&response.context, &response_config.context);
     let service_name = response_config.service_name.then_some(service_name);
     let subgraph_request_id = response_config
         .subgraph_request_id
@@ -1368,16 +1442,12 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                &response_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
-            response
-                .context
-                .upsert_json_value(key, move |_current| value);
-        }
+        update_context_from_coprocessor(
+            &response.context,
+            &keys_sent,
+            context,
+            &response_config.context,
+        )?;
     }
 
     if let Some(headers) = co_processor_output.headers {

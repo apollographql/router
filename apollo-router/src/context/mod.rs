@@ -255,6 +255,10 @@ impl Context {
         }
     }
 
+    pub(crate) fn remove<K: Into<String>>(&self, key: K) -> Option<(String, Value)> {
+        self.entries.remove(&key.into())
+    }
+
     /// Read only access to the executable document for internal router plugins.
     pub(crate) fn executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
         self.extensions()

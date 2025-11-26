@@ -489,3 +489,169 @@ mod on_graphql_error_selector {
         Ok(())
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Track the context keys received in each stage
+    let router_response_context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let router_response_context_clone = router_response_context.clone();
+
+    // Handle all coprocessor stages, but modify SubgraphResponse and track RouterResponse
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| {
+            let body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = body.get("stage").and_then(|s| s.as_str()).unwrap_or("");
+
+            let mut response = body.clone();
+
+            // Ensure Request stages have a control field
+            if stage.ends_with("Request")
+                && !response.as_object().unwrap().contains_key("control")
+                && let Some(obj) = response.as_object_mut()
+            {
+                obj.insert("control".to_string(), serde_json::json!("continue"));
+            }
+
+            if stage == "SubgraphResponse" {
+                // Return context without "myValue" (deleted)
+                if let Some(obj) = response.as_object_mut()
+                    && let Some(ctx) = obj.get_mut("context").and_then(|c| c.as_object_mut())
+                    && let Some(entries) = ctx.get_mut("entries").and_then(|e| e.as_object_mut())
+                {
+                    entries.remove("myValue");
+                }
+            } else if stage == "RouterResponse" {
+                // Track the context received in RouterResponse
+                let context = body.get("context").and_then(|c| c.get("entries"));
+                if let Some(ctx) = context {
+                    *router_response_context_clone.lock().unwrap() = Some(ctx.clone());
+                }
+            }
+            // For all other stages, just pass through
+
+            ResponseTemplate::new(200).set_body_json(response)
+        })
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute a query that will trigger both SubgraphResponse and RouterResponse stages
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Verify that RouterResponse does NOT have "myValue" (it was deleted in SubgraphResponse)
+    if let Some(ctx) = router_response_context.lock().unwrap().as_ref()
+        && let Some(entries) = ctx.as_object()
+    {
+        assert!(
+            !entries.contains_key("myValue"),
+            "myValue should be deleted in RouterResponse stage, but was found: {:?}",
+            entries
+        );
+    }
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_context_key_deletion_with_null() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Track the context keys received in RouterResponse
+    let router_response_context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let router_response_context_clone = router_response_context.clone();
+
+    // Handle all coprocessor stages, but modify SubgraphResponse and track RouterResponse
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| {
+            let body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = body.get("stage").and_then(|s| s.as_str()).unwrap_or("");
+
+            let mut response = body.clone();
+
+            // Ensure Request stages have a control field
+            if stage.ends_with("Request")
+                && !response.as_object().unwrap().contains_key("control")
+                && let Some(obj) = response.as_object_mut()
+            {
+                obj.insert("control".to_string(), serde_json::json!("continue"));
+            }
+
+            if stage == "SubgraphResponse" {
+                // Return context with "myValue" set to null (indicating deletion)
+                if let Some(obj) = response.as_object_mut()
+                    && let Some(ctx) = obj.get_mut("context").and_then(|c| c.as_object_mut())
+                    && let Some(entries) = ctx.get_mut("entries").and_then(|e| e.as_object_mut())
+                {
+                    entries.insert("myValue".to_string(), serde_json::Value::Null);
+                }
+            } else if stage == "RouterResponse" {
+                // Track the context received in RouterResponse
+                let context = body.get("context").and_then(|c| c.get("entries"));
+                if let Some(ctx) = context {
+                    *router_response_context_clone.lock().unwrap() = Some(ctx.clone());
+                }
+            }
+            // For all other stages, just pass through
+
+            ResponseTemplate::new(200).set_body_json(response)
+        })
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute a query that will trigger both SubgraphResponse and RouterResponse stages
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Verify that RouterResponse does NOT have "myValue" (it was set to null in SubgraphResponse)
+    if let Some(ctx) = router_response_context.lock().unwrap().as_ref()
+        && let Some(entries) = ctx.as_object()
+    {
+        assert!(
+            !entries.contains_key("myValue"),
+            "myValue should be deleted in RouterResponse stage (was set to null), but was found: {:?}",
+            entries
+        );
+    }
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}

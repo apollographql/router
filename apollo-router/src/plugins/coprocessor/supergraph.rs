@@ -368,6 +368,8 @@ where
         .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.get_context(&response.context);
+    // Extract keys that would be sent from target_context directly (no translation needed)
+    let keys_sent = extract_context_keys_sent(&response.context, &response_config.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::supergraph_builder()
@@ -413,16 +415,12 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                &response_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
-            response
-                .context
-                .upsert_json_value(key, move |_current| value);
-        }
+        update_context_from_coprocessor(
+            &response.context,
+            &keys_sent,
+            context,
+            &response_config.context,
+        )?;
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -454,6 +452,9 @@ where
                         .expect("serialization will not fail")
                 });
                 let context_to_send = response_config_context.get_context(&generator_map_context);
+                // Extract keys that would be sent from target_context directly (no translation needed)
+                let keys_sent =
+                    extract_context_keys_sent(&generator_map_context, &response_config_context);
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -499,14 +500,12 @@ where
                 )?;
 
                 if let Some(context) = co_processor_output.context {
-                    for (mut key, value) in context.try_into_iter()? {
-                        if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                            &response_config_context
-                        {
-                            key = context_key_from_deprecated(key);
-                        }
-                        generator_map_context.upsert_json_value(key, move |_current| value);
-                    }
+                    update_context_from_coprocessor(
+                        &generator_map_context,
+                        &keys_sent,
+                        context,
+                        &response_config_context,
+                    )?;
                 }
 
                 // We return the deferred_response into our stream of response chunks
