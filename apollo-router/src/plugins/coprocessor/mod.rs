@@ -499,7 +499,6 @@ fn default_response_validation() -> bool {
 /// This function handles both updates/inserts and deletions:
 /// - Keys present in the returned context (with non-null values) are updated/inserted
 /// - Keys that were sent to the coprocessor but are missing from the returned context are deleted
-/// - Keys with null values in the returned context are deleted
 pub(crate) fn update_context_from_coprocessor(
     target_context: &Context,
     context_returned: Context,
@@ -507,7 +506,6 @@ pub(crate) fn update_context_from_coprocessor(
 ) -> Result<(), BoxError> {
     // Collect keys that are in the returned context
     let mut keys_returned = HashSet::new();
-    let mut keys_with_null = HashSet::new();
 
     for (mut key, value) in context_returned.try_into_iter()? {
         // Handle deprecated key names - convert back to actual key names
@@ -515,36 +513,25 @@ pub(crate) fn update_context_from_coprocessor(
             key = context_key_from_deprecated(key);
         }
 
-        // Check if value is null (indicates deletion)
-        if matches!(value, Value::Null) {
-            keys_with_null.insert(key);
-        } else {
-            keys_returned.insert(key.clone());
-            // Update/insert the key
-            target_context.upsert_json_value(key, move |_current| value);
-        }
+        keys_returned.insert(key.clone());
+        // Update/insert the key
+        target_context.upsert_json_value(key, move |_current| value);
     }
 
-    // Delete keys that match any of the following conditions:
-    // - were sent but are missing from the returned context
-    // - have null values
+    // Delete keys that were sent but are missing from the returned context
+    // If the context config is selective, only delete keys that are in the selective list
     match context_config {
         ContextConf::NewContextConf(NewContextConf::Selective(context_keys)) => {
             target_context.retain(|key, _v| {
-                if keys_with_null.contains(key) {
-                    return false;
-                }
                 if keys_returned.contains(key) {
                     return true;
-                }
-                if context_keys.contains(key) && !keys_returned.contains(key) {
+                } else if context_keys.contains(key) {
                     return false;
                 }
                 true
             });
         }
-        _ => target_context
-            .retain(|key, _v| keys_returned.contains(key) && !keys_with_null.contains(key)),
+        _ => target_context.retain(|key, _v| keys_returned.contains(key)),
     }
 
     Ok(())

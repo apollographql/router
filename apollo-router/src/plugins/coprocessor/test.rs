@@ -4044,41 +4044,6 @@ mod tests {
     }
 
     #[test]
-    fn test_update_context_from_coprocessor_deletes_null_keys() {
-        use crate::Context;
-        use crate::json_ext::Value;
-        use crate::plugins::coprocessor::update_context_from_coprocessor;
-
-        // Create a context with some keys
-        let target_context = Context::new();
-        target_context.insert("k1", "v1".to_string()).unwrap();
-        target_context.insert("k2", "v2".to_string()).unwrap();
-
-        // Coprocessor returns context with k2 set to null (indicating deletion)
-        let returned_context = Context::new();
-        returned_context
-            .insert("k1", "v1_updated".to_string())
-            .unwrap();
-        returned_context.insert_json_value("k2", Value::Null);
-
-        // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
-        )
-        .unwrap();
-
-        // k1 should be updated
-        assert_eq!(
-            target_context.get_json_value("k1"),
-            Some(serde_json_bytes::json!("v1_updated"))
-        );
-        // k2 should be deleted (was null)
-        assert!(!target_context.contains_key("k2"));
-    }
-
-    #[test]
     fn test_update_context_from_coprocessor_adds_new_keys() {
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
