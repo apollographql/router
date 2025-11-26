@@ -3801,7 +3801,7 @@ mod tests {
 
         // Make clone() always return another mock with the same behavior:
         mock.expect_clone()
-            .returning(|| create_mock_http_client_hard_error());
+            .returning(create_mock_http_client_hard_error);
 
         mock.expect_call()
             .returning(|_| Box::pin(async move { Err("hard error from mock http client".into()) }));
