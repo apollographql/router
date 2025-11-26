@@ -586,12 +586,12 @@ impl Configuration {
         }
 
         // response & entity caching
-        if self.apollo_plugin_enabled("preview_response_cache")
+        if self.apollo_plugin_enabled("response_cache")
             && self.apollo_plugin_enabled("preview_entity_cache")
         {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "entity cache and response cache features are mutually exclusive",
-                error: "either set preview_response_cache.enabled: false or preview_entity_cache.enabled: false in your router yaml configuration".into(),
+                error: "either set response_cache.enabled: false or preview_entity_cache.enabled: false in your router yaml configuration".into(),
             });
         }
 

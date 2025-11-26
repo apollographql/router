@@ -11,7 +11,7 @@ apq:
       enabled: true
 
 # Enable response cache
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:

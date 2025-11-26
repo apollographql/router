@@ -2,8 +2,7 @@
 title: Response Cache Observability
 subtitle: Monitor with telemetry and debug with the cache debugger
 description: Track response cache performance with OpenTelemetry metrics, traces, and logs. Debug cache behavior interactively with the cache debugger in Apollo Sandbox.
-minVersion: Router v2.8.0
-releaseStage: preview
+minVersion: Router v2.10.0
 ---
 
 Response caching provides comprehensive observability through metrics, traces, and logs. You can also use the cache debugger in Apollo Sandbox to understand cache behavior during development.
@@ -219,7 +218,7 @@ homepage:
 sandbox: # Enabled sandbox
   enabled: true
 # Enable response caching globally
-preview_response_cache:
+response_cache:
   enabled: true
   #highlight-start
   debug: true # Enable debugging data for the cache debugger. Don't enable this in production.

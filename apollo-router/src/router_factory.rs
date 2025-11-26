@@ -887,7 +887,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
     add_oss_apollo_plugin!("preview_file_uploads");
-    add_optional_apollo_plugin!("preview_response_cache");
+    add_optional_apollo_plugin!("response_cache");
     add_optional_apollo_plugin!("preview_entity_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
@@ -1177,7 +1177,7 @@ mod test {
                     enabled: true
                 "#
             }
-            "preview_response_cache" => {
+            "response_cache" => {
                 r#"
                 enabled: true
                 subgraph:
@@ -1362,7 +1362,7 @@ mod test {
         HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControl]))
     ]
     #[case::response_cache(
-        "preview_response_cache",
+        "response_cache",
         HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::ResponseCaching]))
     ]
     #[case::authorization(
@@ -1457,7 +1457,7 @@ mod test {
         HashSet::from_iter(vec![AllowedFeature::DemandControl]))
     ]
     #[case::response_cache(
-        "preview_response_cache",
+        "response_cache",
         HashSet::from_iter(vec![AllowedFeature::EntityCaching]))
     ]
     #[case::authorization(
@@ -1632,7 +1632,7 @@ mod test {
     #[case::authentication("authentication")]
     #[case::file_upload("preview_file_uploads")]
     #[case::entity_cache("preview_entity_cache")]
-    #[case::response_cache("preview_response_cache")]
+    #[case::response_cache("response_cache")]
     #[case::demand_control("demand_control")]
     #[case::connectors("connectors")]
     #[case::coprocessor("coprocessor")]
@@ -1702,7 +1702,7 @@ mod test {
     #[case::authorization("authorization")]
     #[case::authentication("authentication")]
     #[case::file_upload("preview_file_uploads")]
-    #[case::response_cache("preview_response_cache")]
+    #[case::response_cache("response_cache")]
     #[case::demand_control("demand_control")]
     #[case::connectors("connectors")]
     #[case::coprocessor("coprocessor")]
@@ -1733,14 +1733,13 @@ mod test {
         let connectors_config =
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
         let response_cache_config =
-            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("preview_response_cache"))
-                .unwrap();
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("response_cache")).unwrap();
 
         let router_config = Configuration::builder()
             .apollo_plugin("forbid_mutations", forbid_mutations_config)
             .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
             .apollo_plugin("connectors", connectors_config)
-            .apollo_plugin("preview_response_cache", response_cache_config)
+            .apollo_plugin("response_cache", response_cache_config)
             .apollo_plugin(plugin, plugin_config)
             .build()
             .unwrap();

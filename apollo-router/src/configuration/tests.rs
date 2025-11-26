@@ -178,10 +178,10 @@ subgraphs:
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors: 
+            r#"configuration had errors:
 1. at line 4
 
-  
+
   supergraph:
     path: /
 ┌ subgraphs:
@@ -207,10 +207,10 @@ unknown:
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors: 
+            r#"configuration had errors:
 1. at line 2
 
-  
+
 ┌ unknown:
 |   foo: true
 └-----> Additional properties are not allowed ('unknown' was unexpected)
@@ -1288,10 +1288,10 @@ fn it_prevents_enablement_of_both_subgraph_caching_plugins() {
     let make_config = |response_cache_enabled, entity_cache_enabled| {
         let mut config = json!({});
         if let Some(enabled) = response_cache_enabled {
-            config.as_object_mut().unwrap().insert(
-                "preview_response_cache".to_string(),
-                json!({"enabled": enabled}),
-            );
+            config
+                .as_object_mut()
+                .unwrap()
+                .insert("response_cache".to_string(), json!({"enabled": enabled}));
         }
         if let Some(enabled) = entity_cache_enabled {
             config.as_object_mut().unwrap().insert(

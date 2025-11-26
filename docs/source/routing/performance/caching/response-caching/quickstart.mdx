@@ -2,8 +2,7 @@
 title: Response Caching Quickstart
 subtitle: Get started with Redis-backed response caching
 description: Set up response caching in GraphOS Router with Redis. Enable entity-level caching and monitor cache performance.
-minVersion: Router v2.8.0
-releaseStage: preview
+minVersion: Router v2.10.0
 ---
 
 <PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
@@ -29,7 +28,7 @@ To use response caching in GraphOS Router, you must set up:
 
 ### Configure router for response caching
 
-In `router.yaml`, configure `preview_response_cache`:
+In `router.yaml`, configure `response_cache`:
 - Enable response caching globally
 - Configure Redis using the same conventions described in [distributed caching](/router/configuration/distributed-caching#redis-url-configuration)
 - Configure response caching per subgraph, with overrides per subgraph for disabling response caching and TTL
@@ -38,7 +37,7 @@ For example:
 
 ```yaml title="router.yaml"
 # Enable response caching globally
-preview_response_cache:
+response_cache:
   enabled: true
   debug: true # Enable the ability to return data to the cache debugger. Avoid enabling this in production.
   invalidation:

@@ -48,7 +48,7 @@ fn base_config() -> Value {
         "include_subgraph_errors": {
             "all": true,
         },
-        "preview_response_cache": {
+        "response_cache": {
             "enabled": true,
             "subgraph": {
                 "all": {
@@ -78,7 +78,7 @@ fn failure_config() -> Value {
         "include_subgraph_errors": {
             "all": true,
         },
-        "preview_response_cache": {
+        "response_cache": {
             "enabled": true,
             "subgraph": {
                 "all": {
@@ -305,7 +305,7 @@ async fn check_cache_tags_from_debugger_data() {
 
     let mut config = base_config();
     config
-        .get_mut("preview_response_cache")
+        .get_mut("response_cache")
         .and_then(|c| c.as_object_mut())
         .and_then(|c| c.insert("debug".to_string(), true.into()));
 
@@ -628,7 +628,7 @@ async fn complex_entity_key_response_cache() {
         let config_mut = config.as_object_mut().unwrap();
         config_mut.insert("experimental_mock_subgraphs".into(), subgraphs);
         config_mut
-            .get_mut("preview_response_cache")
+            .get_mut("response_cache")
             .unwrap()
             .as_object_mut()
             .unwrap()
@@ -824,7 +824,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     });
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "preview_response_cache": {
+            "response_cache": {
                 "enabled": true,
                 "debug": true,
                 "invalidation": {
@@ -887,7 +887,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "preview_response_cache": {
+            "response_cache": {
                 "enabled": true,
                 "debug": true,
                 "invalidation": {
@@ -945,7 +945,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "preview_response_cache": {
+            "response_cache": {
                 "enabled": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
@@ -1078,7 +1078,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "preview_response_cache": {
+            "response_cache": {
                 "enabled": true,
                 "debug": true,
                 "invalidation": {
@@ -1131,7 +1131,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "preview_response_cache": {
+            "response_cache": {
                 "enabled": true,
                 "debug": true,
                 "invalidation": {
@@ -1188,7 +1188,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "preview_response_cache": {
+            "response_cache": {
                 "enabled": true,
                 "debug": true,
                 "invalidation": {
