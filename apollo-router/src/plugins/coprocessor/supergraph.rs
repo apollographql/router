@@ -413,11 +413,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &response.context,
-            context,
-            &response_config.context,
-        )?;
+        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
     }
 
     if let Some(headers) = co_processor_output.headers {
