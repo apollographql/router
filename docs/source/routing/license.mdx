@@ -159,11 +159,10 @@ If you no longer want the Router to rely on an offline license, you can transiti
 
 Follow these steps to stop using an offline license:
 
-To resume online mode and allow the Router to obtain its license directly from Uplink:
+1. Remove any (`--license`) flags and unset all (`APOLLO_ROUTER_LICENSE*`) environment variables.
+1. Ensure that (`APOLLO_KEY`) and (`APOLLO_GRAPH_REF`) are set correctly so the router can authenticate with Uplink and retrieve entitlements automatically.
 
-* Remove any (`--license`) flags and unset all (`APOLLO_ROUTER_LICENSE*`) environment variables.
-* Ensure that (`APOLLO_KEY`) and (`APOLLO_GRAPH_REF`) are set correctly so the Router can authenticate with Uplink and retrieve entitlements automatically.
-* Once online, license renewal is handled through GraphOS without the need to manually rotate files.
+Once online, license renewal is handled through GraphOS without the need to manually rotate files.
 
 **Alternative:** operate without license enforcement by disabling GraphOS features
 If you prefer not to reconnect to Uplink and do not plan to renew the offline license, you must disable all GraphOS features that require entitlements before the grace period ends. Otherwise, once the license expires, the Router will stop processing requests.
