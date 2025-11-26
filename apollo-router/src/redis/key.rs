@@ -5,7 +5,7 @@ pub(crate) trait KeyType: Clone + fmt::Debug + fmt::Display + Send + Sync {}
 
 // TODO: namespaced vs simple?
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct Key<K: KeyType>(pub(crate) K);
+pub(super) struct Key<K: KeyType>(pub(super) K);
 
 impl<K: KeyType> From<K> for Key<K> {
     fn from(key: K) -> Self {

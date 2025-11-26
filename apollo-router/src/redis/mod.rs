@@ -8,7 +8,5 @@ mod value;
 
 pub(crate) use error::Error;
 pub(crate) use gateway::Gateway;
-use key::Key;
 pub(crate) use key::KeyType;
-use value::Value;
 pub(crate) use value::ValueType;

@@ -37,12 +37,12 @@ use tower::BoxError;
 use url::Url;
 
 use super::Error;
-use super::Key;
 use super::KeyType;
-use super::Value;
 use super::ValueType;
 use super::error::record as record_redis_error;
+use super::key::Key;
 use super::metrics::RedisMetricsCollector;
+use super::value::Value;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
 
@@ -784,7 +784,7 @@ mod test {
         }
         impl redis::ValueType for Stuff {}
 
-        let invalid_json_payload = redis::Value(Stuff {
+        let invalid_json_payload = redis::value::Value(Stuff {
             // this systemtime is invalid, serialization will fail
             time: std::time::UNIX_EPOCH - std::time::Duration::new(1, 0),
         });
