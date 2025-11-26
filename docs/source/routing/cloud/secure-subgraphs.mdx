@@ -6,6 +6,10 @@ redirectFrom:
     - /graphos/graphs/securing-a-subgraph
 ---
 
+import CloudRouterDiscontinuationNotice from '../../../shared/cloud-router-discontinuation-notice.mdx';
+
+<CloudRouterDiscontinuationNotice />
+
 To keep your supergraph secure, it's important that your individual subgraphs are [queried only by your router](/federation/building-supergraphs/subgraphs-overview/#securing-your-subgraphs). That's because your subgraphs expose powerful fields that the router uses to execute operations across them. External clients should not have access to these fields.
 
 To restrict subgraph communication to only your router, Apollo recommends creating a separate shared secret for each of your subgraphs. Whenever your router queries a subgraph, it includes that subgraph's corresponding secret in an HTTP header.
