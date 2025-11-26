@@ -505,7 +505,7 @@ pub(crate) fn update_context_from_coprocessor(
     context_config: &ContextConf,
 ) -> Result<(), BoxError> {
     // Collect keys that are in the returned context
-    let mut keys_returned = HashSet::new();
+    let mut keys_returned = HashSet::with_capacity(context_returned.len());
 
     for (mut key, value) in context_returned.try_into_iter()? {
         // Handle deprecated key names - convert back to actual key names
@@ -514,8 +514,7 @@ pub(crate) fn update_context_from_coprocessor(
         }
 
         keys_returned.insert(key.clone());
-        // Update/insert the key
-        target_context.upsert_json_value(key, move |_current| value);
+        target_context.insert_json_value(key, value);
     }
 
     // Delete keys that were sent but are missing from the returned context
