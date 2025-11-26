@@ -556,19 +556,27 @@ impl RouterStage {
                 let sdl = sdl.clone();
 
                 async move {
-                    process_router_request_stage(
+                    let mut succeeded = true;
+                    let mut executed = false;
+                    let result = process_router_request_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
                         request,
                         request_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
+                        succeeded = false;
                         tracing::error!("coprocessor: router request stage error: {error}");
                         error
-                    })
+                    });
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::RouterRequest, succeeded);
+                    }
+                    result
                 }
             })
         });
@@ -584,19 +592,27 @@ impl RouterStage {
 
                 async move {
                     let response: router::Response = fut.await?;
-                    process_router_response_stage(
+                    let mut succeeded = true;
+                    let mut executed = false;
+                    let result = process_router_response_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
                         response,
                         response_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
+                        succeeded = false;
                         tracing::error!("coprocessor: router response stage error: {error}");
                         error
-                    })
+                    });
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::RouterResponse, succeeded);
+                    };
+                    result
                 }
             })
         });
@@ -673,19 +689,27 @@ impl SubgraphStage {
                 let request_config = request_config.clone();
 
                 async move {
-                    process_subgraph_request_stage(
+                    let mut succeeded = true;
+                    let mut executed = false;
+                    let result = process_subgraph_request_stage(
                         http_client,
                         coprocessor_url,
                         service_name,
                         request,
                         request_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
+                        succeeded = false;
                         tracing::error!("coprocessor: subgraph request stage error: {error}");
                         error
-                    })
+                    });
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::SubgraphRequest, succeeded);
+                    }
+                    result
                 }
             })
         });
@@ -702,19 +726,28 @@ impl SubgraphStage {
 
                 async move {
                     let response: subgraph::Response = fut.await?;
-                    process_subgraph_response_stage(
+
+                    let mut succeeded = true;
+                    let mut executed = false;
+                    let result = process_subgraph_response_stage(
                         http_client,
                         coprocessor_url,
                         service_name,
                         response,
                         response_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
+                        succeeded = false;
                         tracing::error!("coprocessor: subgraph response stage error: {error}");
                         error
-                    })
+                    });
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::SubgraphResponse, succeeded);
+                    }
+                    result
                 }
             })
         });
@@ -747,6 +780,7 @@ async fn process_router_request_stage<C>(
     mut request: router::Request,
     mut request_config: RouterRequestConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -802,24 +836,13 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::RouterRequest, start.elapsed());
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
+    let duration = start.elapsed();
+    record_coprocessor_duration(PipelineStep::RouterRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let mut co_processor_output = co_processor_result?;
-
-    // Determine logical success before control flow branches
-    let succeeded = match co_processor_output.body.as_ref() {
-        Some(body_value) => {
-            // Try to parse as JSON to look for "errors" key
-            match serde_json::from_str::<serde_json_bytes::Value>(body_value) {
-                Ok(json_val) => json_val.get("errors").is_none(),
-                Err(_) => true, // not JSON, treat as success
-            }
-        }
-        None => false, // no body = logical failure
-    };
-
-    record_coprocessor_operation(PipelineStep::RouterRequest, succeeded);
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -919,6 +942,7 @@ async fn process_router_response_stage<C>(
     mut response: router::Response,
     response_config: RouterResponseConf,
     _response_validation: bool, // Router responses don't implement GraphQL validation - streaming responses bypass handle_graphql_response
+    executed: &mut bool,
 ) -> Result<router::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -977,27 +1001,17 @@ where
         .and_sdl(sdl_to_send.clone())
         .build();
 
+    // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::RouterRequest, start.elapsed());
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
+    let duration = start.elapsed();
+    record_coprocessor_duration(PipelineStep::RouterResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
-
-    // Determine logical success before control flow branches
-    let succeeded = match co_processor_output.body.as_ref() {
-        Some(body_value) => {
-            // Try to parse as JSON to look for "errors" key
-            match serde_json::from_str::<serde_json_bytes::Value>(body_value) {
-                Ok(json_val) => json_val.get("errors").is_none(),
-                Err(_) => true, // not JSON, treat as success
-            }
-        }
-        None => false, // no body = logical failure
-    };
-
-    record_coprocessor_operation(PipelineStep::RouterResponse, succeeded);
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
 
@@ -1131,6 +1145,7 @@ async fn process_subgraph_request_stage<C>(
     mut request: subgraph::Request,
     mut request_config: SubgraphRequestConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -1181,24 +1196,13 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::SubgraphRequest, start.elapsed());
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
+    let duration = start.elapsed();
+    record_coprocessor_duration(PipelineStep::SubgraphRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
-
-    // Determine logical success before control flow branches
-    let succeeded = match co_processor_output.body.as_ref() {
-        Some(body_value) => {
-            // Try to deserialize a copy of the body just for validation
-            let gql_response =
-                deserialize_coprocessor_response(body_value.clone(), response_validation);
-            gql_response.errors.is_empty()
-        }
-        None => false, // no body = logical failure
-    };
-
-    record_coprocessor_operation(PipelineStep::SubgraphRequest, succeeded);
-
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
     let control = co_processor_output.control.expect("validated above; qed");
@@ -1295,6 +1299,7 @@ async fn process_subgraph_response_stage<C>(
     mut response: subgraph::Response,
     response_config: SubgraphResponseConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<subgraph::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -1344,23 +1349,13 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::SubgraphResponse, start.elapsed());
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
+    let duration = start.elapsed();
+    record_coprocessor_duration(PipelineStep::SubgraphResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
-
-    // Determine logical success before control flow branches
-    let succeeded = match co_processor_output.body.as_ref() {
-        Some(body_value) => {
-            // Try to deserialize a copy of the body just for validation
-            let gql_response =
-                deserialize_coprocessor_response(body_value.clone(), response_validation);
-            gql_response.errors.is_empty()
-        }
-        None => false, // no body = logical failure
-    };
-
-    record_coprocessor_operation(PipelineStep::SubgraphResponse, succeeded);
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphResponse)?;
 

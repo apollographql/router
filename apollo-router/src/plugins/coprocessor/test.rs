@@ -3286,27 +3286,6 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL response
-    fn create_mock_http_client_router_request_invalid_response() -> MockInternalHttpClientService {
-        mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let response = json!({
-                    "version": 1,
-                    "stage": "RouterRequest",
-                    "control": "continue",
-                    "body": "{\"errors\": \"this should be an array not a string\"}"
-                });
-
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&response).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
-    }
-
-    // Helper function to create mock http client that returns invalid GraphQL response
     fn create_mock_http_client_router_response_invalid_response() -> MockInternalHttpClientService {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -3815,6 +3794,19 @@ mod tests {
                     .unwrap())
             })
         })
+    }
+
+    fn create_mock_http_client_hard_error() -> MockInternalHttpClientService {
+        let mut mock = MockInternalHttpClientService::new();
+
+        // Make clone() always return another mock with the same behavior:
+        mock.expect_clone()
+            .returning(|| create_mock_http_client_hard_error());
+
+        mock.expect_call()
+            .returning(|_| Box::pin(async move { Err("hard error from mock http client".into()) }));
+
+        mock
     }
 
     #[tokio::test]
@@ -4349,7 +4341,7 @@ mod tests {
                 let _stage = create_subgraph_stage_for_request_validation_test();
 
                 let _service = _stage.as_service(
-                    create_mock_http_client_subgraph_request_invalid_response(),
+                    create_mock_http_client_hard_error(),
                     create_mock_subgraph_service().boxed(),
                     "http://test".to_string(),
                     "my_service".to_string(),
@@ -4378,7 +4370,7 @@ mod tests {
                 let _stage = create_subgraph_stage_for_validation_test();
 
                 let _service = _stage.as_service(
-                    create_mock_http_client_subgraph_request_invalid_response(),
+                    create_mock_http_client_hard_error(),
                     create_mock_subgraph_service().boxed(),
                     "http://test".to_string(),
                     "my_service".to_string(),
@@ -4407,7 +4399,7 @@ mod tests {
                 let _stage = create_subgraph_stage_for_request_validation_test();
 
                 let _service = _stage.as_service(
-                    create_mock_http_client_subgraph_request_invalid_response(),
+                    create_mock_http_client_hard_error(),
                     create_mock_subgraph_service().boxed(),
                     "http://test".to_string(),
                     "my_service".to_string(),
@@ -4423,7 +4415,7 @@ mod tests {
                 let _stage = create_subgraph_stage_for_validation_test();
 
                 let _service = _stage.as_service(
-                    create_mock_http_client_subgraph_request_invalid_response(),
+                    create_mock_http_client_hard_error(),
                     create_mock_subgraph_service().boxed(),
                     "http://test".to_string(),
                     "my_service".to_string(),
@@ -4621,7 +4613,7 @@ mod tests {
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_request_validation_test();
-                let mock_http_client = create_mock_http_client_router_request_invalid_response();
+                let mock_http_client = create_mock_http_client_hard_error();
                 let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
@@ -4630,12 +4622,12 @@ mod tests {
                         mock_router_service.boxed(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        true,
+                        false,
                     )
                     .boxed();
 
                 let request = router::Request::fake_builder().build().unwrap();
-                let _ = service_stack.oneshot(request).await.unwrap();
+                let _ = service_stack.oneshot(request).await;
             }
 
             assert_coprocessor_operations_metrics(&[(PipelineStep::RouterRequest, 2, Some(false))]);
@@ -4650,7 +4642,7 @@ mod tests {
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..4 {
                 let router_stage = create_router_stage_for_response_validation_test();
-                let mock_http_client = create_mock_http_client_router_response_invalid_response();
+                let mock_http_client = create_mock_http_client_hard_error();
                 let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
@@ -4664,7 +4656,7 @@ mod tests {
                     .boxed();
 
                 let request = router::Request::fake_builder().build().unwrap();
-                let _ = service_stack.oneshot(request).await.unwrap();
+                let _ = service_stack.oneshot(request).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -4683,7 +4675,7 @@ mod tests {
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let router_stage = create_router_stage_for_request_validation_test();
-                let mock_http_client = create_mock_http_client_router_request_invalid_response();
+                let mock_http_client = create_mock_http_client_hard_error();
                 let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
@@ -4697,13 +4689,13 @@ mod tests {
                     .boxed();
 
                 let request = router::Request::fake_builder().build().unwrap();
-                let _ = service_stack.oneshot(request).await.unwrap();
+                let _ = service_stack.oneshot(request).await;
             }
 
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_response_validation_test();
-                let mock_http_client = create_mock_http_client_router_response_invalid_response();
+                let mock_http_client = create_mock_http_client_hard_error();
                 let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
@@ -4717,7 +4709,7 @@ mod tests {
                     .boxed();
 
                 let request = router::Request::fake_builder().build().unwrap();
-                let _ = service_stack.oneshot(request).await.unwrap();
+                let _ = service_stack.oneshot(request).await;
             }
 
             assert_coprocessor_operations_metrics(&[
