@@ -113,7 +113,6 @@ Follow these steps to configure an GraphOS Router to use an offline license:
 
 1. Provide the offline license to your router on startup. The router accepts an offline license in a few ways:
     1. [`--license <license_path>`](/graphos/reference/router/configuration#--license) CLI option, with an argument containing an absolute or relative path to an offline license file
-    When operating with an offline license, the Router does not poll Uplink for schema updates. If you provide a supergraph schema using the --supergraph (-s) CLI option with a local file path (absolute or relative), the Router will only load that schema from the specified source and will not attempt to fetch newer versions from GraphOS.
     1. [`APOLLO_ROUTER_LICENSE_PATH`](/graphos/reference/router/configuration#--license) environment variable, containing an absolute or relative path to an offline license file 
     1. [`APOLLO_ROUTER_LICENSE`](/graphos/reference/router/configuration#--license) environment variable, containing the stringified contents of an offline license file
 
