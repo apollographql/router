@@ -110,10 +110,11 @@ impl Storage {
             self.send_to_maintenance_queue(invalidation_key.clone());
             let _: () = pipeline
                 .zrange(invalidation_key.clone(), 0, -1, None, false, None, false)
-                .await?;
+                .await
+                .map_err(redis::Error::from)?;
         }
 
-        let results: Vec<Vec<String>> = pipeline.all().await?;
+        let results: Vec<Vec<String>> = pipeline.all().await.map_err(redis::Error::from)?;
         let all_keys: HashSet<String> = results.into_iter().flatten().collect();
         if all_keys.is_empty() {
             return Ok(0);
@@ -190,7 +191,8 @@ impl Storage {
             .client()
             .with_options(&options)
             .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff_time)
-            .await?)
+            .await
+            .map_err(redis::Error::from)?)
     }
 
     /// Create a list of the cache tags that describe this document, with associated namespaces.
@@ -336,7 +338,7 @@ impl CacheStorage for Storage {
         for result in result_vec {
             if let Err(err) = result {
                 tracing::debug!("Caught error during cache tag update: {err:?}");
-                return Err(err.into());
+                return Err(redis::Error::from(err).into());
             }
         }
 
@@ -356,14 +358,15 @@ impl CacheStorage for Storage {
                     None,
                     false,
                 )
-                .await?;
+                .await
+                .map_err(redis::Error::from)?;
         }
 
         let result_vec = pipeline.try_all::<Value>().await;
         for result in result_vec {
             if let Err(err) = result {
                 tracing::debug!("Caught error during document insert: {err:?}");
-                return Err(err.into());
+                return Err(redis::Error::from(err).into());
             }
         }
 
@@ -504,11 +507,21 @@ impl Storage {
     }
 
     async fn ttl(&self, key: &str) -> StorageResult<i64> {
-        Ok(self.storage.client().ttl(key).await?)
+        Ok(self
+            .storage
+            .client()
+            .ttl(key)
+            .await
+            .map_err(redis::Error::from)?)
     }
 
     async fn expire_time(&self, key: &str) -> StorageResult<i64> {
-        Ok(self.storage.client().expire_time(key).await?)
+        Ok(self
+            .storage
+            .client()
+            .expire_time(key)
+            .await
+            .map_err(redis::Error::from)?)
     }
 
     async fn zscore(&self, sorted_set_key: &str, member: &str) -> Result<i64, BoxError> {
@@ -517,17 +530,32 @@ impl Storage {
     }
 
     async fn zcard(&self, sorted_set_key: &str) -> StorageResult<u64> {
-        let cardinality = self.storage.client().zcard(sorted_set_key).await?;
+        let cardinality = self
+            .storage
+            .client()
+            .zcard(sorted_set_key)
+            .await
+            .map_err(redis::Error::from)?;
         Ok(cardinality)
     }
 
     async fn zexists(&self, sorted_set_key: &str, member: &str) -> StorageResult<bool> {
-        let score: Option<String> = self.storage.client().zscore(sorted_set_key, member).await?;
+        let score: Option<String> = self
+            .storage
+            .client()
+            .zscore(sorted_set_key, member)
+            .await
+            .map_err(redis::Error::from)?;
         Ok(score.is_some())
     }
 
     async fn exists(&self, key: &str) -> StorageResult<bool> {
-        Ok(self.storage.client().exists(key).await?)
+        Ok(self
+            .storage
+            .client()
+            .exists(key)
+            .await
+            .map_err(Into::<redis::Error>::into)?)
     }
 }
 
@@ -988,6 +1016,7 @@ mod tests {
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
         use crate::plugins::response_cache::storage::redis::Storage;
+        use crate::redis;
 
         /// Trigger failure by pre-setting the cache tag to an invalid type.
         #[tokio::test]
@@ -1099,7 +1128,11 @@ mod tests {
 
             let result = storage.insert(document, SUBGRAPH_NAME).await;
             let error = result.expect_err("should have timed out via redis");
-            assert!(matches!(error, StorageError::Database(ref e) if e.details() == "timeout"));
+            assert!(
+                matches!(error, StorageError::Database(ref e) if matches!(e, redis::Error::Timeout)),
+                "{:?}",
+                error
+            );
             assert_eq!(error.code(), "TIMEOUT");
 
             // make sure the insert function did not try to operate on the document key
@@ -1376,9 +1409,6 @@ mod tests {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(5) {
             let error = storage.fetch(&document.key, "S1").await.unwrap_err();
-            if error.is_row_not_found() {
-                continue;
-            }
 
             assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
             assert_eq!(error.code(), "TIMEOUT");

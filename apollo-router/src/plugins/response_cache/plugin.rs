@@ -1323,9 +1323,7 @@ async fn cache_lookup_root(
         }
         Err(err) => {
             let span = Span::current();
-            if !err.is_row_not_found() {
-                span.mark_as_error(format!("cannot get cache entry: {err}"));
-            }
+            span.mark_as_error(format!("cannot get cache entry: {err}"));
 
             span.set_span_dyn_attribute(
                 opentelemetry::Key::new("cache.status"),
@@ -1510,10 +1508,8 @@ async fn cache_lookup_entities(
             })
             .collect(),
         Err(err) => {
-            if !err.is_row_not_found() {
-                let span = Span::current();
-                span.mark_as_error(format!("cannot get cache entry: {err}"));
-            }
+            let span = Span::current();
+            span.mark_as_error(format!("cannot get cache entry: {err}"));
 
             std::iter::repeat_n(None, keys_len).collect()
         }

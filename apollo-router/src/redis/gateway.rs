@@ -13,8 +13,6 @@ use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
 use fred::prelude::ClientLike;
-use fred::prelude::Error as RedisError;
-use fred::prelude::ErrorKind as RedisErrorKind;
 use fred::prelude::HeartbeatInterface;
 use fred::prelude::KeysInterface;
 use fred::prelude::Options;
@@ -31,16 +29,19 @@ use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
 use futures::Stream;
+use futures::TryStreamExt;
 use futures::future::join_all;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
 use tower::BoxError;
 use url::Url;
 
+use super::Error;
 use super::Key;
 use super::KeyType;
 use super::Value;
 use super::ValueType;
+use super::error::record as record_redis_error;
 use super::metrics::RedisMetricsCollector;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
@@ -60,50 +61,6 @@ const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
 const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(5);
 /// Interval on which we send PING commands to the Redis servers.
 const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
-
-/// Record a Redis error as a metric, independent of having an active connection
-fn record_redis_error(error: &RedisError, caller: &'static str) {
-    // Don't track NotFound errors as they're expected for cache misses
-
-    let error_type = match error.kind() {
-        RedisErrorKind::Config => "config",
-        RedisErrorKind::Auth => "auth",
-        RedisErrorKind::Routing => "routing",
-        RedisErrorKind::IO => "io",
-        RedisErrorKind::InvalidCommand => "invalid_command",
-        RedisErrorKind::InvalidArgument => "invalid_argument",
-        RedisErrorKind::Url => "url",
-        RedisErrorKind::Protocol => "protocol",
-        RedisErrorKind::Tls => "tls",
-        RedisErrorKind::Canceled => "canceled",
-        RedisErrorKind::Unknown => "unknown",
-        RedisErrorKind::Timeout => "timeout",
-        RedisErrorKind::Cluster => "cluster",
-        RedisErrorKind::Parse => "parse",
-        RedisErrorKind::Sentinel => "sentinel",
-        RedisErrorKind::NotFound => "not_found",
-        RedisErrorKind::Backpressure => "backpressure",
-        RedisErrorKind::Replica => "replica",
-    };
-
-    u64_counter_with_unit!(
-        "apollo.router.cache.redis.errors",
-        "Number of Redis errors by type",
-        "{error}",
-        1,
-        kind = caller,
-        error_type = error_type
-    );
-
-    if !error.is_not_found() && !error.is_canceled() {
-        tracing::error!(
-            error_type = error_type,
-            caller = caller,
-            error = ?error,
-            "Redis error occurred"
-        );
-    }
-}
 
 /// `DropSafeRedisPool` is a wrapper for `fred::prelude::RedisPool` which closes the pool's Redis
 /// connections when it is dropped.
@@ -135,7 +92,7 @@ impl Drop for DropSafeRedisPool {
         let inner = self.pool.clone();
         let caller = self.caller;
         tokio::spawn(async move {
-            let result = inner.quit().await;
+            let result = inner.quit().await.map_err(Into::into);
             if let Err(err) = result {
                 tracing::warn!("Caught error while closing unused Redis connections: {err:?}");
                 record_redis_error(&err, caller);
@@ -160,6 +117,7 @@ impl RedisCacheStorage {
         let url = Self::preprocess_urls(config.urls)
             .inspect_err(|err| record_redis_error(err, caller))?;
         let mut client_config = RedisConfig::from_url(url.as_str())
+            .map_err(Into::into)
             .inspect_err(|err| record_redis_error(err, caller))?;
         let is_cluster = client_config.server.is_clustered();
 
@@ -268,6 +226,7 @@ impl RedisCacheStorage {
                     let _ = client_config
                         .server
                         .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint)
+                        .map_err(Into::into)
                         .inspect_err(|err| record_redis_error(err, caller));
                 }
             })
@@ -306,10 +265,12 @@ impl RedisCacheStorage {
                 loop {
                     match error_rx.recv().await {
                         Ok((error, Some(server))) => {
+                            let error = error.into();
                             tracing::error!("Redis client ({server:?}) error: {error:?}",);
                             record_redis_error(&error, caller);
                         }
                         Ok((error, None)) => {
+                            let error = error.into();
                             tracing::error!("Redis client error: {error:?}",);
                             record_redis_error(&error, caller);
                         }
@@ -405,28 +366,22 @@ impl RedisCacheStorage {
     }
 
     /// Helper method to record Redis errors for metrics
-    fn record_error(&self, error: &RedisError) {
+    fn record_error(&self, error: &Error) {
         record_redis_error(error, self.inner.caller);
     }
 
-    fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
+    fn preprocess_urls(urls: Vec<Url>) -> Result<Url, Error> {
         let url_len = urls.len();
         let mut urls_iter = urls.into_iter();
         let first = urls_iter.next();
         match first {
-            None => Err(RedisError::new(
-                RedisErrorKind::Config,
-                "empty Redis URL list",
-            )),
+            None => Err(Error::Configuration("Empty Redis URL list".to_string())),
             Some(first) => {
                 let scheme = first.scheme();
                 if !SUPPORTED_REDIS_SCHEMES.contains(&scheme) {
-                    return Err(RedisError::new(
-                        RedisErrorKind::Config,
-                        format!(
-                            "invalid Redis URL scheme, expected a scheme from {SUPPORTED_REDIS_SCHEMES:?}, got: {scheme}"
-                        ),
-                    ));
+                    return Err(Error::Configuration(format!(
+                        "Invalid Redis URL scheme, expected a scheme from {SUPPORTED_REDIS_SCHEMES:?}, got: {scheme}"
+                    )));
                 }
 
                 if url_len == 1 {
@@ -439,15 +394,13 @@ impl RedisCacheStorage {
                 let mut result = first.clone();
                 for mut url in urls_iter {
                     if url.username() != username {
-                        return Err(RedisError::new(
-                            RedisErrorKind::Config,
-                            "incompatible usernames between Redis URLs",
+                        return Err(Error::Configuration(
+                            "Incompatible usernames between Redis URLs".to_string(),
                         ));
                     }
                     if url.password() != password {
-                        return Err(RedisError::new(
-                            RedisErrorKind::Config,
-                            "incompatible passwords between Redis URLs",
+                        return Err(Error::Configuration(
+                            "Incompatible passwords between Redis URLs".to_string(),
                         ));
                     }
 
@@ -465,18 +418,17 @@ impl RedisCacheStorage {
 
                     // Now check to make sure our schemes match
                     if url.scheme() != result.scheme() {
-                        return Err(RedisError::new(
-                            RedisErrorKind::Config,
-                            "incompatible schemes between Redis URLs",
+                        return Err(Error::Configuration(
+                            "Incompatible schemes between Redis URLs".to_string(),
                         ));
                     }
 
                     let host = url.host_str().ok_or_else(|| {
-                        RedisError::new(RedisErrorKind::Config, "missing host in Redis URL")
+                        Error::Configuration("Missing host in Redis URL".to_string())
                     })?;
 
                     let port = url.port().ok_or_else(|| {
-                        RedisError::new(RedisErrorKind::Config, "missing port in Redis URL")
+                        Error::Configuration("Missing port in Redis URL".to_string())
                     })?;
 
                     result
@@ -518,7 +470,7 @@ impl RedisCacheStorage {
         }
     }
 
-    pub(crate) async fn get<K: KeyType, V: ValueType>(&self, key: K) -> Result<V, RedisError> {
+    pub(crate) async fn get<K: KeyType, V: ValueType>(&self, key: K) -> Result<V, Error> {
         self.get_with_options(key, Options::default()).await
     }
 
@@ -526,7 +478,7 @@ impl RedisCacheStorage {
         &self,
         key: K,
         options: Options,
-    ) -> Result<V, RedisError> {
+    ) -> Result<V, Error> {
         let key = self.make_key(key);
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
@@ -534,14 +486,19 @@ impl RedisCacheStorage {
                 let _: () = pipeline
                     .get(&key)
                     .await
+                    .map_err(Into::into)
                     .inspect_err(|e| self.record_error(e))?;
                 let _: () = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
                     .await
+                    .map_err(Into::into)
                     .inspect_err(|e| self.record_error(e))?;
 
-                let (value, _timeout_set): (Value<V>, bool) =
-                    pipeline.all().await.inspect_err(|e| self.record_error(e))?;
+                let (value, _timeout_set): (Value<V>, bool) = pipeline
+                    .all()
+                    .await
+                    .map_err(Into::into)
+                    .inspect_err(|e| self.record_error(e))?;
                 Ok(value.0)
             }
             _ => {
@@ -549,6 +506,7 @@ impl RedisCacheStorage {
                 client
                     .get(key)
                     .await
+                    .map_err(Into::into)
                     .inspect_err(|e| self.record_error(e))
                     .map(|v: Value<V>| v.0)
             }
@@ -581,6 +539,7 @@ impl RedisCacheStorage {
             let res: Option<Value<V>> = client
                 .get(key)
                 .await
+                .map_err(Into::into)
                 .inspect_err(|e| self.record_error(e))
                 .ok();
             vec![res.map(|v| v.0)]
@@ -603,7 +562,8 @@ impl RedisCacheStorage {
             for (_shard, (indexes, keys)) in h {
                 let client = client.clone();
                 tasks.push(async move {
-                    let result: Result<Vec<Option<Value<V>>>, _> = client.mget(keys).await;
+                    let result: Result<Vec<Option<Value<V>>>, _> =
+                        client.mget(keys).await.map_err(Into::into);
                     (indexes, result)
                 });
             }
@@ -634,6 +594,7 @@ impl RedisCacheStorage {
             let values: Vec<Option<Value<V>>> = client
                 .mget(keys)
                 .await
+                .map_err(Into::into)
                 .inspect_err(|e| self.record_error(e))
                 .unwrap_or_else(|_| vec![None; len]);
             values.into_iter().map(|value| value.map(|v| v.0)).collect()
@@ -659,7 +620,8 @@ impl RedisCacheStorage {
                 None,
                 false,
             )
-            .await;
+            .await
+            .map_err(Into::into);
         tracing::trace!("insert result {:?}", result);
 
         if let Err(err) = result {
@@ -691,7 +653,7 @@ impl RedisCacheStorage {
                 .await;
         }
 
-        let result: Result<Vec<()>, _> = pipeline.all().await;
+        let result: Result<Vec<()>, _> = pipeline.all().await.map_err(Into::into);
         match result {
             Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
             Err(err) => {
@@ -703,7 +665,7 @@ impl RedisCacheStorage {
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
+    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, Error>
     where
         I: Iterator<Item = fred::types::Key>,
     {
@@ -717,7 +679,7 @@ impl RedisCacheStorage {
         &self,
         keys: I,
         options: Options,
-    ) -> Result<u32, RedisError>
+    ) -> Result<u32, Error>
     where
         I: Iterator<Item = fred::types::Key>,
     {
@@ -729,9 +691,9 @@ impl RedisCacheStorage {
         }
 
         // then we execute against all the key groups at the same time
-        let results: Vec<Result<u32, RedisError>> = join_all(h.into_values().map(|keys| async {
+        let results: Vec<Result<u32, Error>> = join_all(h.into_values().map(|keys| async {
             let client = self.client().with_options(&options);
-            client.del(keys).await
+            client.del(keys).await.map_err(Into::into)
         }))
         .await;
 
@@ -749,14 +711,18 @@ impl RedisCacheStorage {
         &self,
         pattern: String,
         count: Option<u32>,
-    ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
+    ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, Error>> + Send>> {
         let pattern = self.make_key(Key(pattern));
         if self.is_cluster {
             // NOTE: scans might be better send to only the read replicas, but the read-only client
             // doesn't have a scan_cluster(), just a paginated version called scan_page()
-            Box::pin(self.client().scan_cluster(pattern, count, None))
+            Box::pin(
+                self.client()
+                    .scan_cluster(pattern, count, None)
+                    .map_err(Into::into),
+            )
         } else {
-            Box::pin(self.client().scan(pattern, count, None))
+            Box::pin(self.client().scan(pattern, count, None).map_err(Into::into))
         }
     }
 }
@@ -766,7 +732,7 @@ impl RedisCacheStorage {
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 impl RedisCacheStorage {
-    pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
+    pub(crate) async fn truncate_namespace(&self) -> Result<(), Error> {
         use fred::prelude::Key;
         use futures::StreamExt;
 
@@ -777,10 +743,18 @@ impl RedisCacheStorage {
         // find all members of this namespace via `SCAN`
         let pattern = self.make_key(Key("*"));
         let client = self.client();
-        let mut stream: Pin<Box<dyn Stream<Item = Result<Key, RedisError>>>> = if self.is_cluster {
-            Box::pin(client.scan_cluster_buffered(pattern, None, None))
+        let mut stream: Pin<Box<dyn Stream<Item = Result<Key, Error>>>> = if self.is_cluster {
+            Box::pin(
+                client
+                    .scan_cluster_buffered(pattern, None, None)
+                    .map_err(Into::into),
+            )
         } else {
-            Box::pin(client.scan_buffered(pattern, None, None))
+            Box::pin(
+                client
+                    .scan_buffered(pattern, None, None)
+                    .map_err(Into::into),
+            )
         };
 
         let mut keys = Vec::new();

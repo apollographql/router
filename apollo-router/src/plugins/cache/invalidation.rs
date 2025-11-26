@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use fred::error::Error as RedisError;
 use fred::types::scan::Scanner;
 use futures::StreamExt;
 use futures::stream;
@@ -30,7 +29,7 @@ pub(crate) struct Invalidation {
 #[derive(Error, Debug, Clone)]
 pub(crate) enum InvalidationError {
     #[error("redis error")]
-    RedisError(#[from] RedisError),
+    RedisError(#[from] redis::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
 }
