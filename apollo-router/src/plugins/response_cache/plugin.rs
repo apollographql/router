@@ -428,6 +428,14 @@ impl PluginPrivate for ResponseCache {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut map = MultiMap::new();
+        // At least 1 subgraph enabled caching
+        let any_caching_enabled = self
+            .subgraphs
+            .subgraphs
+            .iter()
+            .any(|(subgraph_name, _cfg)| self.subgraph_enabled(subgraph_name))
+            || self.subgraphs.all.enabled.unwrap_or_default();
+
         let global_invalidation_enabled = self
             .subgraphs
             .all
@@ -435,6 +443,7 @@ impl PluginPrivate for ResponseCache {
             .as_ref()
             .map(|i| i.enabled)
             .unwrap_or_default();
+
         // If at least one subgraph is enabled and has invalidation enabled
         let any_subgraph_invalidation_enabled =
             self.subgraphs.subgraphs.iter().any(|(subgraph_name, cfg)| {
@@ -445,7 +454,11 @@ impl PluginPrivate for ResponseCache {
                         .map(|i| i.enabled)
                         .unwrap_or_default()
             });
-        if self.enabled && (global_invalidation_enabled || any_subgraph_invalidation_enabled) {
+
+        if self.enabled
+            && any_caching_enabled
+            && (global_invalidation_enabled || any_subgraph_invalidation_enabled)
+        {
             match &self.endpoint_config {
                 Some(endpoint_config) => {
                     let endpoint = Endpoint::from_router_service(
@@ -2635,6 +2648,7 @@ mod tests {
     use apollo_compiler::parser::Parser;
     use serde_json_bytes::json;
     use tokio::sync::broadcast;
+    use uuid::Uuid;
 
     use super::Subgraph;
     use super::Ttl;
@@ -2698,7 +2712,154 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_invalidation_endpoint_enabled() {
+    #[rstest::rstest]
+    #[case::all_should_be_enabled(true, true, true, true)]
+    // Enable invalidation for every subgraphs except for a specific subgraph should enable invalidation endpoint
+    #[case::specific_subgraph_invalidation_disabled_should_be_enabled(true, true, true, false)]
+    #[case::specific_subgraph_invalidation_enabled_should_be_enabled(true, false, true, true)] // Enable invalidation only for a specific subgraph should enable invalidation endpoint
+    #[case::specific_subgraph_invalidation_enabled_should_be_enabled(false, false, true, true)] // Enable invalidation only for a specific subgraph should enable invalidation endpoint
+    async fn test_invalidation_endpoint_enabled(
+        #[case] all_enabled: bool,
+        #[case] all_invalidation_enabled: bool,
+        #[case] subgraph_enabled: bool,
+        #[case] subgraph_invalidation_enabled: bool,
+    ) {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let (drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+            .await
+            .unwrap();
+        let map = serde_json_bytes::json!({
+            "user": {
+                "private_id": "sub"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false
+            }
+        });
+        let mut response_cache = ResponseCache::for_test(
+            storage.clone(),
+            serde_json_bytes::from_value(map).unwrap(),
+            valid_schema.clone(),
+            true,
+            drop_tx,
+        )
+        .await
+        .unwrap();
+        response_cache.subgraphs = Arc::new(
+            serde_json_bytes::from_value(serde_json_bytes::json!({
+                "all": {
+                    "enabled": all_enabled,
+                    "ttl": "10s",
+                    "invalidation": {
+                        "enabled": all_invalidation_enabled,
+                        "shared_key": "test"
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": subgraph_enabled,
+                        "invalidation": {
+                            "enabled": subgraph_invalidation_enabled,
+                            "shared_key": "test"
+                        }
+                    }
+                }
+            }))
+            .unwrap(),
+        );
+        assert!(!response_cache.web_endpoints().is_empty());
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    #[case::all_should_be_disabled(false, false, false, false)]
+    #[case::all_should_be_disabled(false, true, false, false)]
+    #[case::all_should_be_disabled(false, true, false, true)]
+    #[case::all_should_be_disabled(true, false, true, false)]
+    #[case::all_should_be_disabled(true, false, false, false)]
+    #[case::all_should_be_disabled(true, false, false, true)]
+    async fn test_invalidation_endpoint_disabled(
+        #[case] all_enabled: bool,
+        #[case] all_invalidation_enabled: bool,
+        #[case] subgraph_enabled: bool,
+        #[case] subgraph_invalidation_enabled: bool,
+    ) {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let (drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+            .await
+            .unwrap();
+        let map = serde_json_bytes::json!({
+            "user": {
+                "private_id": "sub"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false
+            }
+        });
+        let mut response_cache = ResponseCache::for_test(
+            storage.clone(),
+            serde_json_bytes::from_value(map).unwrap(),
+            valid_schema.clone(),
+            true,
+            drop_tx,
+        )
+        .await
+        .unwrap();
+        response_cache.subgraphs = Arc::new(
+            serde_json_bytes::from_value(serde_json_bytes::json!({
+                "all": {
+                    "enabled": all_enabled,
+                    "ttl": "10s",
+                    "invalidation": {
+                        "enabled": all_invalidation_enabled,
+                        "shared_key": "test"
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": subgraph_enabled,
+                        "invalidation": {
+                            "enabled": subgraph_invalidation_enabled,
+                            "shared_key": "test"
+                        }
+                    }
+                }
+            }))
+            .unwrap(),
+        );
+        assert!(response_cache.web_endpoints().is_empty());
+    }
+
+    // #[rstest::rstest]
+    // #[case(....)]
+    // async fn test_invalidation_endpoint_disabled(/*params*/) {
+    //     let config = json!({ /* build using params */);
+    //     assert!(!invalidation_endpoint_enabled(config));
+    // }
+
+    // // Complicated cases which don't map to rstest
+    // async fn test_invalidation_endpoint_enablement(/*params*/) {
+    //     let config = json!({ /* build using params */);
+    //     assert!(invalidation_endpoint_enabled(config));
+
+    //     let config = json!({ /* build using params */);
+    //     assert!(invalidation_endpoint_enabled(config));
+    // }
+
+    #[tokio::test]
+    async fn test_invalidation_endpoint_enabled_multiple_subgraphs() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
         let (drop_tx, drop_rx) = broadcast::channel(2);
         let storage = Storage::new(
@@ -2730,189 +2891,6 @@ mod tests {
         )
         .await
         .unwrap();
-        // Enable invalidation only for a specific subgraph should enable invalidation endpoint
-        response_cache.subgraphs = Arc::new(
-            serde_json_bytes::from_value(serde_json_bytes::json!({
-                "all": {
-                    "enabled": true,
-                    "ttl": "10s"
-                },
-                "subgraphs": {
-                    "user": {
-                        "invalidation": {
-                            "enabled": true,
-                            "shared_key": "test"
-                        }
-                    }
-                }
-            }))
-            .unwrap(),
-        );
-        assert!(
-            !response_cache.web_endpoints().is_empty(),
-            "Enable invalidation only for a specific subgraph should enable invalidation endpoint"
-        );
-        // Enable invalidation but disable the subgraph itself should not enable invalidation endpoint
-        response_cache.subgraphs = Arc::new(
-            serde_json_bytes::from_value(serde_json_bytes::json!({
-                "all": {
-                    "enabled": true,
-                    "ttl": "10s"
-                },
-                "subgraphs": {
-                    "user": {
-                        "enabled": false,
-                        "invalidation": {
-                            "enabled": true,
-                            "shared_key": "test"
-                        }
-                    }
-                }
-            }))
-            .unwrap(),
-        );
-        assert!(
-            response_cache.web_endpoints().is_empty(),
-            "Enable invalidation but disable the subgraph itself should not enable invalidation endpoint"
-        );
-        // Enable the subgraph but enable the subgraph invalidation should not enable invalidation endpoint
-        response_cache.subgraphs = Arc::new(
-            serde_json_bytes::from_value(serde_json_bytes::json!({
-                "all": {
-                    "enabled": true,
-                    "ttl": "10s"
-                },
-                "subgraphs": {
-                    "user": {
-                        "enabled": true,
-                        "invalidation": {
-                            "enabled": false,
-                            "shared_key": "test"
-                        }
-                    }
-                }
-            }))
-            .unwrap(),
-        );
-        assert!(
-            response_cache.web_endpoints().is_empty(),
-            "Enable the subgraph but enable the subgraph invalidation should not enable invalidation endpoint"
-        );
-        // Disable caching globally but enable it for specific subgraph and also for invalidation should enable invalidation endpoint
-        response_cache.subgraphs = Arc::new(
-            serde_json_bytes::from_value(serde_json_bytes::json!({
-                "all": {
-                    "enabled": false,
-                    "ttl": "10s"
-                },
-                "subgraphs": {
-                    "user": {
-                        "enabled": true,
-                        "invalidation": {
-                            "enabled": true,
-                            "shared_key": "test"
-                        }
-                    }
-                }
-            }))
-            .unwrap(),
-        );
-        assert!(
-            !response_cache.web_endpoints().is_empty(),
-            "Disable caching globally but enable it for specific subgraph and also for invalidation should enable invalidation endpoint"
-        );
-        // Disable invalidation globally but enable it for specific subgraph should enable invalidation endpoint
-        response_cache.subgraphs = Arc::new(
-            serde_json_bytes::from_value(serde_json_bytes::json!({
-                "all": {
-                    "enabled": false,
-                    "ttl": "10s",
-                    "invalidation": {
-                        "enabled": false,
-                        "shared_key": "test"
-                    }
-                },
-                "subgraphs": {
-                    "user": {
-                        "enabled": true,
-                        "invalidation": {
-                            "enabled": true,
-                            "shared_key": "test"
-                        }
-                    }
-                }
-            }))
-            .unwrap(),
-        );
-        assert!(
-            !response_cache.web_endpoints().is_empty(),
-            "Disable invalidation globally but enable it for specific subgraph should enable invalidation endpoint"
-        );
-        // Enable invalidation globally but disable specific subgraph configuration should enable invalidation endpoint
-        response_cache.subgraphs = Arc::new(
-            serde_json_bytes::from_value(serde_json_bytes::json!({
-                "all": {
-                    "enabled": false,
-                    "ttl": "10s",
-                    "invalidation": {
-                        "enabled": true,
-                        "shared_key": "test"
-                    }
-                }
-            }))
-            .unwrap(),
-        );
-        assert!(
-            !response_cache.web_endpoints().is_empty(),
-            "Enable invalidation globally but disable specific subgraph configuration should enable invalidation endpoint"
-        );
-
-        // Enable invalidation globally without any specific subgraph configuration should enable invalidation endpoint
-        response_cache.subgraphs = Arc::new(
-            serde_json_bytes::from_value(serde_json_bytes::json!({
-                "all": {
-                    "enabled": false,
-                    "ttl": "10s",
-                    "invalidation": {
-                        "enabled": true,
-                        "shared_key": "test"
-                    }
-                }
-            }))
-            .unwrap(),
-        );
-        assert!(
-            !response_cache.web_endpoints().is_empty(),
-            "Enable invalidation globally without any specific subgraph configuration should enable invalidation endpoint"
-        );
-
-        // Enable invalidation globally with one specific subgraph configuration with invalidation disabled should enable invalidation endpoint
-        response_cache.subgraphs = Arc::new(
-            serde_json_bytes::from_value(serde_json_bytes::json!({
-                "all": {
-                    "enabled": false,
-                    "ttl": "10s",
-                    "invalidation": {
-                        "enabled": true,
-                        "shared_key": "test"
-                    }
-                },
-                "subgraphs": {
-                    "user": {
-                        "enabled": true,
-                        "invalidation": {
-                            "enabled": false,
-                            "shared_key": "test"
-                        }
-                    }
-                }
-            }))
-            .unwrap(),
-        );
-        assert!(
-            !response_cache.web_endpoints().is_empty(),
-            "Enable invalidation globally with one specific subgraph configuration with invalidation disabled should enable invalidation endpoint"
-        );
 
         // Disable invalidation globally with one specific subgraph configuration with invalidation disabled and another one enabled should enable invalidation endpoint
         response_cache.subgraphs = Arc::new(
