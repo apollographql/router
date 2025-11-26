@@ -178,7 +178,7 @@ impl ValidationTraversal {
                         if line.is_empty() {
                             message_parts.push(String::new());
                         } else {
-                            message_parts.push(format!("  {}", line));
+                            message_parts.push(format!("  {line}"));
                         }
                     }
                 }
