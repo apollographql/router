@@ -94,8 +94,7 @@ With an offline license, a router can either be fully disconnected from GraphOS 
 
 <Note>
 
-A router using an offline license requires [the use of local manifests](/graphos/routing/security/persisted-queries#local_manifests) when using [safelisting with persisted queries](/graphos/routing/security/persisted-queries), without local manifests, the Router cannot retrieve persisted query metadata from Uplink, and safelisting will not work as intended in disconnected environments.  
-Also, when operating offline, local manifests are the supported way to supply Persisted Query Lists and must be delivered through your own **CI/CD or deployment process**.
+A router using an offline license relies on [local manifests](/graphos/routing/security/persisted-queries#local_manifests) for [safelisting persisted queries](/graphos/routing/security/persisted-queries) as they provide the metadata needed for safelisting to work in disconnected environments, also these manifests also need to be distributed through your own CI/CD or deployment process since they’re the supported way to supply Persisted Query Lists offline.
 
 </Note>
 
