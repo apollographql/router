@@ -2842,22 +2842,6 @@ mod tests {
         assert!(response_cache.web_endpoints().is_empty());
     }
 
-    // #[rstest::rstest]
-    // #[case(....)]
-    // async fn test_invalidation_endpoint_disabled(/*params*/) {
-    //     let config = json!({ /* build using params */);
-    //     assert!(!invalidation_endpoint_enabled(config));
-    // }
-
-    // // Complicated cases which don't map to rstest
-    // async fn test_invalidation_endpoint_enablement(/*params*/) {
-    //     let config = json!({ /* build using params */);
-    //     assert!(invalidation_endpoint_enabled(config));
-
-    //     let config = json!({ /* build using params */);
-    //     assert!(invalidation_endpoint_enabled(config));
-    // }
-
     #[tokio::test]
     async fn test_invalidation_endpoint_enabled_multiple_subgraphs() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
