@@ -4,6 +4,7 @@ mod error;
 mod gateway;
 mod key;
 mod metrics;
+mod pool;
 mod value;
 
 pub(crate) use error::Error;

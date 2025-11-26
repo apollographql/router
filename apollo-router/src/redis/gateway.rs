@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -16,7 +15,6 @@ use fred::prelude::ClientLike;
 use fred::prelude::HeartbeatInterface;
 use fred::prelude::KeysInterface;
 use fred::prelude::Options;
-use fred::prelude::Pool as RedisPool;
 use fred::prelude::TcpConfig;
 use fred::types::Builder;
 use fred::types::Expiration;
@@ -32,7 +30,6 @@ use futures::Stream;
 use futures::TryStreamExt;
 use futures::future::join_all;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::task::AbortHandle;
 use tower::BoxError;
 use url::Url;
 
@@ -42,6 +39,7 @@ use super::ValueType;
 use super::error::record as record_redis_error;
 use super::key::Key;
 use super::metrics::RedisMetricsCollector;
+use super::pool::DropSafeRedisPool;
 use super::value::Value;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
@@ -61,47 +59,6 @@ const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
 const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(5);
 /// Interval on which we send PING commands to the Redis servers.
 const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
-
-/// `DropSafeRedisPool` is a wrapper for `fred::prelude::RedisPool` which closes the pool's Redis
-/// connections when it is dropped.
-//
-// Dev notes:
-// * the inner `RedisPool` must be wrapped in an `Arc` because closing the connections happens
-//   in a spawned async task.
-// * why not just implement this within `Drop` for `RedisCacheStorage`? Because `RedisCacheStorage`
-//   is cloned frequently throughout the router, and we don't want to close the connections
-//   when each clone is dropped, only when the last instance is dropped.
-struct DropSafeRedisPool {
-    pool: Arc<RedisPool>,
-    caller: &'static str,
-    heartbeat_abort_handle: AbortHandle,
-    // Metrics collector handles its own abort and gauges
-    _metrics_collector: RedisMetricsCollector,
-}
-
-impl Deref for DropSafeRedisPool {
-    type Target = RedisPool;
-
-    fn deref(&self) -> &Self::Target {
-        &self.pool
-    }
-}
-
-impl Drop for DropSafeRedisPool {
-    fn drop(&mut self) {
-        let inner = self.pool.clone();
-        let caller = self.caller;
-        tokio::spawn(async move {
-            let result = inner.quit().await.map_err(Into::into);
-            if let Err(err) = result {
-                tracing::warn!("Caught error while closing unused Redis connections: {err:?}");
-                record_redis_error(&err, caller);
-            }
-        });
-        self.heartbeat_abort_handle.abort();
-        // Metrics collector will be dropped automatically and its Drop impl will abort the task
-    }
-}
 
 #[derive(Clone)]
 pub(crate) struct Gateway {
@@ -226,7 +183,7 @@ impl Gateway {
                     let _ = client_config
                         .server
                         .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint)
-                        .map_err(Into::into)
+                        .map_err(Error::from)
                         .inspect_err(|err| record_redis_error(err, caller));
                 }
             })
@@ -265,12 +222,12 @@ impl Gateway {
                 loop {
                     match error_rx.recv().await {
                         Ok((error, Some(server))) => {
-                            let error = error.into();
+                            let error: Error = error.into();
                             tracing::error!("Redis client ({server:?}) error: {error:?}",);
                             record_redis_error(&error, caller);
                         }
                         Ok((error, None)) => {
-                            let error = error.into();
+                            let error: Error = error.into();
                             tracing::error!("Redis client error: {error:?}",);
                             record_redis_error(&error, caller);
                         }
@@ -486,18 +443,18 @@ impl Gateway {
                 let _: () = pipeline
                     .get(&key)
                     .await
-                    .map_err(Into::into)
+                    .map_err(Error::from)
                     .inspect_err(|e| self.record_error(e))?;
                 let _: () = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
                     .await
-                    .map_err(Into::into)
+                    .map_err(Error::from)
                     .inspect_err(|e| self.record_error(e))?;
 
                 let (value, _timeout_set): (Option<Value<V>>, bool) = pipeline
                     .all()
                     .await
-                    .map_err(Into::into)
+                    .map_err(Error::from)
                     .inspect_err(|e| self.record_error(e))?;
                 Ok(value.map(|v| v.0))
             }
@@ -506,7 +463,7 @@ impl Gateway {
                 let value: Option<Value<V>> = client
                     .get(key)
                     .await
-                    .map_err(Into::into)
+                    .map_err(Error::from)
                     .inspect_err(|e| self.record_error(e))?;
                 Ok(value.map(|v| v.0))
             }
@@ -539,7 +496,7 @@ impl Gateway {
             let res: Option<Value<V>> = client
                 .get(key)
                 .await
-                .map_err(Into::into)
+                .map_err(Error::from)
                 .inspect_err(|e| self.record_error(e))
                 .ok();
             vec![res.map(|v| v.0)]
@@ -563,7 +520,7 @@ impl Gateway {
                 let client = client.clone();
                 tasks.push(async move {
                     let result: Result<Vec<Option<Value<V>>>, _> =
-                        client.mget(keys).await.map_err(Into::into);
+                        client.mget(keys).await.map_err(Error::from);
                     (indexes, result)
                 });
             }
@@ -594,7 +551,7 @@ impl Gateway {
             let values: Vec<Option<Value<V>>> = client
                 .mget(keys)
                 .await
-                .map_err(Into::into)
+                .map_err(Error::from)
                 .inspect_err(|e| self.record_error(e))
                 .unwrap_or_else(|_| vec![None; len]);
             values.into_iter().map(|value| value.map(|v| v.0)).collect()
@@ -621,7 +578,7 @@ impl Gateway {
                 false,
             )
             .await
-            .map_err(Into::into);
+            .map_err(Error::from);
         tracing::trace!("insert result {:?}", result);
 
         if let Err(err) = result {
@@ -653,7 +610,7 @@ impl Gateway {
                 .await;
         }
 
-        let result: Result<Vec<()>, _> = pipeline.all().await.map_err(Into::into);
+        let result: Result<Vec<()>, _> = pipeline.all().await.map_err(Error::from);
         match result {
             Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
             Err(err) => {
@@ -719,10 +676,14 @@ impl Gateway {
             Box::pin(
                 self.client()
                     .scan_cluster(pattern, count, None)
-                    .map_err(Into::into),
+                    .map_err(Error::from),
             )
         } else {
-            Box::pin(self.client().scan(pattern, count, None).map_err(Into::into))
+            Box::pin(
+                self.client()
+                    .scan(pattern, count, None)
+                    .map_err(Error::from),
+            )
         }
     }
 }
