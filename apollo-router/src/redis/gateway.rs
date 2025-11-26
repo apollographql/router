@@ -104,7 +104,7 @@ impl Drop for DropSafeRedisPool {
 }
 
 #[derive(Clone)]
-pub(crate) struct RedisCacheStorage {
+pub(crate) struct Gateway {
     inner: Arc<DropSafeRedisPool>,
     namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
@@ -112,7 +112,7 @@ pub(crate) struct RedisCacheStorage {
     reset_ttl: bool,
 }
 
-impl RedisCacheStorage {
+impl Gateway {
     pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)
             .inspect_err(|err| record_redis_error(err, caller))?;
@@ -731,7 +731,7 @@ impl RedisCacheStorage {
     test,
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
-impl RedisCacheStorage {
+impl Gateway {
     pub(crate) async fn truncate_namespace(&self) -> Result<(), Error> {
         use fred::prelude::Key;
         use futures::StreamExt;
