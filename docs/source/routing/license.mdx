@@ -128,10 +128,9 @@ Follow these steps to configure an GraphOS Router to use an offline license:
     * [`--s/-supergraph`](/graphos/reference/router/configuration#-s----supergraph) CLI option, with an argument containing an absolute or relative path to supergraph schema file
 
     <Note>
-    Remember to always distribute updated supergraph schema files through your own **CI/CD or deployment pipeline**.  
-    Failing to propagate schema changes manually can lead to schema drift, unexpected errors, or outages.
+    Keep your local supergraph schema files using your CI/CD pipelines. Failing to propagate schema changes manually can lead to schema drift, unexpected errors, or outages.
     </Note>
-
+    
     * [`APOLLO_SUPERGRAPH_PATH`](/graphos/reference/router/configuration#-s----supergraph) environment variable, containing an absolute or relative path to supergraph schema file
     * [`APOLLO_SUPERGRAPH_URLS`](/graphos/reference/router/configuration#-s----supergraph) environment variable, containing URLs to supergraph schemas
 
