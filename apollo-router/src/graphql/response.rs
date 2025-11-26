@@ -14,6 +14,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::redis;
 
 #[derive(thiserror::Error, Display, Debug, Eq, PartialEq)]
 #[error("GraphQL response was malformed: {reason}")]
@@ -253,6 +254,8 @@ impl From<ExecutionResponse> for Response {
         }
     }
 }
+
+impl redis::ValueType for Response {}
 
 #[cfg(test)]
 mod tests {

@@ -73,5 +73,4 @@ fn get_type_of<T>(_: &T) -> &'static str {
 }
 
 impl ValueType for String {}
-impl ValueType for crate::graphql::Response {}
 impl ValueType for usize {}
