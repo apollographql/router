@@ -1940,56 +1940,108 @@ fn get_invalidation_entity_keys_from_schema(
     typename: &str,
     representations: &serde_json_bytes::Map<ByteString, Value>,
 ) -> Result<HashSet<String>, anyhow::Error> {
-    let field_def =
-        supergraph_schema
-            .get_object(typename)
-            .ok_or_else(|| FetchError::MalformedRequest {
-                reason: "can't find corresponding type for __typename {typename:?}".to_string(),
+    // `filter_dir`: Check if the `@join_directive` directives are for the current subgraph's cacheTags
+    let filter_dir = |dir: &apollo_compiler::ast::Directive| {
+        let Ok(name) = dir.argument_by_name("name", supergraph_schema) else {
+            return false;
+        };
+        let Some(name) = name.as_str() else {
+            return false;
+        };
+        if *name != *CACHE_TAG_DIRECTIVE_NAME {
+            return false;
+        }
+        dir.argument_by_name("graphs", supergraph_schema)
+            .ok()
+            .and_then(|f| {
+                Some(
+                    f.as_list()?
+                        .iter()
+                        .filter_map(|graph| graph.as_enum())
+                        .any(|g| {
+                            subgraph_enums.get(g.as_str()).map(|s| s.as_str())
+                                == Some(subgraph_name)
+                        }),
+                )
+            })
+            .unwrap_or_default()
+    };
+    // supports both Object types and Interface types (for interface objects with isInterfaceObject: true)
+    let all_directives: Vec<_> = match supergraph_schema.get_interface(typename) {
+        // Jumping from an interface object
+        Some(iface_type) => {
+            // In this case, we can only support jumping from an interface object to another
+            // interface object.
+            // Note: `@cacheTag` can be different across implementation types. If the target entity
+            //       type is a interface type (not interface-object), we don't collect the
+            //       directives from its implementation types. Because the actual object type (and
+            //       thus cache key) can't be determined based only on interface type name. This
+            //       may result in cache misses, but it's inherent limitation of interface objects.
+            iface_type
+                .directives
+                .get_all("join__directive")
+                .filter(|dir| filter_dir(dir))
+                .cloned()
+                .collect()
+        }
+        // Jumping from a non-interface object
+        None => {
+            let obj_type = supergraph_schema.get_object(typename).ok_or_else(|| {
+                FetchError::MalformedRequest {
+                    reason: format!("can't find corresponding type for __typename {typename:?}"),
+                }
             })?;
-    let cache_keys = field_def
-        .directives
-        .get_all("join__directive")
-        .filter_map(|dir| {
-            let name = dir.argument_by_name("name", supergraph_schema).ok()?;
-            if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
-                return None;
-            }
-            let is_current_subgraph = dir
-                .argument_by_name("graphs", supergraph_schema)
-                .ok()
-                .and_then(|f| {
-                    Some(
-                        f.as_list()?
-                            .iter()
-                            .filter_map(|graph| graph.as_enum())
-                            .any(|g| {
-                                subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-                                    == Some(subgraph_name)
-                            }),
-                    )
-                })
-                .unwrap_or_default();
-            if !is_current_subgraph {
-                return None;
-            }
-            dir.argument_by_name("args", supergraph_schema)
-                .ok()?
-                .as_object()?
+
+            // Target subgraph may implement an interface object. Handle both interface object case
+            // and normal interface/implementations case by chaining the object type's directives
+            // and those of its implementing interface types.
+            // Note: We also need to look up the interface types because `@cacheTag` directives
+            //       applied on interface object type is not propagated to implementation types.
+            // Note: We don't really support multiple interface objects overlapping each other.
+            //       There are multiple issues preventing that from working. Thus, we don't expect
+            //       an object type to implement multiple interface types with `@cacheTag` on them
+            //       within the same subgraph. So, we will have at most one `@cacheTag` from
+            //       interfaces.
+            let obj_directives: Vec<_> = obj_type
+                .directives
+                .get_all("join__directive")
+                .filter(|dir| filter_dir(dir))
+                .cloned()
+                .collect();
+            let iface_directives: Vec<_> = obj_type
+                .implements_interfaces
                 .iter()
-                .find_map(|(field_name, value)| {
-                    if field_name.as_str() == "format" {
-                        value.as_str()?.parse::<StringTemplate>().ok()
-                    } else {
-                        None
-                    }
+                .flat_map(|iface_name| {
+                    supergraph_schema
+                        .get_interface(iface_name)
+                        .iter()
+                        .flat_map(|iface| iface.directives.get_all("join__directive").cloned())
+                        .collect::<Vec<_>>()
                 })
-        });
+                .filter(|dir| filter_dir(dir))
+                .collect();
+            obj_directives.into_iter().chain(iface_directives).collect()
+        }
+    };
+    let cache_keys = all_directives.into_iter().filter_map(|dir| {
+        dir.argument_by_name("args", supergraph_schema)
+            .ok()?
+            .as_object()?
+            .iter()
+            .find_map(|(field_name, value)| {
+                if field_name.as_str() == "format" {
+                    value.as_str()?.parse::<StringTemplate>().ok()
+                } else {
+                    None
+                }
+            })
+    });
     let mut vars = IndexMap::default();
     // It's safe to use representations variables (not only entity keys) because at the composition level we already checked if it was only using entity keys
     vars.insert("$key".to_string(), Value::Object(representations.clone()));
     let invalidation_cache_keys = cache_keys
         .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
-        .collect::<Result<HashSet<String>, apollo_federation::connectors::StringTemplateError>>()?;
+        .collect::<Result<_, _>>()?;
     Ok(invalidation_cache_keys)
 }
 
@@ -2580,6 +2632,7 @@ mod tests {
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::plugins::response_cache::plugin::ResponseCache;
     use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
+    use crate::plugins::response_cache::plugin::get_invalidation_entity_keys_from_schema;
     use crate::plugins::response_cache::plugin::get_invalidation_root_keys_from_schema;
     use crate::plugins::response_cache::plugin::matches_selection_set;
     use crate::plugins::response_cache::storage::redis::Config;
@@ -3198,6 +3251,243 @@ mod tests {
             ]
             .into_iter()
             .collect()
+        );
+    }
+
+    // makes sure interface objects (eg, `interface Item` below) are able to be used for
+    // invalidation entity keys
+    // Case #1: Jumping into an interface object from a non-interface object subgraph as an object
+    // type.
+    #[test]
+    fn test_interface_object_typename_lookup_inbound() {
+        let schema_text = r#"
+                 directive @join__type(graph: join__Graph!, key: join__FieldSet, isInterfaceObject: Boolean! = false) repeatable on
+     OBJECT | INTERFACE
+                 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+                 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+                 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+                 scalar join__FieldSet
+                 scalar join__DirectiveArguments
+
+                 enum join__Graph {
+                  SEARCH @join__graph(name: "search", url: "http://search")
+                  INVENTORY @join__graph(name: "inventory", url: "http://inventory")
+                }
+
+                type Query { dummy: String }
+
+                interface Item
+                    @join__type(graph: SEARCH, key: "id")
+                    @join__type(graph: INVENTORY, key: "id", isInterfaceObject: true)
+                    @join__directive(graphs: [INVENTORY], name: "federation__cacheTag", args: {format: "Item-{$key.id}"})
+                {
+                    id: ID!
+                }
+
+                type Book implements Item
+                    @join__implements(graph: SEARCH, interface: "Item")
+                    @join__type(graph: SEARCH, key: "id")
+                {
+                    id: ID!
+                    isbn: String!
+                }
+              "#;
+
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let subgraph_enums = HashMap::from([
+            ("SEARCH".into(), "search".into()),
+            ("INVENTORY".into(), "inventory".into()),
+        ]);
+        // Jumping from "search" to "inventory" via the object type "Book"
+        let representation = serde_json_bytes::json!({"__typename": "Book", "id": "123"})
+            .as_object()
+            .unwrap()
+            .clone();
+
+        let result = get_invalidation_entity_keys_from_schema(
+            &schema,
+            "inventory",
+            &subgraph_enums,
+            "Book",
+            &representation,
+        )
+        .expect("should handle interface object typename");
+        assert_eq!(result.into_iter().collect::<Vec<_>>(), [r#"Item-123"#]);
+    }
+
+    #[test]
+    fn test_interface_object_typename_lookup_outbound() {
+        let schema_text = r#"
+                 directive @join__type(graph: join__Graph!, key: join__FieldSet, isInterfaceObject: Boolean! = false) repeatable on
+     OBJECT | INTERFACE
+                 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+                 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+                 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+                 scalar join__FieldSet
+                 scalar join__DirectiveArguments
+
+                 enum join__Graph {
+                  SEARCH @join__graph(name: "search", url: "http://search")
+                  INVENTORY @join__graph(name: "inventory", url: "http://inventory")
+                }
+
+                type Query { dummy: String }
+
+                interface Item
+                    @join__type(graph: SEARCH, key: "id")
+                    @join__type(graph: INVENTORY, key: "id", isInterfaceObject: true)
+                {
+                    id: ID!
+                }
+
+                type Book implements Item
+                    @join__implements(graph: SEARCH, interface: "Item")
+                    @join__type(graph: SEARCH, key: "id")
+                    @join__directive(graphs: [SEARCH], name: "federation__cacheTag", args: {format: "Book-{$key.id}"})
+                {
+                    id: ID!
+                    isbn: String!
+                }
+              "#;
+
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let subgraph_enums = HashMap::from([
+            ("SEARCH".into(), "search".into()),
+            ("INVENTORY".into(), "inventory".into()),
+        ]);
+        // Jumping from "search" to "inventory" via the interface object "Item"
+        let representation = serde_json_bytes::json!({"__typename": "Item", "id": "123"})
+            .as_object()
+            .unwrap()
+            .clone();
+
+        let result = get_invalidation_entity_keys_from_schema(
+            &schema,
+            "inventory",
+            &subgraph_enums,
+            "Item",
+            &representation,
+        )
+        .expect("should handle interface object typename");
+        // Currently, nothing matches.
+        assert_eq!(result.len(), 0);
+    }
+
+    // makes sure interface objects (eg, `interface Item` below) are able to be used for
+    // invalidation entity keys
+    // Case #1: Jumping into an interface object from a non-interface object subgraph as an object
+    // type.
+    #[test]
+    fn test_interface_object_typename_into_interface_object() {
+        let schema_text = r#"
+                 directive @join__type(graph: join__Graph!, key: join__FieldSet, isInterfaceObject: Boolean! = false) repeatable on
+     OBJECT | INTERFACE
+                 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+                 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+                 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+                 scalar join__FieldSet
+                 scalar join__DirectiveArguments
+
+                 enum join__Graph {
+                  SEARCH @join__graph(name: "search", url: "http://search")
+                  INVENTORY @join__graph(name: "inventory", url: "http://inventory")
+                  IRRELEVANT @join__graph(name: "irrelevant", url: "http://irrelevant")
+                }
+
+                type Query { dummy: String }
+
+                interface Item
+                    @join__type(graph: SEARCH, key: "id", isInterfaceObject: true)
+                    @join__type(graph: INVENTORY, key: "id", isInterfaceObject: true)
+                    @join__type(graph: IRRELEVANT, key: "id")
+                    @join__directive(graphs: [INVENTORY], name: "federation__cacheTag", args: {format: "Item-{$key.id}"})
+                {
+                    id: ID!
+                }
+
+                type Book implements Item
+                    @join__implements(graph: IRRELEVANT, interface: "Item")
+                    @join__type(graph: IRRELEVANT, key: "id")
+                {
+                    id: ID!
+                    isbn: String!
+                }
+              "#;
+
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let subgraph_enums = HashMap::from([
+            ("INVENTORY".into(), "inventory".into()),
+            ("SEARCH".into(), "search".into()),
+            ("IRRELEVANT".into(), "irrelevant".into()),
+        ]);
+        // Jumping from "search" to "inventory" via the interface object "Item"
+        let representation = serde_json_bytes::json!({"__typename": "Item", "id": "123"})
+            .as_object()
+            .unwrap()
+            .clone();
+
+        let result = get_invalidation_entity_keys_from_schema(
+            &schema,
+            "inventory",
+            &subgraph_enums,
+            "Item",
+            &representation,
+        )
+        .expect("should handle interface object typename");
+        assert_eq!(result.into_iter().collect::<Vec<_>>(), [r#"Item-123"#]);
+    }
+
+    // makes sure that when an interface isn't usable for entity resolution (ie, `isInterfaceObject:
+    // false`) the typename is the concrete type and is findable via the object type
+    #[test]
+    fn test_concrete_type_when_interface_object_is_false() {
+        // NB: isInterfaceObject defaults to false
+        let schema_text = r#"
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+            scalar join__FieldSet
+
+            enum join__Graph {
+              PRODUCTS @join__graph(name: "products", url: "http://products")
+            }
+
+            type Query { dummy: String }
+
+            # Regular interface (not an interface object)
+            interface Item {
+              id: ID!
+            }
+
+            # Concrete type that implements the interface
+            type Product implements Item @join__type(graph: PRODUCTS, key: "id") {
+              id: ID!
+              name: String
+            }
+        "#;
+
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let subgraph_enums = HashMap::from([("PRODUCTS".into(), "products".into())]);
+
+        // when isInterfaceObject: false, typename in _entities is the concrete type "Product"
+        let representation = serde_json_bytes::json!({
+            "__typename": "Product",  // NB: concrete type, not "Item"
+            "id": "123"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let result = get_invalidation_entity_keys_from_schema(
+            &schema,
+            "products",
+            &subgraph_enums,
+            "Product", // concrete object typename (ie, normal case)
+            &representation,
+        );
+
+        assert!(
+            result.is_ok(),
+            "should handle concrete type (isInterfaceObject: false)"
         );
     }
 }
