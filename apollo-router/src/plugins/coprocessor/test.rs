@@ -4081,10 +4081,11 @@ mod tests {
 
     #[test]
     fn test_update_context_from_coprocessor_preserves_keys_not_sent() {
-        use crate::Context;
-        use crate::plugins::coprocessor::update_context_from_coprocessor;
         use std::collections::HashSet;
         use std::sync::Arc;
+
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
 
         // Create a context with some keys
         let target_context = Context::new();
