@@ -104,6 +104,24 @@
       "groupSlug": "cargo-tracing-packages",
       "dependencyDashboardApproval": true
     },
+    // AWS Smithy crates (aws-smithy-*) must be coordinated carefully with
+    // our tokio version constraint — newer smithy releases require tokio >=1.40
+    // which breaks opentelemetry-jaeger 0.19.0 (runtime panic on blocking fd).
+    // Group these with AWS SDK updates to ensure compatible version resolution.
+    {
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackagePatterns": [
+        "^aws-smithy-",
+        "^aws-sdk-",
+        "^aws-config$",
+        "^aws-types$",
+      ],
+      "groupName": "cargo AWS SDK and Smithy packages",
+      "groupSlug": "cargo-aws-sdk-smithy",
+      "dependencyDashboardApproval": true
+    },
     // Our own `apollo-` packages deserve to get front-and-center treatment.
     // We'll put them in their own PR to facilitate workflows that surface
     // their changes earlier, and get us dog-fooding them quicker.

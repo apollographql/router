@@ -32,7 +32,7 @@ impl Recording {
         let mut digest = Sha256::new();
         let req = serde_json::to_string(&self.client_request).expect("can serialize");
         digest.update(req);
-        let hash = hex::encode(digest.finalize().as_slice());
+        let hash = hex::encode(digest.finalize());
 
         PathBuf::from(format!("{}-{}.json", operation_name, hash))
     }

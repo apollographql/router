@@ -5,8 +5,12 @@ edition = "2021"
 
 [dependencies]
 axum = "0.7.0"
-async-graphql = "7.0.0"
-async-graphql-axum = "7.0.0"
+async-graphql = "=7.0.10" # Pinned: avoid Rust 1.86+ requirement
+async-graphql-axum = "=7.0.10" # Pinned: avoid Rust 1.86+ requirement
+# Pin transitive dependencies to match async-graphql 7.0.10
+async-graphql-derive = "=7.0.10"
+async-graphql-parser = "=7.0.10"
+async-graphql-value = "=7.0.10"
 env_logger = "0.11"
 tokio = { version = "1.22.0", features = ["time", "full"] }
 tower = "0.4.0"
