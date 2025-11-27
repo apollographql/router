@@ -556,7 +556,12 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 200);
 
-    let router_response_context = rx.recv().await.unwrap();
+    let router_response_context =
+        tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timeout waiting for router response context")
+            .expect("router response context was not received");
+
     // Verify that RouterResponse does NOT have "myValue" (it was deleted in SubgraphResponse)
     assert!(
         !router_response_context
