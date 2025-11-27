@@ -6,10 +6,10 @@ kind: ServiceAccount
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-2.9.0-rc.4
+    helm.sh/chart: router-2.9.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v2.9.0-rc.4"
+    app.kubernetes.io/version: "v2.9.0"
     app.kubernetes.io/managed-by: Helm
 ---
 # Source: router/templates/secret.yaml
@@ -18,10 +18,10 @@ kind: Secret
 metadata:
   name: "release-name-router"
   labels:
-    helm.sh/chart: router-2.9.0-rc.4
+    helm.sh/chart: router-2.9.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v2.9.0-rc.4"
+    app.kubernetes.io/version: "v2.9.0"
     app.kubernetes.io/managed-by: Helm
 data:
   managedFederationApiKey: "UkVEQUNURUQ="
@@ -32,10 +32,10 @@ kind: ConfigMap
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-2.9.0-rc.4
+    helm.sh/chart: router-2.9.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v2.9.0-rc.4"
+    app.kubernetes.io/version: "v2.9.0"
     app.kubernetes.io/managed-by: Helm
 data:
   configuration.yaml: |
@@ -55,10 +55,10 @@ kind: Service
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-2.9.0-rc.4
+    helm.sh/chart: router-2.9.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v2.9.0-rc.4"
+    app.kubernetes.io/version: "v2.9.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   type: ClusterIP
@@ -81,10 +81,10 @@ kind: Deployment
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-2.9.0-rc.4
+    helm.sh/chart: router-2.9.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v2.9.0-rc.4"
+    app.kubernetes.io/version: "v2.9.0"
     app.kubernetes.io/managed-by: Helm
   annotations:
   
@@ -103,10 +103,10 @@ spec:
       annotations:
         kubectl.kubernetes.io/default-container: router
       labels:
-        helm.sh/chart: router-2.9.0-rc.4
+        helm.sh/chart: router-2.9.0
         app.kubernetes.io/name: router
         app.kubernetes.io/instance: release-name
-        app.kubernetes.io/version: "v2.9.0-rc.4"
+        app.kubernetes.io/version: "v2.9.0"
         app.kubernetes.io/managed-by: Helm
     spec:
       serviceAccountName: release-name-router
@@ -117,7 +117,7 @@ spec:
         - name: router
           securityContext:
             {}
-          image: "ghcr.io/apollographql/router:v2.9.0-rc.4"
+          image: "ghcr.io/apollographql/router:v2.9.0"
           imagePullPolicy: IfNotPresent
           args:
             - --hot-reload
@@ -171,10 +171,10 @@ kind: Pod
 metadata:
   name: "release-name-router-test-connection"
   labels:
-    helm.sh/chart: router-2.9.0-rc.4
+    helm.sh/chart: router-2.9.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v2.9.0-rc.4"
+    app.kubernetes.io/version: "v2.9.0"
     app.kubernetes.io/managed-by: Helm
   annotations:
     "helm.sh/hook": test
