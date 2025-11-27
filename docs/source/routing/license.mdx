@@ -92,14 +92,6 @@ An offline license can be retrieved from GraphOS with the [`rover license fetch`
 
 With an offline license, a router can either be fully disconnected from GraphOS or configured to connect to GraphOS on a best-effort basis so that it can send graph usage metrics. Apollo recommends configuring your router to report graph usage metrics to GraphOS whenever possible. Since your router sends metrics in a best-effort fashion, it incurs no performance or uptime penalties while enabling several powerful GraphOS features, such as operation checks, field insights, operation traces, and contracts.
 
-<Note>
-
-A router using an offline license relies on [local manifests](/graphos/routing/security/persisted-queries#local_manifests) for [safelisting persisted queries](/graphos/routing/security/persisted-queries) as they provide the metadata needed for safelisting to work in disconnected environments, also these manifests also need to be distributed through your own CI/CD or deployment process since they’re the supported way to supply Persisted Query Lists offline.
-
-</Note>
-
-An offline license is valid for the lesser of the duration of your contract with Apollo, or one year, with an added grace period of 28 days. You are responsible for keeping your offline license files up to date within your infrastructure by rerunning `rover license fetch` to fetch updated license files.
-
 ### Set up offline license for the GraphOS Router
 
 Follow these steps to configure an GraphOS Router to use an offline license:
@@ -167,6 +159,8 @@ If you prefer not to reconnect to Uplink and do not plan to renew the offline li
 To turn off an GraphOS feature, remove all of its associated configuration keys from your router's [YAML config file](/graphos/reference/router/configuration#yaml-config-file).
 
 ## Grace period for expired plans
+
+An offline license is valid for the lesser of the duration of your contract with Apollo, or one year, with an added grace period of 28 days. Keep your offline license files up to date by [renewing your license](#renew-an-offline-license).
 
 If your organization terminates its GraphOS subscription, your router's license is considered expired at the end of your final paid subscription period. GraphOS provides a grace period for expired licenses so that you can turn off GraphOS features before they produce breaking errors in your router.
 
