@@ -1,0 +1,7 @@
+supergraph:
+  listen: 127.0.0.1:0
+
+limits:
+  http1_max_request_headers: 100
+  http1_max_request_buf_size: "16000"
+  http2_max_headers_list_bytes: "20Mib"
