@@ -428,14 +428,36 @@ impl PluginPrivate for ResponseCache {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut map = MultiMap::new();
+        // At least 1 subgraph enabled caching
+        let any_caching_enabled = self
+            .subgraphs
+            .subgraphs
+            .iter()
+            .any(|(subgraph_name, _cfg)| self.subgraph_enabled(subgraph_name))
+            || self.subgraphs.all.enabled.unwrap_or_default();
+
+        let global_invalidation_enabled = self
+            .subgraphs
+            .all
+            .invalidation
+            .as_ref()
+            .map(|i| i.enabled)
+            .unwrap_or_default();
+
+        // If at least one subgraph is enabled and has invalidation enabled
+        let any_subgraph_invalidation_enabled =
+            self.subgraphs.subgraphs.iter().any(|(subgraph_name, cfg)| {
+                self.subgraph_enabled(subgraph_name)
+                    && cfg
+                        .invalidation
+                        .as_ref()
+                        .map(|i| i.enabled)
+                        .unwrap_or_default()
+            });
+
         if self.enabled
-            && self
-                .subgraphs
-                .all
-                .invalidation
-                .as_ref()
-                .map(|i| i.enabled)
-                .unwrap_or_default()
+            && any_caching_enabled
+            && (global_invalidation_enabled || any_subgraph_invalidation_enabled)
         {
             match &self.endpoint_config {
                 Some(endpoint_config) => {
@@ -2626,10 +2648,12 @@ mod tests {
     use apollo_compiler::parser::Parser;
     use serde_json_bytes::json;
     use tokio::sync::broadcast;
+    use uuid::Uuid;
 
     use super::Subgraph;
     use super::Ttl;
     use crate::configuration::subgraph::SubgraphConfiguration;
+    use crate::plugin::PluginPrivate;
     use crate::plugins::response_cache::plugin::ResponseCache;
     use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
     use crate::plugins::response_cache::plugin::get_invalidation_entity_keys_from_schema;
@@ -2685,6 +2709,161 @@ mod tests {
         assert!(!response_cache.subgraph_enabled("archive"));
         assert!(response_cache.subgraph_enabled("user"));
         assert!(response_cache.subgraph_enabled("orga"));
+    }
+
+    async fn get_response_cache_plugin(
+        all_enabled: bool,
+        all_invalidation_enabled: bool,
+        subgraph_enabled: bool,
+        subgraph_invalidation_enabled: bool,
+    ) -> ResponseCache {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let (drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+            .await
+            .unwrap();
+        let map = serde_json_bytes::json!({
+            "user": {
+                "private_id": "sub"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false
+            }
+        });
+        let mut response_cache = ResponseCache::for_test(
+            storage.clone(),
+            serde_json_bytes::from_value(map).unwrap(),
+            valid_schema.clone(),
+            true,
+            drop_tx,
+        )
+        .await
+        .unwrap();
+        response_cache.subgraphs = Arc::new(
+            serde_json_bytes::from_value(serde_json_bytes::json!({
+                "all": {
+                    "enabled": all_enabled,
+                    "ttl": "10s",
+                    "invalidation": {
+                        "enabled": all_invalidation_enabled,
+                        "shared_key": "test"
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": subgraph_enabled,
+                        "invalidation": {
+                            "enabled": subgraph_invalidation_enabled,
+                            "shared_key": "test"
+                        }
+                    }
+                }
+            }))
+            .unwrap(),
+        );
+
+        response_cache
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    // Everything enabled
+    #[case(true, true, true, true)]
+    // Enable invalidation for every subgraphs except for a specific subgraph should enable invalidation endpoint
+    #[case(true, true, true, false)]
+    // Enable invalidation only for a specific subgraph should enable invalidation endpoint
+    #[case(true, false, true, true)]
+    // Disable globally both caching and invalidation but enable invalidation only for a specific subgraph should enable invalidation endpoint
+    #[case(false, false, true, true)]
+    async fn test_invalidation_endpoint_enabled(
+        #[case] all_enabled: bool,
+        #[case] all_invalidation_enabled: bool,
+        #[case] subgraph_enabled: bool,
+        #[case] subgraph_invalidation_enabled: bool,
+    ) {
+        let response_cache = get_response_cache_plugin(
+            all_enabled,
+            all_invalidation_enabled,
+            subgraph_enabled,
+            subgraph_invalidation_enabled,
+        )
+        .await;
+        assert!(!response_cache.web_endpoints().is_empty());
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    // Disable everything should disable invalidation endpoint
+    #[case(false, false, false, false)]
+    // Enable invalidation for a specific subgraph but disable everything else should disable invalidation endpoint
+    #[case(false, true, false, false)]
+    // Enable invalidation both for a specific subgraph and all subgraphs but disable caching everywhere should disable invalidation endpoint
+    #[case(false, true, false, true)]
+    // Only enable caching but not invalidation should disable invalidation endpoint
+    #[case(true, false, true, false)]
+    // Only enable caching for all subgraphs but not invalidation should disable invalidation endpoint
+    #[case(true, false, false, false)]
+    // Only enable invalidation for a specific subgraph that disabled caching should disable invalidation endpoint
+    #[case(true, false, false, true)]
+    async fn test_invalidation_endpoint_disabled(
+        #[case] all_enabled: bool,
+        #[case] all_invalidation_enabled: bool,
+        #[case] subgraph_enabled: bool,
+        #[case] subgraph_invalidation_enabled: bool,
+    ) {
+        let response_cache = get_response_cache_plugin(
+            all_enabled,
+            all_invalidation_enabled,
+            subgraph_enabled,
+            subgraph_invalidation_enabled,
+        )
+        .await;
+        assert!(response_cache.web_endpoints().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_invalidation_endpoint_enabled_multiple_subgraphs() {
+        let mut response_cache = get_response_cache_plugin(false, false, true, false).await;
+        // Disable invalidation globally with one specific subgraph configuration with invalidation disabled and another one enabled should enable invalidation endpoint
+        response_cache.subgraphs = Arc::new(
+            serde_json_bytes::from_value(serde_json_bytes::json!({
+                "all": {
+                    "enabled": false,
+                    "ttl": "10s",
+                    "invalidation": {
+                        "enabled": false,
+                        "shared_key": "test"
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": true,
+                        "invalidation": {
+                            "enabled": false,
+                            "shared_key": "test"
+                        }
+                    },
+                    "posts": {
+                        "enabled": true,
+                        "invalidation": {
+                            "enabled": true,
+                            "shared_key": "test"
+                        }
+                    }
+                }
+            }))
+            .unwrap(),
+        );
+
+        assert!(
+            !response_cache.web_endpoints().is_empty(),
+            "Disable invalidation globally with one specific subgraph configuration with invalidation disabled and another one enabled should enable invalidation endpoint"
+        );
     }
 
     #[tokio::test]
