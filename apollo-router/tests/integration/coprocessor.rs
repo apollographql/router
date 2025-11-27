@@ -499,10 +499,9 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
     let mock_server = wiremock::MockServer::start().await;
     let coprocessor_address = mock_server.uri();
 
-    // Track the context keys received in each stage
-    let router_response_context = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let router_response_context_clone = router_response_context.clone();
-
+    // Send the response context into this channel when RouterResponse stage is reached
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    
     // Handle all coprocessor stages, but modify SubgraphResponse and track RouterResponse
     Mock::given(method("POST"))
         .and(path("/"))
@@ -532,7 +531,7 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
                 // Track the context received in RouterResponse
                 let context = body.get("context").and_then(|c| c.get("entries"));
                 if let Some(ctx) = context {
-                    *router_response_context_clone.lock().unwrap() = Some(ctx.clone());
+                    tx.try_send(ctx.clone()).unwrap();
                 }
             }
             // For all other stages, just pass through
@@ -557,13 +556,10 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 200);
 
+    let router_response_context = rx.blocking_recv().unwrap();
     // Verify that RouterResponse does NOT have "myValue" (it was deleted in SubgraphResponse)
     assert!(
         !router_response_context
-            .lock()
-            .unwrap()
-            .as_ref()
-            .expect("router response context was None")
             .as_object()
             .expect("router response context was not an object")
             .contains_key("myValue")
