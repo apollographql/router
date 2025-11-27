@@ -132,7 +132,7 @@ Follow these steps to configure an GraphOS Router to use an offline license:
 
 Because the router does not auto-fetch updated licenses, you need to keep license files current across all deployments.  
 
-Failure to rotate licenses before they expire will cause the router to have degraded behaviour. See [Grace period for expired plans](/graphos/routing/license#grace-period-for-expired-plans).
+Failure to rotate licenses before they expire will cause the router to have degraded behavior. See [Grace period for expired plans](/graphos/routing/license#grace-period-for-expired-plans).
 
 Follow these steps to rotate your license regularly and safely:
 
@@ -143,12 +143,12 @@ Follow these steps to rotate your license regularly and safely:
 
 ### Stop using an offline license
 
-If you no longer want the Router to rely on an offline license, you can transition back to online validation through Uplink or disable GraphOS features entirely to avoid license enforcement. This is typically done when Routers regain reliable connectivity, when you want to eliminate manual license rotation, or when Apollo Support has confirmed that your account should no longer operate in offline-licensed mode.
+If you no longer want the router to rely on an offline license, you can transition back to online validation through Uplink or disable GraphOS features entirely to avoid license enforcement. This is typically done when routers regain reliable connectivity, when you want to eliminate manual license rotation, or when Apollo Support has confirmed that your account should no longer operate in offline-licensed mode.
 
 Follow these steps to stop using an offline license:
 
-1. Remove any (`--license`) flags and unset all (`APOLLO_ROUTER_LICENSE*`) environment variables.
-1. Ensure that (`APOLLO_KEY`) and (`APOLLO_GRAPH_REF`) are set correctly so the router can authenticate with Uplink and retrieve entitlements automatically.
+1. Remove any `--license` flags and unset all `APOLLO_ROUTER_LICENSE*` environment variables.
+1. Ensure that `APOLLO_KEY` and `APOLLO_GRAPH_REF` are set correctly so the router can authenticate with Uplink and retrieve entitlements automatically.
 
 Once online, license renewal is handled through GraphOS without the need to manually rotate files.
 
