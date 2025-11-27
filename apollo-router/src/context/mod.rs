@@ -259,6 +259,10 @@ impl Context {
         self.entries.retain(|k, v| f(k, v));
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     /// Read only access to the executable document for internal router plugins.
     pub(crate) fn executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
         self.extensions()
