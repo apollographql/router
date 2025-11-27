@@ -80,7 +80,7 @@ Keep your offline license files up to date by [renewing your license](#renew-an-
 
 <br/><br/>
 
-See the section on [Grace period for expired plans](#grace-period-for-expired-plans) for details on what happens when your license expires.
+See [Grace period for expired plans](#grace-period-for-expired-plans) for details on what happens when your license expires.
 
 </Caution>
 
@@ -127,7 +127,9 @@ Follow these steps to configure an GraphOS Router to use an offline license:
     * [`APOLLO_SUPERGRAPH_URLS`](/graphos/reference/router/configuration#-s----supergraph) environment variable, containing URLs to supergraph schemas
 
     <Note>
-    Keep your local supergraph schema files using your CI/CD pipelines. Failing to propagate schema changes manually can lead to schema drift, unexpected errors, or outages.
+
+    Update your local supergraph schema files using your CI/CD pipelines. Failing to propagate schema changes can lead to schema drift, unexpected errors, or outages.
+    
     </Note>
 
 1. Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](/graphos/reference/router/configuration#apollo_key) and [`APOLLO_GRAPH_REF`](/graphos/reference/router/configuration#apollo_graph_ref) environment variables. 
@@ -138,7 +140,7 @@ Follow these steps to configure an GraphOS Router to use an offline license:
 
 Because the router does not auto-fetch updated licenses, you need to keep license files current across all deployments.  
 
-Failure to rotate licenses before they expire will cause the router to have degraded behavior. See [Grace period for expired plans](/graphos/routing/license#grace-period-for-expired-plans).
+Failure to rotate licenses before they expire causes the router to degrade. See [Grace period for expired plans](#grace-period-for-expired-plans).
 
 Follow these steps to rotate your license regularly and safely:
 
@@ -149,7 +151,7 @@ Follow these steps to rotate your license regularly and safely:
 
 ### Stop using an offline license
 
-If you no longer want the router to rely on an offline license, you can transition back to online validation through Uplink or disable GraphOS features entirely to avoid license enforcement. This is typically done when routers regain reliable connectivity, when you want to eliminate manual license rotation, or when Apollo Support has confirmed that your account should no longer operate in offline-licensed mode.
+If you no longer want the router to rely on an offline license, move back to online validation through Uplink or disable GraphOS features entirely to avoid license enforcement. Do this when routers regain reliable connectivity, when you want to eliminate manual license rotation, or when Apollo Support confirms your account should no longer operate in offline-licensed mode. 
 
 Follow these steps to stop using an offline license:
 
@@ -180,10 +182,10 @@ Your router resumes normal functioning whenever you renew your GraphOS subscript
 
 ## Troubleshooting
 
-**If your router doesn't successfully connect to GraphOS,** it logs an error that begins with one of the following strings if any GraphOS features are enabled:
+If your router doesn't successfully connect to GraphOS, it logs an error that begins with one of the following strings if any GraphOS features are enabled:
 
 | Error Message               | Description |
 |-----------------------------|-------------|
 | `Not connected to GraphOS.` | At least one of the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables wasn't set on router startup. |
 | `License not found.`        | The router connected to GraphOS with credentials that are not associated with a GraphOS plan. |
-| `License has expired.`      | Your organization's GraphOS subscription has ended. **Your router will stop processing incoming requests at the end of the standard [grace period](#grace-period-for-expired-plans).** |
+| `License has expired.`      | Your organization's GraphOS subscription has ended. Your router will stop processing incoming requests at the end of the standard [grace period](#grace-period-for-expired-plans). |
