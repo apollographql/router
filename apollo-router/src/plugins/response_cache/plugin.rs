@@ -297,19 +297,35 @@ impl PluginPrivate for ResponseCache {
         let mut storage_interface = StorageInterface::default();
 
         let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-        if let Some(config) = init.config.subgraph.all.redis.clone() {
+        if init.config.enabled
+            && init.config.subgraph.all.enabled.unwrap_or_default()
+            && let Some(config) = init.config.subgraph.all.redis.clone()
+        {
             let storage = Arc::new(OnceLock::new());
             storage_interface.all = Some(storage.clone());
             connect_or_spawn_reconnection_task(config, storage, drop_rx).await?;
         }
 
         for (subgraph, subgraph_config) in &init.config.subgraph.subgraphs {
-            if let Some(config) = subgraph_config.redis.clone() {
-                let storage = Arc::new(OnceLock::new());
-                storage_interface
-                    .subgraphs
-                    .insert(subgraph.clone(), storage.clone());
-                connect_or_spawn_reconnection_task(config, storage, drop_tx.subscribe()).await?;
+            if Self::static_subgraph_enabled(init.config.enabled, &init.config.subgraph, subgraph) {
+                match subgraph_config.redis.clone() {
+                    Some(config) => {
+                        let storage = Arc::new(OnceLock::new());
+                        storage_interface
+                            .subgraphs
+                            .insert(subgraph.clone(), storage.clone());
+                        connect_or_spawn_reconnection_task(config, storage, drop_tx.subscribe())
+                            .await?;
+                    }
+                    None => {
+                        if storage_interface.all.is_none() {
+                            return Err(
+                                format!("you must have a redis configured either for all subgraphs or for subgraph {subgraph:?}")
+                                    .into(),
+                            );
+                        }
+                    }
+                }
             }
         }
 
@@ -497,7 +513,7 @@ impl ResponseCache {
     ))]
     pub(crate) async fn for_test(
         storage: Storage,
-        subgraphs: HashMap<String, Subgraph>,
+        subgraphs: SubgraphConfiguration<Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
         drop_tx: broadcast::Sender<()>,
@@ -522,16 +538,7 @@ impl ResponseCache {
             entity_type: None,
             enabled: true,
             debug: true,
-            subgraphs: Arc::new(SubgraphConfiguration {
-                all: Subgraph {
-                    invalidation: Some(SubgraphInvalidationConfig {
-                        enabled: true,
-                        shared_key: INVALIDATION_SHARED_KEY.to_string(),
-                    }),
-                    ..Default::default()
-                },
-                subgraphs,
-            }),
+            subgraphs: Arc::new(subgraphs),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
@@ -601,14 +608,23 @@ impl ResponseCache {
         })
     }
 
-    // Returns boolean to know if cache is enabled for this subgraph
+    /// Returns boolean to know if cache is enabled for this subgraph
     fn subgraph_enabled(&self, subgraph_name: &str) -> bool {
-        if !self.enabled {
+        Self::static_subgraph_enabled(self.enabled, &self.subgraphs, subgraph_name)
+    }
+
+    /// Static method which returns boolean to know if cache is enabled for this subgraph
+    fn static_subgraph_enabled(
+        plugin_enabled: bool,
+        subgraph_config: &SubgraphConfiguration<Subgraph>,
+        subgraph_name: &str,
+    ) -> bool {
+        if !plugin_enabled {
             return false;
         }
         match (
-            self.subgraphs.all.enabled,
-            self.subgraphs.get(subgraph_name).enabled,
+            subgraph_config.all.enabled,
+            subgraph_config.get(subgraph_name).enabled,
         ) {
             (_, Some(x)) => x, // explicit per-subgraph setting overrides the `all` default
             (Some(true) | None, None) => true, // unset defaults to true
@@ -2653,6 +2669,7 @@ mod tests {
     use super::Subgraph;
     use super::Ttl;
     use crate::configuration::subgraph::SubgraphConfiguration;
+    use crate::plugin::PluginInit;
     use crate::plugin::PluginPrivate;
     use crate::plugins::response_cache::plugin::ResponseCache;
     use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
@@ -2661,6 +2678,7 @@ mod tests {
     use crate::plugins::response_cache::plugin::matches_selection_set;
     use crate::plugins::response_cache::storage::redis::Config;
     use crate::plugins::response_cache::storage::redis::Storage;
+    use crate::plugins::response_cache::tests::create_subgraph_conf;
     use crate::services::OperationKind;
     use crate::services::subgraph;
 
@@ -2673,7 +2691,7 @@ mod tests {
         let storage = Storage::new(&Config::test(false, "test_subgraph_enabled"), drop_rx)
             .await
             .unwrap();
-        let map = serde_json_bytes::json!({
+        let map = serde_json_bytes::from_value(serde_json_bytes::json!({
             "user": {
                 "private_id": "sub"
             },
@@ -2685,11 +2703,13 @@ mod tests {
                 "private_id": "sub",
                 "enabled": false
             }
-        });
+        }))
+        .unwrap();
+        let subgraphs_conf = create_subgraph_conf(map);
 
         let mut response_cache = ResponseCache::for_test(
             storage.clone(),
-            serde_json_bytes::from_value(map).unwrap(),
+            subgraphs_conf,
             valid_schema.clone(),
             true,
             drop_tx,
@@ -2722,29 +2742,9 @@ mod tests {
         let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
             .await
             .unwrap();
-        let map = serde_json_bytes::json!({
-            "user": {
-                "private_id": "sub"
-            },
-            "orga": {
-                "private_id": "sub",
-                "enabled": true
-            },
-            "archive": {
-                "private_id": "sub",
-                "enabled": false
-            }
-        });
-        let mut response_cache = ResponseCache::for_test(
+
+        ResponseCache::for_test(
             storage.clone(),
-            serde_json_bytes::from_value(map).unwrap(),
-            valid_schema.clone(),
-            true,
-            drop_tx,
-        )
-        .await
-        .unwrap();
-        response_cache.subgraphs = Arc::new(
             serde_json_bytes::from_value(serde_json_bytes::json!({
                 "all": {
                     "enabled": all_enabled,
@@ -2765,9 +2765,288 @@ mod tests {
                 }
             }))
             .unwrap(),
-        );
+            valid_schema.clone(),
+            true,
+            drop_tx,
+        )
+        .await
+        .unwrap()
+    }
 
-        response_cache
+    #[tokio::test]
+    async fn test_redis_connection_disabled() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "enabled": false,
+                    "ttl": "10s",
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "namespace": Uuid::new_v4().to_string(),
+                        "pool_size": 1,
+                        "required_to_start": true,
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": false
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response_cache = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await
+        .unwrap();
+
+        assert!(
+            response_cache.storage.all.is_none()
+                || response_cache.storage.all.as_ref().unwrap().get().is_none(),
+            "Redis storage is set globally"
+        );
+        assert!(
+            response_cache.storage.subgraphs.is_empty(),
+            "Redis storage is set for a subgraph"
+        );
+        // ----- Disable globally the plugin ----
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": false,
+            "subgraph": {
+                "all": {
+                    "enabled": true,
+                    "ttl": "10s",
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "namespace": Uuid::new_v4().to_string(),
+                        "pool_size": 1,
+                        "required_to_start": true,
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": true
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response_cache = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await
+        .unwrap();
+
+        assert!(
+            response_cache.storage.all.is_none()
+                || response_cache.storage.all.as_ref().unwrap().get().is_none(),
+            "Redis storage is set globally"
+        );
+        assert!(
+            response_cache.storage.subgraphs.is_empty(),
+            "Redis storage is set for a subgraph"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_redis_conf_provided_should_fail() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "enabled": true,
+                    "ttl": "10s",
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": true
+                    },
+                    "inventory": {
+                        "enabled": true
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        assert!(
+            ResponseCache::new(PluginInit::fake_new(
+                config,
+                Arc::new(valid_schema.to_string()),
+            ))
+            .await
+            .is_err(),
+            "The plugin should not start properly if caching is enabled but no redis provided"
+        );
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    // Globally disabled
+    #[case(false, true, true)]
+    // Disable for all subgraphs
+    #[case(true, false, false)]
+    async fn test_no_redis_conf_provided_but_disabled_should_succeed(
+        #[case] global_enabled: bool,
+        #[case] all_enabled: bool,
+        #[case] subgraph_enabled: bool,
+    ) {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": global_enabled,
+            "subgraph": {
+                "all": {
+                    "enabled": all_enabled,
+                    "ttl": "10s",
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": subgraph_enabled
+                    },
+                    "inventory": {
+                        "enabled": subgraph_enabled
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response_cache = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await
+        .unwrap();
+        if !global_enabled {
+            assert!(!response_cache.enabled);
+        }
+        assert!(
+            response_cache.storage.all.is_none()
+                || response_cache.storage.all.as_ref().unwrap().get().is_none(),
+            "Redis storage is set globally"
+        );
+        assert!(
+            response_cache.storage.subgraphs.is_empty(),
+            "Redis storage is set for a subgraph"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_redis_connection_enabled_multiple_subgraphs() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "enabled": false,
+                    "ttl": "10s",
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "namespace": Uuid::new_v4().to_string(),
+                        "pool_size": 1,
+                        "required_to_start": true,
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": false
+                    },
+                    "inventory": {
+                        "enabled": true
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response_cache = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await
+        .unwrap();
+
+        assert!(
+            response_cache.storage.all.is_none()
+                || response_cache.storage.all.as_ref().unwrap().get().is_none(),
+            "Redis storage is set globally"
+        );
+        assert_eq!(
+            response_cache.storage.subgraphs.len(),
+            1,
+            "Redis storage is not set for a subgraph"
+        );
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    // Everything enabled
+    #[case(true, true)]
+    // Enable caching only for a specific subgraph should enable redis
+    #[case(false, true)]
+    // Enable caching for all subgraphs should enable redis
+    #[case(true, false)]
+    async fn test_redis_connection_enabled(
+        #[case] all_enabled: bool,
+        #[case] subgraph_enabled: bool,
+    ) {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "enabled": all_enabled,
+                    "ttl": "10s",
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "namespace": Uuid::new_v4().to_string(),
+                        "pool_size": 1,
+                        "required_to_start": true,
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": subgraph_enabled
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response_cache = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await
+        .unwrap();
+
+        if all_enabled {
+            assert!(
+                response_cache.storage.all.is_some()
+                    && response_cache.storage.all.as_ref().unwrap().get().is_some(),
+                "Redis storage is not set globally"
+            );
+        } else {
+            assert!(
+                response_cache.storage.all.is_none()
+                    || response_cache.storage.all.as_ref().unwrap().get().is_none(),
+                "Redis storage is set globally"
+            );
+        }
+        if subgraph_enabled {
+            assert_eq!(
+                response_cache.storage.subgraphs.len(),
+                1,
+                "Redis storage is set for a subgraph"
+            );
+        } else {
+            assert!(
+                response_cache.storage.subgraphs.is_empty(),
+                "Redis storage is not set for a subgraph"
+            );
+        }
     }
 
     #[tokio::test]
@@ -2873,7 +3152,7 @@ mod tests {
         let storage = Storage::new(&Config::test(false, "test_subgraph_ttl"), drop_rx)
             .await
             .unwrap();
-        let map = serde_json_bytes::json!({
+        let map = serde_json_bytes::from_value(serde_json_bytes::json!({
             "user": {
                 "private_id": "sub",
                 "ttl": "2s"
@@ -2887,11 +3166,12 @@ mod tests {
                 "enabled": false,
                 "ttl": "5000ms"
             }
-        });
+        }))
+        .unwrap();
 
         let mut response_cache = ResponseCache::for_test(
             storage.clone(),
-            serde_json_bytes::from_value(map).unwrap(),
+            create_subgraph_conf(map),
             valid_schema.clone(),
             true,
             drop_tx,
