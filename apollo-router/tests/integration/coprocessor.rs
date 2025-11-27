@@ -558,15 +558,16 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
     assert_eq!(response.status(), 200);
 
     // Verify that RouterResponse does NOT have "myValue" (it was deleted in SubgraphResponse)
-    if let Some(ctx) = router_response_context.lock().unwrap().as_ref()
-        && let Some(entries) = ctx.as_object()
-    {
-        assert!(
-            !entries.contains_key("myValue"),
-            "myValue should be deleted in RouterResponse stage, but was found: {:?}",
-            entries
-        );
-    }
+    assert!(
+        !router_response_context
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("router response context was None")
+            .as_object()
+            .expect("router response context was not an object")
+            .contains_key("myValue")
+    );
 
     router.graceful_shutdown().await;
 
