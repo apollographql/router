@@ -63,7 +63,7 @@ apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=1.61.12" }
 arc-swap = "1.6.0"
 async-channel = "1.9.0"
-async-compression = { version = "0.4.6", features = [
+async-compression = { version = "=0.4.11", features = [ # Pinned: 0.4.12+ requires tokio 1.40+
     "tokio",
     "brotli",
     "gzip",
@@ -254,7 +254,9 @@ aws-sigv4 = "1.1.6"
 aws-credential-types = "1.1.6"
 aws-config = "=1.5.4" # Pinned: pre-expansion of SDK version requirements (avoids Rust 1.88 requirement)
 aws-types = "1.1.6"
-aws-smithy-runtime-api = { version = "1.1.6", features = ["client"] }
+aws-smithy-runtime-api = { version = "=1.7.3", features = ["client"] } # Pinned: 1.9+ requires tokio 1.40+ which breaks opentelemetry-jaeger
+aws-smithy-async = "=1.2.4" # Pinned: keep within range required by aws-sdk-sso while avoiding newer tokio constraints
+aws-smithy-types = "=1.2.12" # Pinned: newer 1.3.x requires tokio ^1.40.0
 # Explicit AWS SDK pins to prevent version resolution to Rust 1.88+ requirements
 aws-sdk-sso = "=1.54.0" # Pinned: MSRV 1.81.0
 aws-sdk-ssooidc = "=1.55.0" # Pinned: MSRV 1.81.0
