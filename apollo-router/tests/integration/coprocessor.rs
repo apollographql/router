@@ -499,8 +499,9 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
     let mock_server = wiremock::MockServer::start().await;
     let coprocessor_address = mock_server.uri();
 
-    // Send the response context into this channel when RouterResponse stage is reached
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    // Track the context keys received in each stage
+    let router_response_context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let router_response_context_clone = router_response_context.clone();
 
     // Handle all coprocessor stages, but modify SubgraphResponse and track RouterResponse
     Mock::given(method("POST"))
@@ -519,23 +520,43 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
                 obj.insert("control".to_string(), serde_json::json!("continue"));
             }
 
-            if stage == "SubgraphResponse" {
-                // Return context without "myValue" (deleted)
-                if let Some(obj) = response.as_object_mut()
-                    && let Some(ctx) = obj.get_mut("context").and_then(|c| c.as_object_mut())
-                    && let Some(entries) = ctx.get_mut("entries").and_then(|e| e.as_object_mut())
-                {
-                    entries.remove("myValue");
-                }
+            if stage == "RouterRequest" {
+                // Add a context entry to the router request
+                response
+                    .as_object_mut()
+                    .expect("response was not an object")
+                    .entry("context")
+                    .or_insert_with(|| serde_json::Value::Object(Default::default()))
+                    .as_object_mut()
+                    .expect("context was not an object")
+                    .entry("entries")
+                    .or_insert_with(|| serde_json::Value::Object(Default::default()))
+                    .as_object_mut()
+                    .expect("entries was not an object")
+                    .insert("k1".to_string(), serde_json::json!("v1"));
+            } else if stage == "SubgraphResponse" {
+                // Return context without "k1" (deleted)
+                response
+                    .as_object_mut()
+                    .expect("response was not an object")
+                    .get_mut("context")
+                    .expect("context was not found")
+                    .as_object_mut()
+                    .expect("context was not an object")
+                    .get_mut("entries")
+                    .expect("entries was not found")
+                    .as_object_mut()
+                    .expect("entries was not an object")
+                    .remove("k1");
             } else if stage == "RouterResponse" {
                 // Track the context received in RouterResponse
                 let context = body.get("context").and_then(|c| c.get("entries"));
                 if let Some(ctx) = context {
-                    tx.try_send(ctx.clone()).unwrap();
+                    *router_response_context_clone.lock().unwrap() = Some(ctx.clone());
                 }
             }
-            // For all other stages, just pass through
 
+            // For all other stages, just pass through
             ResponseTemplate::new(200).set_body_json(response)
         })
         .mount(&mock_server)
@@ -543,7 +564,7 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
 
     let mut router = IntegrationTest::builder()
         .config(
-            include_str!("fixtures/coprocessor.router.yaml")
+            include_str!("fixtures/coprocessor_context.router.yaml")
                 .replace("<replace>", &coprocessor_address),
         )
         .build()
@@ -556,18 +577,16 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 200);
 
-    let router_response_context =
-        tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
-            .await
-            .expect("timeout waiting for router response context")
-            .expect("router response context was not received");
-
-    // Verify that RouterResponse does NOT have "myValue" (it was deleted in SubgraphResponse)
+    // Verify that RouterResponse does NOT have "k1" (it was deleted in SubgraphResponse)
     assert!(
         !router_response_context
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("router response context was None")
             .as_object()
             .expect("router response context was not an object")
-            .contains_key("myValue")
+            .contains_key("k1")
     );
 
     router.graceful_shutdown().await;
