@@ -501,7 +501,7 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
 
     // Send the response context into this channel when RouterResponse stage is reached
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-    
+
     // Handle all coprocessor stages, but modify SubgraphResponse and track RouterResponse
     Mock::given(method("POST"))
         .and(path("/"))
