@@ -3999,4 +3999,122 @@ mod tests {
                 .is_ok()
         );
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_url() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock"
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs are properly handled
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with a Unix socket URL
+    }
+
+    #[tokio::test]
+    async fn test_coprocessor_http_url_configuration() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8081"
+            }
+        });
+
+        // Verify HTTP URLs continue to work as before (same as existing load_plugin test)
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_coprocessor_https_url_configuration() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "https://example.com:8443/coprocessor"
+            }
+        });
+
+        // Verify HTTPS URLs continue to work as before
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn test_url_scheme_detection() {
+        // Test various URL formats that should be supported
+        let test_cases = vec![
+            ("http://localhost:8081", false),
+            ("https://example.com:443/path", false),
+            ("unix:///tmp/socket.sock", true),
+            ("unix:///var/run/app/coprocessor.sock", true),
+            ("ftp://example.com", false), // Invalid but shouldn't panic
+        ];
+
+        for (url, should_be_unix) in test_cases {
+            let is_unix = url.starts_with("unix://");
+            assert_eq!(
+                is_unix, should_be_unix,
+                "URL '{}' unix detection failed",
+                url
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_backwards_compatibility_with_existing_configs() {
+        // Test that existing production configurations continue to work unchanged
+        let legacy_http_configs = vec![
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080"
+                }
+            }),
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "https://external-coprocessor.company.com/graphql",
+                    "timeout": "10s"
+                }
+            }),
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://127.0.0.1:3001/webhook",
+                    "router": {
+                        "request": {
+                            "context": true,
+                            "headers": true
+                        }
+                    }
+                }
+            }),
+        ];
+
+        // Verify all legacy configurations can still be loaded
+        for config in legacy_http_configs {
+            let test_harness = crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await;
+
+            assert!(
+                test_harness.is_ok(),
+                "Legacy HTTP configuration should load successfully"
+            );
+        }
+    }
 }

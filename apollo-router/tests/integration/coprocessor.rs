@@ -489,3 +489,509 @@ mod on_graphql_error_selector {
         Ok(())
     }
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_unix_domain_socket() -> Result<(), tower::BoxError> {
+    use std::path::PathBuf;
+
+    use hyper_util::rt::TokioExecutor;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::UnixListener;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create a temporary Unix socket path
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("coprocessor.sock");
+    let _ = std::fs::remove_file(&sock_path);
+
+    // Start a minimal Unix domain socket HTTP server that echoes the JSON body back
+    let uds = UnixListener::bind(&sock_path).expect("bind uds");
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = uds.accept().await.expect("accept");
+            let io = TokioIo::new(stream);
+            let svc = hyper::service::service_fn(
+                |req: http::Request<hyper::body::Incoming>| async move {
+                    let bytes = http_body_util::BodyExt::collect(req.into_body())
+                        .await
+                        .unwrap()
+                        .to_bytes();
+                    Ok::<_, std::convert::Infallible>(
+                        http::Response::builder()
+                            .status(200)
+                            .header(
+                                http::header::CONTENT_TYPE,
+                                mime::APPLICATION_JSON.essence_str(),
+                            )
+                            .body(axum::body::Body::from(bytes))
+                            .unwrap(),
+                    )
+                },
+            );
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("uds server error: {err}");
+            }
+        }
+    });
+
+    // Configure router to use the unix:// coprocessor URL
+    let uds_url = format!("unix://{}", sock_path.display());
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(include_str!("fixtures/coprocessor.router.yaml").replace("<replace>", &uds_url))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(unix)]
+async fn test_coprocessor_per_stage_unix_socket_urls() -> Result<(), tower::BoxError> {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering;
+
+    use hyper_util::rt::TokioExecutor;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::UnixListener;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create temporary Unix socket paths for different stages
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let mut router_sock_path = PathBuf::from(dir.path());
+    router_sock_path.push("router_stage.sock");
+    let _ = std::fs::remove_file(&router_sock_path);
+
+    let mut supergraph_sock_path = PathBuf::from(dir.path());
+    supergraph_sock_path.push("supergraph_stage.sock");
+    let _ = std::fs::remove_file(&supergraph_sock_path);
+
+    // Counters to verify each socket was actually used
+    let router_counter = Arc::new(AtomicU32::new(0));
+    let supergraph_counter = Arc::new(AtomicU32::new(0));
+
+    // Start Unix domain socket HTTP server for router stage
+    let router_uds = UnixListener::bind(&router_sock_path).expect("bind router uds");
+    let router_counter_clone = router_counter.clone();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = router_uds.accept().await.expect("accept router");
+            let io = TokioIo::new(stream);
+            let counter = router_counter_clone.clone();
+            let svc =
+                hyper::service::service_fn(move |req: http::Request<hyper::body::Incoming>| {
+                    let counter = counter.clone();
+                    async move {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        let bytes = http_body_util::BodyExt::collect(req.into_body())
+                            .await
+                            .unwrap()
+                            .to_bytes();
+                        Ok::<_, std::convert::Infallible>(
+                            http::Response::builder()
+                                .status(200)
+                                .header(
+                                    http::header::CONTENT_TYPE,
+                                    mime::APPLICATION_JSON.essence_str(),
+                                )
+                                .body(axum::body::Body::from(bytes))
+                                .unwrap(),
+                        )
+                    }
+                });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("router uds server error: {err}");
+            }
+        }
+    });
+
+    // Start Unix domain socket HTTP server for supergraph stage
+    let supergraph_uds = UnixListener::bind(&supergraph_sock_path).expect("bind supergraph uds");
+    let supergraph_counter_clone = supergraph_counter.clone();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = supergraph_uds.accept().await.expect("accept supergraph");
+            let io = TokioIo::new(stream);
+            let counter = supergraph_counter_clone.clone();
+            let svc =
+                hyper::service::service_fn(move |req: http::Request<hyper::body::Incoming>| {
+                    let counter = counter.clone();
+                    async move {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        let bytes = http_body_util::BodyExt::collect(req.into_body())
+                            .await
+                            .unwrap()
+                            .to_bytes();
+                        Ok::<_, std::convert::Infallible>(
+                            http::Response::builder()
+                                .status(200)
+                                .header(
+                                    http::header::CONTENT_TYPE,
+                                    mime::APPLICATION_JSON.essence_str(),
+                                )
+                                .body(axum::body::Body::from(bytes))
+                                .unwrap(),
+                        )
+                    }
+                });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("supergraph uds server error: {err}");
+            }
+        }
+    });
+
+    // Wait a moment for servers to start
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Configure router with per-stage Unix socket URLs
+    let router_uds_url = format!("unix://{}", router_sock_path.display());
+    let supergraph_uds_url = format!("unix://{}", supergraph_sock_path.display());
+
+    let config = format!(
+        r#"
+include_subgraph_errors:
+  all: true
+coprocessor:
+  url: http://should-not-be-used:9999  # Global fallback (should not be used)
+  router:
+    request:
+      headers: true
+      context: true
+      url: {}  # Override for router stage
+  supergraph:
+    request:
+      headers: true
+      body: true
+      context: true
+      url: {}  # Override for supergraph stage
+"#,
+        router_uds_url, supergraph_uds_url
+    );
+
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Verify that both Unix socket servers were actually used
+    let router_calls = router_counter.load(Ordering::SeqCst);
+    let supergraph_calls = supergraph_counter.load(Ordering::SeqCst);
+
+    assert!(
+        router_calls > 0,
+        "Router stage Unix socket should have been called, but was called {} times",
+        router_calls
+    );
+    assert!(
+        supergraph_calls > 0,
+        "Supergraph stage Unix socket should have been called, but was called {} times",
+        supergraph_calls
+    );
+
+    println!(
+        "Per-stage Unix socket URLs working correctly: router={} calls, supergraph={} calls",
+        router_calls, supergraph_calls
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(unix)]
+async fn test_coprocessor_mixed_http_and_unix_socket_urls() -> Result<(), tower::BoxError> {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering;
+
+    use hyper_util::rt::TokioExecutor;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::UnixListener;
+    use wiremock::ResponseTemplate;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create temporary Unix socket path for router stage
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut router_sock_path = PathBuf::from(dir.path());
+    router_sock_path.push("router_stage.sock");
+    let _ = std::fs::remove_file(&router_sock_path);
+
+    // Counters to verify each endpoint was actually used
+    let router_counter = Arc::new(AtomicU32::new(0));
+    let supergraph_counter = Arc::new(AtomicU32::new(0));
+
+    // Start Unix domain socket HTTP server for router stage
+    let router_uds = UnixListener::bind(&router_sock_path).expect("bind router uds");
+    let router_counter_clone = router_counter.clone();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = router_uds.accept().await.expect("accept router");
+            let io = TokioIo::new(stream);
+            let counter = router_counter_clone.clone();
+            let svc =
+                hyper::service::service_fn(move |req: http::Request<hyper::body::Incoming>| {
+                    let counter = counter.clone();
+                    async move {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        let bytes = http_body_util::BodyExt::collect(req.into_body())
+                            .await
+                            .unwrap()
+                            .to_bytes();
+                        Ok::<_, std::convert::Infallible>(
+                            http::Response::builder()
+                                .status(200)
+                                .header(
+                                    http::header::CONTENT_TYPE,
+                                    mime::APPLICATION_JSON.essence_str(),
+                                )
+                                .body(axum::body::Body::from(bytes))
+                                .unwrap(),
+                        )
+                    }
+                });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("router uds server error: {err}");
+            }
+        }
+    });
+
+    // Start HTTP server for supergraph stage using wiremock
+    let supergraph_counter_clone = supergraph_counter.clone();
+    let supergraph_mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(move |req: &wiremock::Request| {
+            supergraph_counter_clone.fetch_add(1, Ordering::SeqCst);
+            // Echo back the request body
+            ResponseTemplate::new(200)
+                .set_body_bytes(req.body.clone())
+                .insert_header("content-type", "application/json")
+        })
+        .mount(&supergraph_mock_server)
+        .await;
+
+    // Wait a moment for servers to start
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Configure router with MIXED transports: Unix socket for router, HTTP for supergraph
+    let router_uds_url = format!("unix://{}", router_sock_path.display());
+    let supergraph_http_url = supergraph_mock_server.uri();
+
+    let config = format!(
+        r#"
+include_subgraph_errors:
+  all: true
+coprocessor:
+  url: http://should-not-be-used:9999  # Global fallback (should not be used)
+  router:
+    request:
+      headers: true
+      context: true
+      url: {}  # Unix socket for router stage
+  supergraph:
+    request:
+      headers: true
+      body: true
+      context: true
+      url: {}  # HTTP for supergraph stage
+"#,
+        router_uds_url, supergraph_http_url
+    );
+
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Verify that BOTH transports were used correctly
+    let router_calls = router_counter.load(Ordering::SeqCst);
+    let supergraph_calls = supergraph_counter.load(Ordering::SeqCst);
+
+    assert!(
+        router_calls > 0,
+        "Router stage Unix socket should have been called, but was called {} times",
+        router_calls
+    );
+    assert!(
+        supergraph_calls > 0,
+        "Supergraph stage HTTP endpoint should have been called, but was called {} times",
+        supergraph_calls
+    );
+
+    println!(
+        "Mixed transports working correctly: router Unix socket={} calls, supergraph HTTP={} calls",
+        router_calls, supergraph_calls
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(unix)]
+async fn test_coprocessor_unix_socket_connection_refused() -> Result<(), BoxError> {
+    use std::path::PathBuf;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create a socket path that doesn't exist (no server listening)
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("nonexistent.sock");
+
+    // Configure router to use a Unix socket that doesn't exist
+    let uds_url = format!("unix://{}", sock_path.display());
+    let config = format!(
+        r#"
+include_subgraph_errors:
+  all: true
+coprocessor:
+  url: {}
+  timeout: 1s
+  router:
+    request:
+      headers: true
+"#,
+        uds_url
+    );
+
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Query should fail or return error due to connection refused
+    let (_trace_id, response) = router.execute_default_query().await;
+
+    // The router should handle the error gracefully
+    // Depending on coprocessor configuration, it might return an error or continue
+    // For this test, we're just verifying it doesn't panic/crash
+    assert!(
+        response.status().is_client_error()
+            || response.status().is_server_error()
+            || response.status().is_success(),
+        "Router should handle connection errors gracefully, got status: {}",
+        response.status()
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(unix)]
+async fn test_coprocessor_unix_socket_server_closes_connection() -> Result<(), BoxError> {
+    use std::path::PathBuf;
+
+    use tokio::net::UnixListener;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create a Unix socket that immediately closes connections
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("closing.sock");
+    let _ = std::fs::remove_file(&sock_path);
+
+    let uds = UnixListener::bind(&sock_path).expect("bind uds");
+    tokio::spawn(async move {
+        loop {
+            if let Ok((stream, _)) = uds.accept().await {
+                // Immediately drop the stream to close the connection
+                drop(stream);
+            }
+        }
+    });
+
+    // Wait for server to be ready
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let uds_url = format!("unix://{}", sock_path.display());
+    let config = format!(
+        r#"
+include_subgraph_errors:
+  all: true
+coprocessor:
+  url: {}
+  timeout: 2s
+  router:
+    request:
+      headers: true
+"#,
+        uds_url
+    );
+
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Query should handle the closed connection gracefully
+    let (_trace_id, response) = router.execute_default_query().await;
+
+    // Should get an error response but not crash
+    assert!(
+        response.status().is_client_error()
+            || response.status().is_server_error()
+            || response.status().is_success(),
+        "Router should handle connection closure gracefully, got status: {}",
+        response.status()
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}

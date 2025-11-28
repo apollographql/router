@@ -177,6 +177,16 @@ impl HttpClientService {
         HttpClientService::new(name, tls_client_config, client_config)
     }
 
+    pub(crate) fn from_config_for_coprocessor(
+        tls_root_store: &RootCertStore,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        // Coprocessors don't use client certificates, so use no client auth
+        let tls_client_config = generate_tls_client_config(tls_root_store.clone(), None)?;
+
+        HttpClientService::new("coprocessor".to_string(), tls_client_config, client_config)
+    }
+
     pub(crate) fn new(
         service: impl Into<String>,
         tls_config: ClientConfig,
@@ -272,17 +282,42 @@ impl tower::Service<HttpRequest> for HttpClientService {
         } = request;
 
         let schema_uri = http_request.uri();
-        let host = schema_uri.host().unwrap_or_default();
-        let port = schema_uri.port_u16().unwrap_or_else(|| {
-            let scheme = schema_uri.scheme_str();
-            if scheme == Some("https") {
-                443
-            } else if scheme == Some("http") {
-                80
-            } else {
-                0
-            }
-        });
+
+        // Check if this is a Unix socket request by looking for the Arc<str> extension
+        // This avoids hex decoding by using the original path stored in external.rs
+        let unix_socket_path = http_request
+            .extensions()
+            .get::<crate::services::external::UnixSocketPath>()
+            .map(|usp| usp.0.clone());
+
+        // Determine transport type and host/port
+        let (transport, host, port) = if let Some(socket_path) = unix_socket_path {
+            // Unix socket: use the original path from the Arc extension (coprocessor case)
+            ("unix", socket_path.to_string(), 0u16)
+        } else if schema_uri.scheme_str() == Some("unix") {
+            // Unix socket without extension (subgraph case)
+            // Hyperlocal encodes the socket path as hex in the host portion - decode it
+            let hex_host = schema_uri.host().unwrap_or("");
+            let socket_path = hex::decode(hex_host)
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .unwrap_or_else(|| hex_host.to_string());
+            ("unix", socket_path, 0u16)
+        } else {
+            // Regular HTTP/HTTPS
+            let host = schema_uri.host().unwrap_or_default();
+            let port = schema_uri.port_u16().unwrap_or_else(|| {
+                let scheme = schema_uri.scheme_str();
+                if scheme == Some("https") {
+                    443
+                } else if scheme == Some("http") {
+                    80
+                } else {
+                    0
+                }
+            });
+            ("ip_tcp", host.to_string(), port)
+        };
 
         #[cfg(unix)]
         let client = match schema_uri.scheme().map(|s| s.as_str()) {
@@ -314,7 +349,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
             "net.peer.port" = %port,
             "http.route" = %path,
             "http.url" = %schema_uri,
-            "net.transport" = "ip_tcp",
+            "net.transport" = %transport,
         );
 
         // Apply any attributes that were stored by telemetry middleware

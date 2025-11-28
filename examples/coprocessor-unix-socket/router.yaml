@@ -1,0 +1,68 @@
+# Apollo Router configuration with Unix Domain Socket coprocessor
+#
+# This configuration demonstrates how to use Unix Domain Sockets for
+# coprocessor communication to reduce latency and overhead.
+
+coprocessor:
+  # Unix Domain Socket URL - provides better performance for local coprocessors
+  url: unix:///tmp/apollo-coprocessor.sock
+
+  # Timeout for coprocessor requests (applies to both HTTP and UDS)
+  timeout: 2s
+
+  # Enable request/response validation (recommended)
+  response_validation: enabled
+
+  # Hook into different router stages
+  router:
+    request:
+      headers: true        # Forward request headers to coprocessor
+      context: true        # Forward router context
+    response:
+      headers: true        # Allow coprocessor to modify response headers
+
+  supergraph:
+    request:
+      body: true           # Forward GraphQL request body
+      context: true        # Forward context information
+    response:
+      body: true           # Allow coprocessor to modify response
+      context: true
+
+  execution:
+    request:
+      body: true           # Forward execution request details
+    response:
+      body: true           # Process execution response
+
+  subgraph:
+    request:
+      headers: true        # Forward headers to subgraph coprocessor
+      body: true           # Forward subgraph request body
+    response:
+      headers: true        # Allow header modification
+      body: true           # Process subgraph response
+
+# Example alternative configurations for different transport types:
+#
+# HTTP coprocessor:
+# coprocessor:
+#   url: http://localhost:8080/coprocessor
+#
+# HTTPS coprocessor with custom port:
+# coprocessor:
+#   url: https://coprocessor.example.com:8443/webhook
+#
+# Unix socket in custom location:
+# coprocessor:
+#   url: unix:///var/run/apollo/coprocessor.sock
+
+# Other router configuration...
+homepage:
+  enabled: false
+
+supergraph:
+  # Point to your local supergraph schema file
+  path: ./supergraph-schema.graphql
+
+listen: 127.0.0.1:4000
