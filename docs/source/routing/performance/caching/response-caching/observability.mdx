@@ -84,7 +84,7 @@ telemetry:
 The latency metrics are marked as experimental because Apollo might change them if there is an upstream change in one of our dependencies.
 
 #### Connection and performance metrics
-  - `apollo.router.cache.redis.connections`: Number of active Redis connections
+  - `apollo.router.cache.redis.clients`: Number of Redis clients active
   - `apollo.router.cache.redis.command_queue_length`: Commands waiting to be sent to Redis
   - `apollo.router.cache.redis.commands_executed`: Total number of Redis commands executed
   - `apollo.router.cache.redis.redelivery_count`: Commands retried due to connection issues
