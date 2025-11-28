@@ -223,6 +223,7 @@ where
             // is the same as if the caller had executed `job` directly without a thread pool.
             let result =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || job(status)));
+
             match tx.send(result) {
                 Ok(()) => {}
                 Err(_) => {

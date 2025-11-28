@@ -1,9 +1,13 @@
+use std::env::VarError;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::task;
+#[allow(unused)]
+use std::time::Duration;
 
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -11,6 +15,7 @@ use query_planner::QueryPlannerPlugin;
 use rand::seq::SliceRandom;
 use sha2::Digest;
 use sha2::Sha256;
+use sysinfo::System;
 use tokio_util::time::FutureExt;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -51,6 +56,94 @@ use crate::spec::Schema;
 use crate::spec::SchemaHash;
 use crate::spec::SpecError;
 
+/// The memory limit for the router process (as defined by the customer via an env var, cgroup, or
+/// host--in that order of precedence)
+#[allow(unused)]
+static MEMORY_LIMIT_BYTES: OnceLock<usize> = OnceLock::new();
+/// The headroom given to the limit to start logging out potentially problematic queries
+#[allow(unused)]
+static MEMORY_HEADROOM: OnceLock<usize> = OnceLock::new();
+
+/// The amount of buffer given between current memory usage and the memory limit to log out
+/// operations and do other visibility-related tasks before potentially OOMkilling
+///
+/// This value is expected to be in bytes
+#[allow(unused)]
+const APOLLO_MEMORY_HEADROOM: &str = "APOLLO_MEMORY_HEADROOM";
+
+/// An optional hint for what to set the memory limit to when logging out potentially problematic
+/// queries
+///
+/// This value is expected to be in bytes
+#[allow(unused)]
+const APOLLO_MEMORY_LIMIT_HINT: &str = "APOLLO_MEMORY_LIMIT_HINT";
+
+/// Looks at the env var APOLLO_MEMORY_HEADROOM and if present sets it as the static
+/// MEMORY_HEADROOM for use in logging out operations that risk memory exhaustion
+#[allow(unused)]
+fn get_memory_headroom() -> &'static usize {
+    MEMORY_HEADROOM.get_or_init(|| {
+        // default to 250mb
+        let default_headroom_in_bytes = 250 * 1024 * 1024;
+
+        let res = if let Ok(value) = std::env::var(APOLLO_MEMORY_HEADROOM) {
+            value.parse().unwrap_or(default_headroom_in_bytes)
+        } else {
+            default_headroom_in_bytes
+        };
+
+        tracing::info!("memory headroom set: {res}");
+
+        res
+    })
+}
+
+/// Get the memory limit from the cgroup limit _or_ the host machine; the former is given
+/// precedence to the latter, and if for some reason neither the cgroup limit or host machine limit
+/// can be converted into a usize, we send back the MAX usize
+#[allow(unused)]
+fn get_memory_limit_bytes() -> &'static usize {
+    MEMORY_LIMIT_BYTES.get_or_init(|| {
+        let memory_limit = match std::env::var(APOLLO_MEMORY_LIMIT_HINT){
+            Ok(val) => {
+                val
+                    .parse::<usize>()
+                    .inspect_err(|e| tracing::warn!("unable to parse memory limit hint to usize, using MAX as default, meaning the memory limit is effectively unset: {e}"))
+                    .unwrap_or(usize::MAX)
+            }
+            Err(VarError::NotPresent)=> {
+                let mut system = System::new();
+                system.refresh_memory();
+                let cgroup_limit = system.cgroup_limits();
+                let memory_limit = if let Some(cgroup_limit) = cgroup_limit {
+                    tracing::info!("Using the cgroup's representation of the memory limit");
+                    cgroup_limit.total_memory
+                } else {
+                    tracing::warn!("Falling back to host system total memory limit for query planning. If cooperative planning isn't enforced, this will have no effect and merely be recorded as the unenforced limit");
+                    // fallback to host's total memory; dangerous because this doesn't represent what might
+                    // be available to a container--we assume that if there's no cgroup, there's no
+                    // container
+                    system.total_memory()
+                };
+        
+                memory_limit
+                    .try_into()
+                    .inspect_err(|e| tracing::warn!("unable to convert memory limit to the right type (u64 -> usize), using MAX as default, meaning the memory limit is effectively unset: {e}"))
+                    .unwrap_or(usize::MAX)
+        
+            }
+            Err(err)=> {
+                tracing::warn!("error reading APOLLO_MEMORY_LIMIT_HINT environment variable: {err}");
+                usize::MAX
+            }
+
+        };
+
+        tracing::info!("memory limit in bytes: {memory_limit}");
+
+        memory_limit
+    })
+}
 #[repr(u8)]
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 enum Outcome {
@@ -328,8 +421,9 @@ where
                 }
             };
 
+            let query = Arc::new(query);
             let caching_key = CachingQueryKey {
-                query: query.clone(),
+                query: query.to_string(),
                 operation: operation_name.clone(),
                 hash: doc.hash.clone(),
                 schema_id: self.schema.schema_id.clone(),
@@ -548,8 +642,10 @@ where
                 context,
             } = request;
 
+            let query = Arc::new(query);
+
             let request = QueryPlannerRequest::builder()
-                .query(query)
+                .query(query.clone())
                 .and_operation_name(operation_name)
                 .document(doc)
                 .metadata(caching_key.metadata)
@@ -641,6 +737,7 @@ where
             }
 
             let outcome_recorded = Arc::new(AtomicU8::new(Outcome::None as u8));
+
             // When cooperative cancellation is enabled, we want to cancel the query planner
             // task if the request is canceled.
             if self.cooperative_cancellation.is_enabled() {
@@ -694,12 +791,49 @@ where
                                 });
                             planning_task.await
                         } else {
-                            unreachable!(
-                                "Can't set a timeout without enabling cooperative cancellation"
-                            );
+                            unreachable!("ruh roh");
                         }
                     }
-                    None => planning_task.await,
+                    None => {
+                        let monitoring_task = tokio::spawn(async move{
+                             #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+                             {
+                                 use tikv_jemalloc_ctl::{epoch, stats};
+                                 let total_mem_available = get_memory_limit_bytes();
+                                 // NB: configurable by env var: APOLLO_MEMORY_HEADROOM
+                                 let memory_headroom = get_memory_headroom();
+                                 let highwater_mark = total_mem_available - memory_headroom;
+
+                                 let e = epoch::mib().unwrap();
+                                 loop {
+                                     // epoch determines refresh of stats
+                                     e.advance().unwrap();
+                                     // in bytes
+                                     match stats::allocated::read() {
+                                         Ok(allocated) => {
+                                             if allocated >= highwater_mark {
+                                                 tracing::warn!("memory consumption near exhaustion; attempting to log operations seen while approaching memory exhaustion");
+                                                 tracing::warn!("operation: {query}");
+                                                 return
+
+                                             }
+                                         }
+                                         Err(err) => {
+                                             tracing::warn!("error trying to get allocated mem: {err}");
+                                         }
+                                     };
+
+                                     tokio::time::sleep(Duration::from_millis(500)).await;
+                                 }
+                             };
+
+
+                        });
+
+                        let res = planning_task.await;
+                        monitoring_task.abort();
+                        res
+                    }
                 }
             } else {
                 // some clients might timeout and cancel the request before query planning is finished,
@@ -1690,6 +1824,39 @@ mod tests {
         } else {
             panic!("Expected both calls to return same error");
         }
+    }
+
+    #[test]
+    fn test_get_memory_limit_bytes_with_env_var_hint() {
+        // WARN: don't take me to prod
+        unsafe {
+            std::env::set_var("APOLLO_MEMORY_LIMIT_HINT", "1073741824"); 
+        }
+
+        let result = get_memory_limit_bytes();
+        assert_eq!(*result, 1073741824 as usize);
+        
+        // WARN: don't take me to prod
+        unsafe {
+            std::env::remove_var("APOLLO_MEMORY_LIMIT_HINT");
+        }
+    }
+
+    #[test]
+    fn test_get_memory_headroom_with_env_var() {
+        // WARN: don't take me to prod
+        unsafe {
+            std::env::set_var("APOLLO_MEMORY_HEADROOM", "123456"); 
+        }
+
+        let result = get_memory_headroom();
+        assert_eq!(*result, 123456 as usize);
+        
+        // WARN: don't take me to prod
+        unsafe {
+            std::env::remove_var("APOLLO_MEMORY_HEADROOM");
+        }
+        
     }
 
     #[tokio::test]

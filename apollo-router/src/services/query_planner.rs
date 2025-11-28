@@ -29,7 +29,7 @@ assert_impl_all!(Request: Send);
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct Request {
-    pub(crate) query: String,
+    pub(crate) query: Arc<String>,
     pub(crate) operation_name: Option<String>,
     pub(crate) document: ParsedDocument,
     pub(crate) metadata: crate::plugins::authorization::CacheKeyMetadata,
@@ -44,7 +44,7 @@ impl Request {
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
     pub(crate) fn new(
-        query: String,
+        query: Arc<String>,
         operation_name: Option<String>,
         document: ParsedDocument,
         metadata: crate::plugins::authorization::CacheKeyMetadata,

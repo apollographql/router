@@ -171,6 +171,7 @@ impl QueryPlannerService {
                 .and_then(|operation| {
                     rust_planner.build_query_plan(&doc.executable, operation, query_plan_options)
                 });
+
             if let Err(FederationError::SingleFederationError(
                 SingleFederationError::InternalUnmergeableFields { .. },
             )) = &result
@@ -199,9 +200,11 @@ impl QueryPlannerService {
             let root_node = convert_root_query_plan_node(&plan);
             Ok((plan, root_node))
         };
+
         let (plan, mut root_node) = compute_job::execute(compute_job_type, job)
             .map_err(MaybeBackPressureError::TemporaryError)?
             .await?;
+
         if let Some(node) = &mut root_node {
             init_query_plan_root_node(node).map_err(QueryPlannerError::from)?;
         }
@@ -407,6 +410,8 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
             plan_options,
             compute_job_type,
         } = req;
+
+        let original_query = original_query.to_string();
 
         let this = self.clone();
         let fut = async move {
