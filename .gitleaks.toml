@@ -3,6 +3,8 @@
     [ rules.allowlist ]
         paths = [
             '''Cargo.lock$'''
+            ,'''^\.changesets\/.+\.md$'''
+            ,'''^CHANGELOG\.md$'''
         ]
 
 [[ rules ]]

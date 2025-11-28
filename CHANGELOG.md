@@ -2,6 +2,173 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.9.0] - 2025-11-27
+
+## 🚀 Features
+
+### Add CORS Private Network Access support ([PR #8279](https://github.com/apollographql/router/pull/8279))
+
+CORS configuration now supports [private network access](https://wicg.github.io/private-network-access/) (PNA). Enable PNA for a CORS policy by specifying the `private_network_access` field, which supports two optional subfields: `access_id` and `access_name`.
+
+**Example configuration:**
+
+```yaml
+cors:
+  policies:
+    - origins: ["https://studio.apollographql.com"]
+      private_network_access:
+        access_id:
+    - match_origins: ["^https://(dev|staging|www)?\\.my-app\\.(com|fr|tn)$"]
+      private_network_access:
+        access_id: "01:23:45:67:89:0A"
+        access_name: "mega-corp device"
+```
+
+By [@TylerBloom](https://github.com/TylerBloom) in https://github.com/apollographql/router/pull/8279
+
+### Configure maximum HTTP/2 header list size ([PR #8636](https://github.com/apollographql/router/pull/8636))
+
+The router now supports configuring the maximum size for HTTP/2 header lists via the `limits.http2_max_headers_list_bytes` setting. This protects against excessive resource usage from clients sending large sets of HTTP/2 headers.
+
+The default remains 16KiB. When a client sends a request with HTTP/2 headers whose total size exceeds the configured limit, the router rejects the request with a 431 error code.
+
+**Example configuration:**
+
+```yaml
+limits:
+  http2_max_headers_list_bytes: "48KiB"
+```
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8636
+
+### Customize response cache key per subgraph via context ([PR #8543](https://github.com/apollographql/router/pull/8543))
+
+The response cache key can now be customized per subgraph using the `apollo::response_cache::key` context entry. The new `subgraphs` field enables defining separate cache keys for individual subgraphs.
+
+Subgraph-specific data takes precedence over data in the `all` field—the router doesn't merge them. To set common data when providing subgraph-specific data, add it to the subgraph-specific section.
+
+**Example payload:**
+
+```json
+{
+  "all": 1,
+  "subgraph_operation1": "key1",
+  "subgraph_operation2": {
+    "data": "key2"
+  },
+  "subgraphs": {
+    "my_subgraph": {
+      "locale": "be"
+    }
+  }
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8543
+
+### Add telemetry selector for Cache-Control metrics ([PR #8524](https://github.com/apollographql/router/pull/8524))
+
+The new `response_cache_control` selector enables telemetry metrics based on the computed [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control) from subgraph responses.
+
+**Example configuration:**
+
+```yaml
+telemetry:
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        views:
+          - name: subgraph.response.cache_control.max_age
+            aggregation:
+              histogram:
+                buckets:
+                - 10
+                - 100
+                - 1000
+                - 10000
+                - 100000
+  instrumentation:
+    instruments:
+      subgraph:
+        subgraph.response.cache_control.max_age:
+          value:
+            response_cache_control: max_age
+          type: histogram
+          unit: s
+          description: A histogram of the computed TTL for a subgraph response
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8524
+
+## 🐛 Fixes
+
+### Remove `_redacted` suffix from event attributes in `apollo.router.state.change.total` metric ([Issue #8464](https://github.com/apollographql/router/issues/8464))
+
+Event names in the `apollo.router.state.change.total` metric no longer include the `_redacted` suffix. The metric now uses the `Display` trait instead of `Debug` for event names, changing values like `updateconfiguration_redacted` to `updateconfiguration` in APM platforms.
+
+The custom behavior for `UpdateLicense` events is retained—the license state name is still appended.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8464
+
+### Preserve Content-Length header for responses with known size ([Issue #7941](https://github.com/apollographql/router/issues/7941))
+
+The router now uses the `Content-Length` header for GraphQL responses with known content lengths instead of `transfer-encoding: chunked`. Previously, the `fleet_detector` plugin destroyed HTTP body size hints when collecting metrics.
+
+This extends the fix from [#6538](https://github.com/apollographql/router/pull/6538), which preserved size hints for `router → subgraph` requests, to also cover `client → router` requests and responses. Size hints now flow correctly through the entire pipeline for optimal HTTP header selection.
+
+By [@morriswchris](https://github.com/morriswchris) in https://github.com/apollographql/router/pull/7977
+
+### Correct `apollo.router.operations.subscriptions.events` metric counting ([PR #8483](https://github.com/apollographql/router/pull/8483))
+
+The `apollo.router.operations.subscriptions.events` metric now increments correctly for each subscription event (excluding ping/pong/close messages). The counter call has been moved into the stream to trigger on each event.
+
+This change also removes custom pong response handling before connection acknowledgment, which previously caused duplicate pongs because the WebSocket implementation already handles pings by default.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8483
+
+### Unify timeout codes in response caching metrics ([PR #8515](https://github.com/apollographql/router/pull/8515))
+
+Tokio- and Redis-based timeouts now use the same `timeout` code in `apollo.router.operations.response_cache.*.error` metrics. Previously, they were inadvertently given different code values.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8515
+
+## 📃 Configuration
+
+### Remove unused TTL parameter from response cache Redis configuration ([PR #8513](https://github.com/apollographql/router/pull/8513))
+
+The `ttl` parameter under `redis` configuration had no effect and is removed. Configure TTL at the `subgraph` level to control cache entry expiration:
+
+```yaml
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      ttl: 10m  # ✅ Configure TTL here
+      redis:
+        urls: [ "redis://..." ]
+        # ❌ ttl was here previously (unused)
+```
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8513
+
+## 📚 Documentation
+
+### Document active subgraph requests selector ([PR #8530](https://github.com/apollographql/router/pull/8530))
+
+The telemetry selectors documentation now correctly reflects the `active_subgraph_requests` attribute.
+
+By [@faisalwaseem](https://github.com/faisalwaseem) in https://github.com/apollographql/router/pull/8530
+
+### Add Redis cache suggestions to response cache documentation ([PR #8624](https://github.com/apollographql/router/pull/8624))
+
+The FAQ now includes information about supported Redis versions and Redis key eviction setup.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8624
+
+
+
 # [2.8.2] - 2025-11-11
 
 ## 🐛 Fixes
