@@ -70,6 +70,20 @@ Offline license support is available on an as-needed basis to Enterprise organiz
 
 </Tip>
 
+<Caution>
+
+An offline license is valid for the duration of your contract or one year, whichever is shorter. It includes a grace period of 28 days.
+
+<br/><br/>
+
+Keep your offline license files up to date by [renewing your license](#renew-an-offline-license).
+
+<br/><br/>
+
+See [Grace period for expired plans](#grace-period-for-expired-plans) for details on what happens when your license expires.
+
+</Caution>
+
 Running your GraphOS Router fleet while fully connected to GraphOS is the best choice for  most Apollo users. However, some scenarios can prevent your routers from connecting to GraphOS for an extended period, ranging from disasters that break connectivity to isolated sites operating with air-gapped networks. If you need to restart or rapidly scale your entire router fleet, but you're unable to communicate with Apollo Uplink, new router instances won't be able to serve traffic.
 
 To support long-term disconnection scenarios, GraphOS supports __offline licenses__ for the GraphOS Router. An offline license enables routers to start and serve traffic without a persistent connection to GraphOS. Instead of fetching its supergraph schema from Apollo Uplink, an offline router gets its supergraph schema from a local supergraph schema file.
@@ -84,14 +98,6 @@ An offline license can be retrieved from GraphOS with the [`rover license fetch`
 
 With an offline license, a router can either be fully disconnected from GraphOS or configured to connect to GraphOS on a best-effort basis so that it can send graph usage metrics. Apollo recommends configuring your router to report graph usage metrics to GraphOS whenever possible. Since your router sends metrics in a best-effort fashion, it incurs no performance or uptime penalties while enabling several powerful GraphOS features, such as operation checks, field insights, operation traces, and contracts.
 
-<Note>
-
-A router using an offline license requires [the use of local manifests](/graphos/routing/security/persisted-queries#local_manifests) when using [safelisting with persisted queries](/graphos/routing/security/persisted-queries), otherwise it will not work as designed when the router is disconnected from Uplink.
-
-</Note>
-
-An offline license is valid for the lesser of the duration of your contract with Apollo, or one year, with an added grace period of 28 days. You are responsible for keeping your offline license files up to date within your infrastructure by rerunning `rover license fetch` to fetch updated license files.
-
 ### Set up offline license for the GraphOS Router
 
 Follow these steps to configure an GraphOS Router to use an offline license:
@@ -103,7 +109,6 @@ Follow these steps to configure an GraphOS Router to use an offline license:
     ```
 
 1. Provide the offline license to your router on startup. The router accepts an offline license in a few ways:
-
     1. [`--license <license_path>`](/graphos/reference/router/configuration#--license) CLI option, with an argument containing an absolute or relative path to an offline license file
     1. [`APOLLO_ROUTER_LICENSE_PATH`](/graphos/reference/router/configuration#--license) environment variable, containing an absolute or relative path to an offline license file 
     1. [`APOLLO_ROUTER_LICENSE`](/graphos/reference/router/configuration#--license) environment variable, containing the stringified contents of an offline license file
@@ -121,25 +126,49 @@ Follow these steps to configure an GraphOS Router to use an offline license:
     * [`APOLLO_SUPERGRAPH_PATH`](/graphos/reference/router/configuration#-s----supergraph) environment variable, containing an absolute or relative path to supergraph schema file
     * [`APOLLO_SUPERGRAPH_URLS`](/graphos/reference/router/configuration#-s----supergraph) environment variable, containing URLs to supergraph schemas
 
+    <Note>
+
+    Update your local supergraph schema files using your CI/CD pipelines. Failing to propagate schema changes can lead to schema drift, unexpected errors, or outages.
+    
+    </Note>
+
 1. Configure the router to report usage metrics to GraphOS in a best-effort basis by setting both the [`APOLLO_KEY`](/graphos/reference/router/configuration#apollo_key) and [`APOLLO_GRAPH_REF`](/graphos/reference/router/configuration#apollo_graph_ref) environment variables. 
 
     These metrics are necessary for several important GraphOS features (operations checks, field insights, operation traces, contracts). Sending them best-effort incurs no performance or uptime penalties. 
 
-## Troubleshooting
+### Renew an offline license
 
-**If your router doesn't successfully connect to GraphOS,** it logs an error that begins with one of the following strings if any GraphOS features are enabled:
+Because the router does not auto-fetch updated licenses, you need to keep license files current across all deployments.  
 
-| Error Message               | Description |
-|-----------------------------|-------------|
-| `Not connected to GraphOS.` | At least one of the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables wasn't set on router startup. |
-| `License not found.`        | The router connected to GraphOS with credentials that are not associated with a GraphOS plan. |
-| `License has expired.`      | Your organization's GraphOS subscription has ended. **Your router will stop processing incoming requests at the end of the standard [grace period](#grace-period-for-expired-plans).** |
+Failure to rotate licenses before they expire causes the router to degrade. See [Grace period for expired plans](#grace-period-for-expired-plans).
+
+Follow these steps to rotate your license regularly and safely:
+
+1. Schedule a [`rover license fetch` job](/rover/commands/license) as part of every subscription renewal cycle.
+2. Securely distribute the newly generated license file to all router instances.
+3. Replace the existing license file immediately after the contract is renewed.
+4. Ensure your CI/CD or configuration management system includes this rotation step as a standard operational procedure.
+
+### Stop using an offline license
+
+If you no longer want the router to rely on an offline license, move back to online validation through Uplink or disable GraphOS features entirely to avoid license enforcement. Do this when routers regain reliable connectivity, when you want to eliminate manual license rotation, or when Apollo Support confirms your account should no longer operate in offline-licensed mode. 
+
+Follow these steps to stop using an offline license:
+
+1. Remove any `--license` flags and unset all `APOLLO_ROUTER_LICENSE*` environment variables.
+1. Ensure that `APOLLO_KEY` and `APOLLO_GRAPH_REF` are set correctly so the router can authenticate with Uplink and retrieve entitlements automatically.
+
+Once online, license renewal is handled through GraphOS without the need to manually rotate files.
+
+If you prefer not to reconnect to Uplink and do not plan to renew the offline license, you must disable all GraphOS features that require entitlements before the grace period ends. Otherwise, once the license expires, the router will stop processing requests.
 
 ## Turning off GraphOS features
 
 To turn off an GraphOS feature, remove all of its associated configuration keys from your router's [YAML config file](/graphos/reference/router/configuration#yaml-config-file).
 
 ## Grace period for expired plans
+
+An offline license is valid for the lesser of the duration of your contract with Apollo, or one year, with an added grace period of 28 days. Keep your offline license files up to date by [renewing your license](#renew-an-offline-license).
 
 If your organization terminates its GraphOS subscription, your router's license is considered expired at the end of your final paid subscription period. GraphOS provides a grace period for expired licenses so that you can turn off GraphOS features before they produce breaking errors in your router.
 
@@ -150,3 +179,13 @@ If your router has an expired GraphOS license, its behavior degrades according t
 - **After 28 days,** your router begins a **hard outage**. It no longer processes incoming client requests and continues emitting logs and metrics from the soft outage.
 
 Your router resumes normal functioning whenever you renew your GraphOS subscription or turn off all [GraphOS features](/graphos/routing/graphos-features).
+
+## Troubleshooting
+
+If your router doesn't successfully connect to GraphOS, it logs an error that begins with one of the following strings if any GraphOS features are enabled:
+
+| Error Message               | Description |
+|-----------------------------|-------------|
+| `Not connected to GraphOS.` | At least one of the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables wasn't set on router startup. |
+| `License not found.`        | The router connected to GraphOS with credentials that are not associated with a GraphOS plan. |
+| `License has expired.`      | Your organization's GraphOS subscription has ended. Your router will stop processing incoming requests at the end of the standard [grace period](#grace-period-for-expired-plans). |
