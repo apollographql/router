@@ -1,10 +1,12 @@
 mod metrics;
 
+use std::any::Any;
 use std::future::Future;
 use std::ops::ControlFlow;
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use apollo_federation::error::FederationError;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
@@ -21,6 +23,8 @@ use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
+use crate::allocator::AllocationLimit;
+use crate::allocator::current;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_SPAN_NAME;
@@ -65,6 +69,7 @@ impl<T> JobStatus<'_, T> {
     /// to avoid needless resource consumption.
     pub(crate) fn check_for_cooperative_cancellation(&self) -> ControlFlow<()> {
         if self.result_sender.is_closed() {
+            println!("result sender is closed");
             ControlFlow::Break(())
         } else {
             ControlFlow::Continue(())
@@ -110,6 +115,25 @@ impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
     }
 }
 
+/// Job was cancelled due to cooperative cancellation
+#[derive(thiserror::Error, Debug, displaydoc::Display, Clone)]
+pub(crate) struct ComputeCooperativeCancellationError;
+
+impl ComputeCooperativeCancellationError {
+    pub(crate) fn to_graphql_error(&self) -> crate::graphql::Error {
+        crate::graphql::Error::builder()
+            .message("Your request has been cancelled due to cooperative cancellation")
+            .extension_code("REQUEST_COOPERATIVE_CANCELLATION")
+            .build()
+    }
+}
+
+impl crate::graphql::IntoGraphQLErrors for ComputeCooperativeCancellationError {
+    fn into_graphql_errors(self) -> Result<Vec<crate::graphql::Error>, Self> {
+        Ok(vec![self.to_graphql_error()])
+    }
+}
+
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum ComputeJobType {
@@ -145,6 +169,8 @@ pub(crate) struct Job {
     ty: ComputeJobType,
     queue_start: Instant,
     job_fn: Box<dyn FnOnce() + Send + 'static>,
+    allocation_stats: Option<std::sync::Arc<crate::allocator::AllocationStats>>,
+    cancel_tx: Option<tokio::sync::oneshot::Sender<usize>>,
 }
 
 pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
@@ -182,7 +208,35 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                                 job.type = job.ty
                             );
                             let job_start = Instant::now();
-                            (job.job_fn)();
+
+                            // Execute job with memory tracking if stats are available
+                            if let Some(stats) = job.allocation_stats {
+                                let max_bytes =
+                                    std::env::var("APOLLO_ROUTER_QUERY_PLANNER_MEMORY_LIMIT")
+                                        .ok()
+                                        .and_then(|s| s.parse::<usize>().ok());
+
+                                // Create a child context with the job type as the name
+                                let job_name: &'static str = job.ty.into();
+
+                                crate::allocator::with_parented_memory_tracking(
+                                    job_name,
+                                    stats,
+                                    || {
+                                        (job.job_fn)();
+                                        if let Some(allocation_stats) = current() {
+                                            record_metrics(&allocation_stats);
+                                        }
+                                    },
+                                    Option::zip(max_bytes, job.cancel_tx).map(
+                                        |(max_bytes, sender)| {
+                                            AllocationLimit::new(max_bytes, sender)
+                                        },
+                                    ),
+                                );
+                            } else {
+                                (job.job_fn)();
+                            }
                             observe_compute_duration(job.ty, job_start.elapsed());
                         })
                     })
@@ -196,6 +250,54 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
         );
         AgeingPriorityQueue::bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
     })
+}
+
+fn record_metrics(stats: &crate::allocator::AllocationStats) {
+    let bytes_allocated = stats.bytes_allocated() as u64;
+    let bytes_deallocated = stats.bytes_deallocated() as u64;
+    let bytes_zeroed = stats.bytes_zeroed() as u64;
+    let bytes_reallocated = stats.bytes_reallocated() as u64;
+    let context_name = stats.name();
+
+    // Record total bytes allocated
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_allocated,
+        allocation.type = "allocated",
+        context = context_name
+    );
+
+    // Record bytes deallocated
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_deallocated,
+        allocation.type = "deallocated",
+        context = context_name
+    );
+
+    // Record bytes zeroed
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_zeroed,
+        allocation.type = "zeroed",
+        context = context_name
+    );
+
+    // Record bytes reallocated
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_reallocated,
+        allocation.type = "reallocated",
+        context = context_name
+    );
 }
 
 /// Returns a future that resolves to a `Result` that is `Ok` if `f` returned or `Err` if it panicked.
@@ -215,7 +317,17 @@ where
     );
     span.in_scope(|| {
         let mut job_watcher = JobWatcher::new(compute_job_type);
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
+
+        let is_cancellable = crate::allocator::current().is_some();
+
+        let (cancel_tx, cancel_rx) = if is_cancellable {
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
+        };
+
         let wrapped_job_fn = Box::new(move || {
             let status = JobStatus { result_sender: &tx };
             // `AssertUnwindSafe` here is correct because this `catch_unwind`
@@ -238,6 +350,8 @@ where
             ty: compute_job_type,
             job_fn: wrapped_job_fn,
             queue_start: Instant::now(),
+            allocation_stats: crate::allocator::current(),
+            cancel_tx,
         };
 
         queue
@@ -261,7 +375,23 @@ where
             })?;
 
         Ok(async move {
-            let result = rx.await;
+            let result: Result<Result<T, Box<dyn Any + Send>>, oneshot::error::RecvError> =
+                if let Some(mut cancel_rx) = cancel_rx {
+                    println!("waiting for cancel or result");
+                    tokio::select! {
+                        biased;
+                        cancellation = &mut cancel_rx => {
+                            if let Ok(bytes_requested) = cancellation {
+                                // TODO(memory-tracking): How can we get the operation name here?
+                                tracing::error!("job {compute_job_type_str} cancelled as it exceeded memory limit (requested {bytes_requested} bytes)");
+                            }
+                            Ok(Err(Box::new(ComputeCooperativeCancellationError)))
+                        }
+                        result = &mut rx => result
+                    }
+                } else {
+                    rx.await
+                };
 
             // This local variable MUST exist. Otherwise, only the field from the JobWatcher struct is moved and drop will occur before the outcome is set.
             // This is predicated on all the fields in the struct being Copy!!!
