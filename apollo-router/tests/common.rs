@@ -16,6 +16,7 @@ use fred::clients::Client as RedisClient;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
 use fred::prelude::Config as RedisConfig;
+use fred::types::scan::ScanType;
 use fred::types::scan::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
@@ -215,7 +216,6 @@ pub struct IntegrationTest {
     _subgraph_overrides: HashMap<String, String>,
     bind_address: Arc<Mutex<Option<SocketAddr>>>,
     redis_namespace: String,
-    redis_urls: Option<Vec<String>>,
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
@@ -279,11 +279,8 @@ impl IntegrationTest {
             Some(&self.port_replacements),
         );
 
-        std::fs::write(
-            &self.test_config_location,
-            serde_yaml::to_string(&updated_config).unwrap(),
-        )
-        .expect("Failed to write updated config");
+        std::fs::write(&self.test_config_location, updated_config)
+            .expect("Failed to write updated config");
     }
 
     /// Set environment variables for the router subprocess
@@ -564,9 +561,8 @@ impl IntegrationTest {
         http_method: Option<String>,
         jwt: Option<String>,
         env: Option<HashMap<String, OsString>>,
-        redis_namespace: Option<String>,
     ) -> Self {
-        let redis_namespace = redis_namespace.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
         let extra_propagator = extra_propagator.unwrap_or_default();
         let tracer_provider_client = telemetry.tracer_provider("client");
@@ -593,7 +589,7 @@ impl IntegrationTest {
             .or_insert(url.clone());
 
         // Insert the overrides into the config
-        let config = merge_overrides(
+        let config_str = merge_overrides(
             &config,
             &subgraph_overrides,
             &apollo_otlp_endpoint,
@@ -601,9 +597,6 @@ impl IntegrationTest {
             &redis_namespace,
             None,
         );
-
-        // pull the redis urls from the config
-        let redis_urls = get_redis_urls(&config);
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
             "..",
@@ -652,11 +645,7 @@ impl IntegrationTest {
         test_config_location.push(location);
         test_schema_location.push(format!("apollo-router-test-{}.graphql", Uuid::new_v4()));
 
-        fs::write(
-            &test_config_location,
-            serde_yaml::to_string(&config).unwrap(),
-        )
-        .expect("could not write config");
+        fs::write(&test_config_location, &config_str).expect("could not write config");
         fs::copy(&supergraph, &test_schema_location).expect("could not write schema");
 
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
@@ -703,7 +692,6 @@ impl IntegrationTest {
             telemetry,
             extra_propagator,
             redis_namespace,
-            redis_urls,
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
             logs: vec![],
@@ -876,17 +864,16 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn update_config(&self, yaml: &str) {
-        let config = merge_overrides(
-            yaml,
-            &self._subgraph_overrides,
-            &self._apollo_otlp_server.uri().to_string(),
-            None,
-            &self.redis_namespace,
-            Some(&self.port_replacements),
-        );
         tokio::fs::write(
             &self.test_config_location,
-            serde_yaml::to_string(&config).unwrap(),
+            &merge_overrides(
+                yaml,
+                &self._subgraph_overrides,
+                &self._apollo_otlp_server.uri().to_string(),
+                None,
+                &self.redis_namespace,
+                Some(&self.port_replacements),
+            ),
         )
         .await
         .expect("must be able to write config");
@@ -907,23 +894,6 @@ impl IntegrationTest {
         &self,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> + use<> {
         self.execute_query(Query::builder().build())
-    }
-
-    #[allow(dead_code)]
-    pub async fn execute_several_default_queries(
-        &self,
-        times: usize,
-    ) -> Vec<(TraceId, reqwest::Response)> {
-        let mut results = Vec::with_capacity(3 * times);
-        for _ in 0..times {
-            results.push(self.execute_query(Query::default()).await);
-            results.push(self.execute_query(Query::default().with_anonymous()).await);
-            results.push(
-                self.execute_query(Query::default().with_invalid_query())
-                    .await,
-            );
-        }
-        results
     }
 
     #[allow(dead_code)]
@@ -1405,82 +1375,6 @@ impl IntegrationTest {
         }
     }
 
-    /// Assert that a metric is present and equal to zero.
-    #[allow(dead_code)]
-    pub async fn assert_metric_zero(&self, text: &str, duration: Option<Duration>) {
-        let now = Instant::now();
-        let mut last_metrics = String::new();
-
-        let pattern = regex::escape(text);
-        let pattern_exists = Regex::new(&format!("(?m)^{pattern}")).expect("Invalid regex");
-        let matches_zero_re =
-            Regex::new(&format!("(?m)^{}\\s+0(\\s|$)", pattern)).expect("Invalid regex");
-
-        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
-            if let Ok(metrics) = self
-                .get_metrics_response()
-                .await
-                .expect("failed to fetch metrics")
-                .text()
-                .await
-            {
-                // metric exists and matches zero
-                if pattern_exists.is_match(&metrics) && matches_zero_re.is_match(&metrics) {
-                    return;
-                }
-                last_metrics = metrics;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-
-        if pattern_exists.is_match(&last_metrics) {
-            panic!("'{text}' detected in metrics but was non-zero\n{last_metrics}");
-        } else {
-            panic!("'{text}' not detected in metrics\n{last_metrics}");
-        }
-    }
-
-    /// Assert that some metric is non-zero. Useful for those metrics that are non-zero but whose
-    /// values might change across integration test runs.
-    ///
-    /// example use: `.assert_metric_non_zero("some_metric_name{label="example"}", None)`
-    ///
-    /// Note: make sure you strip off the value at the end or you'll potentially get false
-    /// negatives
-    #[allow(dead_code)]
-    pub async fn assert_metric_non_zero(&self, text: &str, duration: Option<Duration>) {
-        let now = Instant::now();
-        let mut last_metrics = String::new();
-
-        let pattern = regex::escape(text);
-        let pattern = format!(
-            // disjunction between two patterns: the first (before the `|`) says to look for a value
-            // starting with a digit between 1-9, matching however many, optionally with a decimal; the
-            // second pattern matches values starting with 0 and then a decimal (both required), at least
-            // on non-zero digit, and then however many (if any) other digits
-            "(?m)^{}\\s+([1-9]\\d*(\\.\\d+)?|0\\.[0-9]*[1-9][0-9]*)",
-            pattern
-        );
-        let re = Regex::new(&format!("(?m)^{}", pattern)).expect("Invalid regex");
-
-        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
-            if let Ok(metrics) = self
-                .get_metrics_response()
-                .await
-                .expect("failed to fetch metrics")
-                .text()
-                .await
-            {
-                if re.is_match(&metrics) {
-                    return;
-                }
-                last_metrics = metrics;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("'{text}' not detected in metrics\n{last_metrics}");
-    }
-
     #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
         let router = self.router.as_mut().expect("router must have been started");
@@ -1556,8 +1450,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn clear_redis_cache(&self) {
-        let url = self.redis_url().expect("no redis urls");
-        let config = RedisConfig::from_url(&url).unwrap();
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
 
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
@@ -1565,12 +1458,20 @@ impl IntegrationTest {
             .wait_for_connect()
             .await
             .expect("could not connect to redis");
-
-        for key in self.scan(&client).await.expect("no keys") {
-            client
-                .del::<usize, _>(key)
-                .await
-                .expect("could not delete key");
+        let namespace = &self.redis_namespace;
+        let mut scan = client.scan(format!("{namespace}:*"), None, Some(ScanType::String));
+        while let Some(result) = scan.next().await {
+            if let Some(page) = result.expect("could not scan redis").take_results() {
+                for key in page {
+                    let key = key.as_str().expect("key should be a string");
+                    if key.starts_with(&self.redis_namespace) {
+                        client
+                            .del::<usize, _>(key)
+                            .await
+                            .expect("could not delete key");
+                    }
+                }
+            }
         }
 
         client.quit().await.expect("could not quit redis");
@@ -1578,36 +1479,9 @@ impl IntegrationTest {
         let _ = connection_task.await;
     }
 
-    /// Collect and return all keys found within `self.redis_namespace` in the provided client's
-    /// connected redis instance.
-    async fn scan(
-        &self,
-        client: &fred::clients::Client,
-    ) -> Result<Vec<String>, fred::error::Error> {
-        let pattern = format!("{}:*", self.redis_namespace);
-        let mut scan = if client.is_clustered() {
-            client.scan_cluster(pattern, None, None).boxed()
-        } else {
-            client.scan(pattern, None, None).boxed()
-        };
-
-        let mut keys = Vec::new();
-        while let Some(result) = scan.next().await {
-            if let Some(page) = result?.take_results() {
-                for key in page {
-                    let key = key.as_str().expect("key should be a string");
-                    keys.push(key.to_string());
-                }
-            }
-        }
-
-        Ok(keys)
-    }
-
     #[allow(dead_code)]
     pub async fn assert_redis_cache_contains(&self, key: &str, ignore: Option<&str>) -> String {
-        let url = self.redis_url().expect("no redis urls");
-        let config = RedisConfig::from_url(&url).unwrap();
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
         client.wait_for_connect().await.unwrap();
@@ -1617,14 +1491,21 @@ impl IntegrationTest {
             Ok(s) => s,
             Err(e) => {
                 println!("non-ignored keys in the same namespace in Redis:");
-                for key in self
-                    .scan(&client)
-                    .await
-                    .expect("couldn't get keys from redis")
-                {
-                    let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
-                    if Some(unnamespaced_key.as_str()) != ignore {
-                        println!("\t{unnamespaced_key}");
+
+                let mut scan = client.scan(
+                    format!("{redis_namespace}:*"),
+                    Some(u32::MAX),
+                    Some(ScanType::String),
+                );
+
+                while let Some(result) = scan.next().await {
+                    let keys = result.as_ref().unwrap().results().as_ref().unwrap();
+                    for key in keys {
+                        let key = key.as_str().expect("key should be a string");
+                        let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
+                        if Some(unnamespaced_key.as_str()) != ignore {
+                            println!("\t{unnamespaced_key}");
+                        }
                     }
                 }
                 panic!(
@@ -1637,14 +1518,6 @@ impl IntegrationTest {
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
         s
-    }
-
-    /// Return the first URL in `self.redis_urls`.
-    ///
-    /// This `Vec` will have been populated by the config provided to `IntegrationTest` upon
-    /// initialization.
-    fn redis_url(&self) -> Option<String> {
-        Some(self.redis_urls.as_ref()?.iter().next()?.clone())
     }
 }
 
@@ -1667,7 +1540,7 @@ fn merge_overrides(
     bind_addr: Option<SocketAddr>,
     redis_namespace: &str,
     port_replacements: Option<&HashMap<String, u16>>,
-) -> Value {
+) -> String {
     let bind_addr = bind_addr
         .map(|a| a.to_string())
         .unwrap_or_else(|| "127.0.0.1:0".into());
@@ -1803,66 +1676,22 @@ fn merge_overrides(
             json!({"listen": bind_addr.to_string()}),
         );
 
-    let insert_redis_namespace = |v: Option<&mut Value>| {
-        if let Some(v) = v.and_then(|o| o.as_object_mut()) {
-            v.insert("namespace".to_string(), redis_namespace.into());
-        }
-    };
-
-    insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
-    insert_redis_namespace(config.pointer_mut("/preview_response_cache/subgraph/all/redis"));
-    if let Some(response_cache_per_subgraph) = config
-        .pointer_mut("/preview_response_cache/subgraph/subgraphs")
+    // Set query plan redis namespace
+    if let Some(query_plan) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("supergraph"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("query_planning"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("cache"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("redis"))
         .and_then(|o| o.as_object_mut())
     {
-        for subgraph_config in response_cache_per_subgraph.values_mut() {
-            insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
-        }
+        query_plan.insert("namespace".to_string(), redis_namespace.into());
     }
 
-    config
-}
-
-/// Extract Redis URLs from config. This assumes that caches will share a redis instance; it just
-/// returns the first URLs found from: query plan, response cache all, response cache subgraphs
-fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
-    let convert_urls = |urls: &Vec<Value>| {
-        urls.iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-            .collect()
-    };
-
-    if let Some(urls) = config
-        .pointer("/supergraph/query_planning/cache/redis/urls")
-        .and_then(|o| o.as_array())
-    {
-        return Some(convert_urls(urls));
-    }
-
-    if let Some(response_cache_config) = config.pointer("/preview_response_cache/subgraph") {
-        if let Some(urls) = response_cache_config
-            .pointer("/all/redis/urls")
-            .and_then(|o| o.as_array())
-        {
-            return Some(convert_urls(urls));
-        }
-
-        if let Some(subgraphs) = response_cache_config
-            .get("subgraphs")
-            .and_then(|o| o.as_object())
-        {
-            for (_, subgraph_config) in subgraphs.iter() {
-                if let Some(urls) = subgraph_config
-                    .pointer("/redis/urls")
-                    .and_then(|o| o.as_array())
-                {
-                    return Some(convert_urls(urls));
-                }
-            }
-        }
-    }
-
-    None
+    serde_yaml::to_string(&config).unwrap()
 }
 
 #[allow(dead_code)]
