@@ -102,6 +102,7 @@ impl SupergraphStage {
 
                 async move {
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_supergraph_request_stage(
                         http_client,
                         coprocessor_url,
@@ -109,6 +110,7 @@ impl SupergraphStage {
                         request,
                         request_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -116,13 +118,9 @@ impl SupergraphStage {
                         tracing::error!("coprocessor: supergraph request stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SupergraphRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::SupergraphRequest, succeeded);
+                    }
                     result
                 }
             })
@@ -142,6 +140,7 @@ impl SupergraphStage {
                     let response: supergraph::Response = fut.await?;
 
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_supergraph_response_stage(
                         http_client,
                         coprocessor_url,
@@ -149,6 +148,7 @@ impl SupergraphStage {
                         response,
                         response_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -156,13 +156,9 @@ impl SupergraphStage {
                         tracing::error!("coprocessor: supergraph response stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SupergraphResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::SupergraphResponse, succeeded);
+                    }
                     result
                 }
             })
@@ -195,6 +191,7 @@ async fn process_supergraph_request_stage<C>(
     mut request: supergraph::Request,
     mut request_config: SupergraphRequestConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -240,6 +237,8 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::SupergraphRequest, duration);
 
@@ -332,6 +331,7 @@ async fn process_supergraph_response_stage<C>(
     response: supergraph::Response,
     response_config: SupergraphResponseConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<supergraph::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -385,6 +385,8 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
 
