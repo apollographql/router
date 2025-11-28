@@ -1,0 +1,5 @@
+description: Response cache feature is now GA
+actions:
+  - type: move
+    from: preview_response_cache
+    to: response_cache

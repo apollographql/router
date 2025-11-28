@@ -2,8 +2,7 @@
 title: Response Cache Customization
 subtitle: Cache private data and customize cache keys
 description: Configure per-user caching with private data, create custom cache keys with Rhai scripts, and tune advanced Redis settings.
-minVersion: Router v2.8.0
-releaseStage: preview
+minVersion: Router v2.10.0
 ---
 
 Beyond basic response caching, the router supports customization for caching private data, modifying cache keys, and advanced Redis configuration.
@@ -47,7 +46,7 @@ To set up private information caching, configure the `private_id` option. This o
 As an example, if you are using the router's JWT authentication plugin, first configure the `private_id` option in the `accounts` subgraph to point to the `user_id` key in the context. Then, use a Rhai script to set that key from the JWT's `sub` claim:
 
 ```yaml title="router.yaml"
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:
@@ -190,7 +189,7 @@ Configure a global Redis instance (used by default) and override it with specifi
 
 ```yaml title="router.yaml"
 # Enable response caching globally
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:
@@ -259,7 +258,7 @@ For Redis TLS connections, you can set up a client certificate or override the r
 
 ```yaml title="router.yaml"
 # Enable response caching globally
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:
@@ -283,7 +282,7 @@ preview_response_cache:
 Redis connections and commands have default timeouts that you can override. The timeouts are tailored to specific caching operations: fetch, insert, invalidate, and maintenance. Set a lower fetch timeout and a higher insert timeout for a good balance of reliability and client responsiveness:
 
 ```yaml title="router.yaml"
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:
@@ -302,7 +301,7 @@ The `ttl` option defines the default global expiration for cache entries. You mu
 To prevent potential cache overflow, consider setting the TTL to 24 hours or twice the median publish interval (whichever is less), and monitor cache utilization in your environment, especially if you cache a lot of different data:
 
 ```yaml title="router.yaml"
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:
@@ -318,7 +317,7 @@ preview_response_cache:
 When using the same Redis instance for multiple purposes, the `namespace` option defines a prefix for all the keys defined by the router:
 
 ```yaml title="router.yaml"
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:
@@ -333,7 +332,7 @@ preview_response_cache:
 When active, the `required_to_start` option prevents the router from starting if it can't connect to Redis. By default, the router starts without a connection to Redis, which means it sends requests to subgraphs directly, bypassing the cache:
 
 ```yaml title="router.yaml"
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:
@@ -348,7 +347,7 @@ preview_response_cache:
 The `pool_size` option defines the number of Redis connections the router opens. By default, the router opens five connections. If you have high traffic between the router and Redis, or if you observe latency in those requests, increase the pool size to reduce that latency. You can measure whether you need to increase this number by monitoring the `apollo.router.operations.response_cache.insert` and `apollo.router.operations.response_cache.fetch` [response cache metrics](/router/performance/caching/response-caching/observability#fetchinsert). If the time to insert and fetch data from the cache is long, it might be because of delays in acquiring a connection from the pool:
 
 ```yaml title="router.yaml"
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:

@@ -104,7 +104,7 @@ const DEFAULT_LRU_PRIVATE_QUERIES_SIZE: NonZeroUsize = NonZeroUsize::new(2048).u
 const LRU_PRIVATE_QUERIES_INSTRUMENT_NAME: &str =
     "apollo.router.response_cache.private_queries.lru.size";
 
-register_private_plugin!("apollo", "preview_response_cache", ResponseCache);
+register_private_plugin!("apollo", "response_cache", ResponseCache);
 
 #[derive(Clone)]
 pub(crate) struct ResponseCache {

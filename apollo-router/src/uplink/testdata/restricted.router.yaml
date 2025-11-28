@@ -52,7 +52,7 @@ plugins:
   experimental.restricted:
     enabled: true
 
-preview_response_cache:
+response_cache:
   enabled: true
   invalidation:
     listen: 0.0.0.0:4000
@@ -61,7 +61,7 @@ preview_response_cache:
     all:
       enabled: true
       redis:
-        urls: [ "redis://localhost:6379" ]
+        urls: ["redis://localhost:6379"]
       ttl: 360s # overrides the global TTL
 
 telemetry:

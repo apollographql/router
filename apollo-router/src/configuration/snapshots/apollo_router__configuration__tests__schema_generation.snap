@@ -11917,7 +11917,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "^preview_response_cache$": {
+    "^response_cache$": {
       "$ref": "#/definitions/Config7"
     }
   },

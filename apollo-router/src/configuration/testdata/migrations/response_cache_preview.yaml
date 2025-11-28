@@ -1,0 +1,6 @@
+preview_response_cache:
+  redis:
+    urls: ["redis://localhost:6379"]
+    fetch_timeout: 5ms
+    ttl: 60s
+  enabled: true
