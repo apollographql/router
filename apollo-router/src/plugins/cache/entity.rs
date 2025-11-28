@@ -1016,7 +1016,7 @@ async fn cache_lookup_entities(
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
         .await
         .into_iter()
-        .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
+        .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0).ok())
         .map(|v| match v {
             None => None,
             Some(v) => {

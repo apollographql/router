@@ -387,10 +387,7 @@ impl CacheStorage for Storage {
         Ok(CacheEntry::from((cache_key, value.0)))
     }
 
-    async fn internal_fetch_multiple(
-        &self,
-        cache_keys: &[&str],
-    ) -> StorageResult<Vec<Option<CacheEntry>>> {
+    async fn internal_fetch_multiple(&self, cache_keys: &[&str]) -> Vec<StorageResult<CacheEntry>> {
         let keys: Vec<RedisKey<String>> = cache_keys
             .iter()
             .map(|key| RedisKey(key.to_string()))
@@ -399,18 +396,18 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Option<RedisValue<CacheValue>>> =
+        let values: Vec<Result<RedisValue<CacheValue>, _>> =
             self.storage.get_multiple_with_options(keys, options).await;
 
-        let entries = values
+        values
             .into_iter()
             .zip(cache_keys)
             .map(|(opt_value, cache_key)| {
-                opt_value.map(|value| CacheEntry::from((*cache_key, value.0)))
+                opt_value
+                    .map(|value| CacheEntry::from((*cache_key, value.0)))
+                    .map_err(Into::into)
             })
-            .collect();
-
-        Ok(entries)
+            .collect()
     }
 
     async fn internal_invalidate_by_subgraph(&self, subgraph_name: &str) -> StorageResult<u64> {
@@ -559,6 +556,7 @@ mod tests {
     use super::Config;
     use super::Storage;
     use super::now;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugins::response_cache::ErrorCode;
     use crate::plugins::response_cache::storage::CacheStorage;
     use crate::plugins::response_cache::storage::Document;
@@ -1370,31 +1368,42 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_errors_are_captured() -> Result<(), BoxError> {
-        let config = Config {
-            fetch_timeout: Duration::from_nanos(0),
-            ..redis_config(false)
-        };
-        let (_drop_tx, drop_rx) = broadcast::channel(2);
-        let storage = Storage::new(&config, drop_rx).await?;
-        storage.truncate_namespace().await?;
+        async {
+            let config = Config {
+                fetch_timeout: Duration::from_nanos(0),
+                ..redis_config(false)
+            };
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&config, drop_rx).await?;
+            storage.truncate_namespace().await?;
 
-        let document = common_document();
+            let keys = ["key1", "key2", "key3"];
 
-        // because of how tokio::timeout polls, it's possible for a command to finish before the
-        // timeout is polled (even if the duration is 0). perform the check in a loop to give it
-        // a few changes to trigger.
-        let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(5) {
-            let error = storage.fetch(&document.key, "S1").await.unwrap_err();
-            if error.is_row_not_found() {
-                continue;
+            // because of how tokio::timeout polls, it's possible for a command to finish before the
+            // timeout is polled (even if the duration is 0). perform the check in a loop to give it
+            // a few chances to trigger.
+            let now = Instant::now();
+            while now.elapsed() < Duration::from_secs(5) {
+                let error = match storage.fetch_multiple(&keys, "S1").await {
+                    Ok(_) => continue,
+                    Err(err) if err.is_row_not_found() => continue,
+                    Err(err) => err,
+                };
+
+                assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
+                assert_eq!(error.code(), "TIMEOUT");
+                assert_counter!(
+                    "apollo.router.operations.response_cache.fetch.error",
+                    keys.len(),
+                    "code" = "TIMEOUT",
+                    "subgraph.name" = "S1"
+                );
+                return Ok(());
             }
 
-            assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
-            assert_eq!(error.code(), "TIMEOUT");
-            return Ok(());
+            panic!("Never observed a timeout");
         }
-
-        panic!("Never observed a timeout");
+        .with_metrics()
+        .await
     }
 }
