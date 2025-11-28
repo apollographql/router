@@ -125,7 +125,7 @@ fn last_shape(
                 method_name.as_ref()
             ),
             input_shape.clone(),
-            input_shape.locations,
+            input_shape.locations().cloned(),
         ),
     }
 }

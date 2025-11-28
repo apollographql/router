@@ -9,6 +9,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/headers/invali
         message: "In `@source(http.headers:)`: unknown variable `$foo`, must be one of $config, $context, $request, $env",
         locations: [
             11:49..11:53,
+            11:54..11:57,
         ],
     },
     Message {
@@ -23,6 +24,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/headers/invali
         message: "In `@source(http.headers:)`: `config.bar` must start with one of $config, $context, $request, $env",
         locations: [
             13:56..13:62,
+            13:63..13:66,
         ],
     },
     Message {
@@ -30,6 +32,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/headers/invali
         message: "In `@connect(http.headers:)` on `Query.scalar`: unknown variable `$foo`, must be one of $args, $config, $context, $request, $env",
         locations: [
             24:49..24:53,
+            24:54..24:57,
         ],
     },
     Message {
@@ -51,6 +54,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/headers/invali
         message: "In `@connect(http.headers:)` on `Query.scalar`: `config.bar` must start with one of $args, $config, $context, $request, $env",
         locations: [
             27:56..27:62,
+            27:63..27:66,
         ],
     },
 ]

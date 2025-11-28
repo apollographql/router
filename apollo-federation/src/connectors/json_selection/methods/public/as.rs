@@ -323,12 +323,12 @@ mod tests {
 
         assert_eq!(
             selection!("person->as", spec).shape().pretty_print(),
-            "Error<\"Method ->as requires one or two arguments (got 0)\", $root.person>",
+            "Error<\n  \"Method ->as requires one or two arguments (got 0)\",\n  $root.person,\n>",
         );
 
         assert_eq!(
             selection!("person->as()", spec).shape().pretty_print(),
-            "Error<\"Method ->as requires one or two arguments (got 0)\", $root.person>",
+            "Error<\n  \"Method ->as requires one or two arguments (got 0)\",\n  $root.person,\n>",
         );
     }
 
@@ -361,7 +361,7 @@ mod tests {
             selection!("person->as($x, @.id, @.name)", spec)
                 .shape()
                 .pretty_print(),
-            "Error<\"Method ->as requires one or two arguments (got 3)\", $root.person>",
+            "Error<\n  \"Method ->as requires one or two arguments (got 3)\",\n  $root.person,\n>",
         );
     }
 
@@ -421,17 +421,17 @@ mod tests {
 
         assert_eq!(
             selection!("person->as(123)", spec).shape().pretty_print(),
-            "Error<\"First argument to ->as must be a single $variable name\", $root.person>",
+            "Error<\n  \"First argument to ->as must be a single $variable name\",\n  $root.person,\n>",
         );
 
         assert_eq!(
             selection!("person->as($x.id)", spec).shape().pretty_print(),
-            "Error<\"First argument to ->as must be a single $variable name with no path suffix\", $root.person>",
+            "Error<\n  \"First argument to ->as must be a single $variable name with no path suffix\",\n  $root.person,\n>",
         );
 
         assert_eq!(
             selection!("person->as(p)", spec).shape().pretty_print(),
-            "Error<\"First argument to ->as must be a single $variable name\", $root.person>",
+            "Error<\n  \"First argument to ->as must be a single $variable name\",\n  $root.person,\n>",
         );
     }
 
@@ -704,7 +704,7 @@ mod tests {
             selection!("person->as($oyez, 'oyez') { id name oyez: $oyez }", spec)
                 .shape()
                 .pretty_print(),
-            "{ id: $root.person.*.id, name: $root.person.*.name, oyez: \"oyez\" }",
+            "{\n  id: $root.person.*.id,\n  name: $root.person.*.name,\n  oyez: \"oyez\",\n}",
         );
     }
 

@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/env-vars.graph
 [
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: object values aren't valid here",
+        message: "In `@source(http.headers:)`: expected union but received incompatible object\nDetails: `One<Float, Bool, String, null, None>` does not accept `Dict<String>`",
         locations: [
             19:36..19:40,
         ],
@@ -15,12 +15,14 @@ input_file: apollo-federation/src/connectors/validation/test_data/env-vars.graph
         code: InvalidHeader,
         message: "In `@source(http.headers:)`: `$env.foo` doesn't have a field named `bar`",
         locations: [
+            20:36..20:40,
+            20:41..20:44,
             20:45..20:48,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.invalidObject`: object values aren't valid here",
+        message: "In `GET` in `@connect(http:)` on `Query.invalidObject`: expected union but received incompatible object\nDetails: `One<Float, Bool, String, null, None>` does not accept `Dict<String>`",
         locations: [
             36:44..36:48,
         ],
@@ -29,6 +31,8 @@ input_file: apollo-federation/src/connectors/validation/test_data/env-vars.graph
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Query.invalidPath`: `$env.foo` doesn't have a field named `bar`",
         locations: [
+            41:44..41:48,
+            41:49..41:52,
             41:53..41:56,
         ],
     },
