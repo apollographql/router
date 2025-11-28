@@ -7583,6 +7583,16 @@ expression: "&schema"
           },
           "description": "Configures cooperative cancellation of query planning\n\nSee [`CooperativeCancellation`] for more details."
         },
+        "experimental_path_weight_limit": {
+          "default": null,
+          "description": "Before creating query plans, for each path of fields in the query we compute all the\npossible options to traverse that path via the subgraphs. These options themselves consist\nof paths, and these option paths may consume a significant amount of memory for sufficiently\ncomplex schemas and operations.\n\nThis config allows limiting the number of in-memory paths (weighted by path size). If the\nquery planner exceeds this limit while planning an operation, planning will abort and the\noperation will fail. For guidance on what value to configure for this option, please use the\nrouter metric `apollo.router.query_planning.plan.path_weight_high_water_mark`.\n\nThe default value is None, which specifies no limit.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "experimental_paths_limit": {
           "default": null,
           "description": "Before creating query plans, for each path of fields in the query we compute all the\npossible options to traverse that path via the subgraphs. Multiple options can arise because\nfields in the path can be provided by multiple subgraphs, and abstract types (i.e. unions\nand interfaces) returned by fields sometimes require the query planner to traverse through\neach constituent object type. The number of options generated in this computation can grow\nlarge if the schema or query are sufficiently complex, and that will increase the time spent\nplanning.\n\nThis config allows specifying a per-path limit to the number of options considered. If any\npath's options exceeds this limit, query planning will abort and the operation will fail.\n\nThe default value is None, which specifies no limit.",
@@ -10628,6 +10638,7 @@ expression: "&schema"
               "mode": "measure",
               "timeout": null
             },
+            "experimental_path_weight_limit": null,
             "experimental_paths_limit": null,
             "experimental_plans_limit": null,
             "experimental_reuse_query_plans": false,
@@ -12180,6 +12191,7 @@ expression: "&schema"
             "mode": "measure",
             "timeout": null
           },
+          "experimental_path_weight_limit": null,
           "experimental_paths_limit": null,
           "experimental_plans_limit": null,
           "experimental_reuse_query_plans": false,

@@ -442,7 +442,8 @@ mod tests {
     ) -> Result<Vec<TransitionGraphPath>, FederationError> {
         let nodes_by_kind = query_graph.root_kinds_to_nodes()?;
         let root_node_idx = nodes_by_kind[&op_kind];
-        let curr_graph_path = TransitionGraphPath::new(query_graph.clone(), root_node_idx)?;
+        let curr_graph_path =
+            TransitionGraphPath::new(query_graph.clone(), root_node_idx, Default::default())?;
         build_graph_paths_recursive(query_graph, curr_graph_path, root_node_idx, depth_limit)
     }
 
@@ -456,7 +457,7 @@ mod tests {
             return Ok(vec![]);
         }
 
-        let mut paths = vec![curr_path.clone()];
+        let mut paths = vec![curr_path.try_clone()?];
         for edge_ref in query_graph.out_edges(curr_node_idx) {
             let edge = edge_ref.weight();
             match &edge.transition {

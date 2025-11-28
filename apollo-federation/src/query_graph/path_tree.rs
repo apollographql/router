@@ -620,7 +620,8 @@ mod tests {
     ) -> Result<OpGraphPath, FederationError> {
         let nodes_by_kind = query_graph.root_kinds_to_nodes()?;
         let root_node_idx = nodes_by_kind[&op_kind];
-        let mut graph_path = OpGraphPath::new(query_graph.clone(), root_node_idx)?;
+        let mut graph_path =
+            OpGraphPath::new(query_graph.clone(), root_node_idx, Default::default())?;
         let mut curr_node_idx = root_node_idx;
         for field_name in path.iter() {
             // find the edge that matches `field_name`

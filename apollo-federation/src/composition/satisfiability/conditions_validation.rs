@@ -13,6 +13,7 @@ use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
+use crate::query_graph::graph_path::GraphPathWeightCounter;
 use crate::query_graph::graph_path::operation::OpGraphPath;
 use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::query_graph::graph_path::operation::OpenBranch;
@@ -39,6 +40,7 @@ pub(super) fn resolve_condition_plan(
     excluded_destinations: &ExcludedDestinations,
     excluded_conditions: &ExcludedConditions,
     extra_conditions: Option<&SelectionSet>,
+    graph_path_weight_counter: Arc<GraphPathWeightCounter>,
 ) -> Result<ConditionResolution, FederationError> {
     let edge_weight = query_graph.edge_weight(edge)?;
     let conditions = match (extra_conditions, &edge_weight.conditions) {
@@ -49,7 +51,8 @@ pub(super) fn resolve_condition_plan(
     };
     let excluded_conditions = excluded_conditions.add_item(conditions);
     let head = query_graph.edge_endpoints(edge)?.0;
-    let initial_path = OpGraphPath::new(query_graph.clone(), head)?;
+    let initial_path =
+        OpGraphPath::new(query_graph.clone(), head, graph_path_weight_counter.clone())?;
     let initial_option = SimultaneousPathsWithLazyIndirectPaths::new(
         SimultaneousPaths(vec![Arc::new(initial_path)]),
         context.clone(),
@@ -60,6 +63,7 @@ pub(super) fn resolve_condition_plan(
         query_graph.clone(),
         initial_option,
         conditions.iter().cloned(),
+        graph_path_weight_counter,
     );
     traversal.find_resolution()
 }
@@ -73,6 +77,8 @@ struct ConditionValidationTraversal {
     /// plan for them.
     // PORT_NOTE: This implementation closely follows the way `QueryPlanningTraversal` was ported.
     open_branches: Vec<OpenBranchAndSelections>,
+    /// Counter to track/limit the number of in-memory paths (weighted by path size).
+    graph_path_weight_counter: Arc<GraphPathWeightCounter>,
 }
 
 impl ConditionValidationTraversal {
@@ -80,6 +86,7 @@ impl ConditionValidationTraversal {
         query_graph: Arc<QueryGraph>,
         initial_option: SimultaneousPathsWithLazyIndirectPaths,
         selections: impl IntoIterator<Item = Selection>,
+        graph_path_weight_counter: Arc<GraphPathWeightCounter>,
     ) -> Self {
         Self {
             query_graph,
@@ -88,6 +95,7 @@ impl ConditionValidationTraversal {
                 selections: selections.into_iter().collect(),
                 open_branch: OpenBranch(vec![initial_option]),
             }],
+            graph_path_weight_counter,
         }
     }
 
@@ -193,6 +201,7 @@ impl CachingConditionResolver for ConditionValidationTraversal {
             excluded_destinations,
             excluded_conditions,
             extra_conditions,
+            self.graph_path_weight_counter.clone(),
         )
     }
 }
@@ -307,6 +316,7 @@ type T
                 &Default::default(),
                 &Default::default(),
                 None,
+                Default::default(),
             )
             .unwrap();
             // All edges are expected to be satisfiable.
