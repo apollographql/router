@@ -285,6 +285,8 @@ items:
         children:
           - label: "Overview"
             href: "./cloud/"
+          - label: "Migrate to Self-Hosted"
+            href: "./cloud/migrate-to-self-hosted"
           - label: "Configuration"
             href: "./cloud/configuration"
           - label: "Secure Subgraphs"
