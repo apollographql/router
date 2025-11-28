@@ -1,0 +1,33 @@
+# This coprocessor url will be updated to a test-scoped mock server
+# This config enables context for stages that need to test context propagation
+coprocessor:
+  url: "<replace>"
+  router:
+    request:
+      body: true
+      context: all
+    response:
+      body: true
+      context: all
+  supergraph:
+    request:
+      body: true
+      context: all
+    response:
+      body: true
+      context: all
+  subgraph:
+    all:
+      request:
+        body: true
+        context: all
+      response:
+        body: true
+        context: all
+  execution:
+    request:
+      body: true  
+      context: all
+    response:
+      body: true
+      context: all
