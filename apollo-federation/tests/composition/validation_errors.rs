@@ -450,6 +450,159 @@ mod shared_field_runtime_types_tests {
     }
 }
 
+mod shareable_mutation_fields_tests {
+    use super::*;
+
+    #[test]
+    fn errors_when_queries_may_require_multiple_calls_to_mutation_field() {
+        let subgraph_a = ServiceDefinition {
+            name: "A",
+            type_defs: r#"
+                type Query {
+                    dummy: Int
+                }
+
+                type Mutation {
+                    f: F @shareable
+                }
+
+                type F {
+                    x: Int
+                }
+            "#,
+        };
+
+        let subgraph_b = ServiceDefinition {
+            name: "B",
+            type_defs: r#"
+                type Mutation {
+                    f: F @shareable
+                }
+
+                type F {
+                    y: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+        let messages = error_messages(&result);
+        insta::assert_snapshot!(messages.join("\n"), @r###"
+        Supergraph API queries using the mutation field "Mutation.f" at top-level must be satisfiable without needing to call that field from multiple subgraphs, but every subgraph with that field encounters satisfiability errors. Please fix these satisfiability errors for (at least) one of the following subgraphs with the mutation field:
+        - When calling "Mutation.f" at top-level from subgraph "A":
+          The following supergraph API query:
+          mutation {
+            f {
+              y
+            }
+          }
+          cannot be satisfied by the subgraphs because:
+          - from subgraph "A":
+            - cannot find field "F.y".
+            - cannot move to subgraph "B", which has field "F.y", because type "F" has no @key defined in subgraph "B".
+        - When calling "Mutation.f" at top-level from subgraph "B":
+          The following supergraph API query:
+          mutation {
+            f {
+              x
+            }
+          }
+          cannot be satisfied by the subgraphs because:
+          - from subgraph "B":
+            - cannot find field "F.x".
+            - cannot move to subgraph "A", which has field "F.x", because type "F" has no @key defined in subgraph "A".
+        "###);
+    }
+
+    #[test]
+    fn errors_normally_for_mutation_fields_that_are_not_actually_shared() {
+        let subgraph_a = ServiceDefinition {
+            name: "A",
+            type_defs: r#"
+                type Query {
+                    dummy: Int
+                }
+
+                type Mutation {
+                    f: F @shareable
+                }
+
+                type F @key(fields: "id") {
+                    id: ID!
+                    x: Int
+                }
+            "#,
+        };
+
+        let subgraph_b = ServiceDefinition {
+            name: "B",
+            type_defs: r#"
+                type F @key(fields: "id", resolvable: false) {
+                    id: ID!
+                    y: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+        let messages = error_messages(&result);
+        insta::assert_snapshot!(messages.join("\n"), @r###"
+        The following supergraph API query:
+        mutation {
+          f {
+            y
+          }
+        }
+        cannot be satisfied by the subgraphs because:
+        - from subgraph "A":
+          - cannot find field "F.y".
+          - cannot move to subgraph "B", which has field "F.y", because none of the @key defined on type "F" in subgraph "B" are resolvable (they are all declared with their "resolvable" argument set to false).
+        "###);
+    }
+
+    #[test]
+    fn succeeds_when_queries_do_not_require_multiple_calls_to_mutation_field() {
+        let subgraph_a = ServiceDefinition {
+            name: "A",
+            type_defs: r#"
+                type Query {
+                    dummy: Int
+                }
+
+                type Mutation {
+                    f: F @shareable
+                }
+
+                type F @key(fields: "id") {
+                    id: ID!
+                    x: Int
+                }
+            "#,
+        };
+
+        let subgraph_b = ServiceDefinition {
+            name: "B",
+            type_defs: r#"
+                type Mutation {
+                    f: F @shareable
+                }
+
+                type F @key(fields: "id", resolvable: false) {
+                    id: ID!
+                    y: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+        assert!(
+            result.is_ok(),
+            "Expected successful composition, but got errors: {:?}",
+            result.err()
+        );
+    }
+}
+
 mod other_validation_errors_tests {
     use super::*;
 

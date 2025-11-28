@@ -25,6 +25,7 @@ use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::supergraph::CompositionHint;
 
 pub(super) struct ValidationTraversal {
@@ -35,6 +36,13 @@ pub(super) struct ValidationTraversal {
     previous_visits: IndexMap<NodeIndex, Vec<NodeVisit>>,
     validation_errors: Vec<CompositionError>,
     validation_hints: Vec<CompositionHint>,
+    /// When we discover a shared top-level mutation field, we track satisfiability errors for
+    /// each subgraph containing the field separately. This is because the query planner needs to
+    /// avoid calling these fields more than once, which means there must be no satisfiability
+    /// errors for (at least) one subgraph. The first key is the field coordinate, and the second
+    /// key is the subgraph name.
+    satisfiability_errors_by_mutation_field_and_subgraph:
+        IndexMap<FieldDefinitionPosition, IndexMap<Arc<str>, Vec<CompositionError>>>,
     context: ValidationContext,
     total_validation_subgraph_paths: usize,
     max_validation_subgraph_paths: usize,
@@ -57,25 +65,10 @@ struct TopLevelConditionResolver {
 ///
 /// If we ever re-visit the node with at least more options than a prior visit while making at least
 /// as many assumptions, then we know we can skip re-visiting.
-struct NodeVisit {
-    subgraph_context_keys: IndexSet<SubgraphContextKey>,
-    override_conditions: Arc<OverrideConditions>,
-}
-
-impl NodeVisit {
-    /// Determines if this visit is a non-strict superset of the `other` visit, meaning that this
-    /// visit has at least as many options as the `other` visit while making at least as many
-    /// assumptions.
-    // PORT_NOTE: Named `isSupersetOrEqual()` in the JS codebase, but supersets are by default
-    // non-strict and Rust typically names such methods as `is_superset()`.
-    fn is_superset(&self, other: &NodeVisit) -> bool {
-        self.subgraph_context_keys
-            .is_superset(&other.subgraph_context_keys)
-            && other
-                .override_conditions
-                .iter()
-                .all(|(label, is_enabled)| self.override_conditions.get(label) == Some(is_enabled))
-    }
+#[derive(Clone)]
+pub(super) struct NodeVisit {
+    pub(super) subgraph_context_keys: IndexSet<SubgraphContextKey>,
+    pub(super) override_conditions: Arc<OverrideConditions>,
 }
 
 impl ValidationTraversal {
@@ -96,6 +89,7 @@ impl ValidationTraversal {
             previous_visits: Default::default(),
             validation_errors: vec![],
             validation_hints: vec![],
+            satisfiability_errors_by_mutation_field_and_subgraph: Default::default(),
             context: ValidationContext::new(supergraph_schema)?,
             total_validation_subgraph_paths: 0,
             max_validation_subgraph_paths: composition_options
@@ -113,7 +107,7 @@ impl ValidationTraversal {
     }
 
     fn push_stack(&mut self, state: ValidationState) -> Option<CompositionError> {
-        self.total_validation_subgraph_paths += state.subgraph_paths().len();
+        self.total_validation_subgraph_paths += state.subgraph_path_infos().len();
         self.stack.push(state);
         if self.total_validation_subgraph_paths > self.max_validation_subgraph_paths {
             Some(CompositionError::MaxValidationSubgraphPathsExceeded {
@@ -129,7 +123,7 @@ impl ValidationTraversal {
 
     fn pop_stack(&mut self) -> Option<ValidationState> {
         if let Some(state) = self.stack.pop() {
-            self.total_validation_subgraph_paths -= state.subgraph_paths().len();
+            self.total_validation_subgraph_paths -= state.subgraph_path_infos().len();
             Some(state)
         } else {
             None
@@ -150,6 +144,52 @@ impl ValidationTraversal {
                 return Ok(());
             }
         }
+
+        // Check if any shared top-level mutation fields have errors in all subgraphs
+        for (field_coordinate, errors_by_subgraph) in
+            &self.satisfiability_errors_by_mutation_field_and_subgraph
+        {
+            // Check if some subgraph has no satisfiability errors. If so, then that subgraph
+            // can be used to satisfy all queries to the top-level mutation field, and we can
+            // ignore the errors in other subgraphs.
+            let some_subgraph_has_no_errors = errors_by_subgraph.values().any(|e| e.is_empty());
+            if some_subgraph_has_no_errors {
+                continue;
+            }
+
+            // Otherwise, queries on the top-level mutation field can't be satisfied through
+            // only one call to that field.
+            let mut message_parts = vec![format!(
+                "Supergraph API queries using the mutation field \"{}\" at top-level must be \
+                satisfiable without needing to call that field from multiple subgraphs, but \
+                every subgraph with that field encounters satisfiability errors. Please fix \
+                these satisfiability errors for (at least) one of the following subgraphs with \
+                the mutation field:",
+                field_coordinate
+            )];
+
+            for (subgraph, subgraph_errors) in errors_by_subgraph {
+                message_parts.push(format!(
+                    "- When calling \"{}\" at top-level from subgraph \"{}\":",
+                    field_coordinate, subgraph
+                ));
+                for error in subgraph_errors {
+                    for line in error.to_string().lines() {
+                        if line.is_empty() {
+                            message_parts.push(String::new());
+                        } else {
+                            message_parts.push(format!("  {line}"));
+                        }
+                    }
+                }
+            }
+
+            self.validation_errors
+                .push(CompositionError::SatisfiabilityError {
+                    message: message_parts.join("\n"),
+                });
+        }
+
         errors.append(&mut self.validation_errors);
         hints.append(&mut self.validation_hints);
         Ok(())
@@ -166,31 +206,15 @@ impl ValidationTraversal {
         );
         let span = debug_span!(" |");
         let guard = span.enter();
-        let current_node = state.supergraph_path().tail();
-        let current_visit = NodeVisit {
-            subgraph_context_keys: state.current_subgraph_context_keys()?,
-            override_conditions: state.selected_override_conditions().clone(),
-        };
-        let previous_visits_for_node = self.previous_visits.entry(current_node).or_default();
-        for previous_visit in previous_visits_for_node.iter() {
-            if current_visit.is_superset(previous_visit) {
-                // This means that we've already seen the type and subgraph we're currently on in
-                // the supergraph, and for that previous visit, we've either finished validating we
-                // could reach anything from there, or are in the middle of it (in which case, we're
-                // in a loop). Since we have at least as many options while making at least as many
-                // assumptions as the previous visit, we can handle downstream operation elements
-                // the same way we did previously, and so we skip the node entirely.
-                drop(guard);
-                debug!("Have already validated this node.");
-                return Ok(None);
-            }
+
+        if state.can_skip_visit(&mut self.previous_visits)? {
+            drop(guard);
+            debug!("Can skip visit for this state.");
+            return Ok(None);
         }
-        // We have to validate this node, but we can save the visit here to potentially avoid later
-        // visits.
-        previous_visits_for_node.push(current_visit);
 
         // Pre-collect the next edges for `state.supergraph_path()`, since as we iterate through
-        // these edges, we're going to be mutating the cache in `state.subgraph_paths()`.
+        // these edges, we're going to be mutating the cache in `state.subgraph_path_infos`.
         //
         // Note that if the `supergraph_path()` is terminal, this method is a no-op, which is
         // expected/desired as it means we've successfully "validated" a path to its end.
@@ -251,6 +275,7 @@ impl ValidationTraversal {
                 &mut self.top_level_condition_resolver,
                 &mut self.validation_errors,
                 &mut self.validation_hints,
+                &mut self.satisfiability_errors_by_mutation_field_and_subgraph,
             )?;
             if num_errors != self.validation_errors.len() {
                 drop(guard);

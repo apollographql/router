@@ -16,6 +16,7 @@ use crate::composition::satisfiability::satisfiability_error::satisfiability_err
 use crate::composition::satisfiability::satisfiability_error::shareable_field_mismatched_runtime_types_hint;
 use crate::composition::satisfiability::satisfiability_error::shareable_field_non_intersecting_runtime_types_error;
 use crate::composition::satisfiability::validation_context::ValidationContext;
+use crate::composition::satisfiability::validation_traversal::NodeVisit;
 use crate::ensure;
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -29,7 +30,9 @@ use crate::query_graph::graph_path::UnadvanceableClosures;
 use crate::query_graph::graph_path::Unadvanceables;
 use crate::query_graph::graph_path::transition::TransitionGraphPath;
 use crate::query_graph::graph_path::transition::TransitionPathWithLazyIndirectPaths;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::supergraph::CompositionHint;
 use crate::utils::iter_into_single_item;
@@ -37,13 +40,53 @@ use crate::utils::iter_into_single_item;
 pub(super) struct ValidationState {
     /// Path in the supergraph (i.e. the API schema query graph) corresponding to the current state.
     supergraph_path: TransitionGraphPath,
-    /// All the possible paths we could be in the subgraphs (excluding @provides paths).
-    subgraph_paths: Vec<SubgraphPathInfo>,
+    /// All the possible paths we could be in the subgraphs. When the supergraph path's top-level
+    /// selection is a mutation field, the possible paths are instead partitioned by the name of
+    /// the subgraph containing the mutation field.
+    subgraph_path_infos: SubgraphPathInfos,
     /// When we encounter a supergraph field with a progressive override (i.e. an @override with a
     /// label condition), we consider both possibilities for the label value (T/F) as we traverse
     /// the graph, and record that here. This allows us to exclude paths that can never be taken by
     /// the query planner (i.e. a path where the condition is T in one case and F in another).
     selected_override_conditions: Arc<OverrideConditions>,
+}
+
+/// Represents subgraph path information, matching the JavaScript implementation's class structure.
+/// This corresponds to `SubgraphPathInfos | TopLevelMutationFieldSubgraphPathInfos` in TypeScript.
+pub(super) enum SubgraphPathInfos {
+    /// Normal case: all subgraph paths together.
+    /// Corresponds to JavaScript's `SubgraphPathInfos` class.
+    Paths(Vec<SubgraphPathInfo>),
+    /// Top-level mutation field case: paths partitioned by subgraph name.
+    /// Corresponds to JavaScript's `TopLevelMutationFieldSubgraphPathInfos` class.
+    TopLevelMutationField {
+        mutation_field: FieldDefinitionPosition,
+        paths: IndexMap<Arc<str>, Vec<SubgraphPathInfo>>,
+    },
+}
+
+impl SubgraphPathInfos {
+    /// Returns all subgraph path infos, regardless of partitioning.
+    pub(super) fn iter(&self) -> impl Iterator<Item = &SubgraphPathInfo> {
+        match self {
+            SubgraphPathInfos::Paths(paths) => {
+                Box::new(paths.iter()) as Box<dyn Iterator<Item = _>>
+            }
+            SubgraphPathInfos::TopLevelMutationField { paths, .. } => {
+                Box::new(paths.values().flat_map(|v| v.iter()))
+            }
+        }
+    }
+
+    /// Returns the total count of subgraph paths.
+    pub(super) fn len(&self) -> usize {
+        match self {
+            SubgraphPathInfos::Paths(paths) => paths.len(),
+            SubgraphPathInfos::TopLevelMutationField { paths, .. } => {
+                paths.values().map(|v| v.len()).sum()
+            }
+        }
+    }
 }
 
 pub(super) struct SubgraphPathInfo {
@@ -61,10 +104,20 @@ struct SubgraphPathContextInfo {
     type_name: Name,
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) struct SubgraphContextKey {
     tail_subgraph_name: Arc<str>,
     contexts: SubgraphPathContexts,
+}
+
+/// Result of validating a transition for a set of subgraph paths
+enum ValidationResult {
+    Success {
+        new_subgraph_paths: Vec<SubgraphPathInfo>,
+    },
+    Error {
+        dead_ends: Vec<Unadvanceables>,
+    },
 }
 
 impl ValidationState {
@@ -72,8 +125,8 @@ impl ValidationState {
         &self.supergraph_path
     }
 
-    pub(super) fn subgraph_paths(&self) -> &Vec<SubgraphPathInfo> {
-        &self.subgraph_paths
+    pub(super) fn subgraph_path_infos(&self) -> &SubgraphPathInfos {
+        &self.subgraph_path_infos
     }
 
     pub(super) fn selected_override_conditions(&self) -> &Arc<OverrideConditions> {
@@ -109,37 +162,215 @@ impl ValidationState {
                 api_schema_query_graph,
                 root_kind,
             )?,
-            subgraph_paths: federated_query_graph
-                .out_edges(*federated_root_node)
-                .into_iter()
-                .map(|edge_ref| {
-                    let path = initial_subgraph_path.add(
-                        QueryGraphEdgeTransition::SubgraphEnteringTransition,
-                        edge_ref.id(),
-                        ConditionResolution::no_conditions(),
-                        None,
-                    )?;
-                    Ok::<_, FederationError>(SubgraphPathInfo {
-                        path: TransitionPathWithLazyIndirectPaths::new(Arc::new(path)),
-                        contexts: Default::default(),
+            subgraph_path_infos: SubgraphPathInfos::Paths(
+                federated_query_graph
+                    .out_edges(*federated_root_node)
+                    .into_iter()
+                    .map(|edge_ref| {
+                        let path = initial_subgraph_path.add(
+                            QueryGraphEdgeTransition::SubgraphEnteringTransition,
+                            edge_ref.id(),
+                            ConditionResolution::no_conditions(),
+                            None,
+                        )?;
+                        Ok::<_, FederationError>(SubgraphPathInfo {
+                            path: TransitionPathWithLazyIndirectPaths::new(Arc::new(path)),
+                            contexts: Default::default(),
+                        })
                     })
-                })
-                .process_results(|iter| iter.collect())?,
+                    .process_results(|iter| iter.collect())?,
+            ),
             selected_override_conditions: Default::default(),
         })
+    }
+
+    /// Validates the transition for a set of subgraph paths.
+    ///
+    /// Returns either:
+    /// - `ValidationResult::Success` with new subgraph paths (may be empty if type condition has no matching results)
+    /// - `ValidationResult::Error` with dead ends if validation failed
+    fn validate_transition_for_subgraph_paths(
+        supergraph_schema: &ValidFederationSchema,
+        subgraph_path_infos: &mut [SubgraphPathInfo],
+        new_override_conditions: &Arc<OverrideConditions>,
+        transition: &QueryGraphEdgeTransition,
+        target_type: &crate::schema::position::OutputTypeDefinitionPosition,
+        matching_contexts: &IndexSet<String>,
+        condition_resolver: &mut impl ConditionResolver,
+    ) -> Result<ValidationResult, FederationError> {
+        let mut new_subgraph_paths: Vec<SubgraphPathInfo> = Default::default();
+        let mut dead_ends: Vec<UnadvanceableClosures> = Default::default();
+
+        for SubgraphPathInfo { path, contexts } in subgraph_path_infos.iter_mut() {
+            let options = path.advance_with_transition(
+                transition,
+                target_type,
+                supergraph_schema,
+                condition_resolver,
+                new_override_conditions,
+            )?;
+            let options = match options {
+                Either::Left(options) => options,
+                Either::Right(closures) => {
+                    dead_ends.push(closures);
+                    continue;
+                }
+            };
+            if options.is_empty() {
+                // This means that the edge is a type condition and that if we follow
+                // the path to this subgraph, we're guaranteed that handling that type
+                // condition give us no matching results, and so we can handle whatever
+                // comes next really.
+                return Ok(ValidationResult::Success {
+                    new_subgraph_paths: vec![],
+                });
+            }
+            let new_contexts = if matching_contexts.is_empty() {
+                contexts.clone()
+            } else {
+                let tail_weight = path.path.graph().node_weight(path.path.tail())?;
+                let tail_subgraph = tail_weight.source.clone();
+                let QueryGraphNodeType::SchemaType(tail_type) = &tail_weight.type_ else {
+                    bail!("Unexpectedly encountered federation root node as tail node.");
+                };
+                let mut contexts = contexts.as_ref().clone();
+                for matching_context in matching_contexts {
+                    contexts.insert(
+                        matching_context.clone(),
+                        SubgraphPathContextInfo {
+                            subgraph_name: tail_subgraph.clone(),
+                            type_name: tail_type.type_name().clone(),
+                        },
+                    );
+                }
+                Arc::new(contexts)
+            };
+            new_subgraph_paths.extend(options.into_iter().map(|option| SubgraphPathInfo {
+                path: option,
+                contexts: new_contexts.clone(),
+            }));
+        }
+
+        if new_subgraph_paths.is_empty() {
+            Ok(ValidationResult::Error {
+                dead_ends: dead_ends
+                    .into_iter()
+                    .map(Unadvanceables::try_from)
+                    .process_results(|iter| iter.collect())?,
+            })
+        } else {
+            Ok(ValidationResult::Success { new_subgraph_paths })
+        }
+    }
+
+    /// Determines if we can skip validation for subgraph paths by comparing the current vertex visit
+    /// with previous visits.
+    ///
+    /// This checks if the current vertex visit is a superset of any previous visit,
+    /// meaning it has at least as many subgraph context keys while making at least as many
+    /// override condition assumptions. If so, we've already validated this configuration
+    /// and can skip re-validation.
+    ///
+    /// Note: In the JS implementation, this function mutates the previous visits by adding the
+    /// current visit. In Rust, we handle that mutation at a higher level.
+    ///
+    /// This corresponds to `canSkipVisitForSubgraphPaths` in the JavaScript implementation.
+    fn can_skip_visit_for_subgraph_paths(
+        supergraph_path_tail: petgraph::graph::NodeIndex,
+        _subgraph_path_infos: &[SubgraphPathInfo],
+        current_vertex_visit: &NodeVisit,
+        previous_visits: &mut IndexMap<petgraph::graph::NodeIndex, Vec<NodeVisit>>,
+    ) -> bool {
+        let previous_visits_for_vertex = previous_visits.entry(supergraph_path_tail).or_default();
+
+        for previous_visit in previous_visits_for_vertex.iter() {
+            // Check if current visit is a superset of the previous visit (isSupersetOrEqual in JS)
+            if current_vertex_visit
+                .subgraph_context_keys
+                .is_superset(&previous_visit.subgraph_context_keys)
+                && previous_visit
+                    .override_conditions
+                    .iter()
+                    .all(|(label, is_enabled)| {
+                        current_vertex_visit.override_conditions.get(label) == Some(is_enabled)
+                    })
+            {
+                // This means that we've already seen the type we're currently on in the supergraph,
+                // and when saw it we could be in one of `previousSources`, and we validated that
+                // we could reach anything from there. We're now on the same type, and have strictly
+                // more options regarding subgraphs. So whatever comes next, we can handle in the exact
+                // same way we did previously, and there is thus no way to bother.
+                return true;
+            }
+        }
+
+        // We're gonna have to validate, but we can save the new set of sources here to hopefully save work later.
+        previous_visits_for_vertex.push(current_vertex_visit.clone());
+        false
+    }
+
+    /// Returns whether the entire entire visit to this state can be skipped. If the state is
+    /// partitioned, note that each individual partition must be skippable for the state to be
+    /// skippable.
+    ///
+    /// This corresponds to `canSkipVisit` in the JavaScript implementation.
+    pub(super) fn can_skip_visit(
+        &self,
+        previous_visits: &mut IndexMap<petgraph::graph::NodeIndex, Vec<NodeVisit>>,
+    ) -> Result<bool, FederationError> {
+        let vertex = self.supergraph_path.tail();
+
+        match &self.subgraph_path_infos {
+            SubgraphPathInfos::Paths(paths) => {
+                // Non-partitioned case
+                let current_vertex_visit = NodeVisit {
+                    subgraph_context_keys: self.current_subgraph_context_keys()?,
+                    override_conditions: self.selected_override_conditions.clone(),
+                };
+                Ok(Self::can_skip_visit_for_subgraph_paths(
+                    vertex,
+                    paths,
+                    &current_vertex_visit,
+                    previous_visits,
+                ))
+            }
+            SubgraphPathInfos::TopLevelMutationField { paths, .. } => {
+                // Partitioned case
+                let mut can_skip = true;
+                for subgraph_path_infos in paths.values() {
+                    let current_vertex_visit = NodeVisit {
+                        subgraph_context_keys: self.current_subgraph_context_keys()?,
+                        override_conditions: self.selected_override_conditions.clone(),
+                    };
+                    // Note that this method mutates the set of previous visits, so we
+                    // purposely do not short-circuit return here.
+                    if !Self::can_skip_visit_for_subgraph_paths(
+                        vertex,
+                        subgraph_path_infos,
+                        &current_vertex_visit,
+                        previous_visits,
+                    ) {
+                        can_skip = false;
+                    }
+                }
+                Ok(can_skip)
+            }
+        }
     }
 
     /// Validates that the current state can always be advanced for the provided supergraph edge,
     /// and returns the updated state if so.
     ///
     /// If the state cannot be properly advanced, then an error will be pushed onto the provided
-    /// `errors` array, nothing will be pushed onto the provided `hints` array, and no updated state
-    /// will be returned. Otherwise, nothing will be pushed onto the `errors` array, a hint may be
-    /// pushed onto the `hints` array, and an updated state will be returned except for the case
-    /// where the transition is guaranteed to yield no results (in which case no state is returned).
-    /// This exception occurs when the edge corresponds to a type condition that does not intersect
-    /// with the possible runtime types of the old path's tail, in which case further validation on
-    /// the new path is not necessary.
+    /// `errors` array (or to `satisfiability_errors_by_mutation_field_and_subgraph` if this is
+    /// a partitioned state), nothing will be pushed onto the provided `hints` array, and no updated
+    /// state will be returned. Otherwise, nothing will be pushed onto the `errors` array, a hint
+    /// may be pushed onto the `hints` array, and an updated state will be returned except for the
+    /// case where the transition is guaranteed to yield no results (in which case no state is
+    /// returned). This exception occurs when the edge corresponds to a type condition that does not
+    /// intersect with the possible runtime types of the old path's tail, in which case further
+    /// validation on the new path is not necessary.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn validate_transition(
         &mut self,
         context: &ValidationContext,
@@ -148,6 +379,10 @@ impl ValidationState {
         condition_resolver: &mut impl ConditionResolver,
         errors: &mut Vec<CompositionError>,
         hints: &mut Vec<CompositionHint>,
+        satisfiability_errors_by_mutation_field_and_subgraph: &mut IndexMap<
+            FieldDefinitionPosition,
+            IndexMap<Arc<str>, Vec<CompositionError>>,
+        >,
     ) -> Result<Option<ValidationState>, FederationError> {
         let edge_weight = self.supergraph_path.graph().edge_weight(supergraph_edge)?;
         ensure!(
@@ -175,81 +410,177 @@ impl ValidationState {
                 self.selected_override_conditions.clone()
             };
 
-        let mut new_subgraph_paths: Vec<SubgraphPathInfo> = Default::default();
-        let mut dead_ends: Vec<UnadvanceableClosures> = Default::default();
-        for SubgraphPathInfo { path, contexts } in self.subgraph_paths.iter_mut() {
-            let options = path.advance_with_transition(
-                &edge_weight.transition,
-                target_type,
-                self.supergraph_path.graph().schema()?,
-                condition_resolver,
-                &new_override_conditions,
-            )?;
-            let options = match options {
-                Either::Left(options) => options,
-                Either::Right(closures) => {
-                    dead_ends.push(closures);
-                    continue;
-                }
-            };
-            if options.is_empty() {
-                // This means that the edge is a type condition and that if we follow the path in
-                // this subgraph, we're guaranteed that handling that type condition give us no
-                // matching results, and so we can skip this supergraph path entirely.
-                return Ok(None);
-            }
-            let new_contexts = if matching_contexts.is_empty() {
-                contexts.clone()
-            } else {
-                let tail_weight = path.path.graph().node_weight(path.path.tail())?;
-                let tail_subgraph = tail_weight.source.clone();
-                let QueryGraphNodeType::SchemaType(tail_type) = &tail_weight.type_ else {
-                    bail!("Unexpectedly encountered federation root node as tail node.");
-                };
-                let mut contexts = contexts.as_ref().clone();
-                for matching_context in matching_contexts {
-                    contexts.insert(
-                        matching_context.clone(),
-                        SubgraphPathContextInfo {
-                            subgraph_name: tail_subgraph.clone(),
-                            type_name: tail_type.type_name().clone(),
-                        },
-                    );
-                }
-                Arc::new(contexts)
-            };
-            new_subgraph_paths.extend(options.into_iter().map(|option| SubgraphPathInfo {
-                path: option,
-                contexts: new_contexts.clone(),
-            }))
-        }
         let new_supergraph_path = self.supergraph_path.add(
             edge_weight.transition.clone(),
             supergraph_edge,
             ConditionResolution::no_conditions(),
             None,
         )?;
-        if new_subgraph_paths.is_empty() {
-            satisfiability_error(
-                &new_supergraph_path,
-                &self
-                    .subgraph_paths
-                    .iter()
-                    .map(|path| path.path.path.as_ref())
-                    .collect::<Vec<_>>(),
-                &dead_ends
-                    .into_iter()
-                    .map(Unadvanceables::try_from)
-                    .process_results(|iter| iter.collect::<Vec<_>>())?,
-                errors,
-            )?;
-            return Ok(None);
-        }
 
-        let updated_state = ValidationState {
-            supergraph_path: new_supergraph_path,
-            subgraph_paths: new_subgraph_paths,
-            selected_override_conditions: new_override_conditions,
+        // Handle validation based on whether the state is partitioned
+        let supergraph_schema = self.supergraph_path.graph().schema()?;
+        let updated_state = match &mut self.subgraph_path_infos {
+            SubgraphPathInfos::Paths(subgraph_paths) => {
+                let result = Self::validate_transition_for_subgraph_paths(
+                    supergraph_schema,
+                    subgraph_paths,
+                    &new_override_conditions,
+                    &edge_weight.transition,
+                    target_type,
+                    matching_contexts,
+                    condition_resolver,
+                )?;
+
+                match result {
+                    ValidationResult::Success { new_subgraph_paths }
+                        if new_subgraph_paths.is_empty() =>
+                    {
+                        // As noted in `validateTransitionforSubgraphPaths()`, this being empty
+                        // means that the edge is a type condition and that if we follow the path
+                        // to this subgraph, we're guaranteed that handling that type condition
+                        // gives us no matching results, and so we can handle whatever comes next
+                        // really.
+                        return Ok(None);
+                    }
+                    ValidationResult::Success { new_subgraph_paths } => {
+                        // Check if we're entering a top-level mutation field
+                        if let Some(mutation_field) =
+                            Self::field_if_top_level_mutation(&self.supergraph_path, edge_weight)?
+                        {
+                            // If we just added a top-level mutation field, we partition the created
+                            // state by the subgraph of the field.
+                            let mut partitioned: IndexMap<Arc<str>, Vec<SubgraphPathInfo>> =
+                                Default::default();
+                            for subgraph_path_info in new_subgraph_paths {
+                                let subgraph =
+                                    Self::subgraph_of_top_level_mutation(&subgraph_path_info)?;
+                                partitioned
+                                    .entry(subgraph)
+                                    .or_default()
+                                    .push(subgraph_path_info);
+                            }
+
+                            // If there's not more than one subgraph, then the mutation field was
+                            // never really shared, and we can continue with non-partitioned state.
+                            if partitioned.len() <= 1 {
+                                ValidationState {
+                                    supergraph_path: new_supergraph_path,
+                                    subgraph_path_infos: SubgraphPathInfos::Paths(
+                                        partitioned.into_values().flatten().collect(),
+                                    ),
+                                    selected_override_conditions: new_override_conditions,
+                                }
+                            } else {
+                                // Otherwise, we need the partitioning, and we set up the error stacks
+                                // for each (field, subgraph) pair.
+                                let errors_by_subgraph =
+                                    satisfiability_errors_by_mutation_field_and_subgraph
+                                        .entry(mutation_field.clone())
+                                        .or_default();
+                                for subgraph in partitioned.keys() {
+                                    errors_by_subgraph.entry(subgraph.clone()).or_default();
+                                }
+
+                                ValidationState {
+                                    supergraph_path: new_supergraph_path,
+                                    subgraph_path_infos: SubgraphPathInfos::TopLevelMutationField {
+                                        mutation_field,
+                                        paths: partitioned,
+                                    },
+                                    selected_override_conditions: new_override_conditions,
+                                }
+                            }
+                        } else {
+                            ValidationState {
+                                supergraph_path: new_supergraph_path,
+                                subgraph_path_infos: SubgraphPathInfos::Paths(new_subgraph_paths),
+                                selected_override_conditions: new_override_conditions,
+                            }
+                        }
+                    }
+                    ValidationResult::Error { dead_ends } => {
+                        satisfiability_error(
+                            &new_supergraph_path,
+                            &subgraph_paths
+                                .iter()
+                                .map(|path| path.path.path.as_ref())
+                                .collect::<Vec<_>>(),
+                            &dead_ends,
+                            errors,
+                        )?;
+                        return Ok(None);
+                    }
+                }
+            }
+            SubgraphPathInfos::TopLevelMutationField {
+                mutation_field,
+                paths: partitioned_paths,
+            } => {
+                let mut new_partitioned: IndexMap<Arc<str>, Vec<SubgraphPathInfo>> =
+                    Default::default();
+
+                for (subgraph, subgraph_path_infos) in partitioned_paths.iter_mut() {
+                    // The setup we do above when we enter a mutation field ensures these
+                    // map entries exist.
+                    let errors_for_subgraph = satisfiability_errors_by_mutation_field_and_subgraph
+                        .get_mut(mutation_field)
+                        .and_then(|m| m.get_mut(subgraph));
+
+                    let result = Self::validate_transition_for_subgraph_paths(
+                        supergraph_schema,
+                        subgraph_path_infos,
+                        &new_override_conditions,
+                        &edge_weight.transition,
+                        target_type,
+                        matching_contexts,
+                        condition_resolver,
+                    )?;
+
+                    match result {
+                        ValidationResult::Success { new_subgraph_paths }
+                            if new_subgraph_paths.is_empty() =>
+                        {
+                            // As noted in `validateTransitionforSubgraphPaths()`, this being empty
+                            // means that the edge is a type condition and that if we follow the
+                            // path to this subgraph, we're guaranteed that handling that type
+                            // condition gives us no matching results, and so we can handle whatever
+                            // comes next really.
+                            continue;
+                        }
+                        ValidationResult::Success { new_subgraph_paths } => {
+                            new_partitioned.insert(subgraph.clone(), new_subgraph_paths);
+                        }
+                        ValidationResult::Error { dead_ends } => {
+                            // Record error for this subgraph
+                            if let Some(errors_vec) = errors_for_subgraph {
+                                satisfiability_error(
+                                    &new_supergraph_path,
+                                    &subgraph_path_infos
+                                        .iter()
+                                        .map(|path| path.path.path.as_ref())
+                                        .collect::<Vec<_>>(),
+                                    &dead_ends,
+                                    errors_vec,
+                                )?;
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                if new_partitioned.is_empty() {
+                    return Ok(None);
+                }
+
+                ValidationState {
+                    supergraph_path: new_supergraph_path,
+                    subgraph_path_infos: SubgraphPathInfos::TopLevelMutationField {
+                        mutation_field: mutation_field.clone(),
+                        paths: new_partitioned,
+                    },
+                    selected_override_conditions: new_override_conditions,
+                }
+            }
         };
 
         // When handling a @shareable field, we also compare the set of runtime types for each of
@@ -272,7 +603,7 @@ impl ValidationState {
         // this means an @interfaceObject and this should not be considered as an implementation
         // type. Besides, @interfaceObject types always "stand-in" for every implementation type so
         // they're never a problem for this check and can be ignored.
-        if updated_state.subgraph_paths.len() < 2 {
+        if updated_state.subgraph_path_infos.len() < 2 {
             return Ok(Some(updated_state));
         }
         let QueryGraphEdgeTransition::FieldCollection {
@@ -298,8 +629,9 @@ impl ValidationState {
         if !context.is_shareable(field_definition_position)? {
             return Ok(Some(updated_state));
         }
-        let filtered_paths_count = updated_state
-            .subgraph_paths
+
+        let all_subgraph_paths: Vec<_> = updated_state.subgraph_path_infos.iter().collect();
+        let filtered_paths_count = all_subgraph_paths
             .iter()
             .map(|path| {
                 let path_tail_weight = path.path.path.graph().node_weight(path.path.path.tail())?;
@@ -337,7 +669,7 @@ impl ValidationState {
         let mut runtime_types_per_subgraphs: IndexMap<Arc<str>, Arc<BTreeSet<Name>>> =
             Default::default();
         let mut has_all_empty = true;
-        for new_subgraph_path in updated_state.subgraph_paths.iter() {
+        for new_subgraph_path in all_subgraph_paths.iter() {
             let new_subgraph_path_tail_weight = new_subgraph_path
                 .path
                 .path
@@ -411,7 +743,7 @@ impl ValidationState {
     }
 
     pub(super) fn current_subgraph_names(&self) -> Result<IndexSet<Arc<str>>, FederationError> {
-        self.subgraph_paths
+        self.subgraph_path_infos
             .iter()
             .map(|path_info| {
                 Ok(path_info
@@ -425,10 +757,58 @@ impl ValidationState {
             .process_results(|iter| iter.collect())
     }
 
+    /// Checks if this edge represents a top-level mutation field.
+    fn field_if_top_level_mutation(
+        supergraph_path: &TransitionGraphPath,
+        edge_weight: &crate::query_graph::QueryGraphEdge,
+    ) -> Result<Option<FieldDefinitionPosition>, FederationError> {
+        // Must be at root level (size 0)
+        if supergraph_path.iter().count() != 0 {
+            return Ok(None);
+        }
+
+        // Must be a field collection
+        let QueryGraphEdgeTransition::FieldCollection {
+            field_definition_position,
+            ..
+        } = &edge_weight.transition
+        else {
+            return Ok(None);
+        };
+
+        // Must be from mutation root
+        let root_node = supergraph_path.head_node()?;
+        if root_node.root_kind != Some(SchemaRootDefinitionKind::Mutation) {
+            return Ok(None);
+        }
+
+        Ok(Some(field_definition_position.clone()))
+    }
+
+    /// Gets the subgraph name for a path that represents a top-level mutation field.
+    fn subgraph_of_top_level_mutation(
+        subgraph_path_info: &SubgraphPathInfo,
+    ) -> Result<Arc<str>, FederationError> {
+        let Some((last_edge, _, _, _, _)) = subgraph_path_info.path.path.iter().last() else {
+            return Err(FederationError::internal("Path unexpectedly missing edge"));
+        };
+        let (_, head_node) = subgraph_path_info
+            .path
+            .path
+            .graph()
+            .edge_endpoints(last_edge)?;
+        let head_weight = subgraph_path_info
+            .path
+            .path
+            .graph()
+            .node_weight(head_node)?;
+        Ok(head_weight.source.clone())
+    }
+
     pub(super) fn current_subgraph_context_keys(
         &self,
     ) -> Result<IndexSet<SubgraphContextKey>, FederationError> {
-        self.subgraph_paths
+        self.subgraph_path_infos
             .iter()
             .map(|path_info| {
                 Ok(SubgraphContextKey {
@@ -450,12 +830,39 @@ impl Display for ValidationState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.supergraph_path.fmt(f)?;
         write!(f, " <=> ")?;
-        let mut iter = self.subgraph_paths.iter();
-        if let Some(first_path_info) = iter.next() {
-            first_path_info.path.fmt(f)?;
-            for path_info in iter {
-                write!(f, ", ")?;
-                path_info.path.fmt(f)?;
+        match &self.subgraph_path_infos {
+            SubgraphPathInfos::Paths(paths) => {
+                let mut iter = paths.iter();
+                if let Some(first_path_info) = iter.next() {
+                    write!(f, "[")?;
+                    first_path_info.path.fmt(f)?;
+                    for path_info in iter {
+                        write!(f, ", ")?;
+                        path_info.path.fmt(f)?;
+                    }
+                    write!(f, "]")?;
+                }
+            }
+            SubgraphPathInfos::TopLevelMutationField { paths, .. } => {
+                write!(f, "{{")?;
+                let mut first_partition = true;
+                for (subgraph, path_infos) in paths {
+                    if !first_partition {
+                        write!(f, ", ")?;
+                    }
+                    first_partition = false;
+                    write!(f, "{}: [", subgraph)?;
+                    let mut first_path = true;
+                    for path_info in path_infos {
+                        if !first_path {
+                            write!(f, ", ")?;
+                        }
+                        first_path = false;
+                        path_info.path.fmt(f)?;
+                    }
+                    write!(f, "]")?;
+                }
+                write!(f, "}}")?;
             }
         }
         Ok(())
