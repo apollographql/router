@@ -1189,6 +1189,7 @@ mod tests {
                         queries.push('\n');
                         Ok(subgraph::Response::builder()
                             .extensions(crate::json_ext::Object::new())
+                            .id(request.id)
                             .context(request.context)
                             .subgraph_name(String::default())
                             .build())
@@ -1210,9 +1211,7 @@ mod tests {
         assert!(response.errors.is_empty());
 
         let subgraph_queries = subgraph_queries2.lock().await;
-        insta::assert_snapshot!(*subgraph_queries, @r###"
-        { topProducts { name } }
-        "###)
+        insta::assert_snapshot!(*subgraph_queries, @"{ topProducts { name } }")
     }
 
     #[test]

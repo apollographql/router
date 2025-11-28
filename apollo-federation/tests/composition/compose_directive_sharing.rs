@@ -321,24 +321,24 @@ fn field_sharing_include_hint_in_error_for_targetless_override() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
-        type Query {
-          me: User
-        }
+          type Query {
+            e: E
+          }
 
-        type User @key(fields: "id") {
-          id: ID!
-          name: String! @override(from: "subgraphB")
-        }
+          type E @key(fields: "id") {
+            id: ID!
+            a: Int @override(from: "badName")
+          }
         "#,
     };
 
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type User @key(fields: "id") {
-          id: ID!
-          name: String!
-        }
+          type E @key(fields: "id") {
+            id: ID!
+            a: Int
+          }
         "#,
     };
 
@@ -347,7 +347,7 @@ fn field_sharing_include_hint_in_error_for_targetless_override() {
         &result,
         &[(
             "INVALID_FIELD_SHARING",
-            r#"Non-shareable field "User.name" is resolved from multiple subgraphs"#,
+            r#"Non-shareable field "E.a" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in all of them (please note that "E.a" has an @override directive in "subgraphA" that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)"#,
         )],
     );
 }
@@ -453,4 +453,62 @@ fn federation_directive_handles_renamed_federation_directives() {
       age: Int!
     }
     "###);
+}
+
+#[test]
+fn composition_with_shareable_on_interface_object_field() {
+    // This test reproduces a bug where during interfaceObject field backfilling, we were blindly
+    // copying AST nodes from the subgraph. This sometimes wrongly copied subgraph-only directives
+    // to the supergraph.
+
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "http://subgraphA",
+        r#"
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.6", import: ["@key", "@shareable"])
+
+        type Query {
+          item: Item
+        }
+
+        interface Item @key(fields: "id") {
+          id: ID!
+          name: String!
+        }
+
+        type Product implements Item @key(fields: "id") {
+          id: ID!
+          name: String!
+          price: Float
+        }
+        "#,
+    )
+    .expect("subgraphA should parse successfully");
+
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "http://subgraphB",
+        r#"
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.6", import: ["@key"])
+
+        type Item @federation__interfaceObject @key(fields: "id") {
+          id: ID!
+          description: String! @federation__shareable
+        }
+        "#,
+    )
+    .expect("subgraphB should parse successfully");
+
+    let result = compose(vec![subgraph_a, subgraph_b]);
+    // We should have skipped copying the @federation__shareable on Item.description
+    let supergraph = result.expect("Expected composition to succeed");
+    assert!(
+        !supergraph
+            .schema()
+            .schema()
+            .to_string()
+            .contains("federation__shareable")
+    );
 }

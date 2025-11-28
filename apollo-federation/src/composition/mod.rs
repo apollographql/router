@@ -2,8 +2,6 @@ mod satisfiability;
 
 use std::vec;
 
-use apollo_compiler::Schema;
-use apollo_compiler::validation::Valid;
 use tracing::instrument;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
@@ -81,12 +79,18 @@ pub fn merge_subgraphs(
             message: e.to_string(),
         }]
     })?;
+    tracing::trace!(
+        "Merge has {} errors and {} hints",
+        result.errors.len(),
+        result.hints.len()
+    );
     if result.errors.is_empty() {
-        let schema = result
-            .supergraph
-            .map(|s| s.into_inner().into_inner())
-            .unwrap_or_else(Schema::new);
-        let supergraph = Supergraph::with_hints(Valid::assume_valid(schema), result.hints);
+        let Some(supergraph_schema) = result.supergraph else {
+            return Err(vec![CompositionError::InternalError {
+                message: "Merge completed with no supergraph schema".to_string(),
+            }]);
+        };
+        let supergraph = Supergraph::with_hints(supergraph_schema, result.hints);
         Ok(supergraph)
     } else {
         Err(result.errors)

@@ -783,6 +783,25 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "CacheControlSelector": {
+      "oneOf": [
+        {
+          "const": "scope",
+          "description": "Returns the scope, either `public` or `private`",
+          "type": "string"
+        },
+        {
+          "const": "no_store",
+          "description": "Boolean to know the value of no-store",
+          "type": "string"
+        },
+        {
+          "const": "max_age",
+          "description": "Value of s-maxage or max-age in cache-control",
+          "type": "string"
+        }
+      ]
+    },
     "CacheKind": {
       "enum": [
         "hit",
@@ -2052,14 +2071,6 @@ expression: "&schema"
           "default": null,
           "description": "TLS client configuration"
         },
-        "ttl": {
-          "default": null,
-          "description": "TTL for entries",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "urls": {
           "description": "List of URLs to the Redis cluster",
           "items": {
@@ -2773,7 +2784,8 @@ expression: "&schema"
               ],
               "origins": [
                 "https://studio.apollographql.com"
-              ]
+              ],
+              "private_network_access": null
             }
           ],
           "description": "The origin(s) to allow requests from. The router matches request origins against policies\nin order, first by exact match, then by regex. See module documentation for default behavior.",
@@ -3677,7 +3689,7 @@ expression: "&schema"
           ],
           "description": "A counter of times we have a cache hit or cache miss (deprecated)"
         },
-        "apollo.router.operations.response.cache": {
+        "apollo.router.response.cache": {
           "allOf": [
             {
               "$ref": "#/definitions/StandardInstrumentExtendedCacheAttributesWithSubgraphSelector"
@@ -6345,6 +6357,14 @@ expression: "&schema"
             "null"
           ]
         },
+        "http2_max_headers_list_bytes": {
+          "default": null,
+          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "http_max_request_bytes": {
           "default": 2000000,
           "description": "Limit the size of incoming HTTP requests read from the network,\nto protect against running out of memory. Default: 2000000 (2 MB)",
@@ -7211,6 +7231,40 @@ expression: "&schema"
             "type": "string"
           },
           "type": "array"
+        },
+        "private_network_access": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PrivateNetworkAccessPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When `Some`, the `Access-Control-Allow-Private-Network` header will be added as well as the\nrespective headers contained within the policy."
+        }
+      },
+      "type": "object"
+    },
+    "PrivateNetworkAccessPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "access_id": {
+          "default": null,
+          "description": "When specified, the `Private-Network-Access-ID` header will be added with the given ID.\nThe ID must be a 48-bit value presented as 6 hexadecimal bytes separated by colons, e.g.\n`01:23:45:67:89:0A`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "access_name": {
+          "default": null,
+          "description": "When `Some`, the `Private-Network-Access-Name` header will be added with the given name.\nThe name can be at most 248 UTF-8 code units and match a RegEx equivalent to the ECMAScript\nRegEx `/^[a-z0-9_-.]+$/.`",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10157,6 +10211,23 @@ expression: "&schema"
             "response_cache_status"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "response_cache_control": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CacheControlSelector"
+                }
+              ],
+              "description": "Select data you want from the computed cache control from response caching"
+            }
+          },
+          "required": [
+            "response_cache_control"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -11933,7 +12004,8 @@ expression: "&schema"
             ],
             "origins": [
               "https://studio.apollographql.com"
-            ]
+            ],
+            "private_network_access": null
           }
         ]
       },

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -26,6 +27,7 @@ use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
@@ -40,6 +42,7 @@ use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::SchemaElement;
 use crate::schema::blueprint::FederationBlueprint;
@@ -70,24 +73,38 @@ use crate::supergraph::SERVICE_TYPE_SPEC;
 #[derive(Clone, Debug)]
 pub struct Initial {
     schema: Schema,
+    orphan_extension_types: HashSet<Name>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Expanded {
     schema: ValidFederationSchema,
+    orphan_extension_types: HashSet<Name>,
     metadata: SubgraphMetadata,
 }
 
 #[derive(Clone, Debug)]
 pub struct Upgraded {
     schema: FederationSchema,
+    orphan_extension_types: HashSet<Name>,
     metadata: SubgraphMetadata,
 }
 
 #[derive(Clone, Debug)]
 pub struct Validated {
     schema: ValidFederationSchema,
+    orphan_extension_types: HashSet<Name>,
     metadata: SubgraphMetadata,
+}
+
+impl Expanded {
+    pub(crate) fn orphan_extension_types(&self) -> &HashSet<Name> {
+        &self.orphan_extension_types
+    }
+
+    pub(crate) fn into_orphan_extension_types(self) -> HashSet<Name> {
+        self.orphan_extension_types
+    }
 }
 
 pub(crate) trait HasMetadata {
@@ -162,11 +179,29 @@ pub struct Subgraph<S> {
 }
 
 impl Subgraph<Initial> {
-    pub fn new(name: &str, url: &str, schema: Schema) -> Subgraph<Initial> {
-        Subgraph {
-            name: name.to_string(),
-            url: url.to_string(),
-            state: Initial { schema },
+    pub fn new(
+        name: &str,
+        url: &str,
+        schema: Schema,
+        orphan_extension_types: HashSet<Name>,
+    ) -> Result<Subgraph<Initial>, SubgraphError> {
+        // We use this name as the "source" of root nodes in our federated query graph.
+        if name == FEDERATED_GRAPH_ROOT_SOURCE {
+            Err(SubgraphError::new_without_locations(
+                name.to_string(),
+                SingleFederationError::InvalidSubgraphName {
+                    message: format!("Invalid name {name} for a subgraph: this name is reserved"),
+                },
+            ))
+        } else {
+            Ok(Subgraph {
+                name: name.to_string(),
+                url: url.to_string(),
+                state: Initial {
+                    schema,
+                    orphan_extension_types,
+                },
+            })
         }
     }
 
@@ -175,17 +210,22 @@ impl Subgraph<Initial> {
         url: &str,
         schema_str: &str,
     ) -> Result<Subgraph<Initial>, SubgraphError> {
-        let mut schema = Schema::builder()
+        let schema_builder = Schema::builder()
             .adopt_orphan_extensions()
             .ignore_builtin_redefinitions()
-            .parse(schema_str, name)
+            .parse(schema_str, name);
+        let orphan_extension_types = schema_builder
+            .iter_orphan_extension_types()
+            .cloned()
+            .collect();
+        let mut schema = schema_builder
             .build()
             .map_err(|e| SubgraphError::from_diagnostic_list(name, e.errors))?;
 
         // Simulate graphql-js behavior accepting duplicate argument definitions.
         parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
 
-        Ok(Self::new(name, url, schema))
+        Self::new(name, url, schema, orphan_extension_types)
     }
 
     /// Converts the schema to a fed2 schema.
@@ -207,7 +247,12 @@ impl Subgraph<Initial> {
         };
         add_federation_link_to_test_schema(&mut schema, federation_spec.version(), no_imports)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
-        Ok(Self::new(&self.name, &self.url, schema))
+        Self::new(
+            &self.name,
+            &self.url,
+            schema,
+            self.state.orphan_extension_types,
+        )
     }
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, SubgraphError> {
@@ -217,6 +262,7 @@ impl Subgraph<Initial> {
             ValidFederationSchema::new_assume_valid(schema).map_err(|(_schema, error)| {
                 SubgraphError::new_without_locations(self.name.clone(), error)
             })?;
+        let orphan_extension_types = self.state.orphan_extension_types;
         let metadata = compute_subgraph_metadata(&schema)
             .and_then(|m| {
                 m.ok_or_else(|| {
@@ -231,7 +277,11 @@ impl Subgraph<Initial> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
-            state: Expanded { schema, metadata },
+            state: Expanded {
+                schema,
+                orphan_extension_types,
+                metadata,
+            },
         })
     }
 
@@ -254,6 +304,7 @@ impl Subgraph<Initial> {
 
     fn expand_links_internal(self, validate: bool) -> Result<Subgraph<Expanded>, FederationError> {
         let schema = expand_schema(self.state.schema)?;
+        let orphan_extension_types = self.state.orphan_extension_types;
         trace!("expand_links: compute_subgraph_metadata");
         let metadata = compute_subgraph_metadata(&schema)?.ok_or_else(|| {
             internal_error!(
@@ -272,7 +323,11 @@ impl Subgraph<Initial> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
-            state: Expanded { schema, metadata },
+            state: Expanded {
+                schema,
+                orphan_extension_types,
+                metadata,
+            },
         })
     }
 }
@@ -329,6 +384,13 @@ mod parser_backward_compatibility {
 }
 
 impl Subgraph<Expanded> {
+    /// Returns true if the given type name is an orphan type extension in this subgraph.
+    /// - Orphan type implies that there is one or more extensions for the type, but no base
+    ///   definition.
+    pub(crate) fn is_orphan_extension_type(&self, type_name: &Name) -> bool {
+        self.state.orphan_extension_types.contains(type_name)
+    }
+
     /// Normalizes root types if necessary.
     /// - Returns either `Subgraph<Expanded>` (if unchanged) or `Subgraph<Upgraded>` (if changed).
     pub fn normalize_root_types(
@@ -337,7 +399,8 @@ impl Subgraph<Expanded> {
         // Convert `ValidFederationSchema` to `FederationSchema`, so we can call
         // `normalize_root_types`.
         let mut schema: FederationSchema = self.state.schema.into();
-        let changed = normalize_root_types_in_subgraph_schema(&mut schema)
+        let mut metadata = self.state.metadata;
+        let changed = normalize_root_types_in_subgraph_schema(&mut schema, &mut metadata)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         if changed {
             Ok(Either::Right(Subgraph {
@@ -345,7 +408,8 @@ impl Subgraph<Expanded> {
                 url: self.url,
                 state: Upgraded {
                     schema,
-                    metadata: self.state.metadata,
+                    metadata,
+                    orphan_extension_types: self.state.orphan_extension_types,
                 },
             }))
         } else {
@@ -357,7 +421,8 @@ impl Subgraph<Expanded> {
                     schema: schema
                         .assume_valid()
                         .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?,
-                    metadata: self.state.metadata,
+                    metadata,
+                    orphan_extension_types: self.state.orphan_extension_types,
                 },
             }))
         }
@@ -371,6 +436,7 @@ impl Subgraph<Expanded> {
             state: Upgraded {
                 schema: self.state.schema.into(),
                 metadata: self.state.metadata,
+                orphan_extension_types: self.state.orphan_extension_types,
             },
         }
     }
@@ -383,6 +449,7 @@ impl Subgraph<Expanded> {
             url: self.url,
             state: Validated {
                 schema: self.state.schema,
+                orphan_extension_types: self.state.orphan_extension_types,
                 metadata: self.state.metadata,
             },
         }
@@ -413,6 +480,7 @@ fn validate_subgraph_schema(
 /// Shared by Subgraph<Expanded> and Subgraph<Upgraded>
 fn normalize_root_types_in_subgraph_schema(
     schema: &mut FederationSchema,
+    metadata: &mut SubgraphMetadata,
 ) -> Result<bool, FederationError> {
     let mut operation_types_to_rename = HashMap::new();
     for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
@@ -430,8 +498,12 @@ fn normalize_root_types_in_subgraph_schema(
         }
     }
     let changed = !operation_types_to_rename.is_empty();
-    for (current_name, new_name) in operation_types_to_rename {
-        schema.get_type(current_name)?.rename(schema, new_name)?;
+    for (current_name, new_name) in &operation_types_to_rename {
+        schema
+            .get_type(current_name.clone())?
+            .rename(schema, new_name.clone())?;
+        // Update metadata to reflect the type rename
+        metadata.update_type_references(current_name, new_name);
     }
     Ok(changed)
 }
@@ -450,13 +522,14 @@ impl Subgraph<Upgraded> {
             url: self.url,
             state: Validated {
                 schema,
+                orphan_extension_types: self.state.orphan_extension_types,
                 metadata: self.state.metadata,
             },
         })
     }
 
     pub fn normalize_root_types(&mut self) -> Result<(), SubgraphError> {
-        normalize_root_types_in_subgraph_schema(&mut self.state.schema)
+        normalize_root_types_in_subgraph_schema(&mut self.state.schema, &mut self.state.metadata)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         Ok(())
     }
@@ -473,6 +546,13 @@ fn default_operation_name(op_type: &OperationType) -> Name {
 impl Subgraph<Validated> {
     pub fn validated_schema(&self) -> &ValidFederationSchema {
         &self.state.schema
+    }
+
+    /// Returns true if the given type name is an orphan type extension in this subgraph.
+    /// - Orphan type implies that there is one or more extensions for the type, but no base
+    ///   definition.
+    pub(crate) fn is_orphan_extension_type(&self, type_name: &Name) -> bool {
+        self.state.orphan_extension_types.contains(type_name)
     }
 }
 
@@ -537,10 +617,41 @@ impl<S: HasMetadata> Subgraph<S> {
             .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
     }
 
+    pub(crate) fn external_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)
+    }
+
     pub(crate) fn tag_directive_name(&self) -> Result<Option<Name>, FederationError> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn interface_object_fields(&self) -> Vec<ObjectFieldDefinitionPosition> {
+        let Ok(Some(interface_object_def)) = self
+            .metadata()
+            .federation_spec_definition()
+            .interface_object_directive_definition(self.schema())
+        else {
+            return vec![];
+        };
+
+        let Ok(itf_objects) = self
+            .schema()
+            .referencers()
+            .get_directive(&interface_object_def.name)
+            .map(|refs| &refs.object_types)
+        else {
+            return vec![];
+        };
+
+        itf_objects
+            .iter()
+            .filter_map(|obj| obj.fields(self.schema().schema()).ok())
+            .flatten()
+            .collect()
     }
 
     pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {

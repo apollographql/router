@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt::Display;
 
 use apollo_compiler::Name;
@@ -79,6 +80,7 @@ impl Merger {
         <T as HasArguments>::ArgumentPosition: Display,
     {
         let mut arg_types: IndexMap<Name, Node<Type>> = Default::default();
+        let mut removed_args = HashSet::new();
         for (idx, source) in sources.iter() {
             let Some(pos) = source else {
                 continue;
@@ -145,7 +147,7 @@ impl Merger {
                         if arg.is_required() && arg.default_value.is_none() {
                             self.error_reporter.add_error(CompositionError::ContextualArgumentNotContextualInAllSubgraphs {
                                 message: format!(
-                                    "Argument \"{dest_arg_pos}\" is contextual in at least one subgraph but in \"{pos}\" it does not have @fromContext, is not nullable and has no default value.",
+                                    "Argument \"{dest_arg_pos}\" is contextual in at least one subgraph but in \"{dest_arg_pos}\" it does not have @fromContext, is not nullable and has no default value.",
                                 ),
                                 locations: subgraph.node_locations(arg),
                             });
@@ -165,6 +167,7 @@ impl Merger {
                 // Note: we remove the element after the hint/error because we access it in
                 // the hint message generation.
                 dest.remove_argument(&mut self.merged, arg_name)?;
+                removed_args.insert(arg_name.clone());
                 continue;
             }
 
@@ -207,14 +210,14 @@ impl Merger {
                     let arg_sources: Sources<_> = sources
                         .iter()
                         .map(|(idx, source)| {
-                            let pos_opt = source
-                                .as_ref()
-                                .map(|pos| pos.argument_position(arg_name.clone()));
+                            let pos_opt = source.as_ref().and_then(|pos| {
+                                pos.get_argument(self.subgraphs[*idx].schema(), arg_name)
+                            });
                             (*idx, pos_opt)
                         })
                         .collect();
 
-                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, T::ArgumentPosition, ()>(
+                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, &Node<InputValueDefinition>, ()>(
                         HintCode::InconsistentArgumentPresence,
                         format!(
                             "Optional argument \"{}\" will not be included in the supergraph as it does not appear in all subgraphs: ",
@@ -234,12 +237,17 @@ impl Merger {
                 // Note that we remove the element after the hint/error because we
                 // access it in the hint message generation.
                 dest.remove_argument(&mut self.merged, arg_name)?;
+                removed_args.insert(arg_name.clone());
             }
         }
 
-        Ok(arg_types.into_keys().collect())
+        Ok(arg_types
+            .into_keys()
+            .filter(|n| !removed_args.contains(n))
+            .collect())
     }
 
+    #[instrument(skip(self, sources, dest))]
     pub(in crate::merger) fn merge_argument<T>(
         &mut self,
         sources: &Sources<T>,
@@ -253,6 +261,7 @@ impl Merger {
             + HasType
             + Into<DirectiveTargetPosition>,
     {
+        trace!("Merging argument \"{dest}\"");
         self.merge_description(sources, dest)?;
         self.record_applied_directives_to_merge(sources, dest)?;
         self.merge_type_reference(sources, dest, true)?;
@@ -266,13 +275,17 @@ impl Merger {
         dest: &T,
     ) -> Result<(), FederationError>
     where
-        T: Display + HasDefaultValue,
+        T: Display + HasDefaultValue + HasType,
     {
+        trace!("Merging default value for \"{dest}\"");
         let mut dest_default: Option<Node<Value>> = None;
         let mut locations = Locations::with_capacity(sources.len());
         let mut has_seen_source = false;
         let mut is_inconsistent = false;
         let mut is_incompatible = false;
+
+        // Get the target type for coercibility checking
+        let target_type = dest.get_type(&self.merged)?;
 
         // Because default values are always in input/contra-variant positions, we use an intersection strategy. Namely,
         // the result only has a default if _all_ have a default (which has to be the same, but we error if we found
@@ -302,8 +315,11 @@ impl Merger {
                     }
                 }
                 Some(current) => {
-                    // We have `&Node<Value>` here, so we need the double deref to get value equality.
-                    if source_default.is_none_or(|next| **next != **current) {
+                    // We have `&Node<Value>` here, so we need the double deref to get the values.
+                    // Check if values are equivalent considering type coercibility (e.g., Int to Float)
+                    if source_default.is_none_or(|next| {
+                        !Self::are_default_values_equivalent(next, current, target_type)
+                    }) {
                         is_inconsistent = true;
                         // It's only incompatible if neither is undefined
                         if source_default.is_some() {
@@ -318,6 +334,7 @@ impl Merger {
         // Note that we set the default if is_incompatible mostly to help the building of the error message. But
         // as we'll error out, it doesn't really matter.
         if !is_inconsistent || is_incompatible {
+            trace!("Setting merged default value for \"{dest}\" to {dest_default:?}");
             dest.set_default_value(&mut self.merged, dest_default.clone())?;
         }
 
@@ -354,8 +371,12 @@ impl Merger {
                 format!("Argument \"{dest}\" has a default value in only some subgraphs: "),
                 dest_default,
                 sources,
-                |v| Some(format!("default value {v}")),
-                |pos, idx| pos.get_default_value(self.subgraphs[idx].schema()).map(|v| v.to_string()),
+                // When inconsistent, we set no default. So, the supergraph element should always
+                // be "no default value". The matching strings drive the ordering in the message.
+                |_| Some("no default value".to_string()),
+                |pos, idx| Some(pos.get_default_value(self.subgraphs[idx].schema())
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "no default value".to_string())),
                 |_, subgraphs| {
                     let subgraphs = subgraphs.unwrap_or_default();
                     format!("will not use a default in the supergraph (there is no default in {subgraphs}) but ")
@@ -367,5 +388,36 @@ impl Merger {
         }
 
         Ok(())
+    }
+
+    /// Check if two default values are equivalent, considering type coercibility.
+    /// For example, Int value 200 is equivalent to Float value 200.0 when the target type is Float.
+    fn are_default_values_equivalent(value1: &Value, value2: &Value, target_type: &Type) -> bool {
+        // TODO: This coercibility check should really come from `apollo_compiler`
+        // First check for direct equality
+        if value1 == value2 {
+            return true;
+        }
+
+        // Check for Int to Float coercibility
+        // According to GraphQL spec, Int values can be coerced to Float
+        if target_type.inner_named_type() == "Float" {
+            match (value1, value2) {
+                // Int literal coercible to Float literal
+                (Value::Int(int_val), Value::Float(float_val))
+                | (Value::Float(float_val), Value::Int(int_val)) => {
+                    let Ok(int_val_parsed) = int_val.try_to_f64() else {
+                        return false;
+                    };
+                    let Ok(float_val_parsed) = float_val.try_to_f64() else {
+                        return false;
+                    };
+                    int_val_parsed == float_val_parsed
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
     }
 }
