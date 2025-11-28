@@ -80,19 +80,40 @@ pub(crate) fn create_propagator(
     tracing: &Tracing,
 ) -> TextMapCompositePropagator {
     let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
-    if propagation.jaeger {
+
+    if tracing.is_jaeger_propagation_enabled() {
         propagators.push(Box::<opentelemetry_jaeger_propagator::Propagator>::default());
     }
-    if propagation.baggage {
+    if tracing.is_baggage_propagation_enabled() {
         propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
     }
-    if propagation.trace_context || tracing.otlp.enabled {
+    if tracing.is_trace_context_propagation_enabled() {
         propagators.push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
     }
-    if propagation.zipkin || tracing.zipkin.enabled {
+    if tracing.is_zipkin_propagation_enabled() {
         propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
     }
-    if propagation.datadog || tracing.datadog.enabled {
+    if tracing.is_datadog_propagation_enabled() {
+        if tracing.is_jaeger_propagation_enabled()
+            || tracing.is_trace_context_propagation_enabled()
+            || tracing.is_zipkin_propagation_enabled()
+            || tracing.is_aws_xray_propagation_enabled()
+        {
+            if tracing.datadog.enabled && propagation.datadog.unwrap_or(false) {
+                tracing::warn!(
+                    "if the datadog exporter is enabled and any other propagator except for baggage is enabled, the datadog propagator should be disabled to avoid trace id conflicts"
+                );
+            } else if let Some(true) = propagation.datadog {
+                tracing::warn!(
+                    "datadog propagation should not be used with any other propagator except for baggage to avoid trace id conflicts"
+                );
+            } else if propagation.datadog.is_none() {
+                tracing::warn!(
+                    "datadog propagation should be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled to avoid trace id conflicts"
+                );
+            }
+        }
+
         propagators.push(Box::<
             crate::plugins::telemetry::tracing::datadog_exporter::DatadogPropagator,
         >::default());
