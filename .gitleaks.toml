@@ -3,6 +3,8 @@
     [ rules.allowlist ]
         paths = [
             '''Cargo.lock$'''
+            ,'''^\.changesets\/.+\.md$'''
+            ,'''^CHANGELOG\.md$'''
         ]
 
 [[ rules ]]
@@ -47,6 +49,7 @@
 
         paths = [
             '''^apollo-router\/src\/.+\/testdata\/.+''',
+            '''^apollo-router\/tests\/integration\/fixtures\/.+''',
         ]
 
 [[ rules ]]

@@ -11,7 +11,7 @@ telemetry:
               subgraph_name: true
             supergraph.operation.name:
               supergraph_operation_name: string
-        apollo.router.operations.response.cache:
+        apollo.router.response.cache:
           attributes:
             graphql.type.name:
               alias: entity_type

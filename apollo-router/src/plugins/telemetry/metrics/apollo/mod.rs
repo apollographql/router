@@ -438,6 +438,19 @@ mod test {
             insta::assert_json_snapshot!(results);
         });
 
+        let query = "query {topProducts{name}}";
+        let plugin = create_telemetry_plugin(include_str!(
+            "../../testdata/full_config_all_features_enabled_response_cache.router.yaml"
+        ))
+        .await?;
+        let results = get_metrics_for_request(query, None, None, false, Some(plugin)).await?;
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
+
         Ok(())
     }
 

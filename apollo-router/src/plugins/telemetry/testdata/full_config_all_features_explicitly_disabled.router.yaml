@@ -16,7 +16,16 @@ preview_entity_cache:
     all:
       enabled: true
       redis:
-        urls: [ "redis://..." ]
+        urls: ["redis://..."]
+
+# Disable response cache
+preview_response_cache:
+  enabled: false
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
 
 # Telemetry plugin config
 telemetry:
@@ -57,14 +66,14 @@ telemetry:
           description: "my description"
         acme.request.size: # The name of your custom instrument/metric
           value:
-           request_header: "content-length"
+            request_header: "content-length"
           type: counter
           unit: s
-          description: "my description" 
-            
+          description: "my description"
+
         acme.request.length: # The name of your custom instrument/metric
           value:
-           request_header: "content-length"
+            request_header: "content-length"
           type: histogram
           unit: s
           description: "my description"
@@ -86,7 +95,7 @@ telemetry:
           description: "supergraph requests"
           condition:
             exists:
-             subgraph_response_data: "$.products[*].price1"
+              subgraph_response_data: "$.products[*].price1"
           attributes:
             subgraph.name: true
     events:
@@ -103,7 +112,7 @@ telemetry:
           on: request
           attributes:
             http.request.body.size: true
-          # Only log when the x-log-request header is `log` 
+          # Only log when the x-log-request header is `log`
           condition:
             eq:
               - "log"
@@ -114,7 +123,7 @@ telemetry:
           on: response
           attributes:
             http.response.body.size: true
-          # Only log when the x-log-request header is `log` 
+          # Only log when the x-log-request header is `log`
           condition:
             eq:
               - "log"
@@ -130,7 +139,7 @@ telemetry:
           message: "my event message"
           level: info
           on: request
-          # Only log when the x-log-request header is `log` 
+          # Only log when the x-log-request header is `log`
           condition:
             eq:
               - "log"

@@ -136,7 +136,7 @@ impl Config {
             "redis://127.0.0.1:6379"
         };
 
-        serde_json::from_value(serde_json::json!({
+        serde_json_bytes::from_value(serde_json_bytes::json!({
             "urls": [url],
             "namespace": namespace,
             "pool_size": 1,

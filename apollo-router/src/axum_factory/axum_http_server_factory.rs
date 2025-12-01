@@ -208,14 +208,11 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .map_err(ApolloRouterError::ServerCreationError)?;
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
+                all_routers.main.1,
                 pipeline_ref.clone(),
                 actual_main_listen_address.clone(),
                 main_listener,
-                configuration.supergraph.connection_shutdown_timeout,
-                all_routers.main.1,
-                configuration.limits.http1_max_request_headers,
-                configuration.limits.http1_max_request_buf_size,
-                configuration.server.http.header_read_timeout,
+                configuration.clone(),
                 all_connections_stopped_sender.clone(),
             );
 
@@ -251,14 +248,11 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .into_iter()
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
+                            router,
                             pipeline_ref.clone(),
                             listen_addr.clone(),
                             listener,
-                            configuration.supergraph.connection_shutdown_timeout,
-                            router,
-                            configuration.limits.http1_max_request_headers,
-                            configuration.limits.http1_max_request_buf_size,
-                            configuration.server.http.header_read_timeout,
+                            configuration.clone(),
                             all_connections_stopped_sender.clone(),
                         );
                         (

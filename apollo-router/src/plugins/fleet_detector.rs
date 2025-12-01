@@ -264,7 +264,23 @@ impl PluginPrivate for FleetDetector {
             // Count the number of request bytes from clients to the router
             .map_request(move |req: router::Request| router::Request {
                 router_request: req.router_request.map(move |body| {
-                    router::body::from_result_stream(body.into_data_stream().inspect(|res| {
+                    let size_hint = body.size_hint();
+
+                    // Short-circuit for complete bodies
+                    //
+                    // If the `SizeHint` gives us an exact value, we can use this for the
+                    // metric and return without wrapping the request Body into a stream.
+                    if let Some(size) = size_hint.exact() {
+                        u64_counter!(
+                            "apollo.router.operations.request_size",
+                            "Total number of request bytes from clients",
+                            size
+                        );
+                        return body;
+                    }
+
+                    // For streaming bodies, we need to wrap the stream and count bytes as we go
+                    router::body::from_result_stream(body.into_data_stream().inspect(move |res| {
                         if let Ok(bytes) = res {
                             u64_counter!(
                                 "apollo.router.operations.request_size",
@@ -280,15 +296,33 @@ impl PluginPrivate for FleetDetector {
             .map_response(move |res: router::Response| {
                 router::Response::http_response_builder()
                     .response(res.response.map(move |body| {
-                        router::body::from_result_stream(body.into_data_stream().inspect(|res| {
-                            if let Ok(bytes) = res {
-                                u64_counter!(
-                                    "apollo.router.operations.response_size",
-                                    "Total number of response bytes to clients",
-                                    bytes.len() as u64
-                                );
-                            }
-                        }))
+                        let size_hint = body.size_hint();
+
+                        // Short-circuit for complete bodies
+                        //
+                        // If the `SizeHint` gives us an exact value, we can use this for the
+                        // metric and return without wrapping the response Body into a stream.
+                        if let Some(size) = size_hint.exact() {
+                            u64_counter!(
+                                "apollo.router.operations.response_size",
+                                "Total number of response bytes to clients",
+                                size
+                            );
+                            return body;
+                        }
+
+                        // For streaming bodies, we need to wrap the stream and count bytes as we go
+                        router::body::from_result_stream(body.into_data_stream().inspect(
+                            move |res| {
+                                if let Ok(bytes) = res {
+                                    u64_counter!(
+                                        "apollo.router.operations.response_size",
+                                        "Total number of response bytes to clients",
+                                        bytes.len() as u64
+                                    );
+                                }
+                            },
+                        ))
                     }))
                     .context(res.context)
                     .build()
@@ -838,5 +872,132 @@ nodev   cgroup
             OFFICIAL_HELM_CHART
         );
         assert_eq!(get_deployment_type(None, Some(OPERATOR)), OPERATOR);
+    }
+
+    #[tokio::test]
+    async fn test_size_hint_preservation_router_request_and_response() {
+        async {
+            let plugin = FleetDetector::default();
+
+            // GIVEN a router service with request and response bodies that have exact size hints
+            let mut mock_service = MockRouterService::new();
+            mock_service
+                .expect_call()
+                .times(1)
+                .returning(|req: router::Request| {
+                    // Verify the request body still has size hint after plugin processing
+                    let body = req.router_request.into_body();
+                    let size_hint = body.size_hint();
+                    assert!(
+                        size_hint.exact().is_some(),
+                        "Request body size hint should be preserved to enable content-length headers"
+                    );
+                    assert_eq!(size_hint.exact().unwrap(), 12); // "test request".len()
+
+                    // Create a response body with exact size hint (Full body)
+                    let response_body = router::body::from_bytes("test response");
+
+                    // Verify the response body has exact size hint before returning
+                    let response_size_hint = response_body.size_hint();
+                    assert!(
+                        response_size_hint.exact().is_some(),
+                        "Response body should have exact size hint to enable content-length headers"
+                    );
+                    assert_eq!(response_size_hint.exact().unwrap(), 13); // "test response".len()
+
+                    router::Response::http_response_builder()
+                        .context(req.context)
+                        .response(
+                            http::Response::builder()
+                                .status(StatusCode::OK)
+                                .header("content-type", "application/json")
+                                .body(response_body)
+                                .unwrap(),
+                        )
+                        .build()
+                });
+
+            let mut router_service = plugin.router_service(mock_service.boxed());
+            let router_req = router::Request::fake_builder()
+                .body(router::body::from_bytes("test request"))
+                .build()
+                .unwrap();
+
+            let _router_response = router_service
+                .ready()
+                .await
+                .unwrap()
+                .call(router_req)
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
+            // THEN operation size metrics should exist with exact sizes (not streaming)
+            // This indicates size hints were preserved for both request and response.
+            // When Hyper sees these preserved size hints later in the pipeline, it will
+            // use content-length headers instead of transfer-encoding: chunked
+            // If size hints were lost, we'd see byte-by-byte counting instead of single exact metrics
+            assert_counter!("apollo.router.operations.request_size", 12, &[]); // "test request".len()
+            assert_counter!("apollo.router.operations.response_size", 13, &[]); // "test response".len()
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_streaming_body_without_size_hint() {
+        async {
+            let plugin = FleetDetector::default();
+
+            // GIVEN a router service with a streaming body (no exact size hint)
+            let mut mock_service = MockRouterService::new();
+            mock_service
+                .expect_call()
+                .times(1)
+                .returning(|req: router::Request| {
+                    // Create a streaming response body without exact size hint
+                    let response_body =
+                        router::body::from_result_stream(futures::stream::once(async {
+                            Ok::<_, Infallible>(bytes::Bytes::from("streaming response"))
+                        }));
+                    router::Response::http_response_builder()
+                        .context(req.context)
+                        .response(
+                            http::Response::builder()
+                                .status(StatusCode::OK)
+                                .header("content-type", "application/json")
+                                .body(response_body)
+                                .unwrap(),
+                        )
+                        .build()
+                });
+
+            let mut router_service = plugin.router_service(mock_service.boxed());
+            let router_req = router::Request::fake_builder()
+                .body(router::body::from_result_stream(futures::stream::once(
+                    async { Ok::<_, Infallible>(bytes::Bytes::from("streaming request")) },
+                )))
+                .build()
+                .unwrap();
+
+            let _router_response = router_service
+                .ready()
+                .await
+                .unwrap()
+                .call(router_req)
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
+            // THEN operation size metrics should exist for streaming bodies
+            // Note: streaming bodies record bytes incrementally as they're consumed
+            assert_counter!("apollo.router.operations.response_size", 18, &[]);
+        }
+        .with_metrics()
+        .await;
     }
 }

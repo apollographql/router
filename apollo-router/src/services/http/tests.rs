@@ -2,6 +2,7 @@ use std::convert::Infallible;
 use std::io;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
@@ -50,27 +51,116 @@ use crate::services::http::HttpRequest;
 use crate::services::router;
 use crate::services::supergraph;
 
+// ALPN protocol constants
+mod alpn {
+    pub(super) const H2: &[u8] = b"h2";
+    pub(super) const HTTP_1_1: &[u8] = b"http/1.1";
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum NegotiatedHttpProtocol {
+    HTTP1,
+    HTTP2,
+}
+/// Tracks which protocol was negotiated across different execution contexts (ie, in the test server
+/// actually handling the negotiation)
+#[derive(Debug, Clone)]
+struct NegotiatedProtocolTracker {
+    // the observed protocol, without changing its binary representation
+    protocol: Arc<Mutex<Option<NegotiatedHttpProtocol>>>,
+}
+
+impl TryFrom<Vec<u8>> for NegotiatedHttpProtocol {
+    type Error = String;
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        let http1 = alpn::HTTP_1_1.to_vec();
+        let http2 = alpn::H2.to_vec();
+
+        if value == http1 {
+            Ok(NegotiatedHttpProtocol::HTTP1)
+        } else if value == http2 {
+            Ok(NegotiatedHttpProtocol::HTTP2)
+        } else {
+            Err(format!("{value:?} is not a supported protocol"))
+        }
+    }
+}
+
+impl NegotiatedProtocolTracker {
+    fn new() -> Self {
+        Self {
+            protocol: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn set(&self, protocol: NegotiatedHttpProtocol) {
+        *self.protocol.lock().unwrap() = Some(protocol);
+    }
+
+    fn get(&self) -> Option<NegotiatedHttpProtocol> {
+        self.protocol.lock().unwrap().clone()
+    }
+
+    fn is_http2(&self) -> bool {
+        self.get()
+            .is_some_and(|prot| prot == NegotiatedHttpProtocol::HTTP2)
+    }
+
+    fn is_http1(&self) -> bool {
+        self.get()
+            .is_some_and(|prot| prot == NegotiatedHttpProtocol::HTTP1)
+    }
+
+    // there's some risk here of counting as unset what was unprocessed; just note that we default
+    // to None
+    fn is_unnegotiated(&self) -> bool {
+        self.get().is_none()
+    }
+}
+
 async fn tls_server(
     listener: TcpListener,
     certificates: Vec<CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
     body: &'static str,
+    negotiated_protocol_tracker: NegotiatedProtocolTracker,
+    alpn_protocols: Vec<Vec<u8>>,
 ) {
-    let tls_config = Arc::new(
-        ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certificates, key)
-            .expect("built our tls config"),
-    );
+    let mut tls_config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certificates, key)
+        .expect("built our tls config");
+
+    tls_config.alpn_protocols = alpn_protocols;
+
+    let tls_config = Arc::new(tls_config);
     let acceptor = TlsAcceptor::from(tls_config);
 
     loop {
         let (stream, _) = listener.accept().await.expect("accepting connections");
         let acceptor = acceptor.clone();
 
+        let negotiated_protocol = negotiated_protocol_tracker.clone();
         tokio::spawn(async move {
             let acceptor_stream = acceptor.accept(stream).await.expect("accepted stream");
+            if let Some(protocol) = acceptor_stream.get_ref().1.alpn_protocol() {
+                negotiated_protocol.set(protocol.to_vec().try_into().unwrap());
+            }
+
             let tokio_stream = TokioIo::new(acceptor_stream);
+
+            // configure hyper builder based on negotiated protocol; this auto-detects the
+            // protocol and has http1 and http2 configurations available--we use the auto-detecting
+            // builder in listeners.rs too
+            let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+
+            // set the version for the http protocol; if none are set, don't restrict the builder
+            if negotiated_protocol.is_http2() {
+                builder = builder.http2_only();
+            } else if negotiated_protocol.is_http1() {
+                // HTTP/1.1 was negotiated or no ALPN
+                builder = builder.http1_only();
+            }
 
             let hyper_service =
                 hyper::service::service_fn(move |_request: Request<Incoming>| async {
@@ -78,12 +168,12 @@ async fn tls_server(
                         http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
-                            .version(Version::HTTP_11)
                             .body::<Body>(body.into())
                             .unwrap(),
                     )
                 });
-            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+
+            if let Err(err) = builder
                 .serve_connection_with_upgrades(tokio_stream, hyper_service)
                 .await
             {
@@ -164,7 +254,17 @@ async fn tls_self_signed() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
-    tokio::task::spawn(tls_server(listener, certificates, key, r#"{"data": null}"#));
+    let negotiated_protocol = NegotiatedProtocolTracker::new();
+    let negotiated_clone = negotiated_protocol.clone();
+
+    tokio::task::spawn(tls_server(
+        listener,
+        certificates,
+        key,
+        r#"{"data": null}"#,
+        negotiated_clone,
+        vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
+    ));
 
     // we cannot parse a configuration from text, because certificates are generally
     // added by file expansion and we don't have access to that here, and inserting
@@ -221,11 +321,16 @@ async fn tls_self_signed_connector() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
+    let negotiated_protocol = NegotiatedProtocolTracker::new();
+    let negotiated_clone = negotiated_protocol.clone();
+
     tokio::task::spawn(tls_server(
         listener,
         certificates,
         key,
         r#"{"my_field": "abc"}"#,
+        negotiated_clone,
+        vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
     ));
 
     // we cannot parse a configuration from text, because certificates are generally
@@ -283,7 +388,17 @@ async fn tls_custom_root() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
-    tokio::task::spawn(tls_server(listener, certificates, key, r#"{"data": null}"#));
+    let negotiated_protocol = NegotiatedProtocolTracker::new();
+    let negotiated_clone = negotiated_protocol.clone();
+
+    tokio::task::spawn(tls_server(
+        listener,
+        certificates,
+        key,
+        r#"{"data": null}"#,
+        negotiated_clone,
+        vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
+    ));
 
     // we cannot parse a configuration from text, because certificates are generally
     // added by file expansion and we don't have access to that here, and inserting
@@ -341,11 +456,16 @@ async fn tls_custom_root_connector() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
+    let negotiated_protocol = NegotiatedProtocolTracker::new();
+    let negotiated_clone = negotiated_protocol.clone();
+
     tokio::task::spawn(tls_server(
         listener,
         certificates,
         key,
         r#"{"my_field": "abc"}"#,
+        negotiated_clone,
+        vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
     ));
 
     // we cannot parse a configuration from text, because certificates are generally
@@ -887,4 +1007,286 @@ async fn test_unix_socket() {
         .await
         .unwrap();
     insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_alpn_negotiates_http2_when_both_support() {
+    let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+    let key_pem = include_str!("./testdata/server.key");
+    let certificates = load_certs(certificate_pem).unwrap();
+    let key = load_key(key_pem).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let socket_addr = listener.local_addr().unwrap();
+    let negotiated_protocol = NegotiatedProtocolTracker::new();
+    let negotiated_clone = negotiated_protocol.clone();
+
+    tokio::task::spawn(tls_server(
+        listener,
+        certificates,
+        key,
+        r#"{"data": null}"#,
+        negotiated_clone,
+        vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
+    ));
+
+    let mut config = Configuration::default();
+    config.tls.subgraph.subgraphs.insert(
+        "test".to_string(),
+        TlsClient {
+            certificate_authorities: Some(certificate_pem.into()),
+            client_authentication: None,
+        },
+    );
+
+    let subgraph_service = HttpClientService::from_config_for_subgraph(
+        "test",
+        &config,
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::builder()
+            .experimental_http2(Http2Config::Enable)
+            .build(),
+    )
+    .unwrap();
+
+    let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+    let response = subgraph_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{"query":"{ test }"}"#))
+                .unwrap(),
+            context: Context::new(),
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        negotiated_protocol.is_http2(),
+        "expected h2 ALPN negotiation, got: {:?}",
+        negotiated_protocol.get()
+    );
+
+    assert_eq!(response.http_response.status(), StatusCode::OK);
+
+    let body_bytes = router::body::into_bytes(response.http_response.into_parts().1)
+        .await
+        .unwrap();
+    let body = std::str::from_utf8(&body_bytes).unwrap();
+    assert_eq!(body, r#"{"data": null}"#);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_alpn_falls_back_to_http1_when_server_only_supports_http1() {
+    let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+    let key_pem = include_str!("./testdata/server.key");
+    let certificates = load_certs(certificate_pem).unwrap();
+    let key = load_key(key_pem).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let socket_addr = listener.local_addr().unwrap();
+
+    let negotiated_protocol = NegotiatedProtocolTracker::new();
+    let negotiated_clone = negotiated_protocol.clone();
+
+    tokio::task::spawn(tls_server(
+        listener,
+        certificates,
+        key,
+        r#"{"data": null}"#,
+        negotiated_clone,
+        // NOTE: only supports http1
+        vec![alpn::HTTP_1_1.to_vec()],
+    ));
+
+    let mut config = Configuration::default();
+    config.tls.subgraph.subgraphs.insert(
+        "test".to_string(),
+        TlsClient {
+            certificate_authorities: Some(certificate_pem.into()),
+            client_authentication: None,
+        },
+    );
+
+    let subgraph_service = HttpClientService::from_config_for_subgraph(
+        "test",
+        &config,
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::builder()
+            // NOTE: http2 enabled, but since we don't support it, it'll fallback to http1
+            .experimental_http2(Http2Config::Enable)
+            .build(),
+    )
+    .unwrap();
+
+    let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+    let response = subgraph_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{"query":"{ test }"}"#))
+                .unwrap(),
+            context: Context::new(),
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        negotiated_protocol.is_http1(),
+        "Expected http/1.1 ALPN negotiation as fallback, got: {:?}",
+        negotiated_protocol.get()
+    );
+
+    assert_eq!(response.http_response.status(), StatusCode::OK);
+
+    let body_bytes = router::body::into_bytes(response.http_response.into_parts().1)
+        .await
+        .unwrap();
+    let body = std::str::from_utf8(&body_bytes).unwrap();
+    assert_eq!(body, r#"{"data": null}"#);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_alpn_uses_http1_when_client_disables_http2() {
+    let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+    let key_pem = include_str!("./testdata/server.key");
+    let certificates = load_certs(certificate_pem).unwrap();
+    let key = load_key(key_pem).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let socket_addr = listener.local_addr().unwrap();
+
+    let negotiated_protocol = NegotiatedProtocolTracker::new();
+    let negotiated_clone = negotiated_protocol.clone();
+
+    tokio::task::spawn(tls_server(
+        listener,
+        certificates,
+        key,
+        r#"{"data": null}"#,
+        negotiated_clone,
+        // NOTE: only supporting http1
+        vec![alpn::HTTP_1_1.to_vec()],
+    ));
+
+    let mut config = Configuration::default();
+    config.tls.subgraph.subgraphs.insert(
+        "test".to_string(),
+        TlsClient {
+            certificate_authorities: Some(certificate_pem.into()),
+            client_authentication: None,
+        },
+    );
+
+    let subgraph_service = HttpClientService::from_config_for_subgraph(
+        "test",
+        &config,
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::builder()
+            // NOTE: explicitly disabling http2
+            .experimental_http2(Http2Config::Disable)
+            .build(),
+    )
+    .unwrap();
+
+    let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+    let response = subgraph_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{"query":"{ test }"}"#))
+                .unwrap(),
+            context: Context::new(),
+        })
+        .await
+        .unwrap();
+
+    // when HTTP/2 is disabled, the client doesn't advertise h2 via ALPN,
+    // so the server may receive no ALPN at all (None) or http/1.1
+    assert!(
+        negotiated_protocol.is_http1() || negotiated_protocol.is_unnegotiated(),
+        "Expected http/1.1 or no ALPN when client disables HTTP/2, got: {:?}",
+        negotiated_protocol.get()
+    );
+
+    assert_eq!(response.http_response.status(), StatusCode::OK);
+
+    let body_bytes = router::body::into_bytes(response.http_response.into_parts().1)
+        .await
+        .unwrap();
+
+    let body = std::str::from_utf8(&body_bytes).unwrap();
+    assert_eq!(body, r#"{"data": null}"#);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_alpn_negotiates_http2_for_connectors() {
+    let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+    let key_pem = include_str!("./testdata/server.key");
+    let certificates = load_certs(certificate_pem).unwrap();
+    let key = load_key(key_pem).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let socket_addr = listener.local_addr().unwrap();
+
+    let negotiated_protocol = NegotiatedProtocolTracker::new();
+    let negotiated_clone = negotiated_protocol.clone();
+
+    tokio::task::spawn(tls_server(
+        listener,
+        certificates,
+        key,
+        r#"{"my_field": "abc"}"#,
+        negotiated_clone,
+        vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()],
+    ));
+
+    let mut config = Configuration::default();
+    config.tls.connector.sources.insert(
+        "test".to_string(),
+        TlsClient {
+            certificate_authorities: Some(certificate_pem.into()),
+            client_authentication: None,
+        },
+    );
+
+    let connector_service = HttpClientService::from_config_for_connector(
+        "test",
+        &config,
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::builder()
+            .experimental_http2(Http2Config::Enable)
+            .build(),
+    )
+    .unwrap();
+
+    let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+    let response = connector_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{}"#))
+                .unwrap(),
+            context: Context::new(),
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        negotiated_protocol.is_http2(),
+        "Expected h2 ALPN negotiation for connector, got: {:?}",
+        negotiated_protocol.get()
+    );
+
+    assert_eq!(response.http_response.status(), StatusCode::OK);
+
+    let body_bytes = router::body::into_bytes(response.http_response.into_parts().1)
+        .await
+        .unwrap();
+    let body = std::str::from_utf8(&body_bytes).unwrap();
+    assert_eq!(body, r#"{"my_field": "abc"}"#);
 }

@@ -324,3 +324,97 @@ fn test_satisfiability_handles_extra_implicit_downcast() {
     let result = compose(vec![parsed_a, parsed_b]);
     result.expect("Expected composition to succeed");
 }
+
+#[test]
+fn composes_input_field_with_int_to_float_coercible_defaults() {
+    // Regression test for input field default value coercibility.
+    // When an input field has type Float, default values of 200 (Int) and 200.0 (Float)
+    // should be considered compatible because Int values are coercible to Float.
+    // This should not produce an INPUT_FIELD_DEFAULT_MISMATCH error.
+
+    let subgraph_a = ServiceDefinition {
+        name: "subgraph-a",
+        type_defs: r#"
+            type Query {
+                foo(input: InputA): [A!]! @shareable
+            }
+
+            input InputA {
+                value: Float! = 200
+                unit: String! = "meters"
+            }
+
+            type A @shareable {
+                id: ID!
+                name: String!
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraph-b",
+        type_defs: r#"
+            type Query {
+                foo(input: InputA): [A!]! @shareable
+            }
+
+            input InputA {
+                value: Float! = 200.0
+                unit: String! = "meters"
+            }
+
+            type A @shareable {
+                id: ID!
+                name: String!
+            }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+
+    // This should succeed because 200 (Int) is coercible to 200.0 (Float)
+    let _supergraph = result
+        .expect("Expected composition to succeed with Int default coercible to Float default");
+}
+
+#[test]
+fn composes_subgraphs_with_directives_on_renamed_root_types() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraph-a",
+        type_defs: r#"
+            schema {
+                query: MyQuery
+                mutation: MyMutation
+            }
+
+            type MyQuery @tag(name: "custom") {
+                hello(name: String! @tag(name: "custom")): String @tag(name: "custom")
+            }
+
+            type MyMutation @tag(name: "custom") {
+                bye(name: String! @tag(name: "custom")): String! @tag(name: "custom")
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraph-b",
+        type_defs: r#"
+            schema {
+                query: Query
+                mutation: Mutation
+            }
+
+            type Query {
+                helloWorld: String
+            }
+
+            type Mutation {
+                goodbyeWorld: String
+            }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let _supergraph = result.expect("Expected composition to succeed");
+}

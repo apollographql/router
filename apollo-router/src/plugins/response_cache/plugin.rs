@@ -86,7 +86,7 @@ use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
 
 /// Change this key if you introduce a breaking change in response caching algorithm to make sure it won't take the previous entries
-pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.0";
+pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.1";
 pub(crate) const CACHE_TAG_DIRECTIVE_NAME: &str = "federation__cacheTag";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
@@ -297,19 +297,35 @@ impl PluginPrivate for ResponseCache {
         let mut storage_interface = StorageInterface::default();
 
         let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-        if let Some(config) = init.config.subgraph.all.redis.clone() {
+        if init.config.enabled
+            && init.config.subgraph.all.enabled.unwrap_or_default()
+            && let Some(config) = init.config.subgraph.all.redis.clone()
+        {
             let storage = Arc::new(OnceLock::new());
             storage_interface.all = Some(storage.clone());
             connect_or_spawn_reconnection_task(config, storage, drop_rx).await?;
         }
 
         for (subgraph, subgraph_config) in &init.config.subgraph.subgraphs {
-            if let Some(config) = subgraph_config.redis.clone() {
-                let storage = Arc::new(OnceLock::new());
-                storage_interface
-                    .subgraphs
-                    .insert(subgraph.clone(), storage.clone());
-                connect_or_spawn_reconnection_task(config, storage, drop_tx.subscribe()).await?;
+            if Self::static_subgraph_enabled(init.config.enabled, &init.config.subgraph, subgraph) {
+                match subgraph_config.redis.clone() {
+                    Some(config) => {
+                        let storage = Arc::new(OnceLock::new());
+                        storage_interface
+                            .subgraphs
+                            .insert(subgraph.clone(), storage.clone());
+                        connect_or_spawn_reconnection_task(config, storage, drop_tx.subscribe())
+                            .await?;
+                    }
+                    None => {
+                        if storage_interface.all.is_none() {
+                            return Err(
+                                format!("you must have a redis configured either for all subgraphs or for subgraph {subgraph:?}")
+                                    .into(),
+                            );
+                        }
+                    }
+                }
             }
         }
 
@@ -428,14 +444,36 @@ impl PluginPrivate for ResponseCache {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut map = MultiMap::new();
+        // At least 1 subgraph enabled caching
+        let any_caching_enabled = self
+            .subgraphs
+            .subgraphs
+            .iter()
+            .any(|(subgraph_name, _cfg)| self.subgraph_enabled(subgraph_name))
+            || self.subgraphs.all.enabled.unwrap_or_default();
+
+        let global_invalidation_enabled = self
+            .subgraphs
+            .all
+            .invalidation
+            .as_ref()
+            .map(|i| i.enabled)
+            .unwrap_or_default();
+
+        // If at least one subgraph is enabled and has invalidation enabled
+        let any_subgraph_invalidation_enabled =
+            self.subgraphs.subgraphs.iter().any(|(subgraph_name, cfg)| {
+                self.subgraph_enabled(subgraph_name)
+                    && cfg
+                        .invalidation
+                        .as_ref()
+                        .map(|i| i.enabled)
+                        .unwrap_or_default()
+            });
+
         if self.enabled
-            && self
-                .subgraphs
-                .all
-                .invalidation
-                .as_ref()
-                .map(|i| i.enabled)
-                .unwrap_or_default()
+            && any_caching_enabled
+            && (global_invalidation_enabled || any_subgraph_invalidation_enabled)
         {
             match &self.endpoint_config {
                 Some(endpoint_config) => {
@@ -475,7 +513,7 @@ impl ResponseCache {
     ))]
     pub(crate) async fn for_test(
         storage: Storage,
-        subgraphs: HashMap<String, Subgraph>,
+        subgraphs: SubgraphConfiguration<Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
         drop_tx: broadcast::Sender<()>,
@@ -500,16 +538,7 @@ impl ResponseCache {
             entity_type: None,
             enabled: true,
             debug: true,
-            subgraphs: Arc::new(SubgraphConfiguration {
-                all: Subgraph {
-                    invalidation: Some(SubgraphInvalidationConfig {
-                        enabled: true,
-                        shared_key: INVALIDATION_SHARED_KEY.to_string(),
-                    }),
-                    ..Default::default()
-                },
-                subgraphs,
-            }),
+            subgraphs: Arc::new(subgraphs),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
@@ -579,14 +608,23 @@ impl ResponseCache {
         })
     }
 
-    // Returns boolean to know if cache is enabled for this subgraph
+    /// Returns boolean to know if cache is enabled for this subgraph
     fn subgraph_enabled(&self, subgraph_name: &str) -> bool {
-        if !self.enabled {
+        Self::static_subgraph_enabled(self.enabled, &self.subgraphs, subgraph_name)
+    }
+
+    /// Static method which returns boolean to know if cache is enabled for this subgraph
+    fn static_subgraph_enabled(
+        plugin_enabled: bool,
+        subgraph_config: &SubgraphConfiguration<Subgraph>,
+        subgraph_name: &str,
+    ) -> bool {
+        if !plugin_enabled {
             return false;
         }
         match (
-            self.subgraphs.all.enabled,
-            self.subgraphs.get(subgraph_name).enabled,
+            subgraph_config.all.enabled,
+            subgraph_config.get(subgraph_name).enabled,
         ) {
             (_, Some(x)) => x, // explicit per-subgraph setting overrides the `all` default
             (Some(true) | None, None) => true, // unset defaults to true
@@ -1836,7 +1874,7 @@ fn extract_cache_keys(
 
     // Get entity key to only get the right fields in representations
     let mut res = Vec::with_capacity(representations.len());
-    let mut entities = HashMap::new();
+    let entities = representations.len() as u64;
     let mut typenames = HashSet::new();
     for representation in representations {
         let representation =
@@ -1858,12 +1896,6 @@ fn extract_cache_keys(
                 reason: "__typename in representation is not a string".to_string(),
             })?;
         typenames.insert(typename.to_string());
-        match entities.get_mut(typename) {
-            Some(entity_nb) => *entity_nb += 1,
-            None => {
-                entities.insert(typename.to_string(), 1u64);
-            }
-        }
 
         // Get the entity key from `representation`, only needed in debug for the cache debugger
         let representation_entity_key = if debug {
@@ -1927,16 +1959,13 @@ fn extract_cache_keys(
         ),
     );
 
-    for (typename, entity_nb) in entities {
-        u64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.fetch.entity",
-            "Number of entities per subgraph fetch node",
-            "{entity}",
-            entity_nb,
-            "subgraph.name" = subgraph_name.to_string(),
-            "graphql.type" = typename
-        );
-    }
+    u64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch.entity",
+        "Number of entities per subgraph fetch node",
+        "{entity}",
+        entities,
+        "subgraph.name" = subgraph_name.to_string()
+    );
 
     Ok(res)
 }
@@ -1949,56 +1978,108 @@ fn get_invalidation_entity_keys_from_schema(
     typename: &str,
     representations: &serde_json_bytes::Map<ByteString, Value>,
 ) -> Result<HashSet<String>, anyhow::Error> {
-    let field_def =
-        supergraph_schema
-            .get_object(typename)
-            .ok_or_else(|| FetchError::MalformedRequest {
-                reason: "can't find corresponding type for __typename {typename:?}".to_string(),
+    // `filter_dir`: Check if the `@join_directive` directives are for the current subgraph's cacheTags
+    let filter_dir = |dir: &apollo_compiler::ast::Directive| {
+        let Ok(name) = dir.argument_by_name("name", supergraph_schema) else {
+            return false;
+        };
+        let Some(name) = name.as_str() else {
+            return false;
+        };
+        if *name != *CACHE_TAG_DIRECTIVE_NAME {
+            return false;
+        }
+        dir.argument_by_name("graphs", supergraph_schema)
+            .ok()
+            .and_then(|f| {
+                Some(
+                    f.as_list()?
+                        .iter()
+                        .filter_map(|graph| graph.as_enum())
+                        .any(|g| {
+                            subgraph_enums.get(g.as_str()).map(|s| s.as_str())
+                                == Some(subgraph_name)
+                        }),
+                )
+            })
+            .unwrap_or_default()
+    };
+    // supports both Object types and Interface types (for interface objects with isInterfaceObject: true)
+    let all_directives: Vec<_> = match supergraph_schema.get_interface(typename) {
+        // Jumping from an interface object
+        Some(iface_type) => {
+            // In this case, we can only support jumping from an interface object to another
+            // interface object.
+            // Note: `@cacheTag` can be different across implementation types. If the target entity
+            //       type is a interface type (not interface-object), we don't collect the
+            //       directives from its implementation types. Because the actual object type (and
+            //       thus cache key) can't be determined based only on interface type name. This
+            //       may result in cache misses, but it's inherent limitation of interface objects.
+            iface_type
+                .directives
+                .get_all("join__directive")
+                .filter(|dir| filter_dir(dir))
+                .cloned()
+                .collect()
+        }
+        // Jumping from a non-interface object
+        None => {
+            let obj_type = supergraph_schema.get_object(typename).ok_or_else(|| {
+                FetchError::MalformedRequest {
+                    reason: format!("can't find corresponding type for __typename {typename:?}"),
+                }
             })?;
-    let cache_keys = field_def
-        .directives
-        .get_all("join__directive")
-        .filter_map(|dir| {
-            let name = dir.argument_by_name("name", supergraph_schema).ok()?;
-            if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
-                return None;
-            }
-            let is_current_subgraph = dir
-                .argument_by_name("graphs", supergraph_schema)
-                .ok()
-                .and_then(|f| {
-                    Some(
-                        f.as_list()?
-                            .iter()
-                            .filter_map(|graph| graph.as_enum())
-                            .any(|g| {
-                                subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-                                    == Some(subgraph_name)
-                            }),
-                    )
-                })
-                .unwrap_or_default();
-            if !is_current_subgraph {
-                return None;
-            }
-            dir.argument_by_name("args", supergraph_schema)
-                .ok()?
-                .as_object()?
+
+            // Target subgraph may implement an interface object. Handle both interface object case
+            // and normal interface/implementations case by chaining the object type's directives
+            // and those of its implementing interface types.
+            // Note: We also need to look up the interface types because `@cacheTag` directives
+            //       applied on interface object type is not propagated to implementation types.
+            // Note: We don't really support multiple interface objects overlapping each other.
+            //       There are multiple issues preventing that from working. Thus, we don't expect
+            //       an object type to implement multiple interface types with `@cacheTag` on them
+            //       within the same subgraph. So, we will have at most one `@cacheTag` from
+            //       interfaces.
+            let obj_directives: Vec<_> = obj_type
+                .directives
+                .get_all("join__directive")
+                .filter(|dir| filter_dir(dir))
+                .cloned()
+                .collect();
+            let iface_directives: Vec<_> = obj_type
+                .implements_interfaces
                 .iter()
-                .find_map(|(field_name, value)| {
-                    if field_name.as_str() == "format" {
-                        value.as_str()?.parse::<StringTemplate>().ok()
-                    } else {
-                        None
-                    }
+                .flat_map(|iface_name| {
+                    supergraph_schema
+                        .get_interface(iface_name)
+                        .iter()
+                        .flat_map(|iface| iface.directives.get_all("join__directive").cloned())
+                        .collect::<Vec<_>>()
                 })
-        });
+                .filter(|dir| filter_dir(dir))
+                .collect();
+            obj_directives.into_iter().chain(iface_directives).collect()
+        }
+    };
+    let cache_keys = all_directives.into_iter().filter_map(|dir| {
+        dir.argument_by_name("args", supergraph_schema)
+            .ok()?
+            .as_object()?
+            .iter()
+            .find_map(|(field_name, value)| {
+                if field_name.as_str() == "format" {
+                    value.as_str()?.parse::<StringTemplate>().ok()
+                } else {
+                    None
+                }
+            })
+    });
     let mut vars = IndexMap::default();
     // It's safe to use representations variables (not only entity keys) because at the composition level we already checked if it was only using entity keys
     vars.insert("$key".to_string(), Value::Object(representations.clone()));
     let invalidation_cache_keys = cache_keys
         .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
-        .collect::<Result<HashSet<String>, apollo_federation::connectors::StringTemplateError>>()?;
+        .collect::<Result<_, _>>()?;
     Ok(invalidation_cache_keys)
 }
 
@@ -2583,16 +2664,21 @@ mod tests {
     use apollo_compiler::parser::Parser;
     use serde_json_bytes::json;
     use tokio::sync::broadcast;
+    use uuid::Uuid;
 
     use super::Subgraph;
     use super::Ttl;
     use crate::configuration::subgraph::SubgraphConfiguration;
+    use crate::plugin::PluginInit;
+    use crate::plugin::PluginPrivate;
     use crate::plugins::response_cache::plugin::ResponseCache;
     use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
+    use crate::plugins::response_cache::plugin::get_invalidation_entity_keys_from_schema;
     use crate::plugins::response_cache::plugin::get_invalidation_root_keys_from_schema;
     use crate::plugins::response_cache::plugin::matches_selection_set;
     use crate::plugins::response_cache::storage::redis::Config;
     use crate::plugins::response_cache::storage::redis::Storage;
+    use crate::plugins::response_cache::tests::create_subgraph_conf;
     use crate::services::OperationKind;
     use crate::services::subgraph;
 
@@ -2605,7 +2691,7 @@ mod tests {
         let storage = Storage::new(&Config::test(false, "test_subgraph_enabled"), drop_rx)
             .await
             .unwrap();
-        let map = serde_json::json!({
+        let map = serde_json_bytes::from_value(serde_json_bytes::json!({
             "user": {
                 "private_id": "sub"
             },
@@ -2617,11 +2703,13 @@ mod tests {
                 "private_id": "sub",
                 "enabled": false
             }
-        });
+        }))
+        .unwrap();
+        let subgraphs_conf = create_subgraph_conf(map);
 
         let mut response_cache = ResponseCache::for_test(
             storage.clone(),
-            serde_json::from_value(map).unwrap(),
+            subgraphs_conf,
             valid_schema.clone(),
             true,
             drop_tx,
@@ -2631,16 +2719,430 @@ mod tests {
 
         assert!(response_cache.subgraph_enabled("user"));
         assert!(!response_cache.subgraph_enabled("archive"));
-        let subgraph_config = serde_json::json!({
+        let subgraph_config = serde_json_bytes::json!({
             "all": {
                 "enabled": false
             },
             "subgraphs": response_cache.subgraphs.subgraphs.clone()
         });
-        response_cache.subgraphs = Arc::new(serde_json::from_value(subgraph_config).unwrap());
+        response_cache.subgraphs = Arc::new(serde_json_bytes::from_value(subgraph_config).unwrap());
         assert!(!response_cache.subgraph_enabled("archive"));
         assert!(response_cache.subgraph_enabled("user"));
         assert!(response_cache.subgraph_enabled("orga"));
+    }
+
+    async fn get_response_cache_plugin(
+        all_enabled: bool,
+        all_invalidation_enabled: bool,
+        subgraph_enabled: bool,
+        subgraph_invalidation_enabled: bool,
+    ) -> ResponseCache {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let (drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+            .await
+            .unwrap();
+
+        ResponseCache::for_test(
+            storage.clone(),
+            serde_json_bytes::from_value(serde_json_bytes::json!({
+                "all": {
+                    "enabled": all_enabled,
+                    "ttl": "10s",
+                    "invalidation": {
+                        "enabled": all_invalidation_enabled,
+                        "shared_key": "test"
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": subgraph_enabled,
+                        "invalidation": {
+                            "enabled": subgraph_invalidation_enabled,
+                            "shared_key": "test"
+                        }
+                    }
+                }
+            }))
+            .unwrap(),
+            valid_schema.clone(),
+            true,
+            drop_tx,
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_redis_connection_disabled() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "enabled": false,
+                    "ttl": "10s",
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "namespace": Uuid::new_v4().to_string(),
+                        "pool_size": 1,
+                        "required_to_start": true,
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": false
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response_cache = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await
+        .unwrap();
+
+        assert!(
+            response_cache.storage.all.is_none()
+                || response_cache.storage.all.as_ref().unwrap().get().is_none(),
+            "Redis storage is set globally"
+        );
+        assert!(
+            response_cache.storage.subgraphs.is_empty(),
+            "Redis storage is set for a subgraph"
+        );
+        // ----- Disable globally the plugin ----
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": false,
+            "subgraph": {
+                "all": {
+                    "enabled": true,
+                    "ttl": "10s",
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "namespace": Uuid::new_v4().to_string(),
+                        "pool_size": 1,
+                        "required_to_start": true,
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": true
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response_cache = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await
+        .unwrap();
+
+        assert!(
+            response_cache.storage.all.is_none()
+                || response_cache.storage.all.as_ref().unwrap().get().is_none(),
+            "Redis storage is set globally"
+        );
+        assert!(
+            response_cache.storage.subgraphs.is_empty(),
+            "Redis storage is set for a subgraph"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_redis_conf_provided_should_fail() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "enabled": true,
+                    "ttl": "10s",
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": true
+                    },
+                    "inventory": {
+                        "enabled": true
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        assert!(
+            ResponseCache::new(PluginInit::fake_new(
+                config,
+                Arc::new(valid_schema.to_string()),
+            ))
+            .await
+            .is_err(),
+            "The plugin should not start properly if caching is enabled but no redis provided"
+        );
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    // Globally disabled
+    #[case(false, true, true)]
+    // Disable for all subgraphs
+    #[case(true, false, false)]
+    async fn test_no_redis_conf_provided_but_disabled_should_succeed(
+        #[case] global_enabled: bool,
+        #[case] all_enabled: bool,
+        #[case] subgraph_enabled: bool,
+    ) {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": global_enabled,
+            "subgraph": {
+                "all": {
+                    "enabled": all_enabled,
+                    "ttl": "10s",
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": subgraph_enabled
+                    },
+                    "inventory": {
+                        "enabled": subgraph_enabled
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response_cache = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await
+        .unwrap();
+        if !global_enabled {
+            assert!(!response_cache.enabled);
+        }
+        assert!(
+            response_cache.storage.all.is_none()
+                || response_cache.storage.all.as_ref().unwrap().get().is_none(),
+            "Redis storage is set globally"
+        );
+        assert!(
+            response_cache.storage.subgraphs.is_empty(),
+            "Redis storage is set for a subgraph"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_redis_connection_enabled_multiple_subgraphs() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "enabled": false,
+                    "ttl": "10s",
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "namespace": Uuid::new_v4().to_string(),
+                        "pool_size": 1,
+                        "required_to_start": true,
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": false
+                    },
+                    "inventory": {
+                        "enabled": true
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response_cache = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await
+        .unwrap();
+
+        assert!(
+            response_cache.storage.all.is_none()
+                || response_cache.storage.all.as_ref().unwrap().get().is_none(),
+            "Redis storage is set globally"
+        );
+        assert_eq!(
+            response_cache.storage.subgraphs.len(),
+            1,
+            "Redis storage is not set for a subgraph"
+        );
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    // Everything enabled
+    #[case(true, true)]
+    // Enable caching only for a specific subgraph should enable redis
+    #[case(false, true)]
+    // Enable caching for all subgraphs should enable redis
+    #[case(true, false)]
+    async fn test_redis_connection_enabled(
+        #[case] all_enabled: bool,
+        #[case] subgraph_enabled: bool,
+    ) {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "enabled": all_enabled,
+                    "ttl": "10s",
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "namespace": Uuid::new_v4().to_string(),
+                        "pool_size": 1,
+                        "required_to_start": true,
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": subgraph_enabled
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let response_cache = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await
+        .unwrap();
+
+        if all_enabled {
+            assert!(
+                response_cache.storage.all.is_some()
+                    && response_cache.storage.all.as_ref().unwrap().get().is_some(),
+                "Redis storage is not set globally"
+            );
+        } else {
+            assert!(
+                response_cache.storage.all.is_none()
+                    || response_cache.storage.all.as_ref().unwrap().get().is_none(),
+                "Redis storage is set globally"
+            );
+        }
+        if subgraph_enabled {
+            assert_eq!(
+                response_cache.storage.subgraphs.len(),
+                1,
+                "Redis storage is set for a subgraph"
+            );
+        } else {
+            assert!(
+                response_cache.storage.subgraphs.is_empty(),
+                "Redis storage is not set for a subgraph"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    // Everything enabled
+    #[case(true, true, true, true)]
+    // Enable invalidation for every subgraphs except for a specific subgraph should enable invalidation endpoint
+    #[case(true, true, true, false)]
+    // Enable invalidation only for a specific subgraph should enable invalidation endpoint
+    #[case(true, false, true, true)]
+    // Disable globally both caching and invalidation but enable invalidation only for a specific subgraph should enable invalidation endpoint
+    #[case(false, false, true, true)]
+    async fn test_invalidation_endpoint_enabled(
+        #[case] all_enabled: bool,
+        #[case] all_invalidation_enabled: bool,
+        #[case] subgraph_enabled: bool,
+        #[case] subgraph_invalidation_enabled: bool,
+    ) {
+        let response_cache = get_response_cache_plugin(
+            all_enabled,
+            all_invalidation_enabled,
+            subgraph_enabled,
+            subgraph_invalidation_enabled,
+        )
+        .await;
+        assert!(!response_cache.web_endpoints().is_empty());
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    // Disable everything should disable invalidation endpoint
+    #[case(false, false, false, false)]
+    // Enable invalidation for a specific subgraph but disable everything else should disable invalidation endpoint
+    #[case(false, true, false, false)]
+    // Enable invalidation both for a specific subgraph and all subgraphs but disable caching everywhere should disable invalidation endpoint
+    #[case(false, true, false, true)]
+    // Only enable caching but not invalidation should disable invalidation endpoint
+    #[case(true, false, true, false)]
+    // Only enable caching for all subgraphs but not invalidation should disable invalidation endpoint
+    #[case(true, false, false, false)]
+    // Only enable invalidation for a specific subgraph that disabled caching should disable invalidation endpoint
+    #[case(true, false, false, true)]
+    async fn test_invalidation_endpoint_disabled(
+        #[case] all_enabled: bool,
+        #[case] all_invalidation_enabled: bool,
+        #[case] subgraph_enabled: bool,
+        #[case] subgraph_invalidation_enabled: bool,
+    ) {
+        let response_cache = get_response_cache_plugin(
+            all_enabled,
+            all_invalidation_enabled,
+            subgraph_enabled,
+            subgraph_invalidation_enabled,
+        )
+        .await;
+        assert!(response_cache.web_endpoints().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_invalidation_endpoint_enabled_multiple_subgraphs() {
+        let mut response_cache = get_response_cache_plugin(false, false, true, false).await;
+        // Disable invalidation globally with one specific subgraph configuration with invalidation disabled and another one enabled should enable invalidation endpoint
+        response_cache.subgraphs = Arc::new(
+            serde_json_bytes::from_value(serde_json_bytes::json!({
+                "all": {
+                    "enabled": false,
+                    "ttl": "10s",
+                    "invalidation": {
+                        "enabled": false,
+                        "shared_key": "test"
+                    }
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": true,
+                        "invalidation": {
+                            "enabled": false,
+                            "shared_key": "test"
+                        }
+                    },
+                    "posts": {
+                        "enabled": true,
+                        "invalidation": {
+                            "enabled": true,
+                            "shared_key": "test"
+                        }
+                    }
+                }
+            }))
+            .unwrap(),
+        );
+
+        assert!(
+            !response_cache.web_endpoints().is_empty(),
+            "Disable invalidation globally with one specific subgraph configuration with invalidation disabled and another one enabled should enable invalidation endpoint"
+        );
     }
 
     #[tokio::test]
@@ -2650,7 +3152,7 @@ mod tests {
         let storage = Storage::new(&Config::test(false, "test_subgraph_ttl"), drop_rx)
             .await
             .unwrap();
-        let map = serde_json::json!({
+        let map = serde_json_bytes::from_value(serde_json_bytes::json!({
             "user": {
                 "private_id": "sub",
                 "ttl": "2s"
@@ -2664,11 +3166,12 @@ mod tests {
                 "enabled": false,
                 "ttl": "5000ms"
             }
-        });
+        }))
+        .unwrap();
 
         let mut response_cache = ResponseCache::for_test(
             storage.clone(),
-            serde_json::from_value(map).unwrap(),
+            create_subgraph_conf(map),
             valid_schema.clone(),
             true,
             drop_tx,
@@ -3207,6 +3710,243 @@ mod tests {
             ]
             .into_iter()
             .collect()
+        );
+    }
+
+    // makes sure interface objects (eg, `interface Item` below) are able to be used for
+    // invalidation entity keys
+    // Case #1: Jumping into an interface object from a non-interface object subgraph as an object
+    // type.
+    #[test]
+    fn test_interface_object_typename_lookup_inbound() {
+        let schema_text = r#"
+                 directive @join__type(graph: join__Graph!, key: join__FieldSet, isInterfaceObject: Boolean! = false) repeatable on
+     OBJECT | INTERFACE
+                 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+                 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+                 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+                 scalar join__FieldSet
+                 scalar join__DirectiveArguments
+
+                 enum join__Graph {
+                  SEARCH @join__graph(name: "search", url: "http://search")
+                  INVENTORY @join__graph(name: "inventory", url: "http://inventory")
+                }
+
+                type Query { dummy: String }
+
+                interface Item
+                    @join__type(graph: SEARCH, key: "id")
+                    @join__type(graph: INVENTORY, key: "id", isInterfaceObject: true)
+                    @join__directive(graphs: [INVENTORY], name: "federation__cacheTag", args: {format: "Item-{$key.id}"})
+                {
+                    id: ID!
+                }
+
+                type Book implements Item
+                    @join__implements(graph: SEARCH, interface: "Item")
+                    @join__type(graph: SEARCH, key: "id")
+                {
+                    id: ID!
+                    isbn: String!
+                }
+              "#;
+
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let subgraph_enums = HashMap::from([
+            ("SEARCH".into(), "search".into()),
+            ("INVENTORY".into(), "inventory".into()),
+        ]);
+        // Jumping from "search" to "inventory" via the object type "Book"
+        let representation = serde_json_bytes::json!({"__typename": "Book", "id": "123"})
+            .as_object()
+            .unwrap()
+            .clone();
+
+        let result = get_invalidation_entity_keys_from_schema(
+            &schema,
+            "inventory",
+            &subgraph_enums,
+            "Book",
+            &representation,
+        )
+        .expect("should handle interface object typename");
+        assert_eq!(result.into_iter().collect::<Vec<_>>(), [r#"Item-123"#]);
+    }
+
+    #[test]
+    fn test_interface_object_typename_lookup_outbound() {
+        let schema_text = r#"
+                 directive @join__type(graph: join__Graph!, key: join__FieldSet, isInterfaceObject: Boolean! = false) repeatable on
+     OBJECT | INTERFACE
+                 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+                 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+                 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+                 scalar join__FieldSet
+                 scalar join__DirectiveArguments
+
+                 enum join__Graph {
+                  SEARCH @join__graph(name: "search", url: "http://search")
+                  INVENTORY @join__graph(name: "inventory", url: "http://inventory")
+                }
+
+                type Query { dummy: String }
+
+                interface Item
+                    @join__type(graph: SEARCH, key: "id")
+                    @join__type(graph: INVENTORY, key: "id", isInterfaceObject: true)
+                {
+                    id: ID!
+                }
+
+                type Book implements Item
+                    @join__implements(graph: SEARCH, interface: "Item")
+                    @join__type(graph: SEARCH, key: "id")
+                    @join__directive(graphs: [SEARCH], name: "federation__cacheTag", args: {format: "Book-{$key.id}"})
+                {
+                    id: ID!
+                    isbn: String!
+                }
+              "#;
+
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let subgraph_enums = HashMap::from([
+            ("SEARCH".into(), "search".into()),
+            ("INVENTORY".into(), "inventory".into()),
+        ]);
+        // Jumping from "search" to "inventory" via the interface object "Item"
+        let representation = serde_json_bytes::json!({"__typename": "Item", "id": "123"})
+            .as_object()
+            .unwrap()
+            .clone();
+
+        let result = get_invalidation_entity_keys_from_schema(
+            &schema,
+            "inventory",
+            &subgraph_enums,
+            "Item",
+            &representation,
+        )
+        .expect("should handle interface object typename");
+        // Currently, nothing matches.
+        assert_eq!(result.len(), 0);
+    }
+
+    // makes sure interface objects (eg, `interface Item` below) are able to be used for
+    // invalidation entity keys
+    // Case #1: Jumping into an interface object from a non-interface object subgraph as an object
+    // type.
+    #[test]
+    fn test_interface_object_typename_into_interface_object() {
+        let schema_text = r#"
+                 directive @join__type(graph: join__Graph!, key: join__FieldSet, isInterfaceObject: Boolean! = false) repeatable on
+     OBJECT | INTERFACE
+                 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+                 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+                 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+                 scalar join__FieldSet
+                 scalar join__DirectiveArguments
+
+                 enum join__Graph {
+                  SEARCH @join__graph(name: "search", url: "http://search")
+                  INVENTORY @join__graph(name: "inventory", url: "http://inventory")
+                  IRRELEVANT @join__graph(name: "irrelevant", url: "http://irrelevant")
+                }
+
+                type Query { dummy: String }
+
+                interface Item
+                    @join__type(graph: SEARCH, key: "id", isInterfaceObject: true)
+                    @join__type(graph: INVENTORY, key: "id", isInterfaceObject: true)
+                    @join__type(graph: IRRELEVANT, key: "id")
+                    @join__directive(graphs: [INVENTORY], name: "federation__cacheTag", args: {format: "Item-{$key.id}"})
+                {
+                    id: ID!
+                }
+
+                type Book implements Item
+                    @join__implements(graph: IRRELEVANT, interface: "Item")
+                    @join__type(graph: IRRELEVANT, key: "id")
+                {
+                    id: ID!
+                    isbn: String!
+                }
+              "#;
+
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let subgraph_enums = HashMap::from([
+            ("INVENTORY".into(), "inventory".into()),
+            ("SEARCH".into(), "search".into()),
+            ("IRRELEVANT".into(), "irrelevant".into()),
+        ]);
+        // Jumping from "search" to "inventory" via the interface object "Item"
+        let representation = serde_json_bytes::json!({"__typename": "Item", "id": "123"})
+            .as_object()
+            .unwrap()
+            .clone();
+
+        let result = get_invalidation_entity_keys_from_schema(
+            &schema,
+            "inventory",
+            &subgraph_enums,
+            "Item",
+            &representation,
+        )
+        .expect("should handle interface object typename");
+        assert_eq!(result.into_iter().collect::<Vec<_>>(), [r#"Item-123"#]);
+    }
+
+    // makes sure that when an interface isn't usable for entity resolution (ie, `isInterfaceObject:
+    // false`) the typename is the concrete type and is findable via the object type
+    #[test]
+    fn test_concrete_type_when_interface_object_is_false() {
+        // NB: isInterfaceObject defaults to false
+        let schema_text = r#"
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+            scalar join__FieldSet
+
+            enum join__Graph {
+              PRODUCTS @join__graph(name: "products", url: "http://products")
+            }
+
+            type Query { dummy: String }
+
+            # Regular interface (not an interface object)
+            interface Item {
+              id: ID!
+            }
+
+            # Concrete type that implements the interface
+            type Product implements Item @join__type(graph: PRODUCTS, key: "id") {
+              id: ID!
+              name: String
+            }
+        "#;
+
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let subgraph_enums = HashMap::from([("PRODUCTS".into(), "products".into())]);
+
+        // when isInterfaceObject: false, typename in _entities is the concrete type "Product"
+        let representation = serde_json_bytes::json!({
+            "__typename": "Product",  // NB: concrete type, not "Item"
+            "id": "123"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let result = get_invalidation_entity_keys_from_schema(
+            &schema,
+            "products",
+            &subgraph_enums,
+            "Product", // concrete object typename (ie, normal case)
+            &representation,
+        );
+
+        assert!(
+            result.is_ok(),
+            "should handle concrete type (isInterfaceObject: false)"
         );
     }
 }
