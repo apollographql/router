@@ -8,7 +8,7 @@ publish = false
 
 [dev-dependencies]
 apollo-router = { path = "../apollo-router" }
-criterion = { version = "0.7", features = ["async_tokio", "async_futures"] }
+criterion = { version = "0.8", features = ["async_tokio", "async_futures"] }
 memory-stats = "1.1.0"
 once_cell.workspace = true
 serde_json.workspace = true
