@@ -125,13 +125,13 @@ fn get_memory_limit_bytes() -> &'static usize {
                     // container
                     system.total_memory()
                 };
-        
+
                 memory_limit
                     .try_into()
                     .inspect_err(|e| tracing::warn!("unable to convert memory limit to the right type (u64 -> usize), using MAX as default, meaning the memory limit is effectively unset: {e}"))
                     .unwrap_or(usize::MAX)
-        
             }
+
             Err(err)=> {
                 tracing::warn!("error reading APOLLO_MEMORY_LIMIT_HINT environment variable: {err}");
                 usize::MAX
@@ -1830,12 +1830,12 @@ mod tests {
     fn test_get_memory_limit_bytes_with_env_var_hint() {
         // WARN: don't take me to prod
         unsafe {
-            std::env::set_var("APOLLO_MEMORY_LIMIT_HINT", "1073741824"); 
+            std::env::set_var("APOLLO_MEMORY_LIMIT_HINT", "1073741824");
         }
 
         let result = get_memory_limit_bytes();
         assert_eq!(*result, 1073741824 as usize);
-        
+
         // WARN: don't take me to prod
         unsafe {
             std::env::remove_var("APOLLO_MEMORY_LIMIT_HINT");
@@ -1846,17 +1846,16 @@ mod tests {
     fn test_get_memory_headroom_with_env_var() {
         // WARN: don't take me to prod
         unsafe {
-            std::env::set_var("APOLLO_MEMORY_HEADROOM", "123456"); 
+            std::env::set_var("APOLLO_MEMORY_HEADROOM", "123456");
         }
 
         let result = get_memory_headroom();
         assert_eq!(*result, 123456 as usize);
-        
+
         // WARN: don't take me to prod
         unsafe {
             std::env::remove_var("APOLLO_MEMORY_HEADROOM");
         }
-        
     }
 
     #[tokio::test]
