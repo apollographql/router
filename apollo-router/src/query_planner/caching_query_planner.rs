@@ -1834,7 +1834,7 @@ mod tests {
         }
 
         let result = get_memory_limit_bytes();
-        assert_eq!(*result, 1073741824 as usize);
+        assert_eq!(*result, 1073741824_usize);
 
         // WARN: don't take me to prod
         unsafe {
@@ -1850,7 +1850,7 @@ mod tests {
         }
 
         let result = get_memory_headroom();
-        assert_eq!(*result, 123456 as usize);
+        assert_eq!(*result, 123456_usize);
 
         // WARN: don't take me to prod
         unsafe {
