@@ -420,7 +420,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             .expect(
                                                 "this should not fail unless the socket is invalid",
                                             );
-
+                                        
                                         let hyper_service = hyper::service::service_fn(move |request| {
                                             app.clone().call(request)
                                         });
@@ -428,6 +428,16 @@ pub(super) fn serve_router_on_listen_addr(
                                         let tokio_stream = TokioIo::new(stream);
 
                                         let mut builder = Builder::new(TokioExecutor::new());
+                                        // --- START FIX ---
+                                        // 1. Detect if the TLS handshake negotiated HTTP/2
+                                        let is_http2 = tokio_stream.inner().get_ref().1.alpn_protocol() == Some(&b"h2"[..]);
+                                    
+                                        // 2. If yes, FORCE the builder to use your H2 config explicitly
+                                        if is_http2 {
+                                            builder = builder.http2_only();
+                                        }
+                                        // --- END FIX ---
+                                        
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection = config
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
