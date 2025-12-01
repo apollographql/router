@@ -35,6 +35,7 @@ use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
 use crate::plugins::response_cache::metrics::record_maintenance_queue_error;
 use crate::plugins::response_cache::metrics::record_maintenance_success;
+use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 
 pub(crate) type Config = super::config::Config;
 
@@ -110,7 +111,8 @@ impl Storage {
         };
         let pipeline = self.storage.pipeline().with_options(&options);
         for invalidation_key in &invalidation_keys {
-            let invalidation_key = format!("cache-tag:{invalidation_key}");
+            let invalidation_key =
+                format!("version:{RESPONSE_CACHE_VERSION}:cache-tag:{invalidation_key}");
             self.send_to_maintenance_queue(invalidation_key.clone());
 
             let redis_key = self.make_key(invalidation_key.clone());
@@ -212,9 +214,9 @@ impl Storage {
     /// * `subgraph-{s}` (whole subgraph)
     /// * `subgraph-{s}:key-{i1}`, `subgraph-{s}:key-{i2}`, ... (invalidation key per subgraph)
     ///
-    /// These are then turned into redis keys by adding the namespace and a `cache-tag:` prefix, ie:
-    /// * `{namespace}:cache-tag:subgraph-{s}`
-    /// * `{namespace}:cache-tag:subgraph-{s}:key-{i1}`, ...
+    /// These are then turned into redis keys by adding the namespace, version, and `cache-tag:` prefix, ie:
+    /// * `{namespace}:version:{RESPONSE_CACHE_VERSION}:cache-tag:subgraph-{s}`
+    /// * `{namespace}:version:{RESPONSE_CACHE_VERSION}:cache-tag:subgraph-{s}:key-{i1}`, ...
     fn cache_tag_permutations(
         &self,
         document_invalidation_keys: &[String],
@@ -227,7 +229,7 @@ impl Storage {
         }
 
         for cache_tag in cache_tags.iter_mut() {
-            *cache_tag = format!("cache-tag:{cache_tag}");
+            *cache_tag = format!("version:{RESPONSE_CACHE_VERSION}:cache-tag:{cache_tag}");
         }
 
         cache_tags
