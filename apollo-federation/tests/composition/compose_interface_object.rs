@@ -543,3 +543,55 @@ fn interface_object_with_inaccessible_field() {
         "id field should have @join__field for subgraph-c"
     );
 }
+
+#[test]
+fn interface_with_non_resolvable_key_does_not_require_all_implementations() {
+    // subgraphA defines the interface with a resolvable key and ALL implementations
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          iFromA: I
+        }
+
+        interface I @key(fields: "id") {
+          id: ID!
+          x: Int
+        }
+
+        type A implements I @key(fields: "id") {
+          id: ID!
+          x: Int
+        }
+
+        type B implements I @key(fields: "id") {
+          id: ID!
+          x: Int
+        }
+
+        type C implements I @key(fields: "id") {
+          id: ID!
+          x: Int
+        }
+        "#,
+    };
+
+    // subgraphB defines the interface with a non-resolvable key and does not
+    // define all implementations (A, B, C are missing). This should be allowed
+    // because the key is not resolvable.
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        interface I @key(fields: "id", resolvable: false) {
+          id: ID!
+          x: Int
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    // This should succeed - a non-resolvable key doesn't require all implementations
+    let _supergraph = result.expect(
+        "Expected composition to succeed - non-resolvable interface key should not require all implementations"
+    );
+}
