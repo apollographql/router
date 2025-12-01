@@ -1185,7 +1185,7 @@ mod tests {
         // manually trigger maintenance with a time in the future, in between the expiry times of doc1
         // and docs 2 and 3. therefore, we should remove `key1` and leave `key2` and `key3`
         let cutoff = now() + 10;
-        assert!(storage.zscore(&invalidation_key, &doc_key1).await? < cutoff as i64);
+        assert!(storage.zscore(&invalidation_key, doc_key1).await? < cutoff as i64);
         let removed_keys = storage
             .remove_keys_from_cache_tag_by_cutoff(invalidation_key.clone(), cutoff as f64)
             .await?;
@@ -1193,9 +1193,9 @@ mod tests {
 
         // now we should have two elements in the 'whole-subgraph' invalidation key
         assert_eq!(storage.zcard(&invalidation_key).await?, 2);
-        assert!(!storage.zexists(&invalidation_key, &doc_key1).await?);
-        assert!(storage.zexists(&invalidation_key, &doc_key2).await?);
-        assert!(storage.zexists(&invalidation_key, &doc_key3).await?);
+        assert!(!storage.zexists(&invalidation_key, doc_key1).await?);
+        assert!(storage.zexists(&invalidation_key, doc_key2).await?);
+        assert!(storage.zexists(&invalidation_key, doc_key3).await?);
 
         // manually trigger maintenance with the time set way in the future
         let cutoff = now() + 1000;
