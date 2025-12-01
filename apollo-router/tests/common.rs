@@ -1727,7 +1727,7 @@ fn merge_overrides(
     }
 
     // Override the listening address always since we spawn the router on a
-    // random port.
+    // random port. However, don't override Unix socket paths.
     match config
         .as_object_mut()
         .and_then(|o| o.get_mut("supergraph"))
@@ -1744,10 +1744,20 @@ fn merge_overrides(
             }
         }
         Some(supergraph_conf) => {
-            supergraph_conf.insert(
-                "listen".to_string(),
-                serde_json::Value::String(bind_addr.to_string()),
-            );
+            // check if the listen address is a Unix socket path (ie, starts with /)
+            let is_unix_socket = supergraph_conf
+                .get("listen")
+                .and_then(|v| v.as_str())
+                .map(|s| s.starts_with('/'))
+                .unwrap_or(false);
+
+            // only override if it's not a Unix socket
+            if !is_unix_socket {
+                supergraph_conf.insert(
+                    "listen".to_string(),
+                    serde_json::Value::String(bind_addr.to_string()),
+                );
+            }
         }
     }
 
