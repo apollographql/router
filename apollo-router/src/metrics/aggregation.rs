@@ -515,12 +515,15 @@ mod test {
 
         let reader = SharedReader(Arc::new(ManualReader::builder().build()));
 
-        opentelemetry::global::set_meter_provider(
-            MeterProviderBuilder::default()
-                .with_reader(reader.clone())
-                .build(),
-        );
         let meter_provider = AggregateMeterProvider::default();
+        meter_provider.set(
+            MeterProviderType::OtelDefault,
+            FilterMeterProvider::public(
+                MeterProviderBuilder::default()
+                    .with_reader(reader.clone())
+                    .build(),
+            )
+        );
 
         let counter = meter_provider
             .meter_with_scope(InstrumentationScope::builder("test").build())
@@ -586,15 +589,13 @@ mod test {
         let shutdown = Arc::new(AtomicBool::new(false));
         let periodic_reader = reader(&meter_provider, &shutdown);
 
-        opentelemetry::global::set_meter_provider(
-            MeterProviderBuilder::default()
-                .with_reader(periodic_reader)
-                .build(),
-        );
-
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(opentelemetry::global::meter_provider()),
+            FilterMeterProvider::public(
+                MeterProviderBuilder::default()
+                    .with_reader(periodic_reader)
+                    .build(),
+            ),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -612,30 +613,26 @@ mod test {
         let shutdown1 = Arc::new(AtomicBool::new(false));
         let periodic_reader = reader(&meter_provider, &shutdown1);
 
-        opentelemetry::global::set_meter_provider(
-            MeterProviderBuilder::default()
-                .with_reader(periodic_reader)
-                .build(),
-        );
-
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(opentelemetry::global::meter_provider()),
+            FilterMeterProvider::public(
+                MeterProviderBuilder::default()
+                    .with_reader(periodic_reader)
+                    .build(),
+            ),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
         let shutdown2 = Arc::new(AtomicBool::new(false));
         let periodic_reader = reader(&meter_provider, &shutdown2);
 
-        opentelemetry::global::set_meter_provider(
-            MeterProviderBuilder::default()
-                .with_reader(periodic_reader)
-                .build(),
-        );
-
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(opentelemetry::global::meter_provider()),
+            FilterMeterProvider::public(
+                MeterProviderBuilder::default()
+                    .with_reader(periodic_reader)
+                    .build(),
+            ),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
