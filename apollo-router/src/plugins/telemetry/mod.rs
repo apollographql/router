@@ -2451,7 +2451,6 @@ mod tests {
                 "http.response.status_code" = 400,
                 "acme.my_attribute" = "application/json",
                 "error.type" = "Bad Request",
-                "http.response.status_code" = 400,
                 "network.protocol.version" = "HTTP/1.1"
             );
         }
