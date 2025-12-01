@@ -1,0 +1,94 @@
+---
+title: Deployment Patterns
+subtitle: Production deployment patterns for Apollo Router
+description: Learn about deployment patterns for Apollo Router, including blue/green deployments for zero-downtime schema updates.
+---
+
+# Graph Artifacts
+
+Graph Artifacts contain a supergraph created from a single build. Whereas graphs are referred to by their Graph ID and Variant Name, Graph Artifacts are instead referred to by their unique hash digest. Given that digest reference, a router can be configured to point to a single, immutable supergraph instead of the latest-built supergraph, giving you complete control over what is running in your production environment.
+
+Choosing a deployment strategy with Graph Artifacts
+
+| Strategy | Best For | Downtime | Rollback Speed | Complexity |
+|----------|----------|----------|----------------|------------|
+| **Blue/Green** | High-traffic production | Zero | Instant | High |
+| **Rolling** | Lower-traffic or simpler setups | Minimal | Delayed | Low |
+
+
+# Retrieving a Graph Artifact digest
+
+See [Schema from Graph Artifacts](/graphos/routing/configuration/schema-oci) for information on how supergraph builds are mapped to OCI URIs and how to retrieve them.
+
+# Launch router fleets
+
+## Blue/Green Deployment
+
+In a (blue/green deployment)[https://en.wikipedia.org/wiki/Blue%E2%80%93green_deployment], two separate fleets of routers are pinned to different schemas.
+
+1. Launch the **Blue** fleet with the initial URI
+2. Make a change to a subgraph and let it build
+3. Launch the **Green** fleet with the updated uri
+4. Validate the **Green** fleet and shift traffic from **Blue** to **Green**
+5. Monitor for errors, and if necessary, shift traffic back to **Blue**
+
+
+### 1. Launching the Blue router fleet
+
+Using the URI queried above as the Graph Artifact Reference:
+
+```bash
+APOLLO_KEY="your-api-key" \
+APOLLO_GRAPH_ARTIFACT_REFERENCE="artifact.api.apollographql.com/my-graph-a50b9d546b298e5a@sha256:14409db3d8a8d74ff9e9a0b5712c0aa8d574bcacc3656e1bc0c55ecf97cd9264" \
+router
+```
+
+### 2. Publish a new subgraph to Graph OS
+
+Graph OS will compose a new supergraph, but your router fleet will not automatically deploy. Query for the new Graph Artifact URI using the above queries.
+
+
+### 3. Launching the Green router fleet
+
+```bash
+# Using tag reference
+APOLLO_KEY="your-api-key" \
+APOLLO_GRAPH_ARTIFACT_REFERENCE="artifact.api.apollographql.com/my-graph-a50b9d546b298e5a@sha256:08a2d3c63bf9fc88276d97a9e8df5f841fd772724ad10f119f7e516f228b74c6" \
+router
+```
+
+### 5-6. Shift traffic and monitor
+
+Use your existing infrastructure to monitor and adjust your load balancer's weighted routing as appropriate.
+
+### Benefits of Blue/Green Deployment
+
+Pros:
+
+* Zero downtime
+* Instant rollback
+* Gradual rollout
+* Deterministic versions
+* Staging environment mirrors production
+* Failover environment is already provisioned
+
+Cons:
+
+- Cost for two full environments
+
+
+## Rolling deployment
+
+Instead of maintaining two fleets, it is possible to redeploy each router in the fleet with a new APOLLO_GRAPH_ARTIFACT_REFERENCE.
+
+### Benefits of rolling deployment
+
+Pros:
+
+* Simpler and cheaper setup, no need for two fleets
+
+Cons:
+
+* Slower rollback (requires pod restarts)
+* Less control over traffic distribution
+* Failover requires full environment creation

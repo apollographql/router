@@ -70,6 +70,27 @@ A path to a file containing the [graph API key](/graphos/api-keys/#graph-api-key
 </td>
 </tr>
 <tr>
+<td style="min-width: 150px;">
+
+##### `APOLLO_GRAPH_ARTIFACT_REFERENCE`
+
+</td>
+<td>
+
+An OCI reference to a graph artifact that contains the supergraph schema for the router to run. The reference must use a SHA256 digest format.
+
+**Example:**
+```
+artifact.api.apollographql.com/my-graph-a50b9d546b298e5a@sha256:14409db3d8a8d74ff9e9a0b5712c0aa8d574bcacc3656e1bc0c55ecf97cd9264
+```
+
+When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink. The router still fetches entitlements and persisted queries from Uplink.
+
+For information on finding OCI artifact references, see [Schema from Graph Artifacts](/graphos/routing/configuration/schema-oci).
+
+</td>
+</tr>
+<tr>
 </tr>
 </tbody>
 </table>

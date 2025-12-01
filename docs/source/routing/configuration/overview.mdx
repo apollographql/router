@@ -16,23 +16,64 @@ Running an Apollo Router instance involves some key steps:
 
 As the runtime for a federated graph, a router needs to know the schema of the graph it's running. We call the schema for a federated graph a _supergraph schema_. 
 
-You need to configure the router at startup to know where to get its supergraph schema. That configuration depends on whether or not its supergraph schema is managed by GraphOS:
+You need to configure the router at startup to know where to get its supergraph schema. The router supports several methods for loading a supergraph schema, each suited for different deployment scenarios.
 
-- If your supergraph schema is managed by GraphOS, you can configure your router with the GraphOS graph ref and API key as environment variables (`APOLLO_GRAPH_REF` and `APOLLO_KEY`). Based on these, the router can automatically fetch the supergraph schema from GraphOS.
-- Otherwise, you can provide the router a supergraph schema file [via command line or environment variable](/graphos/routing/configuration/cli#-s----supergraph).
+### From OCI Registry (Graph Artifacts)
 
-## Configuring features in YAML
+[Learn more →](/graphos/routing/configuration/schema-oci)
 
-Configuring the router's features happens primarily via a YAML configuration file. Named `router.yaml` by default, the router's YAML configuration file lets you configure all of a router's runtime features declaratively. 
+**Pros:**
+- ✅ Immutable, versioned schema references
+- ✅ Deterministic deployments (same digest = same schema)
+- ✅ Ideal for blue/green deployments
+- ✅ Reliable rollbacks to any previous version
+- ✅ Works with any infrastructure (Kubernetes, Docker, bare metal)
 
-## Passing configuration at startup
+**Cons:**
+- ❌ Requires manual schema version management
+- ❌ Network dependency for Apollo's registry (can use local registry for independence)
 
-Command-line options, a YAML config, and environment variables are passed to the router at startup. 
+### Apollo GraphOS Operator
 
-This example command would be for a router with a GraphOS-managed graph and a custom named `myrouter.yaml` config file:
+[Learn more →](https://www.apollographql.com/docs/apollo-operator)
 
-```bash showLineNumbers=false
-APOLLO_KEY="..." APOLLO_GRAPH_REF="..." router --config myrouter.yaml
-```
+**Pros:**
+- ✅ Kubernetes-native schema management
+- ✅ Can easily manage complex deployment workflows
+- ✅ Automatic schema updates with configurable strategies
+- ✅ Built-in blue/green deployment support
+- ✅ Integrates with Kubernetes monitoring and logging
 
-> The router can hot-reload updated configuration. When enabled, changes in `router.yaml` trigger the router to reload with the updated configuration.  Existing requests will finish using the existing configuration and new requests will start using the new configuration.
+**Cons:**
+- ❌ Requires Kubernetes infrastructure
+
+### From local file
+
+[Learn more →](/graphos/routing/configuration/schema-file)
+
+**Pros:**
+- ✅ Flexible for any infrastructure
+- ✅ Full control over schema version
+- ✅ Easy to integrate with CI/CD pipelines
+- ✅ Supports hot reloading for local development
+
+**Cons:**
+- ❌ Complexity of manual schema file management
+- ❌ Hot reloading has performance impact
+
+**Best for:** Local development, testing, or production deployments where you manage schema files directly (often combined with CI/CD pipelines).
+
+### Using GraphOS Uplink (Managed Federation)
+
+[Learn more →](/graphos/routing/uplink)
+
+**Pros:**
+- ✅ Automatic schema updates
+
+**Cons:**
+- ❌ Hot reloading has performance impact
+- ❌ Network dependency for Apollo's Uplink
+- ❌ Less control over deployment timing
+
+**Best for:** Production deployments where application teams do not have access to infrastructure
+

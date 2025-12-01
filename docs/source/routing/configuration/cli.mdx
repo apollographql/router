@@ -112,7 +112,9 @@ If set, a router runs in dev mode to help with local development.
 </td>
 <td>
 
-If set, the router watches for changes to its configuration file and any supergraph file passed with `--supergraph` and reloads them automatically without downtime. This setting only affects local files provided to the router. The supergraph and configuration provided from GraphOS via Launches (and delivered via Uplink) are _always_ loaded automatically, regardless of this setting.
+If set, the router watches for changes to its configuration file and any supergraph file passed with `--supergraph` and reloads them automatically without downtime. This setting only affects local files provided to the router. The supergraph and configuration provided from GraphOS via Launches (and delivered via Uplink) are _always_ loaded automatically, regardless of this setting.<br/><br/>
+
+For details on hot reload support for different schema sources and performance considerations, see [Hot Reload](/graphos/routing/configuration/hot-reload).
 
 </td>
 </tr>
@@ -189,7 +191,7 @@ An OCI reference to a graph artifact that contains the supergraph schema for the
 When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink.
 The router still fetches entitlements and persisted queries from Uplink.<br/><br/>
 
-⚠️ **This option is in preview and doesn't support hot-reloading of schemas.**
+For information on finding OCI artifact references, see [OCI Artifact References](/graphos/routing/configuration/oci-artifacts).<br/><br/>
 
 </td>
 </tr>
