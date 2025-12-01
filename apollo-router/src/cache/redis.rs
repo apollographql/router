@@ -648,7 +648,7 @@ impl RedisCacheStorage {
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
-    ) -> Vec<Option<RedisValue<V>>> {
+    ) -> Result<Vec<Option<RedisValue<V>>>, RedisError> {
         self.get_multiple_with_options(keys, Options::default())
             .await
     }
@@ -657,7 +657,7 @@ impl RedisCacheStorage {
         &self,
         mut keys: Vec<RedisKey<K>>,
         options: Options,
-    ) -> Vec<Option<RedisValue<V>>> {
+    ) -> Result<Vec<Option<RedisValue<V>>>, RedisError> {
         // NB: MGET is different from GET in that it returns `Option`s rather than `Result`s.
         //  > For every key that does not hold a string value or does not exist, the special value
         //    nil is returned. Because of this, the operation never fails.
@@ -671,9 +671,8 @@ impl RedisCacheStorage {
             let res = client
                 .get(key)
                 .await
-                .inspect_err(|e| self.record_error(e))
-                .ok();
-            vec![res]
+                .inspect_err(|e| self.record_error(e))?;
+            Ok(vec![res])
         } else if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
@@ -702,21 +701,13 @@ impl RedisCacheStorage {
             // the keys argument's order
             let mut result = vec![None; len];
             for (indexes, result_value) in join_all(tasks).await.into_iter() {
-                match result_value {
-                    Ok(values) => {
-                        for (index, value) in indexes.into_iter().zip(values.into_iter()) {
-                            result[index] = value;
-                        }
-                    }
-                    Err(e) => {
-                        self.record_error(&e);
-                    }
+                for (index, value) in indexes.into_iter().zip(result_value?.into_iter()) {
+                    result[index] = value;
                 }
             }
 
-            result
+            Ok(result)
         } else {
-            let len = keys.len();
             let keys = keys
                 .into_iter()
                 .map(|k| self.make_key(k))
@@ -725,7 +716,6 @@ impl RedisCacheStorage {
                 .mget(keys)
                 .await
                 .inspect_err(|e| self.record_error(e))
-                .unwrap_or_else(|_| vec![None; len])
         }
     }
 
@@ -1106,7 +1096,7 @@ mod test {
             }
 
             // test the `mget` functionality
-            let values = storage.get_multiple(keys).await;
+            let values = storage.get_multiple(keys).await?;
             for value in values {
                 let value: RedisValue<usize> = value.ok_or("missing value")?;
                 assert_eq!(value.0, expected_value);
@@ -1151,7 +1141,7 @@ mod test {
                     .map(|value| value.map(ToString::to_string))
                     .collect();
 
-                let values = storage.get_multiple(keys).await;
+                let values = storage.get_multiple(keys).await?;
                 let parsed_values: Vec<Option<String>> =
                     values.into_iter().map(|v| v.map(|v| v.0)).collect();
                 assert_eq!(parsed_values, expected_values);

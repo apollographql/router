@@ -399,8 +399,10 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Option<RedisValue<CacheValue>>> =
-            self.storage.get_multiple_with_options(keys, options).await;
+        let values: Vec<Option<RedisValue<CacheValue>>> = self
+            .storage
+            .get_multiple_with_options(keys, options)
+            .await?;
 
         let entries = values
             .into_iter()
