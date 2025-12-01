@@ -65,7 +65,6 @@ struct TopLevelConditionResolver {
 ///
 /// If we ever re-visit the node with at least more options than a prior visit while making at least
 /// as many assumptions, then we know we can skip re-visiting.
-#[derive(Clone)]
 pub(super) struct NodeVisit {
     pub(super) subgraph_context_keys: IndexSet<SubgraphContextKey>,
     pub(super) override_conditions: Arc<OverrideConditions>,

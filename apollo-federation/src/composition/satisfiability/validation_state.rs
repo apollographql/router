@@ -104,7 +104,7 @@ struct SubgraphPathContextInfo {
     type_name: Name,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash)]
 pub(super) struct SubgraphContextKey {
     tail_subgraph_name: Arc<str>,
     contexts: SubgraphPathContexts,
@@ -278,35 +278,47 @@ impl ValidationState {
     fn can_skip_visit_for_subgraph_paths(
         supergraph_path_tail: petgraph::graph::NodeIndex,
         _subgraph_path_infos: &[SubgraphPathInfo],
-        current_vertex_visit: &NodeVisit,
+        current_vertex_visit: NodeVisit,
         previous_visits: &mut IndexMap<petgraph::graph::NodeIndex, Vec<NodeVisit>>,
     ) -> bool {
-        let previous_visits_for_vertex = previous_visits.entry(supergraph_path_tail).or_default();
+        use indexmap::map::Entry;
 
-        for previous_visit in previous_visits_for_vertex.iter() {
-            // Check if current visit is a superset of the previous visit (isSupersetOrEqual in JS)
-            if current_vertex_visit
-                .subgraph_context_keys
-                .is_superset(&previous_visit.subgraph_context_keys)
-                && previous_visit
-                    .override_conditions
-                    .iter()
-                    .all(|(label, is_enabled)| {
-                        current_vertex_visit.override_conditions.get(label) == Some(is_enabled)
-                    })
-            {
-                // This means that we've already seen the type we're currently on in the supergraph,
-                // and when saw it we could be in one of `previousSources`, and we validated that
-                // we could reach anything from there. We're now on the same type, and have strictly
-                // more options regarding subgraphs. So whatever comes next, we can handle in the exact
-                // same way we did previously, and there is thus no way to bother.
-                return true;
+        match previous_visits.entry(supergraph_path_tail) {
+            Entry::Occupied(mut entry) => {
+                let previous_visits_for_vertex = entry.get_mut();
+
+                for previous_visit in previous_visits_for_vertex.iter() {
+                    // Check if current visit is a superset of the previous visit (isSupersetOrEqual in JS)
+                    if current_vertex_visit
+                        .subgraph_context_keys
+                        .is_superset(&previous_visit.subgraph_context_keys)
+                        && previous_visit
+                            .override_conditions
+                            .iter()
+                            .all(|(label, is_enabled)| {
+                                current_vertex_visit.override_conditions.get(label)
+                                    == Some(is_enabled)
+                            })
+                    {
+                        // This means that we've already seen the type we're currently on in the supergraph,
+                        // and when saw it we could be in one of `previousSources`, and we validated that
+                        // we could reach anything from there. We're now on the same type, and have strictly
+                        // more options regarding subgraphs. So whatever comes next, we can handle in the exact
+                        // same way we did previously, and there is thus no way to bother.
+                        return true;
+                    }
+                }
+
+                // We're gonna have to validate, but we can save the new set of sources here to hopefully save work later.
+                previous_visits_for_vertex.push(current_vertex_visit);
+                false
+            }
+            Entry::Vacant(entry) => {
+                // First visit to this vertex - record it and don't skip
+                entry.insert(vec![current_vertex_visit]);
+                false
             }
         }
-
-        // We're gonna have to validate, but we can save the new set of sources here to hopefully save work later.
-        previous_visits_for_vertex.push(current_vertex_visit.clone());
-        false
     }
 
     /// Returns whether the entire entire visit to this state can be skipped. If the state is
@@ -330,7 +342,7 @@ impl ValidationState {
                 Ok(Self::can_skip_visit_for_subgraph_paths(
                     vertex,
                     paths,
-                    &current_vertex_visit,
+                    current_vertex_visit,
                     previous_visits,
                 ))
             }
@@ -347,7 +359,7 @@ impl ValidationState {
                     if !Self::can_skip_visit_for_subgraph_paths(
                         vertex,
                         subgraph_path_infos,
-                        &current_vertex_visit,
+                        current_vertex_visit,
                         previous_visits,
                     ) {
                         can_skip = false;
