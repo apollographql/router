@@ -288,18 +288,7 @@ impl ValidationState {
                 let previous_visits_for_vertex = entry.get_mut();
 
                 for previous_visit in previous_visits_for_vertex.iter() {
-                    // Check if current visit is a superset of the previous visit (isSupersetOrEqual in JS)
-                    if current_vertex_visit
-                        .subgraph_context_keys
-                        .is_superset(&previous_visit.subgraph_context_keys)
-                        && previous_visit
-                            .override_conditions
-                            .iter()
-                            .all(|(label, is_enabled)| {
-                                current_vertex_visit.override_conditions.get(label)
-                                    == Some(is_enabled)
-                            })
-                    {
+                    if current_vertex_visit.is_superset_or_equal(previous_visit) {
                         // This means that we've already seen the type we're currently on in the supergraph,
                         // and when saw it we could be in one of `previousSources`, and we validated that
                         // we could reach anything from there. We're now on the same type, and have strictly
@@ -336,7 +325,7 @@ impl ValidationState {
             SubgraphPathInfos::Paths(paths) => {
                 // Non-partitioned case
                 let current_vertex_visit = NodeVisit {
-                    subgraph_context_keys: self.current_subgraph_context_keys()?,
+                    subgraph_context_keys: self.current_subgraph_context_keys(None)?,
                     override_conditions: self.selected_override_conditions.clone(),
                 };
                 Ok(Self::can_skip_visit_for_subgraph_paths(
@@ -351,7 +340,8 @@ impl ValidationState {
                 let mut can_skip = true;
                 for subgraph_path_infos in paths.values() {
                     let current_vertex_visit = NodeVisit {
-                        subgraph_context_keys: self.current_subgraph_context_keys()?,
+                        subgraph_context_keys: self
+                            .current_subgraph_context_keys(Some(subgraph_path_infos))?,
                         override_conditions: self.selected_override_conditions.clone(),
                     };
                     // Note that this method mutates the set of previous visits, so we
@@ -642,8 +632,8 @@ impl ValidationState {
             return Ok(Some(updated_state));
         }
 
-        let all_subgraph_paths: Vec<_> = updated_state.subgraph_path_infos.iter().collect();
-        let filtered_paths_count = all_subgraph_paths
+        let filtered_paths_count = updated_state
+            .subgraph_path_infos
             .iter()
             .map(|path| {
                 let path_tail_weight = path.path.path.graph().node_weight(path.path.path.tail())?;
@@ -681,7 +671,7 @@ impl ValidationState {
         let mut runtime_types_per_subgraphs: IndexMap<Arc<str>, Arc<BTreeSet<Name>>> =
             Default::default();
         let mut has_all_empty = true;
-        for new_subgraph_path in all_subgraph_paths.iter() {
+        for new_subgraph_path in updated_state.subgraph_path_infos.iter() {
             let new_subgraph_path_tail_weight = new_subgraph_path
                 .path
                 .path
@@ -819,22 +809,32 @@ impl ValidationState {
 
     pub(super) fn current_subgraph_context_keys(
         &self,
+        subgraph_path_infos: Option<&[SubgraphPathInfo]>,
     ) -> Result<IndexSet<SubgraphContextKey>, FederationError> {
-        self.subgraph_path_infos
-            .iter()
-            .map(|path_info| {
-                Ok(SubgraphContextKey {
-                    tail_subgraph_name: path_info
-                        .path
-                        .path
-                        .graph()
-                        .node_weight(path_info.path.path.tail())?
-                        .source
-                        .clone(),
-                    contexts: path_info.contexts.clone(),
-                })
+        let map_to_context_key = |path_info: &SubgraphPathInfo| {
+            Ok(SubgraphContextKey {
+                tail_subgraph_name: path_info
+                    .path
+                    .path
+                    .graph()
+                    .node_weight(path_info.path.path.tail())?
+                    .source
+                    .clone(),
+                contexts: path_info.contexts.clone(),
             })
-            .process_results(|iter| iter.collect())
+        };
+
+        match subgraph_path_infos {
+            Some(path_infos) => path_infos
+                .iter()
+                .map(map_to_context_key)
+                .process_results(|iter| iter.collect()),
+            None => self
+                .subgraph_path_infos
+                .iter()
+                .map(map_to_context_key)
+                .process_results(|iter| iter.collect()),
+        }
     }
 }
 

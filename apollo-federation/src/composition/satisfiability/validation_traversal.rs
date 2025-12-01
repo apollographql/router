@@ -70,6 +70,24 @@ pub(super) struct NodeVisit {
     pub(super) override_conditions: Arc<OverrideConditions>,
 }
 
+impl NodeVisit {
+    /// Returns `true` if the current visit is a superset or equal to `other` visit.
+    ///
+    /// A visit is a superset of another if:
+    /// 1. Its subgraph context keys are a superset of the other's subgraph context keys
+    /// 2. All override conditions in the other visit are present with the same values in this visit
+    ///
+    /// This corresponds to `isSupersetOrEqual` in the JavaScript implementation.
+    pub(super) fn is_superset_or_equal(&self, other: &NodeVisit) -> bool {
+        self.subgraph_context_keys
+            .is_superset(&other.subgraph_context_keys)
+            && other
+                .override_conditions
+                .iter()
+                .all(|(label, is_enabled)| self.override_conditions.get(label) == Some(is_enabled))
+    }
+}
+
 impl ValidationTraversal {
     const DEFAULT_MAX_VALIDATION_SUBGRAPH_PATHS: usize = 1_000_000;
 
