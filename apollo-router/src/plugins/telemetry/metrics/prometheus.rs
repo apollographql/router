@@ -15,7 +15,7 @@ use tower_service::Service;
 
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
-use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::{Conf, MetricAggregation};
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::services::router;
@@ -82,18 +82,31 @@ impl MetricsConfigurator for Config {
             .with_registry(registry.clone())
             .build()?;
 
-        let buckets = builder.metrics_common().buckets.clone();
-
-        let aggregation_view = move |_i: &Instrument| {
+        // Only apply the global buckets view to instruments that don't have custom histogram views
+        // configured.
+        let common_buckets = builder.metrics_common().buckets.clone();
+        let custom_histogram_view_names = builder
+            .metrics_common()
+            .views
+            .iter()
+            .filter(|v| matches!(v.aggregation, Some(MetricAggregation::Histogram { .. })))
+            .map(|v| v.name.clone())
+            .collect::<Vec<_>>();
+        let aggregation_view = move |i: &Instrument| {
+            if !custom_histogram_view_names.contains(&i.name().to_string()) {
             Some(
                 Stream::builder()
                     .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: buckets.clone(),
+                        boundaries: common_buckets.clone(),
                         record_min_max: true,
                     })
                     .build()
                     .unwrap(),
             )
+            } else {
+                None
+            }
+
         };
 
         builder

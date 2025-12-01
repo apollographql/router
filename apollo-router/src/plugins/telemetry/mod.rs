@@ -3031,7 +3031,8 @@ mod tests {
             .await;
             plugin.activate();
             make_supergraph_request(plugin.as_ref()).await;
-            u64_histogram!("apollo.test.histo", "it's a test", 1u64);
+            u64_histogram!("apollo.test.custom", "should have custom buckets", 1u64);
+            u64_histogram!("apollo.test.global", "should have global buckets", 1u64);
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
