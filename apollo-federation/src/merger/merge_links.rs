@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveDefinition;
@@ -11,6 +12,7 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::link::Import;
 use crate::link::Link;
+use crate::link::LinksMetadata;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec_definition::SPEC_REGISTRY;
@@ -43,6 +45,33 @@ struct CoreDirectiveInSupergraph {
     composition_spec: DirectiveCompositionSpecification,
 }
 
+fn get_directive_source_and_import(
+    directive: &Name,
+    features: &LinksMetadata,
+) -> Option<(Arc<Link>, Arc<Import>)> {
+    // First, check if this is an explicitly imported directive
+    if let Some((source, import)) = features.directives_by_imported_name.get(directive) {
+        return Some((Arc::clone(source), Arc::clone(import)));
+    }
+
+    // Otherwise, check if this is a namespaced directive (e.g., federation__inaccessible)
+    if let Some((spec_name, directive_name_in_spec)) = directive.split_once("__")
+        && let Some(link) = features.by_name_in_schema.get(spec_name)
+    {
+        // Create a synthetic import for this namespaced directive
+        if let Ok(element_name) = Name::new(directive_name_in_spec) {
+            let synthetic_import = Arc::new(Import {
+                element: element_name,
+                is_directive: true,
+                alias: None,
+            });
+            return Some((Arc::clone(link), synthetic_import));
+        }
+    }
+
+    None
+}
+
 impl Merger {
     pub(crate) fn collect_core_directives_to_compose(
         &self,
@@ -61,14 +90,14 @@ impl Merger {
             };
 
             for (directive, referencers) in &subgraph.schema().referencers().directives {
-                let Some((source, import)) = features.directives_by_imported_name.get(directive)
+                let Some((source, import)) = get_directive_source_and_import(directive, features)
                 else {
                     continue;
                 };
                 if referencers.len() == 0 {
                     continue;
                 }
-                let Some(composition_spec) = SPEC_REGISTRY.get_composition_spec(source, import)
+                let Some(composition_spec) = SPEC_REGISTRY.get_composition_spec(&source, &import)
                 else {
                     trace!(
                         "Directive @{directive} from {} has no registered composition spec, skipping",
