@@ -18,6 +18,7 @@ use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::fed1_link_imports;
+use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -154,6 +155,9 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
                 if let Some(other) = by_name_in_schema.get(imported_name)
                     && !Arc::ptr_eq(other, link)
                     && !other.renames(imported_name)
+                    // Allow federation spec to re-export directives from companion specs
+                    && !(link.url.identity == Identity::federation_identity()
+                        && other.url.identity.domain == APOLLO_SPEC_DOMAIN)
                 {
                     return Err(LinkError::BootstrapError(format!(
                         "import for '{}' of {} conflicts with spec {}",

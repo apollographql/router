@@ -1,6 +1,7 @@
 use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
+use test_log::test;
 
 use super::ServiceDefinition;
 use super::compose_as_fed2_subgraphs;
@@ -417,4 +418,52 @@ fn composes_subgraphs_with_directives_on_renamed_root_types() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let _supergraph = result.expect("Expected composition to succeed");
+}
+
+#[test]
+fn composes_subgraph_with_explicit_tag_spec_link() {
+    let subgraph_with_tag_link = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/tag/v0.2")
+
+        directive @key(fields: String!) repeatable on OBJECT | INTERFACE
+
+        type Query {
+            product: Product
+        }
+
+        type Product @key(fields: "id") {
+            id: ID!
+            name: String @tag(name: "public")
+        }
+    "#;
+    let other_subgraph = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key", "@external"])
+
+        type Query {
+            user: User
+        }
+
+        type User @key(fields: "id") {
+            id: ID!
+            email: String
+        }
+    "#;
+
+    let subgraphs = vec![
+        Subgraph::parse("products", "http://products", subgraph_with_tag_link).unwrap(),
+        Subgraph::parse("users", "http://users", other_subgraph).unwrap(),
+    ];
+
+    // Link expansion should succeed when the tag spec is explicitly linked. Adding the fed 1 spec
+    // was adding its own @tag that conflicted with the imported one.
+    let result = compose(subgraphs);
+    assert!(
+        result.is_ok(),
+        "Composition should succeed when a subgraph explicitly links the tag spec. Error: {:?}",
+        result.err()
+    );
 }
