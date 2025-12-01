@@ -24,6 +24,7 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::Configuration;
+use crate::allocator::WithMemoryTracking;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
 use crate::compute_job::ComputeJobType;
@@ -470,7 +471,7 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
         };
 
         // Return the response as an immediate future
-        Box::pin(fut)
+        Box::pin(fut.with_memory_tracking("query_planner.request", None))
     }
 }
 
