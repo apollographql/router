@@ -387,7 +387,10 @@ impl CacheStorage for Storage {
         Ok(CacheEntry::from((cache_key, value.0)))
     }
 
-    async fn internal_fetch_multiple(&self, cache_keys: &[&str]) -> Vec<StorageResult<CacheEntry>> {
+    async fn internal_fetch_multiple(
+        &self,
+        cache_keys: &[&str],
+    ) -> (Vec<Option<CacheEntry>>, Vec<super::Error>) {
         let keys: Vec<RedisKey<String>> = cache_keys
             .iter()
             .map(|key| RedisKey(key.to_string()))
@@ -396,18 +399,18 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Result<RedisValue<CacheValue>, _>> =
+        let (values, errors): (Vec<Option<RedisValue<CacheValue>>>, _) =
             self.storage.get_multiple_with_options(keys, options).await;
 
-        values
+        let values = values
             .into_iter()
             .zip(cache_keys)
             .map(|(opt_value, cache_key)| {
-                opt_value
-                    .map(|value| CacheEntry::from((*cache_key, value.0)))
-                    .map_err(Into::into)
+                opt_value.map(|value| CacheEntry::from((*cache_key, value.0)))
             })
-            .collect()
+            .collect();
+        let errors = errors.into_iter().map(Into::into).collect();
+        (values, errors)
     }
 
     async fn internal_invalidate_by_subgraph(&self, subgraph_name: &str) -> StorageResult<u64> {
@@ -1367,37 +1370,62 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn timeout_errors_are_captured() -> Result<(), BoxError> {
-        async {
-            let config = Config {
-                fetch_timeout: Duration::from_nanos(0),
-                ..redis_config(false)
-            };
+    #[rstest::rstest]
+    #[case::fetch_non_cluster(false, false, 1)]
+    #[case::fetch_multiple_1_non_cluster(false, true, 1)]
+    #[case::fetch_multiple_3_non_cluster(false, true, 3)]
+    #[case::fetch_cluster(true, false, 1)]
+    #[case::fetch_multiple_1_cluster(true, true, 1)]
+    #[case::fetch_multiple_3_cluster(true, true, 3)]
+    async fn timeout_errors_are_captured(
+        #[case] clustered: bool,
+        #[case] uses_fetch_multiple: bool,
+        #[case] num_values: usize,
+    ) -> Result<(), BoxError> {
+        let config = Config {
+            fetch_timeout: Duration::from_nanos(0),
+            ..redis_config(clustered)
+        };
+
+        let keys: Vec<String> = (0..num_values).map(|n| format!("key{n}")).collect();
+
+        async move {
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage = Storage::new(&config, drop_rx).await?;
             storage.truncate_namespace().await?;
-
-            let keys = ["key1", "key2", "key3"];
 
             // because of how tokio::timeout polls, it's possible for a command to finish before the
             // timeout is polled (even if the duration is 0). perform the check in a loop to give it
             // a few chances to trigger.
             let now = Instant::now();
             while now.elapsed() < Duration::from_secs(5) {
-                let error = match storage.fetch_multiple(&keys, "S1").await {
-                    Ok(_) => continue,
-                    Err(err) if err.is_row_not_found() => continue,
-                    Err(err) => err,
+                let error = {
+                    if uses_fetch_multiple {
+                        let keys: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+                        if let Err(err) = storage.fetch_multiple(&keys, "S1").await {
+                            err
+                        } else {
+                            // Might get Ok([None; 3]) - try again
+                            continue;
+                        }
+                    } else {
+                        storage.fetch(&keys[0], "S1").await.unwrap_err()
+                    }
                 };
+
+                if error.is_row_not_found() {
+                    continue;
+                }
 
                 assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
                 assert_eq!(error.code(), "TIMEOUT");
                 assert_counter!(
                     "apollo.router.operations.response_cache.fetch.error",
-                    keys.len(),
+                    1,
                     "code" = "TIMEOUT",
                     "subgraph.name" = "S1"
                 );
+
                 return Ok(());
             }
 

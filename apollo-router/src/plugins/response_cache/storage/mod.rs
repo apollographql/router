@@ -14,7 +14,6 @@ use super::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
 use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
-use crate::plugins::response_cache::metrics::record_fetch_errors;
 use crate::plugins::response_cache::metrics::record_insert_duration;
 use crate::plugins::response_cache::metrics::record_insert_error;
 use crate::plugins::response_cache::metrics::record_invalidation_duration;
@@ -117,7 +116,10 @@ pub(super) trait CacheStorage {
     }
 
     #[doc(hidden)]
-    async fn internal_fetch_multiple(&self, cache_keys: &[&str]) -> Vec<StorageResult<CacheEntry>>;
+    async fn internal_fetch_multiple(
+        &self,
+        cache_keys: &[&str],
+    ) -> (Vec<Option<CacheEntry>>, Vec<Error>);
 
     /// Fetch the values belonging to `cache_keys`. Command will be timed out after `self.fetch_timeout()`.
     async fn fetch_multiple(
@@ -135,19 +137,14 @@ pub(super) trait CacheStorage {
 
         record_fetch_duration(now.elapsed(), subgraph_name, batch_size);
 
-        let values = result
+        let (values, errors) = result
             .map_err(Into::into)
-            .inspect_err(|err| record_fetch_errors(err, subgraph_name, batch_size as u64))?;
+            .inspect_err(|err| record_fetch_error(err, subgraph_name))?;
 
         // individually inspect each error in the Vec, in case we had partial success
-        let values = values
-            .into_iter()
-            .map(|value| {
-                value
-                    .inspect_err(|err| record_fetch_error(err, subgraph_name))
-                    .ok()
-            })
-            .collect();
+        errors
+            .iter()
+            .for_each(|err| record_fetch_error(err, subgraph_name));
         Ok(values)
     }
 

@@ -1012,11 +1012,12 @@ async fn cache_lookup_entities(
         private_id,
     )?;
 
-    let cache_result: Vec<Option<CacheEntry>> = cache
+    let (values, _errors): (Vec<Option<RedisValue<CacheEntry>>>, _) = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
-        .await
+        .await;
+    let cache_result = values
         .into_iter()
-        .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0).ok())
+        .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
         .map(|v| match v {
             None => None,
             Some(v) => {
