@@ -4,7 +4,8 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use opentelemetry_prometheus::ResourceSelector;
-use prometheus::Encoder;
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, Stream};
+use prometheus::{Encoder};
 use prometheus::Registry;
 use prometheus::TextEncoder;
 use schemars::JsonSchema;
@@ -81,7 +82,23 @@ impl MetricsConfigurator for Config {
             .with_registry(registry.clone())
             .build()?;
 
-        builder.with_reader(MeterProviderType::Public, exporter);
+        let buckets = builder.metrics_common().buckets.clone();
+
+        let aggregation_view = move |_i: &Instrument| {
+            Some(
+                Stream::builder()
+                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries: buckets.clone(),
+                        record_min_max: true,
+                    })
+                    .build()
+                    .unwrap(),
+            )
+        };
+
+        builder
+            .with_reader(MeterProviderType::Public, exporter)
+            .with_view(MeterProviderType::Public, aggregation_view);
         builder.with_prometheus_registry(registry);
         Ok(())
     }
