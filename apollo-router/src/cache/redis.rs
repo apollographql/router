@@ -701,7 +701,8 @@ impl RedisCacheStorage {
             // the keys argument's order
             let mut result = vec![None; len];
             for (indexes, result_value) in join_all(tasks).await.into_iter() {
-                for (index, value) in indexes.into_iter().zip(result_value?.into_iter()) {
+                let values = result_value.inspect_err(|err| self.record_error(err))?;
+                for (index, value) in indexes.into_iter().zip(values.into_iter()) {
                     result[index] = value;
                 }
             }
