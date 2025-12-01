@@ -377,6 +377,23 @@ pub(super) fn serve_router_on_listen_addr(
                                 match res {
                                     NetworkStream::Tcp(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
+                                        // -----------------------------------------------------------------
+                                        // FIX: Manually peek at the TCP stream to detect HTTP/2
+                                        // This allows us to apply the Large Header Config BEFORE the buffer fills up.
+                                        // -----------------------------------------------------------------
+                                        let mut is_http2 = false;
+                                        let mut buf = [0u8; 24]; 
+                                        // The Standard HTTP/2 Connection Preface
+                                        const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+                                    
+                                        // Peek (look at data without removing it)
+                                        if let Ok(n) = stream.peek(&mut buf).await {
+                                            if n >= 24 && &buf[..24] == H2_PREFACE {
+                                                is_http2 = true;
+                                            }
+                                        }
+                                        // -----------------------------------------------------------------
+                                        
                                         let app = InjectConnectionInfo::new(app, ConnectionInfo {
                                             peer_address: stream.peer_addr().ok(),
                                             server_address: stream.local_addr().ok(),
@@ -394,6 +411,9 @@ pub(super) fn serve_router_on_listen_addr(
                                         });
 
                                         let mut builder = Builder::new(TokioExecutor::new());
+                                        if is_http2 {
+                                            builder = builder.http2_only();
+                                        }
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
