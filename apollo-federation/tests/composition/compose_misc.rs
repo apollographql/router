@@ -427,38 +427,22 @@ fn composes_subgraph_with_explicit_tag_spec_link() {
             @link(url: "https://specs.apollo.dev/link/v1.0")
             @link(url: "https://specs.apollo.dev/tag/v0.2")
 
-        directive @key(fields: String!) repeatable on OBJECT | INTERFACE
-
         type Query {
-            product: Product
-        }
-
-        type Product @key(fields: "id") {
-            id: ID!
-            name: String @tag(name: "public")
+            field1: String @tag(name: "tag1")
         }
     "#;
     let other_subgraph = r#"
-        extend schema
-            @link(url: "https://specs.apollo.dev/link/v1.0")
-            @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key", "@external"])
-
         type Query {
-            user: User
-        }
-
-        type User @key(fields: "id") {
-            id: ID!
-            email: String
+            field2: String
         }
     "#;
 
     let subgraphs = vec![
-        Subgraph::parse("products", "http://products", subgraph_with_tag_link).unwrap(),
-        Subgraph::parse("users", "http://users", other_subgraph).unwrap(),
+        Subgraph::parse("s1", "http://s1", subgraph_with_tag_link).unwrap(),
+        Subgraph::parse("s2", "http://s2", other_subgraph).unwrap(),
     ];
 
-    // Link expansion should succeed when the tag spec is explicitly linked. Adding the fed 1 spec
+    // Link expansion should succeed when the tag spec is explicitly linked. Expanding the fed spec
     // was adding its own @tag that conflicted with the imported one.
     let result = compose(subgraphs);
     assert!(
