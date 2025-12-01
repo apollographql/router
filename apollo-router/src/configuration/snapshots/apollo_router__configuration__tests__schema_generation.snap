@@ -1929,6 +1929,10 @@ expression: "&schema"
       "type": "object"
     },
     "Config7": {
+      "description": "Configuration for the progressive override plugin",
+      "type": "object"
+    },
+    "Config8": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -1974,7 +1978,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config8": {
+    "Config9": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
@@ -2090,10 +2094,6 @@ expression: "&schema"
       "required": [
         "urls"
       ],
-      "type": "object"
-    },
-    "Config9": {
-      "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
     "ConnectorConfiguration": {
@@ -9228,7 +9228,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Config8"
+              "$ref": "#/definitions/Config9"
             },
             {
               "type": "null"
@@ -11918,7 +11918,7 @@ expression: "&schema"
       "type": "object"
     },
     "^response_cache$": {
-      "$ref": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8"
     }
   },
   "properties": {
@@ -12114,7 +12114,7 @@ expression: "&schema"
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config9"
+      "$ref": "#/definitions/Config7"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"

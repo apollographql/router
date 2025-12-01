@@ -1,6 +1,19 @@
 preview_response_cache:
-  redis:
-    urls: ["redis://localhost:6379"]
-    fetch_timeout: 5ms
-    ttl: 60s
   enabled: true
+  subgraph:
+    all:
+      redis:
+        urls: ["redis://test"]
+        required_to_start: true
+      enabled: true
+      invalidation:
+        enabled: true
+        shared_key: "invalidate"
+    subgraphs:
+      accounts:
+        enabled: false
+      products:
+        ttl: 120s
+        invalidation:
+          enabled: true
+          shared_key: "invalidate"
