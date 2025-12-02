@@ -869,6 +869,16 @@ impl RedisCacheStorage {
         self.delete_from_scan_result(keys.into_iter()).await?;
         Ok(())
     }
+
+    pub(crate) fn strip_namespace(&self, key: String) -> String {
+        match &self.namespace {
+            Some(namespace) => key
+                .strip_prefix(&format!("{namespace}:"))
+                .map(ToString::to_string)
+                .unwrap_or(key),
+            None => key,
+        }
+    }
 }
 
 #[cfg(test)]
