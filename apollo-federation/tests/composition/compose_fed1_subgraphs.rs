@@ -37,8 +37,9 @@ fn compose_services(
 }
 
 mod basic_type_extensions {
-    use super::*;
     use insta::assert_snapshot;
+
+    use super::*;
 
     fn get_type(subgraph: &apollo_federation::ValidFederationSubgraph, name: &str) -> String {
         subgraph
@@ -372,8 +373,9 @@ mod validations {
 }
 
 mod shareable {
-    use super::*;
     use insta::assert_snapshot;
+
+    use super::*;
 
     #[test]
     fn handles_provides() {
@@ -657,8 +659,9 @@ mod shareable {
 }
 
 mod override_tests {
-    use super::*;
     use insta::assert_snapshot;
+
+    use super::*;
 
     #[test]
     fn accepts_override_if_the_definition_is_manually_provided() {
