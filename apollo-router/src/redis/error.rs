@@ -58,8 +58,8 @@ impl Display for Error {
     }
 }
 
-impl From<fred::error::Error> for Error {
-    fn from(error: fred::error::Error) -> Self {
+impl From<&fred::error::Error> for Error {
+    fn from(error: &fred::error::Error) -> Self {
         use fred::error::ErrorKind;
         let details = error.details().to_string();
 
@@ -91,6 +91,12 @@ impl From<fred::error::Error> for Error {
                 //Error::Unknown(details)
             }
         }
+    }
+}
+
+impl From<fred::error::Error> for Error {
+    fn from(error: fred::error::Error) -> Self {
+        (&error).into()
     }
 }
 

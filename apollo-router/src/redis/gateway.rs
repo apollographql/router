@@ -323,8 +323,8 @@ impl Gateway {
     }
 
     /// Helper method to record Redis errors for metrics
-    fn record_error(&self, error: &Error) {
-        record_redis_error(error, self.inner.caller);
+    fn record_error<E: Into<Error>>(&self, error: E) {
+        record_redis_error(&error.into(), self.inner.caller);
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, Error> {
@@ -443,29 +443,23 @@ impl Gateway {
                 let _: () = pipeline
                     .get(&key)
                     .await
-                    .map_err(Error::from)
                     .inspect_err(|e| self.record_error(e))?;
                 let _: () = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
                     .await
-                    .map_err(Error::from)
                     .inspect_err(|e| self.record_error(e))?;
 
-                let (value, _timeout_set): (Option<Value<V>>, bool) = pipeline
-                    .all()
-                    .await
-                    .map_err(Error::from)
-                    .inspect_err(|e| self.record_error(e))?;
-                Ok(value.map(|v| v.0))
+                let (value, _timeout_set): (Value<Option<V>>, bool) =
+                    pipeline.all().await.inspect_err(|e| self.record_error(e))?;
+                Ok(value.0)
             }
             _ => {
                 let client = self.replica_client().with_options(&options);
-                let value: Option<Value<V>> = client
+                let value: Value<Option<V>> = client
                     .get(key)
                     .await
-                    .map_err(Error::from)
                     .inspect_err(|e| self.record_error(e))?;
-                Ok(value.map(|v| v.0))
+                Ok(value.0)
             }
         }
     }
@@ -493,13 +487,9 @@ impl Gateway {
 
         if keys.len() == 1 {
             let key = self.make_key(keys.swap_remove(0));
-            let res: Option<Value<V>> = client
-                .get(key)
-                .await
-                .map_err(Error::from)
-                .inspect_err(|e| self.record_error(e))
-                .ok();
-            vec![res.map(|v| v.0)]
+            let res: Result<Value<Option<V>>, _> =
+                client.get(key).await.inspect_err(|e| self.record_error(e));
+            vec![res.map(|v| v.0).unwrap_or(None)]
         } else if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
@@ -519,8 +509,7 @@ impl Gateway {
             for (_shard, (indexes, keys)) in h {
                 let client = client.clone();
                 tasks.push(async move {
-                    let result: Result<Vec<Option<Value<V>>>, _> =
-                        client.mget(keys).await.map_err(Error::from);
+                    let result: Result<Vec<Value<Option<V>>>, _> = client.mget(keys).await;
                     (indexes, result)
                 });
             }
@@ -532,7 +521,7 @@ impl Gateway {
                 match result_value {
                     Ok(values) => {
                         for (index, value) in indexes.into_iter().zip(values.into_iter()) {
-                            result[index] = value.map(|v| v.0);
+                            result[index] = value.0;
                         }
                     }
                     Err(e) => {
@@ -548,13 +537,12 @@ impl Gateway {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            let values: Vec<Option<Value<V>>> = client
+            let values: Vec<Value<Option<V>>> = client
                 .mget(keys)
                 .await
-                .map_err(Error::from)
                 .inspect_err(|e| self.record_error(e))
-                .unwrap_or_else(|_| vec![None; len]);
-            values.into_iter().map(|value| value.map(|v| v.0)).collect()
+                .unwrap_or_else(|_| vec![Value(None); len]);
+            values.into_iter().map(|value| value.0).collect()
         }
     }
 
@@ -577,8 +565,7 @@ impl Gateway {
                 None,
                 false,
             )
-            .await
-            .map_err(Error::from);
+            .await;
         tracing::trace!("insert result {:?}", result);
 
         if let Err(err) = result {
@@ -610,7 +597,7 @@ impl Gateway {
                 .await;
         }
 
-        let result: Result<Vec<()>, _> = pipeline.all().await.map_err(Error::from);
+        let result: Result<Vec<()>, _> = pipeline.all().await;
         match result {
             Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
             Err(err) => {
@@ -648,9 +635,9 @@ impl Gateway {
         }
 
         // then we execute against all the key groups at the same time
-        let results: Vec<Result<u32, Error>> = join_all(h.into_values().map(|keys| async {
+        let results: Vec<Result<u32, _>> = join_all(h.into_values().map(|keys| async {
             let client = self.client().with_options(&options);
-            client.del(keys).await.map_err(Into::into)
+            client.del(keys).await
         }))
         .await;
 

@@ -2,7 +2,6 @@ use std::fmt;
 
 use fred::error::Error as RedisError;
 use fred::error::ErrorKind as RedisErrorKind;
-use fred::prelude::FromValue;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -26,24 +25,28 @@ impl<V: ValueType> fmt::Display for Value<V> {
     }
 }
 
-impl<V: ValueType> FromValue for Value<V> {
+impl<V: ValueType> ValueType for Option<V> {}
+
+impl<V: ValueType> fred::prelude::FromValue for Value<Option<V>> {
     fn from_value(value: fred::types::Value) -> Result<Self, RedisError> {
         match value {
-            fred::types::Value::Bytes(data) => {
-                serde_json::from_slice(&data).map(Value).map_err(|e| {
+            fred::types::Value::Bytes(data) => serde_json::from_slice(&data)
+                .map(|v| Value(Some(v)))
+                .map_err(|e| {
                     RedisError::new(
                         RedisErrorKind::Parse,
                         format!("can't deserialize from JSON: {e}"),
                     )
-                })
-            }
-            fred::types::Value::String(s) => serde_json::from_str(&s).map(Value).map_err(|e| {
-                RedisError::new(
-                    RedisErrorKind::Parse,
-                    format!("can't deserialize from JSON: {e}"),
-                )
-            }),
-            fred::types::Value::Null => Err(RedisError::new(RedisErrorKind::NotFound, "not found")),
+                }),
+            fred::types::Value::String(s) => serde_json::from_str(&s)
+                .map(|v| Value(Some(v)))
+                .map_err(|e| {
+                    RedisError::new(
+                        RedisErrorKind::Parse,
+                        format!("can't deserialize from JSON: {e}"),
+                    )
+                }),
+            fred::types::Value::Null => Ok(Value(None)),
             _res => Err(RedisError::new(
                 RedisErrorKind::Parse,
                 "the data is the wrong type",

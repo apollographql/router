@@ -30,8 +30,8 @@ use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
 use crate::plugins::response_cache::metrics::record_maintenance_queue_error;
 use crate::plugins::response_cache::metrics::record_maintenance_success;
-use crate::redis;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
+use crate::redis;
 
 pub(crate) type Config = super::config::Config;
 
@@ -114,7 +114,8 @@ impl Storage {
             let redis_key = self.make_key(invalidation_key.clone());
             let _: () = pipeline
                 .zrange(redis_key, 0, -1, None, false, None, false)
-                .await.map_err(redis::Error::from)?;
+                .await
+                .map_err(redis::Error::from)?;
         }
 
         let results: Vec<Vec<String>> = pipeline.all().await.map_err(redis::Error::from)?;
@@ -521,12 +522,22 @@ impl Storage {
 
     async fn ttl(&self, key: &str) -> StorageResult<i64> {
         let key = self.make_key(key);
-        Ok(self.storage.client().ttl(key).await.map_err(redis::Error::from)?)
+        Ok(self
+            .storage
+            .client()
+            .ttl(key)
+            .await
+            .map_err(redis::Error::from)?)
     }
 
     async fn expire_time(&self, key: &str) -> StorageResult<i64> {
         let key = self.make_key(key);
-        Ok(self.storage.client().expire_time(key).await.map_err(redis::Error::from)?)
+        Ok(self
+            .storage
+            .client()
+            .expire_time(key)
+            .await
+            .map_err(redis::Error::from)?)
     }
 
     async fn zscore(&self, sorted_set_key: &str, member: &str) -> Result<i64, BoxError> {
@@ -537,19 +548,34 @@ impl Storage {
 
     async fn zcard(&self, sorted_set_key: &str) -> StorageResult<u64> {
         let sorted_set_key = self.make_key(sorted_set_key);
-        let cardinality = self.storage.client().zcard(sorted_set_key).await.map_err(redis::Error::from)?;
+        let cardinality = self
+            .storage
+            .client()
+            .zcard(sorted_set_key)
+            .await
+            .map_err(redis::Error::from)?;
         Ok(cardinality)
     }
 
     async fn zexists(&self, sorted_set_key: &str, member: &str) -> StorageResult<bool> {
         let sorted_set_key = self.make_key(sorted_set_key);
-        let score: Option<String> = self.storage.client().zscore(sorted_set_key, member).await.map_err(redis::Error::from)?;
+        let score: Option<String> = self
+            .storage
+            .client()
+            .zscore(sorted_set_key, member)
+            .await
+            .map_err(redis::Error::from)?;
         Ok(score.is_some())
     }
 
     async fn exists(&self, key: &str) -> StorageResult<bool> {
         let key = self.make_key(key);
-        Ok(self.storage.client().exists(key).await.map_err(redis::Error::from)?)
+        Ok(self
+            .storage
+            .client()
+            .exists(key)
+            .await
+            .map_err(redis::Error::from)?)
     }
 }
 
@@ -882,7 +908,10 @@ mod tests {
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was stored
-            let stored_data = storage.fetch(&document_key, SUBGRAPH_NAME).await?.expect("not found");
+            let stored_data = storage
+                .fetch(&document_key, SUBGRAPH_NAME)
+                .await?
+                .expect("not found");
             assert_eq!(stored_data.data, document.data);
 
             let keys = storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME);
@@ -1408,7 +1437,16 @@ mod tests {
         // a few changes to trigger.
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(5) {
-            let error = storage.fetch(&document.key, "S1").await.unwrap_err();
+            let error = match storage.fetch(&document.key, "S1").await {
+                Ok(Some(_)) => {
+                    panic!("Should not have encountered a value")
+                }
+                Ok(None) => {
+                    // element not found, try again to hit the timeout
+                    continue;
+                }
+                Err(err) => err,
+            };
 
             assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
             assert_eq!(error.code(), "TIMEOUT");
