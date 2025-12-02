@@ -504,7 +504,6 @@ fn configure_connection(
         builder.max_buf_size(max_buf_size);
     }
 
-    builder
 }
 
 #[derive(Clone)]
