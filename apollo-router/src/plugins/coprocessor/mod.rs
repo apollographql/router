@@ -495,6 +495,47 @@ fn default_response_validation() -> bool {
     true
 }
 
+/// Update the target context based on the context returned from the coprocessor.
+/// This function handles both updates/inserts and deletions:
+/// - Keys present in the returned context (with non-null values) are updated/inserted
+/// - Keys that were sent to the coprocessor but are missing from the returned context are deleted
+pub(crate) fn update_context_from_coprocessor(
+    target_context: &Context,
+    context_returned: Context,
+    context_config: &ContextConf,
+) -> Result<(), BoxError> {
+    // Collect keys that are in the returned context
+    let mut keys_returned = HashSet::with_capacity(context_returned.len());
+
+    for (mut key, value) in context_returned.try_into_iter()? {
+        // Handle deprecated key names - convert back to actual key names
+        if let ContextConf::NewContextConf(NewContextConf::Deprecated) = context_config {
+            key = context_key_from_deprecated(key);
+        }
+
+        keys_returned.insert(key.clone());
+        target_context.insert_json_value(key, value);
+    }
+
+    // Delete keys that were sent but are missing from the returned context
+    // If the context config is selective, only delete keys that are in the selective list
+    match context_config {
+        ContextConf::NewContextConf(NewContextConf::Selective(context_keys)) => {
+            target_context.retain(|key, _v| {
+                if keys_returned.contains(key) {
+                    return true;
+                } else if context_keys.contains(key) {
+                    return false;
+                }
+                true
+            });
+        }
+        _ => target_context.retain(|key, _v| keys_returned.contains(key)),
+    }
+
+    Ok(())
+}
+
 fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
     f64_histogram!(
         "apollo.router.operations.coprocessor.duration",
@@ -1025,16 +1066,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                &response_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
-            response
-                .context
-                .upsert_json_value(key, move |_current| value);
-        }
+        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -1099,14 +1131,11 @@ where
                 };
 
                 if let Some(context) = co_processor_output.context {
-                    for (mut key, value) in context.try_into_iter()? {
-                        if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                            &context_conf
-                        {
-                            key = context_key_from_deprecated(key);
-                        }
-                        generator_map_context.upsert_json_value(key, move |_current| value);
-                    }
+                    update_context_from_coprocessor(
+                        &generator_map_context,
+                        context,
+                        &context_conf,
+                    )?;
                 }
 
                 // We return the final_bytes into our stream of response chunks
@@ -1368,16 +1397,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                &response_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
-            response
-                .context
-                .upsert_json_value(key, move |_current| value);
-        }
+        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
     }
 
     if let Some(headers) = co_processor_output.headers {
