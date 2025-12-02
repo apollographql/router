@@ -277,7 +277,6 @@ impl ValidationState {
     /// This corresponds to `canSkipVisitForSubgraphPaths` in the JavaScript implementation.
     fn can_skip_visit_for_subgraph_paths(
         supergraph_path_tail: petgraph::graph::NodeIndex,
-        _subgraph_path_infos: &[SubgraphPathInfo],
         current_vertex_visit: NodeVisit,
         previous_visits: &mut IndexMap<petgraph::graph::NodeIndex, Vec<NodeVisit>>,
     ) -> bool {
@@ -322,7 +321,7 @@ impl ValidationState {
         let vertex = self.supergraph_path.tail();
 
         match &self.subgraph_path_infos {
-            SubgraphPathInfos::Paths(paths) => {
+            SubgraphPathInfos::Paths(_) => {
                 // Non-partitioned case
                 let current_vertex_visit = NodeVisit {
                     subgraph_context_keys: self.current_subgraph_context_keys(None)?,
@@ -330,7 +329,6 @@ impl ValidationState {
                 };
                 Ok(Self::can_skip_visit_for_subgraph_paths(
                     vertex,
-                    paths,
                     current_vertex_visit,
                     previous_visits,
                 ))
@@ -348,7 +346,6 @@ impl ValidationState {
                     // purposely do not short-circuit return here.
                     if !Self::can_skip_visit_for_subgraph_paths(
                         vertex,
-                        subgraph_path_infos,
                         current_vertex_visit,
                         previous_visits,
                     ) {
