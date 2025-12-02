@@ -180,6 +180,13 @@ impl ExecutionStage {
     }
 }
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_execution_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -321,6 +328,13 @@ where
     Ok(ControlFlow::Continue(request))
 }
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_execution_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
