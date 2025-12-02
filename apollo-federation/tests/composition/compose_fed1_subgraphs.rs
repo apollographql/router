@@ -72,14 +72,14 @@ mod basic_type_extensions {
             .to_api_schema(Default::default())
             .expect("Expected API schema generation to succeed");
         assert_snapshot!(api_schema.schema().to_string(), @r#"
+        type Query {
+          products: [Product!]
+        }
+
         type Product {
           sku: String!
           name: String!
           price: Int!
-        }
-
-        type Query {
-          products: [Product!]
         }
         "#);
 
@@ -876,14 +876,14 @@ mod shareable {
             .to_api_schema(Default::default())
             .expect("Expected API schema generation to succeed");
         assert_snapshot!(api_schema.schema().to_string(), @r#"
-        type A {
-          id: ID!
-          x: Int
-        }
-
         type Query {
           a1: A
           a2: A
+        }
+
+        type A {
+          id: ID!
+          x: Int
         }
         "#);
     }
@@ -927,14 +927,14 @@ mod shareable {
             .to_api_schema(Default::default())
             .expect("Expected API schema generation to succeed");
         assert_snapshot!(api_schema.schema().to_string(), @r#"
-        type A {
-          id: ID!
-          x: Int
-        }
-
         type Query {
           a1: A
           a2: A
+        }
+
+        type A {
+          id: ID!
+          x: Int
         }
         "#);
     }
@@ -978,14 +978,14 @@ mod shareable {
             .to_api_schema(Default::default())
             .expect("Expected API schema generation to succeed");
         assert_snapshot!(api_schema.schema().to_string(), @r#"
-        type A {
-          id: ID!
-          x: Int
-        }
-
         type Query {
           a1: A
           a2: A
+        }
+
+        type A {
+          id: ID!
+          x: Int
         }
         "#);
     }
@@ -1069,14 +1069,14 @@ mod shareable {
             .to_api_schema(Default::default())
             .expect("Expected API schema generation to succeed");
         assert_snapshot!(api_schema.schema().to_string(), @r#"
-        type A {
-          x: Int
-          y: Int
-        }
-
         type Query {
           a1: A
           a2: A
+        }
+
+        type A {
+          x: Int
+          y: Int
         }
         "#);
     }
@@ -1161,10 +1161,12 @@ mod override_tests {
             .types
             .get("A")
             .expect("A exists in the schema");
-        assert_snapshot!(type_a.to_string(), @r#"type A @join__type(graph: SUBGRAPHA, key: "id") @join__type(graph: SUBGRAPHB, key: "id") {
+        assert_snapshot!(type_a.to_string(), @r#"
+        type A @join__type(graph: SUBGRAPHA, key: "id") @join__type(graph: SUBGRAPHB, key: "id") {
           id: ID!
           x: Int @join__field(graph: SUBGRAPHB, override: "subgraphA")
-        }"#);
+        }
+        "#);
     }
 
     #[test]
