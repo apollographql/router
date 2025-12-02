@@ -678,8 +678,10 @@ pub(crate) mod test_utils {
         }
 
         fn equal_attributes(expected: &[KeyValue], actual: &[KeyValue]) -> bool {
-            // If lengths are different, we can short circuit.
-            if expected.len() != actual.len() {
+            // If we have fewer actual than expected, short circuit. Sometimes actual can have
+            // harmless duplicates so we use > instead of == (e.g. custom instruments with response
+            // event attrs)
+            if expected.len() > actual.len() {
                 return false;
             }
 
