@@ -24,13 +24,13 @@ See [Schema from Graph Artifacts](/graphos/routing/configuration/schema-oci) for
 
 ## Blue/Green Deployment
 
-In a (blue/green deployment)[https://en.wikipedia.org/wiki/Blue%E2%80%93green_deployment], two separate fleets of routers are pinned to different schemas.
+In a [blue/green deployment](https://en.wikipedia.org/wiki/Blue%E2%80%93green_deployment), two separate fleets of routers are pinned to different schemas.
 
-1. Launch the **Blue** fleet with the initial URI
-2. Make a change to a subgraph and let it build
-3. Launch the **Green** fleet with the updated uri
-4. Validate the **Green** fleet and shift traffic from **Blue** to **Green**
-5. Monitor for errors, and if necessary, shift traffic back to **Blue**
+1. Launch the **Blue** fleet with the initial URI.
+2. Make a change to a subgraph and let it build.
+3. Launch the **Green** fleet with the updated URI.
+4. Validate the **Green** fleet and shift traffic from **Blue** to **Green**.
+5. Monitor for errors, and if necessary, shift traffic back to **Blue**.
 
 
 ### 1. Launching the Blue router fleet
@@ -43,9 +43,9 @@ APOLLO_GRAPH_ARTIFACT_REFERENCE="artifact.api.apollographql.com/my-graph-a50b9d5
 router
 ```
 
-### 2. Publish a new subgraph to Graph OS
+### 2. Publish a new subgraph to GraphOS
 
-Graph OS will compose a new supergraph, but your router fleet will not automatically deploy. Query for the new Graph Artifact URI using the above queries.
+GraphOS will compose a new supergraph, but your router fleet will not automatically deploy. Query for the new graph artifact URI using the above queries.
 
 
 ### 3. Launching the Green router fleet
@@ -65,12 +65,12 @@ Use your existing infrastructure to monitor and adjust your load balancer's weig
 
 Pros:
 
-* Zero downtime
-* Instant rollback
-* Gradual rollout
-* Deterministic versions
-* Staging environment mirrors production
-* Failover environment is already provisioned
+- Zero downtime
+- Instant rollback
+- Gradual rollout
+- Deterministic versions
+- Staging environment mirrors production
+- Failover environment is already provisioned
 
 Cons:
 
@@ -79,13 +79,13 @@ Cons:
 
 ## Rolling deployment
 
-Instead of maintaining two fleets, it is possible to redeploy each router in the fleet with a new APOLLO_GRAPH_ARTIFACT_REFERENCE.
+Instead of maintaining two fleets, you can redeploy each router in the fleet with a new `APOLLO_GRAPH_ARTIFACT_REFERENCE`.
 
 ### Benefits of rolling deployment
 
 Pros:
 
-* Simpler and cheaper setup, no need for two fleets
+- Simpler and cheaper setup, no need for two fleets
 
 Cons:
 
