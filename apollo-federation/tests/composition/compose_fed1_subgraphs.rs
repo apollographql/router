@@ -39,6 +39,16 @@ mod basic_type_extensions {
     use super::*;
     use insta::assert_snapshot;
 
+    fn get_type(subgraph: &apollo_federation::ValidFederationSubgraph, name: &str) -> String {
+        subgraph
+            .schema
+            .schema()
+            .types
+            .get(name)
+            .unwrap()
+            .to_string()
+    }
+
     #[test]
     fn works_when_extension_subgraph_is_second() {
         let subgraph_a = ServiceDefinition {
@@ -89,161 +99,26 @@ mod basic_type_extensions {
         let subgraph_a_extracted = subgraphs
             .get("subgraphA")
             .expect("Expected subgraphA to be present");
-        assert_snapshot!(subgraph_a_extracted.schema.schema().to_string(), @r#"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@authenticated", "@requiresScopes", "@policy", "@sourceAPI", "@sourceType", "@sourceField", "@context", "@fromContext", "@cost", "@listSize"]) {
-          query: Query
-        }
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-        directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
-
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
-
-        directive @extends on OBJECT | INTERFACE
-
-        directive @shareable on OBJECT | FIELD_DEFINITION
-
-        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-        directive @override(from: String!, label: String) on FIELD_DEFINITION
-
-        directive @composeDirective(name: String) repeatable on SCHEMA
-
-        directive @interfaceObject on OBJECT
-
-        directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @sourceAPI repeatable on SCHEMA
-
-        directive @sourceType repeatable on OBJECT | INTERFACE
-
-        directive @sourceField repeatable on FIELD_DEFINITION
-
-        directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
-
-        directive @fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
-
-        directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-
-        directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
-
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-
-        scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar federation__Scope
-
-        scalar federation__Policy
-
-        scalar federation__ContextFieldValue
-
-        type Product @key(fields: "sku") {
-          sku: String! @shareable
+        assert_snapshot!(get_type(subgraph_a_extracted, "Product"), @r#"
+        type Product @federation__key(fields: "sku", resolvable: true) {
+          sku: String! @federation__shareable
           name: String!
         }
-
+        "#);
+        assert_snapshot!(get_type(subgraph_a_extracted, "Query"), @r#"
         type Query {
           products: [Product!]
+          _entities(representations: [_Any!]!): [_Entity]!
+          _service: _Service!
         }
         "#);
 
         let subgraph_b_extracted = subgraphs
             .get("subgraphB")
             .expect("Expected subgraphB to be present");
-        assert_snapshot!(subgraph_b_extracted.schema.schema().to_string(), @r#"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@authenticated", "@requiresScopes", "@policy", "@sourceAPI", "@sourceType", "@sourceField", "@context", "@fromContext", "@cost", "@listSize"]) {
-          query: Query
-        }
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-        directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
-
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
-
-        directive @extends on OBJECT | INTERFACE
-
-        directive @shareable on OBJECT | FIELD_DEFINITION
-
-        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-        directive @override(from: String!, label: String) on FIELD_DEFINITION
-
-        directive @composeDirective(name: String) repeatable on SCHEMA
-
-        directive @interfaceObject on OBJECT
-
-        directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @sourceAPI repeatable on SCHEMA
-
-        directive @sourceType repeatable on OBJECT | INTERFACE
-
-        directive @sourceField repeatable on FIELD_DEFINITION
-
-        directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
-
-        directive @fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
-
-        directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-
-        directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
-
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-
-        scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar federation__Scope
-
-        scalar federation__Policy
-
-        scalar federation__ContextFieldValue
-
-        type Product @key(fields: "sku") {
-          sku: String! @shareable
+        assert_snapshot!(get_type(subgraph_b_extracted, "Product"), @r#"
+        type Product @federation__key(fields: "sku", resolvable: true) {
+          sku: String! @federation__shareable
           price: Int!
         }
         "#);
@@ -299,78 +174,9 @@ mod basic_type_extensions {
         let subgraph_a_extracted = subgraphs
             .get("subgraphA")
             .expect("Expected subgraphA to be present");
-        assert_snapshot!(subgraph_a_extracted.schema.schema().to_string(), @r#"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@authenticated", "@requiresScopes", "@policy", "@sourceAPI", "@sourceType", "@sourceField", "@context", "@fromContext", "@cost", "@listSize"]) {
-          query: Query
-        }
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-        directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
-
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
-
-        directive @extends on OBJECT | INTERFACE
-
-        directive @shareable on OBJECT | FIELD_DEFINITION
-
-        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-        directive @override(from: String!, label: String) on FIELD_DEFINITION
-
-        directive @composeDirective(name: String) repeatable on SCHEMA
-
-        directive @interfaceObject on OBJECT
-
-        directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @sourceAPI repeatable on SCHEMA
-
-        directive @sourceType repeatable on OBJECT | INTERFACE
-
-        directive @sourceField repeatable on FIELD_DEFINITION
-
-        directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
-
-        directive @fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
-
-        directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-
-        directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
-
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-
-        scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar federation__Scope
-
-        scalar federation__Policy
-
-        scalar federation__ContextFieldValue
-
-        type Product @key(fields: "sku") {
-          sku: String! @shareable
+        assert_snapshot!(get_type(subgraph_a_extracted, "Product"), @r#"
+        type Product @federation__key(fields: "sku", resolvable: true) {
+          sku: String! @federation__shareable
           price: Int!
         }
         "#);
@@ -378,83 +184,17 @@ mod basic_type_extensions {
         let subgraph_b_extracted = subgraphs
             .get("subgraphB")
             .expect("Expected subgraphB to be present");
-        assert_snapshot!(subgraph_b_extracted.schema.schema().to_string(), @r#"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@authenticated", "@requiresScopes", "@policy", "@sourceAPI", "@sourceType", "@sourceField", "@context", "@fromContext", "@cost", "@listSize"]) {
-          query: Query
-        }
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-        directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
-
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
-
-        directive @extends on OBJECT | INTERFACE
-
-        directive @shareable on OBJECT | FIELD_DEFINITION
-
-        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-        directive @override(from: String!, label: String) on FIELD_DEFINITION
-
-        directive @composeDirective(name: String) repeatable on SCHEMA
-
-        directive @interfaceObject on OBJECT
-
-        directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @sourceAPI repeatable on SCHEMA
-
-        directive @sourceType repeatable on OBJECT | INTERFACE
-
-        directive @sourceField repeatable on FIELD_DEFINITION
-
-        directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
-
-        directive @fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
-
-        directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-
-        directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
-
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-
-        scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar federation__Scope
-
-        scalar federation__Policy
-
-        scalar federation__ContextFieldValue
-
-        type Product @key(fields: "sku") {
-          sku: String! @shareable
+        assert_snapshot!(get_type(subgraph_b_extracted, "Product"), @r#"
+        type Product @federation__key(fields: "sku", resolvable: true) {
+          sku: String! @federation__shareable
           name: String!
         }
-
+        "#);
+        assert_snapshot!(get_type(subgraph_b_extracted, "Query"), @r#"
         type Query {
           products: [Product!]
+          _entities(representations: [_Any!]!): [_Entity]!
+          _service: _Service!
         }
         "#);
     }
@@ -520,78 +260,9 @@ mod basic_type_extensions {
         let subgraph_a_extracted = subgraphs
             .get("subgraphA")
             .expect("Expected subgraphA to be present");
-        assert_snapshot!(subgraph_a_extracted.schema.schema().to_string(), @r#"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@authenticated", "@requiresScopes", "@policy", "@sourceAPI", "@sourceType", "@sourceField", "@context", "@fromContext", "@cost", "@listSize"]) {
-          query: Query
-        }
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-        directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
-
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
-
-        directive @extends on OBJECT | INTERFACE
-
-        directive @shareable on OBJECT | FIELD_DEFINITION
-
-        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-        directive @override(from: String!, label: String) on FIELD_DEFINITION
-
-        directive @composeDirective(name: String) repeatable on SCHEMA
-
-        directive @interfaceObject on OBJECT
-
-        directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @sourceAPI repeatable on SCHEMA
-
-        directive @sourceType repeatable on OBJECT | INTERFACE
-
-        directive @sourceField repeatable on FIELD_DEFINITION
-
-        directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
-
-        directive @fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
-
-        directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-
-        directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
-
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-
-        scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar federation__Scope
-
-        scalar federation__Policy
-
-        scalar federation__ContextFieldValue
-
-        type Product @key(fields: "sku") {
-          sku: String! @shareable
+        assert_snapshot!(get_type(subgraph_a_extracted, "Product"), @r#"
+        type Product @federation__key(fields: "sku", resolvable: true) {
+          sku: String! @federation__shareable
           price: Int!
         }
         "#);
@@ -599,161 +270,25 @@ mod basic_type_extensions {
         let subgraph_b_extracted = subgraphs
             .get("subgraphB")
             .expect("Expected subgraphB to be present");
-        assert_snapshot!(subgraph_b_extracted.schema.schema().to_string(), @r#"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@authenticated", "@requiresScopes", "@policy", "@sourceAPI", "@sourceType", "@sourceField", "@context", "@fromContext", "@cost", "@listSize"]) {
-          query: Query
-        }
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-        directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
-
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
-
-        directive @extends on OBJECT | INTERFACE
-
-        directive @shareable on OBJECT | FIELD_DEFINITION
-
-        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-        directive @override(from: String!, label: String) on FIELD_DEFINITION
-
-        directive @composeDirective(name: String) repeatable on SCHEMA
-
-        directive @interfaceObject on OBJECT
-
-        directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @sourceAPI repeatable on SCHEMA
-
-        directive @sourceType repeatable on OBJECT | INTERFACE
-
-        directive @sourceField repeatable on FIELD_DEFINITION
-
-        directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
-
-        directive @fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
-
-        directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-
-        directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
-
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-
-        scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar federation__Scope
-
-        scalar federation__Policy
-
-        scalar federation__ContextFieldValue
-
+        assert_snapshot!(get_type(subgraph_b_extracted, "Product"), @r#"
         type Product {
-          sku: String! @shareable
+          sku: String! @federation__shareable
           name: String!
         }
-
+        "#);
+        assert_snapshot!(get_type(subgraph_b_extracted, "Query"), @r#"
         type Query {
           products: [Product!]
+          _service: _Service!
         }
         "#);
 
         let subgraph_c_extracted = subgraphs
             .get("subgraphC")
             .expect("Expected subgraphC to be present");
-        assert_snapshot!(subgraph_c_extracted.schema.schema().to_string(), @r#"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject", "@authenticated", "@requiresScopes", "@policy", "@sourceAPI", "@sourceType", "@sourceField", "@context", "@fromContext", "@cost", "@listSize"]) {
-          query: Query
-        }
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-        directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
-
-        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
-
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
-
-        directive @extends on OBJECT | INTERFACE
-
-        directive @shareable on OBJECT | FIELD_DEFINITION
-
-        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-        directive @override(from: String!, label: String) on FIELD_DEFINITION
-
-        directive @composeDirective(name: String) repeatable on SCHEMA
-
-        directive @interfaceObject on OBJECT
-
-        directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
-
-        directive @sourceAPI repeatable on SCHEMA
-
-        directive @sourceType repeatable on OBJECT | INTERFACE
-
-        directive @sourceField repeatable on FIELD_DEFINITION
-
-        directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
-
-        directive @fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
-
-        directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-
-        directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
-
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-
-        scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar federation__Scope
-
-        scalar federation__Policy
-
-        scalar federation__ContextFieldValue
-
-        type Product @key(fields: "sku") {
-          sku: String! @shareable
+        assert_snapshot!(get_type(subgraph_c_extracted, "Product"), @r#"
+        type Product @federation__key(fields: "sku", resolvable: true) {
+          sku: String! @federation__shareable
           color: String!
         }
         "#);
