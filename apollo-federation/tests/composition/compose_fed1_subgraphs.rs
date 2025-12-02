@@ -1,5 +1,6 @@
 use apollo_federation::composition::compose;
 use apollo_federation::error::CompositionError;
+use apollo_federation::subgraph::test_utils::remove_indentation;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
@@ -8,7 +9,7 @@ use super::ServiceDefinition;
 use super::assert_composition_errors;
 use super::extract_subgraphs_from_supergraph_result;
 
-fn compose_fed1_subgraphs(
+fn compose_services(
     service_list: &[ServiceDefinition<'_>],
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
     let mut subgraphs = Vec::new();
@@ -75,7 +76,7 @@ mod basic_type_extensions {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         let supergraph = result.expect("Expected composition to succeed");
 
         let api_schema = supergraph
@@ -150,7 +151,7 @@ mod basic_type_extensions {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         let supergraph = result.expect("Expected composition to succeed");
 
         let api_schema = supergraph
@@ -235,7 +236,7 @@ mod basic_type_extensions {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
+        let result = compose_services(&[subgraph_a, subgraph_b, subgraph_c]);
         let supergraph = result.expect("Expected composition to succeed");
 
         let api_schema = supergraph
@@ -318,7 +319,7 @@ mod validations {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         assert_composition_errors(
             &result,
             &[(
@@ -359,7 +360,7 @@ mod validations {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
+        let result = compose_services(&[subgraph_a, subgraph_b, subgraph_c]);
         assert_composition_errors(
             &result,
             &[(
@@ -404,7 +405,7 @@ mod shareable {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         let supergraph = result.expect("Expected composition to succeed");
 
         let api_schema = supergraph
@@ -455,7 +456,7 @@ mod shareable {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         let supergraph = result.expect("Expected composition to succeed");
 
         let api_schema = supergraph
@@ -506,7 +507,7 @@ mod shareable {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         let supergraph = result.expect("Expected composition to succeed");
 
         let api_schema = supergraph
@@ -557,7 +558,7 @@ mod shareable {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         assert_composition_errors(
             &result,
             &[(
@@ -597,7 +598,7 @@ mod shareable {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         let supergraph = result.expect("Expected composition to succeed");
 
         let api_schema = supergraph
@@ -650,7 +651,7 @@ mod shareable {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         result.expect("Expected composition to succeed");
     }
 }
@@ -687,7 +688,7 @@ mod override_tests {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         let supergraph = result.expect("Expected composition to succeed");
 
         let type_a = supergraph
@@ -730,14 +731,23 @@ mod override_tests {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
-        assert_composition_errors(
-            &result,
-            &[(
-                "INVALID_GRAPHQL",
-                r#"If you meant the "@override" federation 2 directive, note that this schema is a federation 1 schema. To be a federation 2 schema, it needs to @link to the federation specification v2."#,
-            )],
+        let errors = compose_services(&[subgraph_a, subgraph_b]).unwrap_err();
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected exactly on error, but got {errors:?}"
         );
+        assert_eq!(errors[0].code().definition().code(), "INVALID_GRAPHQL");
+        insta::assert_snapshot!(remove_indentation(&errors[0].to_string()), @r#"
+        [subgraphB] Error: cannot find directive `@override` in this document
+           ╭─[ subgraphB:4:28 ]
+           │
+         4 │                     x: Int @override(from: "subgraphA")
+           │                            ──────────────┬─────────────
+           │                                          ╰─────────────── directive not defined
+        ───╯
+         If you meant the "@override" federation 2 directive, note that this schema is a federation 1 schema. To be a federation 2 schema, it needs to @link to the federation specification v2.
+        "#);
     }
 
     #[test]
@@ -768,7 +778,7 @@ mod override_tests {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_services(&[subgraph_a, subgraph_b]);
         assert_composition_errors(
             &result,
             &[(
@@ -793,7 +803,7 @@ mod override_tests {
             "#,
         };
 
-        let result = compose_fed1_subgraphs(&[subgraph_a]);
+        let result = compose_services(&[subgraph_a]);
         result.expect("Expected composition to succeed");
     }
 }
