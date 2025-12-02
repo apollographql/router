@@ -34,6 +34,15 @@ pub(crate) enum OciReferenceType {
 pub(crate) fn validate_oci_reference(
     reference: &str,
 ) -> Result<(String, OciReferenceType), anyhow::Error> {
+    // Quick check if the reference contains a domain name since the parser will accept
+    // no domain and default to docker.io which is not appropriate.
+    if reference.starts_with(&[':', '@']) {
+        return Err(anyhow::anyhow!(
+            "invalid graph artifact reference '{}': must specify registry before reference",
+            reference
+        ));
+    }
+
     // Parse the reference using OCI distribution spec parser
     reference
         .parse::<Reference>()
