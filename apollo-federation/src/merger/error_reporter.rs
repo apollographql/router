@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::ops::Range;
 
 use apollo_compiler::parser::LineColumn;
@@ -70,7 +69,7 @@ impl ErrorReporter {
         (self.errors, self.hints)
     }
 
-    pub(crate) fn report_mismatch_error<D: Display, S>(
+    pub(crate) fn report_mismatch_error<D, S>(
         &mut self,
         error: CompositionError,
         mismatched_element: &D,
@@ -101,7 +100,7 @@ impl ErrorReporter {
         );
     }
 
-    pub(crate) fn report_mismatch_error_without_supergraph<T: Display>(
+    pub(crate) fn report_mismatch_error_without_supergraph<T>(
         &mut self,
         error: CompositionError,
         subgraph_elements: &Sources<T>,
@@ -131,7 +130,7 @@ impl ErrorReporter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn report_mismatch_error_with_specifics<D: Display, S>(
+    pub(crate) fn report_mismatch_error_with_specifics<D, S>(
         &mut self,
         error: CompositionError,
         mismatched_element: &D,
@@ -167,7 +166,7 @@ impl ErrorReporter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn report_mismatch_hint<D: Display, S>(
+    pub(crate) fn report_mismatch_hint<D, S>(
         &mut self,
         code: HintCode,
         message: String,
@@ -212,7 +211,7 @@ impl ErrorReporter {
     /// Reports a mismatch between a supergraph element and subgraph elements.
     /// Not meant to be used directly: use `report_mismatch_error` or `report_mismatch_hint` instead.
     #[allow(clippy::too_many_arguments)]
-    fn report_mismatch<D: Display, S>(
+    fn report_mismatch<D, S>(
         &mut self,
         supergraph_element: Option<&D>,
         subgraph_elements: &Sources<S>,
@@ -261,13 +260,11 @@ impl ErrorReporter {
         let supergraph_mismatch = supergraph_element
             .and_then(supergraph_mismatch_accessor)
             .unwrap_or_default();
-        assert!(
-            distribution_map.len() > 1,
-            "Should not have been called for {}",
-            supergraph_element
-                .map(|elt| elt.to_string())
-                .unwrap_or_else(|| "undefined".to_string())
-        );
+        if distribution_map.len() <= 1 {
+            tracing::warn!(
+                "report_mismatch called but no mismatch found for element {supergraph_mismatch}",
+            );
+        }
         let mut distribution = Vec::new();
         let subgraphs_like_supergraph = distribution_map.get(&supergraph_mismatch);
         // We always add the "supergraph" first (proper formatting of hints rely on this in particular)
