@@ -36,7 +36,7 @@ pub(crate) fn validate_oci_reference(
 ) -> Result<(String, OciReferenceType), anyhow::Error> {
     // Quick check if the reference contains a domain name since the parser will accept
     // no domain and default to docker.io which is not appropriate.
-    if reference.starts_with(&[':', '@']) {
+    if reference.starts_with([':', '@']) {
         return Err(anyhow::anyhow!(
             "invalid graph artifact reference '{}': must specify registry before reference",
             reference
@@ -755,6 +755,8 @@ mod tests {
     #[test]
     fn test_validate_oci_reference_invalid_cases() {
         let invalid_references = vec![
+            // Invalid reference, no registry (not covered by parse())
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
             // Invalid OCI reference formats (covered by parse())
             "",
             // Invalid digest formats - invalid hex characters
