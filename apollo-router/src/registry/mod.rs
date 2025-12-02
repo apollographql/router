@@ -693,7 +693,11 @@ mod tests {
 
         for ref_str in valid_digest_refs {
             let result = validate_oci_reference(ref_str);
-            assert!(result.is_ok(), "Digest reference '{}' should be valid", ref_str);
+            assert!(
+                result.is_ok(),
+                "Digest reference '{}' should be valid",
+                ref_str
+            );
             let (reference, ref_type) = result.unwrap();
             assert_eq!(reference, ref_str);
             assert_eq!(ref_type, OciReferenceType::Sha);
@@ -908,19 +912,33 @@ mod tests {
     #[test]
     fn test_reference_parse_coverage() {
         use oci_client::Reference;
-        
+
         println!("\n=== Testing Reference::parse() with validation test cases ===\n");
-        
+
         // Test cases from our validation tests
         let test_cases = vec![
             // Valid digest references
-            ("artifact.api.apollographql.com/my-graph@sha256:142067152bd8e2c1411c87ef872cb27d2d5053f55a5a70b00068c5789dc27682", "Valid digest (SHA256, 64 chars)"),
-            ("registry.example.com/repo@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "Valid digest (SHA256, 64 chars)"),
-            ("localhost:5000/my-repo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "Valid digest (SHA256, 64 chars)"),
-            ("docker.io/library/alpine@sha256:1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd", "Valid digest (SHA256, 64 chars)"),
-            
+            (
+                "artifact.api.apollographql.com/my-graph@sha256:142067152bd8e2c1411c87ef872cb27d2d5053f55a5a70b00068c5789dc27682",
+                "Valid digest (SHA256, 64 chars)",
+            ),
+            (
+                "registry.example.com/repo@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "Valid digest (SHA256, 64 chars)",
+            ),
+            (
+                "localhost:5000/my-repo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "Valid digest (SHA256, 64 chars)",
+            ),
+            (
+                "docker.io/library/alpine@sha256:1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd",
+                "Valid digest (SHA256, 64 chars)",
+            ),
             // Valid tag references
-            ("artifact.api.apollographql.com/my-graph:latest", "Valid tag"),
+            (
+                "artifact.api.apollographql.com/my-graph:latest",
+                "Valid tag",
+            ),
             ("registry.example.com/repo:v1.0.0", "Valid tag"),
             ("localhost:5000/my-repo:tag_name", "Valid tag"),
             ("docker.io/library/alpine:tag-name", "Valid tag"),
@@ -937,22 +955,46 @@ mod tests {
             ("registry.example.com/repo:LATEST", "Valid tag"),
             ("registry.example.com/repo:ProdBuild", "Valid tag"),
             ("registry.example.com/repo:RC_1", "Valid tag"),
-            ("registry.example.com/repo:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "Valid tag (looks like digest)"),
-            ("registry.example.com/repo:test-9f86d081884c7d65", "Valid tag"),
-            
+            (
+                "registry.example.com/repo:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                "Valid tag (looks like digest)",
+            ),
+            (
+                "registry.example.com/repo:test-9f86d081884c7d65",
+                "Valid tag",
+            ),
             // Invalid cases - OCI reference formats
             ("", "Empty string"),
             ("not-a-valid-reference", "Invalid format"),
-            
             // Invalid digest formats
-            ("registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg", "Invalid hex char (g)"),
-            ("registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!", "Invalid char (!)"),
-            ("registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1", "Too long (65 chars)"),
-            ("registry.example.com/repo@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "Space at start"),
-            ("registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ", "Space at end"),
-            ("registry.example.com/repo@sha256:12345678-90abcdef-12345678-90abcdef-12345678-90abcdef-12345678-90abcdef", "Dashes in digest"),
-            ("registry.example.com/repo@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef", "Extra colons"),
-            
+            (
+                "registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
+                "Invalid hex char (g)",
+            ),
+            (
+                "registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
+                "Invalid char (!)",
+            ),
+            (
+                "registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
+                "Too long (65 chars)",
+            ),
+            (
+                "registry.example.com/repo@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                "Space at start",
+            ),
+            (
+                "registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ",
+                "Space at end",
+            ),
+            (
+                "registry.example.com/repo@sha256:12345678-90abcdef-12345678-90abcdef-12345678-90abcdef-12345678-90abcdef",
+                "Dashes in digest",
+            ),
+            (
+                "registry.example.com/repo@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef",
+                "Extra colons",
+            ),
             // Invalid tag formats
             ("registry.example.com/repo:-latest", "Tag starts with dash"),
             ("registry.example.com/repo:.123", "Tag starts with dot"),
@@ -965,16 +1007,21 @@ mod tests {
             ("registry.example.com/repo:tag?test", "? in tag"),
             ("registry.example.com/repo:", "Empty tag"),
             ("registry.example.com/repo::", "Double colon"),
-            ("registry.example.com/repo:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "Tag too long (129 chars)"),
-            
+            (
+                "registry.example.com/repo:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "Tag too long (129 chars)",
+            ),
             // Edge cases
-            ("registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde", "Short digest (63 chars)"),
+            (
+                "registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
+                "Short digest (63 chars)",
+            ),
         ];
-        
+
         let total_cases = test_cases.len();
         let mut parse_successes = Vec::new();
         let mut parse_errors = Vec::new();
-        
+
         for (input, description) in test_cases {
             match input.parse::<Reference>() {
                 Ok(ref_val) => {
@@ -985,21 +1032,21 @@ mod tests {
                 }
             }
         }
-        
+
         println!("Total test cases: {}", total_cases);
         println!("Parse succeeded: {}", parse_successes.len());
         println!("Parse failed: {}\n", parse_errors.len());
-        
+
         println!("=== Cases where parse() succeeded ===");
         for (input, desc, parsed) in &parse_successes {
             println!("  ✓ {}: '{}' -> '{}'", desc, input, parsed);
         }
-        
+
         println!("\n=== Cases where parse() failed ===");
         for (input, desc, error) in &parse_errors {
             println!("  ✗ {}: '{}' -> Error: {}", desc, input, error);
         }
-        
+
         // This test always passes - it's just for reporting
         assert!(true);
     }
