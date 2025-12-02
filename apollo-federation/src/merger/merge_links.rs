@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveDefinition;
@@ -61,14 +62,31 @@ impl Merger {
             };
 
             for (directive, referencers) in &subgraph.schema().referencers().directives {
-                let Some((source, import)) = features.directives_by_imported_name.get(directive)
-                else {
+                let Some(linked_elem) = features.source_link_of_directive(directive) else {
                     continue;
                 };
                 if referencers.len() == 0 {
                     continue;
                 }
-                let Some(composition_spec) = SPEC_REGISTRY.get_composition_spec(source, import)
+                let source = linked_elem.link;
+                let import = match linked_elem.import {
+                    Some(import) => import,
+                    None => {
+                        // If there is no explicit import, we create a synthetic import for merging
+                        let Some((_, directive_name_in_spec)) = directive.split_once("__") else {
+                            continue;
+                        };
+                        let Ok(element_name) = Name::new(directive_name_in_spec) else {
+                            continue;
+                        };
+                        Arc::new(Import {
+                            element: element_name,
+                            is_directive: true,
+                            alias: None,
+                        })
+                    }
+                };
+                let Some(composition_spec) = SPEC_REGISTRY.get_composition_spec(&source, &import)
                 else {
                     trace!(
                         "Directive @{directive} from {} has no registered composition spec, skipping",
