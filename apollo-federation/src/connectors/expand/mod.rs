@@ -90,11 +90,9 @@ pub fn expand_connectors(
 
     // Expand just the connector subgraphs
     let mut expanded_subgraphs = Vec::new();
-    let mut spec_versions = HashSet::new();
 
     for (link, sub) in connect_subgraphs {
         expanded_subgraphs.extend(split_subgraph(&link, sub)?);
-        spec_versions.insert(link.spec);
     }
 
     // Merge the subgraphs into one supergraph
@@ -120,7 +118,6 @@ pub fn expand_connectors(
     carryover_directives(
         &supergraph.schema,
         &mut new_supergraph,
-        spec_versions.into_iter(),
         &subgraph_name_replacements,
         subgraph_connect_directive_names,
     )
