@@ -30,7 +30,11 @@ You can export your cloud router configuration in two ways:
 
 In Studio, navigate to your graph's **Cloud Router** page and click the **Router configuration YAML** tab to download the config.
 
-[TODO SCREENSHOT]
+<img
+  className="screenshot"
+  alt="Cloud Router configuration in GraphOS Studio"
+  src="../../images/router/cloud-router-config.jpg"
+/>
 
 If you can't access the Cloud Router page (for example, if you have already changed your graph's hosting mode), use the Rover CLI to export the configuration.
 
@@ -38,7 +42,7 @@ If you can't access the Cloud Router page (for example, if you have already chan
 
 Use the [`cloud config fetch` command](/rover/commands/cloud#cloud-config-fetch). [Install](/rover/getting-started) and [configure](/rover/configuring) the Rover CLI to run this command.
 
-Replace the `<GRAPH_REF>` placeholder in the following command with your own graph ref to download the router configuration YAML to a local `router.yaml` file.
+Replace the `<GRAPH_REF>` placeholder in the following command with your graph ref to download the router configuration YAML to a local `router.yaml` file.
 
 ```bash showLineNumbers={false}
 rover cloud config fetch <GRAPH_REF> > router.yaml
