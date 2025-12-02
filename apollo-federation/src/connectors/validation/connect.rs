@@ -40,22 +40,21 @@ pub(super) fn fields_seen_by_all_connects(
     schema: &SchemaInfo,
     all_source_names: &[SourceName],
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
-    let mut messages = Vec::new();
-    let mut connects = Vec::new();
-
-    for (type_name, extended_type) in schema.types.iter().filter(|(_, ty)| !ty.is_built_in()) {
-        // Only check types that can have connectors (objects, interfaces, unions)
-        if matches!(
-            extended_type,
-            ExtendedType::Object(_) | ExtendedType::Interface(_) | ExtendedType::Union(_)
-        ) && let Some(type_ref) = SchemaTypeRef::new(schema.schema, type_name)
-        {
-            let (connects_for_type, messages_for_type) =
-                Connect::find_on_type(type_ref, schema, all_source_names);
-            connects.extend(connects_for_type);
-            messages.extend(messages_for_type);
-        }
-    }
+    let (connects, messages): (Vec<_>, Vec<_>) = schema
+        .types
+        .iter()
+        .filter(|(_, ty)| !ty.is_built_in())
+        .filter(|(_, ty)| {
+            matches!(
+                ty,
+                ExtendedType::Object(_) | ExtendedType::Interface(_) | ExtendedType::Union(_)
+            )
+        })
+        .filter_map(|(type_name, _)| SchemaTypeRef::new(schema.schema, type_name))
+        .map(|type_ref| Connect::find_on_type(type_ref, schema, all_source_names))
+        .unzip();
+    let connects: Vec<_> = connects.into_iter().flatten().collect();
+    let mut messages: Vec<_> = messages.into_iter().flatten().collect();
 
     let mut seen_fields = Vec::new();
     let mut valid_id_names: HashMap<_, Vec<_>> = HashMap::new();
@@ -168,7 +167,7 @@ impl<'schema> Connect<'schema> {
             ExtendedType::Union(union) => union.directives.iter(),
             _ => [].iter(), // Other types (scalars, enums, etc.) don't support connectors
         }
-        .filter(|directive| directive.name == *schema.connect_directive_name())
+        .filter(|directive| &directive.name == schema.connect_directive_name())
         .map(|directive| ConnectDirectiveCoordinate {
             directive,
             element: ConnectedElement::Type { type_ref },
@@ -182,7 +181,7 @@ impl<'schema> Connect<'schema> {
                     field
                         .directives
                         .iter()
-                        .filter(|directive| directive.name == *schema.connect_directive_name())
+                        .filter(|directive| &directive.name == schema.connect_directive_name())
                         .map(|directive| ConnectDirectiveCoordinate {
                             directive,
                             element: ConnectedElement::Field {
@@ -200,7 +199,7 @@ impl<'schema> Connect<'schema> {
                     field
                         .directives
                         .iter()
-                        .filter(|directive| directive.name == *schema.connect_directive_name())
+                        .filter(|directive| &directive.name == schema.connect_directive_name())
                         .map(|directive| ConnectDirectiveCoordinate {
                             directive,
                             element: ConnectedElement::Field {
@@ -374,7 +373,7 @@ impl<'schema> Connect<'schema> {
                     code: Code::CircularReference,
                     message: format!(
                         "Direct circular reference detected in `{}.{}: {}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        parent_type.name().clone(),
+                        parent_type.name(),
                         field_def.name,
                         field_def.ty
                     ),
