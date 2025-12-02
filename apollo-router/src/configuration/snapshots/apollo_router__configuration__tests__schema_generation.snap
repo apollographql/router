@@ -8331,6 +8331,20 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "The size hint of the body.\nThis is used as the Content-Length header has not yet been populated\nwhen selectors are evaluated",
+          "properties": {
+            "response_size_hint": {
+              "description": "Extract response size hint in bytes",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "response_size_hint"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Router overhead duration (time not spent in subgraph requests)",
           "properties": {
             "router_overhead": {
