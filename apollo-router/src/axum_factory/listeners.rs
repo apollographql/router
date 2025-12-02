@@ -377,23 +377,6 @@ pub(super) fn serve_router_on_listen_addr(
                                 match res {
                                     NetworkStream::Tcp(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
-                                        // -----------------------------------------------------------------
-                                        // FIX: Manually peek at the TCP stream to detect HTTP/2
-                                        // This allows us to apply the Large Header Config BEFORE the buffer fills up.
-                                        // -----------------------------------------------------------------
-                                        let mut is_http2 = false;
-                                        let mut buf = [0u8; 24]; 
-                                        // The Standard HTTP/2 Connection Preface
-                                        const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
-                                    
-                                        // Peek (look at data without removing it)
-                                        if let Ok(n) = stream.peek(&mut buf).await {
-                                            if n >= 24 && &buf[..24] == H2_PREFACE {
-                                                is_http2 = true;
-                                            }
-                                        }
-                                        // -----------------------------------------------------------------
-                                        
                                         let app = InjectConnectionInfo::new(app, ConnectionInfo {
                                             peer_address: stream.peer_addr().ok(),
                                             server_address: stream.local_addr().ok(),
@@ -411,11 +394,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         });
 
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        if is_http2 {
-                                            builder = builder.http2_only();
-                                        }
-                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
-                                        let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
+
+                                        // Just call the function to mutate the builder in-place. Do not assign the result.
+                                        configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        
+                                        // Call serve on the PARENT builder
+                                        let connection = builder.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     }
                                     #[cfg(unix)]
@@ -427,8 +411,12 @@ pub(super) fn serve_router_on_listen_addr(
                                             app.clone().call(request)
                                         });
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
-                                        let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
+
+                                        // Just call the function to mutate the builder in-place. Do not assign the result.
+                                        configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        
+                                        // Call serve on the PARENT builder
+                                        let connection = builder.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     },
                                     NetworkStream::Tls(stream) => {
@@ -448,19 +436,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         let tokio_stream = TokioIo::new(stream);
 
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        // --- START FIX ---
-                                        // 1. Detect if the TLS handshake negotiated HTTP/2
-                                        let is_http2 = tokio_stream.inner().get_ref().1.alpn_protocol() == Some(&b"h2"[..]);
-                                    
-                                        // 2. If yes, FORCE the builder to use your H2 config explicitly
-                                        if is_http2 {
-                                            builder = builder.http2_only();
-                                        }
-                                        // --- END FIX ---
+
+                                        // Just call the function to mutate the builder in-place. Do not assign the result.
+                                        configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         
-                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
-                                        let connection = config
-                                            .serve_connection_with_upgrades(tokio_stream, hyper_service);
+                                        // Call serve on the PARENT builder
+                                        let connection = builder.serve_connection_with_upgrades(tokio_stream, hyper_service);
 
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
 
@@ -489,12 +470,12 @@ pub(super) fn serve_router_on_listen_addr(
 /// NOTE: centralize all connection configuration changes here so that the behavior of the
 /// connections remains in-step
 fn configure_connection(
-    conn_builder: &mut Builder<TokioExecutor>,
+    conn_builder: &mut Builder<TokioExecutor>, // The Parent
     header_read_timeout: Duration,
     opt_max_http1_headers: Option<usize>,
     opt_max_http1_buf_size: Option<ByteSize>,
     opt_max_http2_headers_list_bytes: Option<ByteSize>,
-) -> Http1Builder<'_, TokioExecutor> {
+) { // No return value needed, we mutate conn_builder in place
     // NOTE: this is a builder that auto-detects http1/http2, so we can configure both and rely on
     // it to figure out whether we have an http1 or http2 connection
     let mut builder = conn_builder.http2();
