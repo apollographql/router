@@ -106,6 +106,11 @@ impl SubgraphMetadata {
     }
 
     pub(crate) fn is_field_shareable(&self, field: &FieldDefinitionPosition) -> bool {
+        // In Federation 1, all fields are implicitly shareable
+        if self.federation_spec_definition.is_fed1() {
+            return true;
+        }
+
         self.key_fields.contains(field)
             || self.shareable_fields.contains(field)
             // Fed2 schemas reject provides on non-external field, but fed1 doesn't (at least not always).

@@ -452,7 +452,6 @@ impl Display for SubgraphError {
 }
 
 pub mod test_utils {
-    use either::Either;
 
     use super::SubgraphError;
     use super::typestate::Expanded;
@@ -476,11 +475,9 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        let subgraph = subgraph.expand_links()?;
-        match subgraph.normalize_root_types()? {
-            Either::Left(s) => Ok(s.assume_validated()),
-            Either::Right(s) => s.validate(),
-        }
+        let mut subgraph = subgraph.expand_links()?;
+        subgraph.normalize_root_types()?;
+        Ok(subgraph.assume_validated())
     }
 
     pub fn build_inner_expanded(

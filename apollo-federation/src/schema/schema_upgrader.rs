@@ -1016,39 +1016,19 @@ fn inner_upgrade_subgraphs_if_necessary(
 // However, those messages were never used, so we have omitted them here.
 #[instrument(skip(subgraphs))]
 pub fn upgrade_subgraphs_if_necessary(
-    subgraphs: Vec<Subgraph<Expanded>>,
+    mut subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
+    let mut errors: Vec<CompositionError> = vec![];
+    for subgraph in subgraphs.iter_mut() {
+        if let Err(error) = subgraph.normalize_root_types() {
+            errors.extend(error.to_composition_errors());
+        }
+    }
     // Upgrade subgraphs (if necessary)
     let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
 
-    let mut errors: Vec<CompositionError> = vec![];
-
-    // Normalize root types (if necessary)
-    let normalized: Vec<_> = upgraded
-        .into_iter()
-        .filter_map(|subgraph| match subgraph {
-            Either::Left(s) => match s.normalize_root_types() {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    errors.extend(e.to_composition_errors());
-                    None
-                }
-            },
-            Either::Right(mut s) => {
-                match s.normalize_root_types() {
-                    Ok(()) => {}
-                    Err(e) => {
-                        errors.extend(e.to_composition_errors());
-                        return None;
-                    }
-                }
-                Some(Either::Right(s))
-            }
-        })
-        .collect();
-
     // Validate subgraphs (if either upgraded or normalized)
-    let validated: Vec<Subgraph<Validated>> = normalized
+    let validated: Vec<Subgraph<Validated>> = upgraded
         .into_iter()
         .filter_map(|subgraph| match subgraph {
             Either::Left(s) => {
