@@ -37,7 +37,13 @@ impl Merger {
             let interface_pos: TypeDefinitionPosition = dest.clone().into();
             let keys = interface_pos.get_applied_directives(subgraph.schema(), &key_directive_name);
             has_key = has_key || !keys.is_empty();
-            let Some(resolvable_key) = keys.iter().find(|key| !key.arguments.is_empty()) else {
+            let federation_spec_definition = subgraph.metadata().federation_spec_definition();
+            let Some(resolvable_key) = keys.iter().find(|key| {
+                federation_spec_definition
+                    .key_directive_arguments(key)
+                    .map(|args| args.resolvable)
+                    .unwrap_or(true) // @key(resolvable:) defaults to true in its definition
+            }) else {
                 continue;
             };
             let implementations_in_subgraph = subgraph

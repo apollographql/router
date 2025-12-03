@@ -27,8 +27,8 @@ use serde::Deserializer;
 use serde::Serialize;
 use serde::de::Visitor;
 use serde_json::Value;
+use strum::EnumIter;
 use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
 use thiserror::Error;
 
 use super::parsed_link_spec::ParsedLinkSpec;
