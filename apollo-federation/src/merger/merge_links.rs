@@ -177,7 +177,7 @@ impl Merger {
                             )
                         })
                         .collect();
-                    self.error_reporter.report_mismatch_error::<_, _, ()>(
+                    self.error_reporter.report_mismatch_error::<_, _>(
                         CompositionError::LinkImportNameMismatch {
                             message: format!("The \"@{}\" directive (from {}) is imported with mismatched name between subgraphs: it is imported as ", directive.name, subgraph_core_directive.url),
                         },
