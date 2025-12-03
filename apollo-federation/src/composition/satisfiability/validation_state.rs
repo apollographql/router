@@ -438,12 +438,8 @@ impl ValidationState {
                     .graph()
                     .node_weight(path_info.path.path.tail())?;
                 Ok(SubgraphContextKey {
-                    tail_subgraph_name: query_graph_node
-                        .source
-                        .clone(),
-                    tail_type_name: query_graph_node
-                        .type_
-                        .to_string(),
+                    tail_subgraph_name: query_graph_node.source.clone(),
+                    tail_type_name: query_graph_node.type_.to_string(),
                     contexts: path_info.contexts.clone(),
                 })
             })
