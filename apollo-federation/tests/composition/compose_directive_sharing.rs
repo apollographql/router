@@ -311,7 +311,7 @@ fn field_sharing_applies_shareable_on_type_only_to_fields_within_definition() {
         &result,
         &[(
             "INVALID_FIELD_SHARING",
-            r#"Non-shareable field "A.x" is resolved from multiple subgraphs"#,
+            r#"Non-shareable field "A.x" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in subgraph "subgraphB""#,
         )],
     );
 }
@@ -454,7 +454,7 @@ fn interface_object_field_requires_shareable() {
         &result,
         &[(
             "INVALID_FIELD_SHARING",
-            r#"Non-shareable field "Entity.sku" is resolved from multiple subgraphs"#,
+            r#"Non-shareable field "Entity.sku" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA", "subgraphB (through @interfaceObject field "Node.sku")" and "subgraphC" and defined as non-shareable in subgraph "subgraphB (through @interfaceObject field "Node.sku")""#,
         )],
     );
 }
