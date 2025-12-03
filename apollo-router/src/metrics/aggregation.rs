@@ -28,10 +28,9 @@ use opentelemetry::metrics::UpDownCounter;
 use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
+use strum::Display;
 use strum::EnumCount;
-use strum_macros::Display;
-use strum_macros::EnumCount;
-use strum_macros::EnumIter;
+use strum::EnumIter;
 
 use crate::metrics::filter::FilterMeterProvider;
 
