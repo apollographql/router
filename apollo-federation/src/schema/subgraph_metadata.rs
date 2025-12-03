@@ -121,6 +121,10 @@ impl SubgraphMetadata {
             || self.required_fields.contains(field)
     }
 
+    pub(crate) fn remove_external_field(&mut self, field: &FieldDefinitionPosition) {
+        self.external_metadata.external_fields.shift_remove(field);
+    }
+
     /// Update field coordinates in metadata after a type has been renamed.
     /// This is necessary when root operation types are normalized (e.g., MyMutation -> Mutation).
     pub(crate) fn update_type_references(
