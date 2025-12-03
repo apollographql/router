@@ -9821,6 +9821,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "subgraph_request_body_size": {
+              "description": "The subgraph request body size.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_request_body_size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "default": {
               "description": "Optional default value.",
               "type": [
