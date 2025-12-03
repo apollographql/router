@@ -401,7 +401,7 @@ impl CacheStorage for Storage {
     async fn internal_fetch_multiple(
         &self,
         cache_keys: &[&str],
-    ) -> StorageResult<Vec<Option<CacheEntry>>> {
+    ) -> StorageResult<Vec<StorageResult<CacheEntry>>> {
         let keys: Vec<RedisKey<String>> = cache_keys
             .iter()
             .map(|key| RedisKey(key.to_string()))
@@ -410,14 +410,18 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Option<RedisValue<CacheValue>>> =
-            self.storage.get_multiple_with_options(keys, options).await;
+        let values: Vec<Result<RedisValue<CacheValue>, _>> = self
+            .storage
+            .get_multiple_with_options(keys, options)
+            .await?;
 
         let entries = values
             .into_iter()
             .zip(cache_keys)
             .map(|(opt_value, cache_key)| {
-                opt_value.map(|value| CacheEntry::from((*cache_key, value.0)))
+                opt_value
+                    .map(|value| CacheEntry::from((*cache_key, value.0)))
+                    .map_err(Into::into)
             })
             .collect();
 
