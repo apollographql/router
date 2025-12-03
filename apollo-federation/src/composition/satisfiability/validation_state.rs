@@ -64,7 +64,7 @@ struct SubgraphPathContextInfo {
 #[derive(PartialEq, Eq, Hash)]
 pub(super) struct SubgraphContextKey {
     tail_subgraph_name: Arc<str>,
-    tail_type_name: String,
+    tail_type_name: QueryGraphNodeType,
     contexts: SubgraphPathContexts,
 }
 
@@ -439,7 +439,7 @@ impl ValidationState {
                     .node_weight(path_info.path.path.tail())?;
                 Ok(SubgraphContextKey {
                     tail_subgraph_name: query_graph_node.source.clone(),
-                    tail_type_name: query_graph_node.type_.to_string(),
+                    tail_type_name: query_graph_node.type_.clone(),
                     contexts: path_info.contexts.clone(),
                 })
             })
