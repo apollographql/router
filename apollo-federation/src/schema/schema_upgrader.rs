@@ -124,7 +124,7 @@ impl SchemaUpgrader {
         subgraph: Subgraph<Expanded>,
     ) -> Result<Subgraph<Upgraded>, FederationError> {
         // Run pre-upgrade validations to check for issues that would prevent upgrade
-        let upgrade_metadata = UpgradeMetadata {
+        let mut upgrade_metadata = UpgradeMetadata {
             subgraph_name: subgraph.name.clone(),
             key_directive_name: subgraph.key_directive_name()?.clone(),
             requires_directive_name: subgraph.requires_directive_name()?.clone(),
@@ -147,40 +147,24 @@ impl SchemaUpgrader {
         self.remove_external_on_object_types(&mut schema);
 
         // Note that we remove all external on type extensions first, so we don't have to care about it later in @key, @provides and @requires.
-        self.remove_external_on_type_extensions(&upgrade_metadata, &mut schema)?;
-
-        // Recalculate metadata after removing @external directives, so that remove_unused_externals
-        // has the correct information about which fields are actually external.
-        let recomputed_metadata = super::compute_subgraph_metadata(&schema)?
-            .ok_or_else(|| SingleFederationError::Internal {
-                message: "Failed to recompute subgraph metadata after removing external directives".to_string(),
-            })?;
-        let updated_metadata = UpgradeMetadata {
-            subgraph_name: upgrade_metadata.subgraph_name.clone(),
-            key_directive_name: upgrade_metadata.key_directive_name.clone(),
-            requires_directive_name: upgrade_metadata.requires_directive_name.clone(),
-            provides_directive_name: upgrade_metadata.provides_directive_name.clone(),
-            extends_directive_name: upgrade_metadata.extends_directive_name.clone(),
-            metadata: recomputed_metadata,
-            orphan_extension_types: upgrade_metadata.orphan_extension_types.clone(),
-        };
+        self.remove_external_on_type_extensions(&mut upgrade_metadata, &mut schema)?;
 
         self.fix_inactive_provides_and_requires(&mut schema)?;
 
-        self.remove_type_extensions(&updated_metadata, &mut schema)?;
+        self.remove_type_extensions(&upgrade_metadata, &mut schema)?;
 
-        self.remove_directives_on_interface(&updated_metadata, &mut schema)?;
+        self.remove_directives_on_interface(&upgrade_metadata, &mut schema)?;
 
         // Note that this rule rely on being after `remove_directives_on_interface` in practice (in that it doesn't check interfaces).
         self.remove_provides_on_non_composite(&mut schema)?;
 
         // Note that this should come _after_ all the other changes that may remove/update federation directives, since those may create unused
         // externals. Which is why this is toward  the end.
-        self.remove_unused_externals(&updated_metadata, &mut schema)?;
+        self.remove_unused_externals(&upgrade_metadata, &mut schema)?;
 
-        self.add_shareable(&updated_metadata, &mut schema)?;
+        self.add_shareable(&upgrade_metadata, &mut schema)?;
 
-        self.remove_tag_on_external(&updated_metadata, &mut schema)?;
+        self.remove_tag_on_external(&upgrade_metadata, &mut schema)?;
 
         // Some type extensions are converted to definitions in the `remove_type_extensions`.
         // We need to update the orphan extension types accordingly.
@@ -484,7 +468,7 @@ impl SchemaUpgrader {
 
     fn remove_external_on_type_extensions(
         &self,
-        upgrade_metadata: &UpgradeMetadata,
+        upgrade_metadata: &mut UpgradeMetadata,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let Some(metadata) = &schema.subgraph_metadata else {
@@ -584,7 +568,9 @@ impl SchemaUpgrader {
 
         for (pos, directive) in &to_remove {
             pos.remove_directive(schema, directive);
+            upgrade_metadata.metadata.remove_external_field(pos);
         }
+
         Ok(())
     }
 
