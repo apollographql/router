@@ -39,7 +39,8 @@ fn merge_validations_errors_when_a_subgraph_is_invalid() {
  3 │           a: A
    │              ┬  
    │              ╰── not found in this scope
-───╯"#,
+───╯
+"#,
         )],
     );
 }
@@ -75,7 +76,8 @@ fn merge_validations_errors_when_subgraph_has_introspection_reserved_name() {
  3 │           __someQuery: Int
    │           ─────┬─────  
    │                ╰─────── Pick a different name here
-───╯"#,
+───╯
+"#,
         )],
     );
 }
