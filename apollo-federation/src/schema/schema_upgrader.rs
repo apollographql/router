@@ -10,6 +10,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use either::Either;
+use itertools::Itertools;
 use tracing::instrument;
 
 use super::FederationSchema;
@@ -1016,14 +1017,20 @@ fn inner_upgrade_subgraphs_if_necessary(
 // However, those messages were never used, so we have omitted them here.
 #[instrument(skip(subgraphs))]
 pub fn upgrade_subgraphs_if_necessary(
-    mut subgraphs: Vec<Subgraph<Expanded>>,
+    subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
     let mut errors: Vec<CompositionError> = vec![];
-    for subgraph in subgraphs.iter_mut() {
-        if let Err(error) = subgraph.normalize_root_types() {
-            errors.extend(error.to_composition_errors());
-        }
-    }
+    let subgraphs = subgraphs
+        .into_iter()
+        .filter_map(|sg| match sg.normalize_root_types() {
+            Ok(s) => Some(s),
+            Err(e) => {
+                errors.extend(e.to_composition_errors());
+                None
+            }
+        })
+        .collect_vec();
+
     // Upgrade subgraphs (if necessary)
     let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
 

@@ -108,17 +108,12 @@ impl Expanded {
 
 pub(crate) trait HasMetadata {
     fn metadata(&self) -> &SubgraphMetadata;
-    fn metadata_mut(&mut self) -> &mut SubgraphMetadata;
     fn schema(&self) -> &FederationSchema;
 }
 
 impl HasMetadata for Expanded {
     fn metadata(&self) -> &SubgraphMetadata {
         &self.metadata
-    }
-
-    fn metadata_mut(&mut self) -> &mut SubgraphMetadata {
-        &mut self.metadata
     }
 
     fn schema(&self) -> &FederationSchema {
@@ -131,10 +126,6 @@ impl HasMetadata for Upgraded {
         &self.metadata
     }
 
-    fn metadata_mut(&mut self) -> &mut SubgraphMetadata {
-        &mut self.metadata
-    }
-
     fn schema(&self) -> &FederationSchema {
         &self.schema
     }
@@ -143,10 +134,6 @@ impl HasMetadata for Upgraded {
 impl HasMetadata for Validated {
     fn metadata(&self) -> &SubgraphMetadata {
         &self.metadata
-    }
-
-    fn metadata_mut(&mut self) -> &mut SubgraphMetadata {
-        &mut self.metadata
     }
 
     fn schema(&self) -> &FederationSchema {
@@ -404,12 +391,13 @@ impl Subgraph<Expanded> {
     }
 
     /// Normalizes root types if necessary.
-    pub fn normalize_root_types(&mut self) -> Result<(), SubgraphError> {
+    pub fn normalize_root_types(self) -> Result<Self, SubgraphError> {
+        let name = self.name.clone();
         self.normalize_root_types_inner()
-            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))
+            .map_err(|e| SubgraphError::new_without_locations(name, e))
     }
 
-    fn normalize_root_types_inner(&mut self) -> Result<(), FederationError> {
+    fn normalize_root_types_inner(self) -> Result<Self, FederationError> {
         let mut operation_types_to_rename = HashMap::new();
         for (op_type, op_name) in self
             .schema()
@@ -431,20 +419,36 @@ impl Subgraph<Expanded> {
             }
         }
         if operation_types_to_rename.is_empty() {
-            return Ok(());
+            return Ok(self);
         }
-        let mut schema: FederationSchema = self.state.schema.clone().into();
+        let Subgraph {
+            name,
+            url,
+            state:
+                Expanded {
+                    schema,
+                    orphan_extension_types,
+                    mut metadata,
+                },
+        } = self;
+        let mut schema: FederationSchema = schema.into();
         for (current_name, new_name) in &operation_types_to_rename {
-            self.schema()
+            schema
                 .get_type(current_name.clone())?
                 .rename(&mut schema, new_name.clone())?;
             // Update metadata to reflect the type rename
-            self.metadata_mut()
-                .update_type_references(current_name, new_name);
+            metadata.update_type_references(current_name, new_name);
         }
-        self.state.schema = validate_subgraph_schema(schema, self.metadata())?;
-
-        Ok(())
+        let schema = validate_subgraph_schema(schema, &metadata)?;
+        Ok(Subgraph {
+            name,
+            url,
+            state: Expanded {
+                schema,
+                orphan_extension_types,
+                metadata,
+            },
+        })
     }
 
     /// Transitions from Expanded to Upgraded.
@@ -579,10 +583,6 @@ impl Subgraph<Validated> {
 impl<S: HasMetadata> Subgraph<S> {
     pub(crate) fn metadata(&self) -> &SubgraphMetadata {
         self.state.metadata()
-    }
-
-    pub(crate) fn metadata_mut(&mut self) -> &mut SubgraphMetadata {
-        self.state.metadata_mut()
     }
 
     pub(crate) fn schema(&self) -> &FederationSchema {

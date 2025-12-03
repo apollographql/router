@@ -475,9 +475,10 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        let mut subgraph = subgraph.expand_links()?;
-        subgraph.normalize_root_types()?;
-        Ok(subgraph.assume_validated())
+        Ok(subgraph
+            .expand_links()?
+            .normalize_root_types()?
+            .assume_validated())
     }
 
     pub fn build_inner_expanded(
