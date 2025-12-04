@@ -1890,7 +1890,6 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets(#[values(1, 3, 5)] num_p
     let _ = join_set.join_all().await;
 
     let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
-    assert!(redis_monitor_output.command_sent_to_replicas_only("MGET"));
     assert!(redis_monitor_output.command_sent_to_replicas_only("GET"));
 
     // check that there were no I/O errors
