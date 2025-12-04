@@ -544,15 +544,24 @@ impl Merger {
         }
 
         for arg_name in &invalid_args_presence {
-            // TODO: We need a more complete port of this on `ErrorReporter`
-            self.report_mismatch_error_with_specifics(
+            let argument_pos = ObjectFieldArgumentDefinitionPosition {
+                type_name: dest.type_name().clone(),
+                field_name: dest.field_name().clone(),
+                argument_name: arg_name.clone(),
+            };
+            self.error_reporter.report_mismatch_error_with_specifics::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition>(
                 CompositionError::ExternalArgumentMissing {
                     message: format!(
-                        "Field \"{dest}\" is missing argument \"{arg_name}\" in some subgraphs where it is marked @external: "
+                        "Field \"{dest}\" is missing argument \"{argument_pos}\" in some subgraphs where it is marked @external: "
                     ),
                 },
+                &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source| source.as_ref().map_or("", |_| ""),
+                |_| Some("present".to_string()),
+                |_, _idx| Some("present".to_string()),
+                |_, names| format!("argument \"{argument_pos}\" is declared in {} ", names.unwrap_or("undefined".to_string())),
+                |_, names| format!("but not in {names} (where \"{dest}\" is @external)."),
+                true,
             );
         }
 

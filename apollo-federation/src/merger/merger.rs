@@ -763,7 +763,6 @@ impl Merger {
                 };
             Some(type_kind_description)
         };
-        // TODO: Third type param is supposed to be representation of AST nodes
         self.error_reporter
             .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition>(
                 CompositionError::TypeKindMismatch {
@@ -2445,55 +2444,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         F: FnMut(&Option<T>, usize) -> bool,
     {
         sources.iter().any(|(idx, source)| predicate(source, *idx))
-    }
-
-    // TODO: These error reporting functions are not yet fully implemented
-    pub(crate) fn report_mismatch_error_with_specifics<T>(
-        &mut self,
-        error: CompositionError,
-        sources: &Sources<T>,
-        accessor: impl Fn(&Option<T>) -> &str,
-    ) {
-        // Build a detailed error message by showing which subgraphs have/don't have the element
-        let mut details = Vec::new();
-        let mut has_subgraphs = Vec::new();
-        let mut missing_subgraphs = Vec::new();
-
-        for (&idx, source) in sources.iter() {
-            let subgraph_name = if idx < self.names.len() {
-                &self.names[idx]
-            } else {
-                "unknown"
-            };
-
-            let result = accessor(source);
-            if result == "yes" {
-                has_subgraphs.push(subgraph_name);
-            } else {
-                missing_subgraphs.push(subgraph_name);
-            }
-        }
-
-        // Format the subgraph lists
-        if !has_subgraphs.is_empty() {
-            details.push(format!("defined in {}", has_subgraphs.join(", ")));
-        }
-        if !missing_subgraphs.is_empty() {
-            details.push(format!("but not in {}", missing_subgraphs.join(", ")));
-        }
-
-        // Create the enhanced error with details
-        let enhanced_error = match error {
-            CompositionError::EnumValueMismatch { message } => {
-                CompositionError::EnumValueMismatch {
-                    message: format!("{}{}", message, details.join(" ")),
-                }
-            }
-            // Add other error types as needed
-            other => other,
-        };
-
-        self.error_reporter.add_error(enhanced_error);
     }
 
     pub(crate) fn source_locations<T>(&self, sources: &Sources<Node<T>>) -> Vec<SubgraphLocation> {
