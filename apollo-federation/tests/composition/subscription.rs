@@ -1,7 +1,6 @@
 use crate::composition::ServiceDefinition;
 use crate::composition::test_helpers::compose_as_fed2_subgraphs;
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn type_subscription_appears_in_the_supergraph() {
     let subgraph_a = ServiceDefinition {
@@ -44,7 +43,6 @@ fn type_subscription_appears_in_the_supergraph() {
     );
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn directives_incompatible_with_subscriptions_wont_compose() {
     let subgraph_a = ServiceDefinition {
@@ -87,7 +85,6 @@ fn directives_incompatible_with_subscriptions_wont_compose() {
     );
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn subscription_name_collisions_across_subgraphs_should_not_compose() {
     let subgraph_a = ServiceDefinition {
