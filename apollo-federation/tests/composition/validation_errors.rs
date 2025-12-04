@@ -109,7 +109,7 @@ cannot be satisfied by the subgraphs because:
   }
 }
 cannot be satisfied by the subgraphs because:
-- from subgraph "B": @require condition on field "T1.f2" can be satisfied but missing usable key on "T1" in subgraph "B" to resume query.
+- from subgraph "B": @requires condition on field "T1.f2" can be satisfied but missing usable key on "T1" in subgraph "B" to resume query.
 - from subgraph "A": cannot find field "T1.f2"."#,
             )],
         );
@@ -363,7 +363,7 @@ mod shared_field_runtime_types_tests {
 Shared field "Query.a" return type "A" has a non-intersecting set of possible runtime types across subgraphs. Runtime types in subgraphs are:
  - in subgraph "A", type "I1";
  - in subgraph "B", type "I2".
-This is not allowed as shared fields must resolve the same way in all subgraphs, and that imply at least some common runtime types between the subgraphs."#,
+This is not allowed as shared fields must resolve the same way in all subgraphs, and that implies at least some common runtime types between the subgraphs."#,
             )],
         );
     }
@@ -430,7 +430,7 @@ This is not allowed as shared fields must resolve the same way in all subgraphs,
 Shared field "E.s" return type "U!" has a non-intersecting set of possible runtime types across subgraphs. Runtime types in subgraphs are:
  - in subgraph "A", types "A" and "B";
  - in subgraph "B", types "C" and "D".
-This is not allowed as shared fields must resolve the same way in all subgraphs, and that imply at least some common runtime types between the subgraphs."#,
+This is not allowed as shared fields must resolve the same way in all subgraphs, and that implies at least some common runtime types between the subgraphs."#,
             )],
         );
     }
