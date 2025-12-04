@@ -701,7 +701,8 @@ impl RedisCacheStorage {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            let values: Vec<Option<RedisValue<V>>> = self.client()
+            let values: Vec<Option<RedisValue<V>>> = self
+                .client()
                 .with_options(&options)
                 .mget(keys)
                 .await
