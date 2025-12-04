@@ -57,6 +57,8 @@ pub(crate) enum SubgraphQuery {
     String,
 }
 
+pub(crate) struct SubgraphRequestBodySize(pub u64);
+
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 #[derivative(Debug, PartialEq)]
@@ -136,6 +138,10 @@ pub(crate) enum SubgraphSelector {
         redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
+    },
+    SubgraphRequestBodySize {
+        /// The subgraph request body size.
+        subgraph_request_body_size: bool,
     },
     SubgraphResponseHeader {
         /// The name of a subgraph response header.
@@ -470,6 +476,16 @@ impl Selector for SubgraphSelector {
 
     fn on_response(&self, response: &subgraph::Response) -> Option<opentelemetry::Value> {
         match self {
+            // We check for this in on_response instead of on_request as the request body has
+            // not yet been serialized during on_request, so the size is not available.
+            SubgraphSelector::SubgraphRequestBodySize {
+                subgraph_request_body_size,
+                ..
+            } if *subgraph_request_body_size => response
+                .context
+                .extensions()
+                .with_lock(|lock| lock.get::<SubgraphRequestBodySize>().map(|bs| bs.0))
+                .map(|size| opentelemetry::Value::I64(size as i64)),
             SubgraphSelector::SubgraphResponseHeader {
                 subgraph_response_header,
                 default,
@@ -890,6 +906,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphRequestResendCountKey;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphQuery;
+    use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
     use crate::plugins::telemetry::otel;
     use crate::services::subgraph::SubgraphRequestId;
@@ -1015,6 +1032,30 @@ mod test {
                     .unwrap()
             ),
             None
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_request_body_size() {
+        let selector = SubgraphSelector::SubgraphRequestBodySize {
+            subgraph_request_body_size: true,
+        };
+
+        let context = crate::context::Context::new();
+        context
+            .extensions()
+            .with_lock(|l| l.insert(SubgraphRequestBodySize(100)));
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .context(context)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            opentelemetry::Value::I64(100)
         );
     }
 

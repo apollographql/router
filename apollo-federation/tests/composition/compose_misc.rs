@@ -376,3 +376,45 @@ fn composes_input_field_with_int_to_float_coercible_defaults() {
     let _supergraph = result
         .expect("Expected composition to succeed with Int default coercible to Float default");
 }
+
+#[test]
+fn composes_subgraphs_with_directives_on_renamed_root_types() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraph-a",
+        type_defs: r#"
+            schema {
+                query: MyQuery
+                mutation: MyMutation
+            }
+
+            type MyQuery @tag(name: "custom") {
+                hello(name: String! @tag(name: "custom")): String @tag(name: "custom")
+            }
+
+            type MyMutation @tag(name: "custom") {
+                bye(name: String! @tag(name: "custom")): String! @tag(name: "custom")
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraph-b",
+        type_defs: r#"
+            schema {
+                query: Query
+                mutation: Mutation
+            }
+
+            type Query {
+                helloWorld: String
+            }
+
+            type Mutation {
+                goodbyeWorld: String
+            }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let _supergraph = result.expect("Expected composition to succeed");
+}

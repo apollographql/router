@@ -8,7 +8,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 
-#[derive(Copy, Clone, strum_macros::IntoStaticStr)]
+#[derive(Copy, Clone, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub(super) enum Outcome {
     ExecutedOk,

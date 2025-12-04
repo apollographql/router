@@ -16,7 +16,7 @@ info:
   unit: By
   data:
     datapoints:
-      - sum: 35
+      - sum: 18
         count: 1
         attributes:
           http.request.method: GET
