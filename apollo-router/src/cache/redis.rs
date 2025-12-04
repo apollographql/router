@@ -657,7 +657,7 @@ impl RedisCacheStorage {
 
     pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
         &self,
-        mut keys: Vec<RedisKey<K>>,
+        keys: Vec<RedisKey<K>>,
         options: Options,
     ) -> Vec<Option<RedisValue<V>>> {
         // NB: MGET is different from GET in that it returns `Option`s rather than `Result`s.
@@ -666,18 +666,7 @@ impl RedisCacheStorage {
         //    - https://redis.io/docs/latest/commands/mget/
 
         tracing::trace!("getting multiple values from redis: {:?}", keys);
-        let client = self.client();
-
-        if keys.len() == 1 {
-            let key = self.make_key(keys.swap_remove(0));
-            let res = client
-                .with_options(&options)
-                .get(key)
-                .await
-                .inspect_err(|e| self.record_error(e))
-                .ok();
-            vec![res]
-        } else if self.is_cluster {
+        if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
             // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
@@ -693,7 +682,7 @@ impl RedisCacheStorage {
 
             // then we query all the key groups at the same time
             // use `client.replicas()` since we're in a cluster and can take advantage of read-replicas
-            let client = client.replicas().with_options(&options);
+            let client = self.client().replicas().with_options(&options);
             let mut tasks = Vec::new();
             for (_shard, (indexes, keys)) in h {
                 let client = client.clone();
@@ -726,7 +715,7 @@ impl RedisCacheStorage {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            client
+            self.client()
                 .with_options(&options)
                 .mget(keys)
                 .await
