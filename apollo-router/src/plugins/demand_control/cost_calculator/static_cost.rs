@@ -1086,7 +1086,7 @@ mod tests {
         }
         // This was previously logging a warning for every __typename in the response. At the time of writing,
         // this should not produce logs. Generally, it should not produce undue noise for valid requests.
-        .with_subscriber(assert_snapshot_subscriber!())
+        .with_subscriber(assert_snapshot_subscriber!(tracing_core::LevelFilter::WARN))
         .await
     }
 
