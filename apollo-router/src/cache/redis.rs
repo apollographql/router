@@ -673,7 +673,8 @@ impl RedisCacheStorage {
 
         if keys.len() == 1 {
             let key = self.make_key(keys.swap_remove(0));
-            let res_value: Result<RedisValue<V>, RedisError> = client.with_options(&options).get(key).await;
+            let res_value: Result<RedisValue<V>, RedisError> =
+                client.with_options(&options).get(key).await;
             let value = res_value.inspect_err(|e| self.record_error(e))?;
             Ok(vec![Ok(value)])
         } else if self.is_cluster {
@@ -708,7 +709,8 @@ impl RedisCacheStorage {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            let values: Vec<Option<RedisValue<V>>> = client.with_options(&options)
+            let values: Vec<Option<RedisValue<V>>> = client
+                .with_options(&options)
                 .mget(keys)
                 .await
                 .inspect_err(|e| self.record_error(e))?;
