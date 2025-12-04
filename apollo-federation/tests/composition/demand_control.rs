@@ -9,7 +9,6 @@ use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Satisfiable;
 use test_log::test;
 
-// Helper function to check directive applications on various schema elements
 fn check_cost_and_listsize_directives(
     result: &Supergraph<Satisfiable>,
     cost_name: &str,
@@ -97,10 +96,11 @@ fn check_cost_and_listsize_directives(
     );
 
     // Check @cost on SCALAR
-    let scalar = match coord!(ExpensiveInt).lookup(schema).unwrap() {
-        ExtendedType::Scalar(s) => s,
-        _ => panic!("Expected ExpensiveInt to be a scalar"),
-    };
+    let scalar = coord!(ExpensiveInt)
+        .lookup(schema)
+        .unwrap()
+        .as_scalar()
+        .unwrap();
     let cost_directive = scalar
         .directives
         .iter()
@@ -112,10 +112,11 @@ fn check_cost_and_listsize_directives(
     );
 
     // Check @cost on OBJECT
-    let object = match coord!(ExpensiveObject).lookup(schema).unwrap() {
-        ExtendedType::Object(o) => o,
-        _ => panic!("Expected ExpensiveObject to be an object"),
-    };
+    let object = coord!(ExpensiveObject)
+        .lookup(schema)
+        .unwrap()
+        .as_object()
+        .unwrap();
     let cost_directive = object
         .directives
         .iter()
