@@ -455,11 +455,17 @@ impl Gateway {
             Ok(value.0)
         } else if self.is_cluster {
             let client = self.client().replicas().with_options(&options);
-            let value = client.get(key).await.inspect_err(|e| self.record_error(e))?;
+            let value: Value<Option<V>> = client
+                .get(key)
+                .await
+                .inspect_err(|e| self.record_error(e))?;
             Ok(value.0)
         } else {
             let client = self.client().with_options(&options);
-            let value = client.get(key).await.inspect_err(|e| self.record_error(e))?;
+            let value: Value<Option<V>> = client
+                .get(key)
+                .await
+                .inspect_err(|e| self.record_error(e))?;
             Ok(value.0)
         }
     }
@@ -513,7 +519,12 @@ impl Gateway {
             results_with_indexes.sort_unstable_by_key(|(index, _)| *index);
             Ok(results_with_indexes
                 .into_iter()
-                .map(|(_, value)| value.inspect_err(|e| self.record_error(e)).map_err(Into::into))
+                .map(|(_, value)| {
+                    value
+                        .inspect_err(|e| self.record_error(e))
+                        .map_err(Into::into)
+                        .map(|res| res.0)
+                })
                 .collect())
         } else {
             let keys = keys
@@ -526,10 +537,7 @@ impl Gateway {
                 .mget(keys)
                 .await
                 .inspect_err(|e| self.record_error(e))?;
-            Ok(values
-                .into_iter()
-                .map(|v| v.0)
-                .collect())
+            Ok(values.into_iter().map(|v| Ok(v.0)).collect())
         }
     }
 

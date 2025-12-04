@@ -123,7 +123,7 @@ pub(super) trait CacheStorage {
     async fn internal_fetch_multiple(
         &self,
         cache_keys: &[&str],
-    ) -> StorageResult<Vec<StorageResult<CacheEntry>>>;
+    ) -> StorageResult<Vec<StorageResult<Option<CacheEntry>>>>;
 
     /// Fetch the values belonging to `cache_keys`. Command will be timed out after `self.fetch_timeout()`.
     async fn fetch_multiple(
@@ -150,6 +150,7 @@ pub(super) trait CacheStorage {
                 value
                     .inspect_err(|err| record_fetch_error(err, subgraph_name))
                     .ok()
+                    .flatten()
             })
             .collect();
         Ok(values)

@@ -403,14 +403,18 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Result<Option<CacheValue>, _>> =
-            self.storage.get_multiple_with_options(keys, options).await;
+        let values: Vec<Result<Option<CacheValue>, _>> = self
+            .storage
+            .get_multiple_with_options(keys, options)
+            .await?;
 
         let entries = values
             .into_iter()
             .zip(cache_keys)
             .map(|(res_value, cache_key)| {
-                res_value.map(|opt_value| opt_value.map(|value| CacheEntry::from((*cache_key, value))))
+                res_value
+                    .map(|opt_value| opt_value.map(|value| CacheEntry::from((*cache_key, value))))
+                    .map_err(Into::into)
             })
             .collect();
 
