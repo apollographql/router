@@ -3029,7 +3029,6 @@ mod tests {
 
                                         let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
                                         let body_size = body.len();
-                                        dbg!(&body);
                                         request.context.extensions()
                                             .with_lock(|lock| {
                                                 lock.insert(SubgraphRequestBodySize(body_size as u64));
