@@ -667,10 +667,8 @@ impl InstrumentsConfig {
                                 )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(SubgraphSelector::SubgraphRequestHeader {
-                                subgraph_request_header: "content-length".to_string(),
-                                redact: None,
-                                default: None,
+                            selector: Some(Arc::new(SubgraphSelector::SubgraphRequestBodySize {
+                                subgraph_request_body_size: true,
                             })),
                             selectors,
                             updated: false,
@@ -2562,6 +2560,7 @@ mod tests {
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
+    use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
     use crate::plugins::telemetry::config_new::supergraph::instruments::SupergraphCustomInstruments;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
@@ -3023,6 +3022,13 @@ mod tests {
                                         .and_operation_kind(operation_kind)
                                         .subgraph_request(http_request)
                                         .build();
+
+                                        let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
+                                        let body_size = body.len();
+                                        request.context.extensions()
+                                            .with_lock(|lock| {
+                                                lock.insert(SubgraphRequestBodySize(body_size as u64));
+                                            });
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
                                     apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
