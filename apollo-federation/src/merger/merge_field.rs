@@ -530,7 +530,7 @@ impl Merger {
 
         // Phase 2: Reporting - report errors in groups, matching JS version order
         if has_invalid_types {
-            self.error_reporter.report_mismatch_error::<FieldDefinition, FieldDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<FieldDefinition, FieldDefinitionPosition>(
                 CompositionError::ExternalTypeMismatch {
                     message: format!(
                         "Type of field \"{dest}\" is incompatible across subgraphs (where marked @external): it has ",
@@ -562,7 +562,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition>(
                 CompositionError::ExternalArgumentTypeMismatch {
                     message: format!(
                         "Type of argument \"{argument_pos}\" is incompatible across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -581,7 +581,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition>(
                 CompositionError::ExternalArgumentDefaultMismatch {
                     message: format!(
                         "Argument \"{argument_pos}\" has incompatible defaults across subgraphs (where \"{dest}\" is marked @external): it has ",
