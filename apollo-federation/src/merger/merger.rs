@@ -765,7 +765,7 @@ impl Merger {
         };
         // TODO: Third type param is supposed to be representation of AST nodes
         self.error_reporter
-            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition, ()>(
+            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition>(
                 CompositionError::TypeKindMismatch {
                     message: format!(
                         "Type \"{}\" has mismatched kind: it is defined as ",
@@ -1619,8 +1619,7 @@ impl Merger {
             {
                 self.error_reporter.report_mismatch_hint::<
                     ObjectOrInterfaceTypeDefinitionPosition,
-                    ObjectOrInterfaceTypeDefinitionPosition,
-                    ()>(
+                    ObjectOrInterfaceTypeDefinitionPosition>(
                         hint_id.clone(),
 format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\": ",
                             type_description,
@@ -1667,7 +1666,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             }
         }
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize, ()>(
+            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize>(
                 HintCode::InconsistentEntity,
                 format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
                     &obj.type_name,
@@ -1964,7 +1963,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 }
             };
 
-            self.error_reporter.report_mismatch_error::<Type, T, ()>(
+            self.error_reporter.report_mismatch_error::<Type, T>(
                 error,
                 &ty,
                 sources,
@@ -1997,7 +1996,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 "subtype"
             };
 
-            self.error_reporter.report_mismatch_hint::<Type, T, ()>(
+            self.error_reporter.report_mismatch_hint::<Type, T>(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs: ",
@@ -2252,7 +2251,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 } else {
                     format!("Element \"{dest}\"")
                 };
-                self.error_reporter.report_mismatch_hint::<T, T, ()>(
+                self.error_reporter.report_mismatch_hint::<T, T>(
                     HintCode::InconsistentDescription,
                     format!("{name} has inconsistent descriptions across subgraphs. "),
                     dest,

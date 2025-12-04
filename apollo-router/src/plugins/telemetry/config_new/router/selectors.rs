@@ -1,4 +1,5 @@
 use derivative::Derivative;
+use http_body::Body;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::from_str;
@@ -159,6 +160,13 @@ pub(crate) enum RouterSelector {
         /// The http response status code.
         response_status: ResponseStatus,
     },
+    /// The size hint of the body.
+    /// This is used as the Content-Length header has not yet been populated
+    /// when selectors are evaluated
+    ResponseSizeHint {
+        /// Extract response size hint in bytes
+        response_size_hint: bool,
+    },
     /// Router overhead duration (time not spent in subgraph requests)
     RouterOverhead {
         /// Extract router overhead duration in seconds
@@ -311,6 +319,13 @@ impl Selector for RouterSelector {
                     .canonical_reason()
                     .map(|reason| reason.to_string().into()),
             },
+            RouterSelector::ResponseSizeHint { response_size_hint } if *response_size_hint => {
+                response
+                    .response
+                    .size_hint()
+                    .exact()
+                    .map(|size| opentelemetry::Value::I64(size as i64))
+            }
             RouterSelector::RouterOverhead { router_overhead } if *router_overhead => response
                 .context
                 .extensions()
@@ -459,6 +474,7 @@ impl Selector for RouterSelector {
                     | RouterSelector::ResponseHeader { .. }
                     | RouterSelector::ResponseContext { .. }
                     | RouterSelector::ResponseStatus { .. }
+                    | RouterSelector::ResponseSizeHint { .. }
                     | RouterSelector::RouterOverhead { .. }
                     | RouterSelector::ActiveSubgraphRequests { .. }
                     | RouterSelector::OnGraphQLError { .. }
@@ -972,6 +988,25 @@ mod test {
                 )
                 .unwrap(),
             "No Content".into()
+        );
+    }
+
+    #[test]
+    fn router_response_size_hint() {
+        let selector = RouterSelector::ResponseSizeHint {
+            response_size_hint: true,
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .data("value")
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            // The actual response body is {"data":"value"}
+            opentelemetry::Value::I64(16)
         );
     }
 

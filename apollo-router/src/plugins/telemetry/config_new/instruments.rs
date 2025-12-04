@@ -401,11 +401,7 @@ impl InstrumentsConfig {
                                     )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(RouterSelector::ResponseHeader {
-                                response_header: "content-length".to_string(),
-                                redact: None,
-                                default: None,
-                            })),
+                            selector: Some(Arc::new(RouterSelector::ResponseSizeHint { response_size_hint: true })),
                             selectors,
                             updated: false,
                             _phantom: PhantomData,
@@ -3469,7 +3465,6 @@ mod tests {
                 .status_code(StatusCode::BAD_REQUEST)
                 .header("content-type", "application/json")
                 .header("x-my-header", "TEST")
-                .header("content-length", "35")
                 .data(json!({"errors": [{"message": "nope"}]}))
                 .build()
                 .unwrap();
@@ -3489,7 +3484,7 @@ mod tests {
             assert_histogram_sum!("http.server.request.body.size", 35.0);
             assert_histogram_sum!(
                 "http.server.response.body.size",
-                35.0,
+                40.0,
                 "acme.my_attribute" = "TEST"
             );
 
@@ -3506,7 +3501,6 @@ mod tests {
                 .context(router_req.context.clone())
                 .status_code(StatusCode::BAD_REQUEST)
                 .header("content-type", "application/json")
-                .header("content-length", "35")
                 .data(json!({"errors": [{"message": "nope"}]}))
                 .build()
                 .unwrap();
@@ -3526,12 +3520,12 @@ mod tests {
             assert_histogram_sum!("http.server.request.body.size", 70.0);
             assert_histogram_sum!(
                 "http.server.response.body.size",
-                35.0,
+                40.0,
                 "acme.my_attribute" = "TEST"
             );
             assert_histogram_sum!(
                 "http.server.response.body.size",
-                35.0,
+                40.0,
                 "acme.my_attribute" = "unknown"
             );
 
@@ -3547,7 +3541,6 @@ mod tests {
                 .context(router_req.context.clone())
                 .status_code(StatusCode::OK)
                 .header("content-type", "application/json")
-                .header("content-length", "35")
                 .data(json!({"errors": [{"message": "nope"}]}))
                 .build()
                 .unwrap();
