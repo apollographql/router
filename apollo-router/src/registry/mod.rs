@@ -1,5 +1,6 @@
 use std::string::FromUtf8Error;
 use std::time::Duration;
+use std::time::Instant;
 
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
@@ -224,10 +225,47 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
         protocol,
         ..Default::default()
     });
-
-    let digest = client.fetch_manifest_digest(&reference, &auth).await?;
-
-    Ok(digest)
+    let before_request = Instant::now();
+    match client.fetch_manifest_digest(&reference, &auth).await {
+        Ok(digest) => {
+            u64_counter_with_unit!(
+                "apollo.router.oci.manifest.count",
+                "Number of requests to get manifest for a Graph Artifact",
+                "{count}",
+                1u64,
+                url = oci_config.reference.to_string(),
+                status = "success"
+            );
+            f64_histogram_with_unit!(
+                "apollo.router.oci.manifest.duration.seconds",
+                "Duration of fetching manifest from OCI.",
+                "s",
+                before_request.elapsed().as_secs_f64(),
+                url = oci_config.reference.to_string(),
+                kind = "got_manifest"
+            );
+            Ok(digest)
+        }
+        Err(err) => {
+            u64_counter_with_unit!(
+                "apollo.router.oci.manifest.count",
+                "Number of requests to get manifest for a Graph Artifact",
+                "{count}",
+                1u64,
+                status = "failure"
+            );
+            f64_histogram_with_unit!(
+                "apollo.router.oci.manifest.duration.seconds",
+                "Duration of fetching manifest from OCI.",
+                "s",
+                before_request.elapsed().as_secs_f64(),
+                url = oci_config.reference.to_string(),
+                kind = "oci_error",
+                error = "error response from OCI"
+            );
+            Err(err.into())
+        }
+    }
 }
 
 /// Fetch an OCI bundle
@@ -240,6 +278,13 @@ pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciE
         "prepared to fetch schema from oci over {:?}, auth anonymous? {:?}",
         protocol,
         auth == RegistryAuth::Anonymous
+    );
+
+    u64_counter_with_unit!(
+        "apollo.router.oci.fullArtifact.count.total",
+        "Total number of requests to get full artifact for a Graph Artifact",
+        "{count}",
+        1u64
     );
 
     pull_oci(
@@ -261,12 +306,43 @@ pub(crate) fn stream_from_oci(
 
     let task = async move {
         let mut last_digest: Option<String> = None;
+        let before_request = Instant::now();
         loop {
             match fetch_oci_manifest_digest(&oci_config).await {
-                Ok(current_digest) => {
+                    Ok(current_digest) => {
+                        u64_counter_with_unit!(
+                            "apollo.router.oci.blob.count",
+                            "Total number of requests to get manifest for a Graph Artifact",
+                            "{count}",
+                            1u64,
+                            status = "success"
+                        );
+                        f64_histogram_with_unit!(
+                            "apollo.router.oci.manifest.duration.seconds",
+                            "Duration of fetching manifest from OCI.",
+                            "s",
+                            before_request.elapsed().as_secs_f64(),
+                            url = oci_config.reference.to_string(),
+                            kind = "new"
+                        );
                     if last_digest.as_deref() == Some(current_digest.as_str()) {
                         // Digest unchanged, skip fetching the full schema
                         tracing::debug!("oci manifest digest unchanged, skipping schema fetch");
+                        u64_counter_with_unit!(
+                            "apollo.router.oci.manifest.unchanged.count",
+                            "Number of requests who indicate blob unchanged",
+                            "{count}",
+                            1u64,
+                            status = "success"
+                        );
+                        f64_histogram_with_unit!(
+                            "apollo.router.oci.manifest.duration.seconds",
+                            "Duration of Apollo Uplink fetches.",
+                            "s",
+                            before_request.elapsed().as_secs_f64(),
+                            url = oci_config.reference.to_string(),
+                            kind = "unchanged"
+                        );
                     } else {
                         // Digest changed, fetch the full schema
                         tracing::debug!("oci manifest digest changed, fetching schema");
@@ -275,6 +351,21 @@ pub(crate) fn stream_from_oci(
                         match fetch_oci(&oci_config).await {
                             Ok(oci_result) => {
                                 tracing::debug!("fetched schema from oci registry");
+                                u64_counter_with_unit!(
+                                    "apollo.router.oci.blob.count",
+                                    "Number of requests to get blob for a Graph Artifact",
+                                    "{count}",
+                                    1u64,
+                                    status = "success"
+                                );
+                                f64_histogram_with_unit!(
+                                    "apollo.router.oci.manifest.duration.seconds",
+                                    "Duration of fetch for GrAr blob.",
+                                    "s",
+                                    before_request.elapsed().as_secs_f64(),
+                                    url = oci_config.reference.to_string(),
+                                    kind = "new"
+                                );
                                 let schema_state = SchemaState {
                                     sdl: oci_result.schema,
                                     launch_id: None, //TODO: Add launch_id
@@ -287,6 +378,20 @@ pub(crate) fn stream_from_oci(
                                 }
                             }
                             Err(err) => {
+                                u64_counter_with_unit!(
+                                    "apollo.router.oci.blob.count",
+                                    "Number of requests to get blob for a Graph Artifact",
+                                    "{count}",
+                                    1u64,
+                                    status = "failure"
+                                );
+                                f64_histogram!(
+                                    "apollo.router.oci.blob.duration.seconds",
+                                    "Duration of fetch for GrAr blob.",
+                                    before_request.elapsed().as_secs_f64(),
+                                    url = oci_config.reference.to_string(),
+                                    kind = "oci_error"
+                                );
                                 tracing::error!("error fetching schema from oci registry: {}", err);
                                 if let Err(e) = sender.send(Err(err)).await {
                                     tracing::debug!(
