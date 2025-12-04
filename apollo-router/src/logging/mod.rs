@@ -78,12 +78,18 @@ pub(crate) mod test {
                             .unwrap()
                             .as_object_mut()
                             .unwrap();
+                        // Remove noisy OTel logs when meter provider is dropped
+                        if matches!(fields.get("name").and_then(|v| v.as_str()), Some("MeterProvider.Drop")){
+                            return None;
+                        }
+
                         let message = fields.remove("message").unwrap_or_default();
                         line.as_object_mut()
                             .unwrap()
                             .insert("message".to_string(), message);
-                        line
+                        Some(line)
                     })
+                    .flatten()// Remove None values
                     .collect();
                 serde_json::json!(parsed_log)
             };

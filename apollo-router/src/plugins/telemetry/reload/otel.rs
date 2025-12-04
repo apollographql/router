@@ -88,7 +88,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     let fmt = if std::io::stdout().is_terminal() {
         FmtLayer::new(Text::default(), std::io::stdout)
             .with_filter(filter_fn(|meta| {
-                !meta.target().starts_with("opentelemetry")
+                !meta.target().starts_with("opentelemetry") // TODO this should only filter out error/warn
             }))
             .boxed()
     } else {

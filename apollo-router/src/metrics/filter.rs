@@ -274,7 +274,7 @@ impl InstrumentProvider for FilteredInstrumentProvider {
 impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
     fn meter(&self, name: &'static str) -> Meter {
         Meter::new(Arc::new(FilteredInstrumentProvider {
-            noop: opentelemetry::global::meter_provider().meter(""),
+            noop: opentelemetry::global::meter_provider().meter("noop"),
             delegate: self
                 .delegate
                 .versioned_meter(name, None::<&str>, None::<&str>, None),
@@ -284,7 +284,7 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
     }
     fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
         Meter::new(Arc::new(FilteredInstrumentProvider {
-            noop: opentelemetry::global::meter_provider().meter(""),
+            noop: opentelemetry::global::meter_provider().meter("noop"),
             delegate: self.delegate.meter_with_scope(&scope),
             deny: self.deny.clone(),
             allow: self.allow.clone(),

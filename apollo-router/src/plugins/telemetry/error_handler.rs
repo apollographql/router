@@ -56,7 +56,6 @@ impl OtelErrorLayer {
     }
 
     fn classify(&self, target: &str, msg: &str) -> ErrorType {
-        // TODO workshop this
         if target.contains("metrics") || msg.contains("Metrics error:") {
             ErrorType::Metric
         } else if target.contains("trace") {
