@@ -555,15 +555,13 @@ fn hints_when_merging_cost_arguments() {
     .unwrap();
     let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
 
-    /* TODO: Re-enable once FED-693 is merged
     assert_eq!(result.hints().len(), 1);
     let hint = result.hints().first().unwrap();
     assert_eq!(hint.code(), "MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS");
     assert_eq!(
         hint.message(),
-        r#"Directive @cost is applied to "Query.sharedWithCost" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "weight": MAX }""#
+        r#"Directive @cost is applied to "Query.sharedWithCost" in multiple subgraphs with different arguments. Merging strategies used by arguments: { weight: MAX }"#
     );
-    */
 
     let shared_with_cost = coord!(Query.sharedWithCost)
         .lookup_field(result.schema().schema())
