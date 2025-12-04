@@ -6,8 +6,6 @@ events:
         body: |
           hello
     - router_response:
-        headers:
-          "content-length": "35"
         body: |
           hello
         status: 200

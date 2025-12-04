@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 
 /// Items with higher priority value get handled sooner
 #[allow(unused)]
-#[derive(strum_macros::IntoStaticStr)]
+#[derive(strum::IntoStaticStr)]
 pub(crate) enum Priority {
     P1 = 1,
     P2,

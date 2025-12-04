@@ -8,7 +8,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 pub(super) use error::Error;
-use tokio_util::future::FutureExt;
+use tokio_util::time::FutureExt;
 
 use super::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
@@ -123,7 +123,7 @@ pub(super) trait CacheStorage {
     async fn internal_fetch_multiple(
         &self,
         cache_keys: &[&str],
-    ) -> StorageResult<Vec<Option<CacheEntry>>>;
+    ) -> StorageResult<Vec<StorageResult<CacheEntry>>>;
 
     /// Fetch the values belonging to `cache_keys`. Command will be timed out after `self.fetch_timeout()`.
     async fn fetch_multiple(
@@ -141,7 +141,18 @@ pub(super) trait CacheStorage {
         );
 
         record_fetch_duration(now.elapsed(), subgraph_name, batch_size);
-        result.inspect_err(|err| record_fetch_error(err, subgraph_name))
+
+        // go through values to record partial errors
+        let values = result
+            .inspect_err(|err| record_fetch_error(err, subgraph_name))?
+            .into_iter()
+            .map(|value| {
+                value
+                    .inspect_err(|err| record_fetch_error(err, subgraph_name))
+                    .ok()
+            })
+            .collect();
+        Ok(values)
     }
 
     #[doc(hidden)]

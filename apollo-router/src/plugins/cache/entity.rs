@@ -1007,21 +1007,26 @@ async fn cache_lookup_entities(
         private_id,
     )?;
 
+    let result_len = keys.len();
     let cache_result: Vec<Option<CacheEntry>> = cache
         .get_multiple(keys.clone())
         .await
-        .into_iter()
-        .map(|v: Option<CacheEntry>| match v {
-            None => None,
-            Some(v) => {
-                if v.control.can_use() {
-                    Some(v)
-                } else {
-                    None
-                }
-            }
+        .map(|values| {
+            values
+                .into_iter()
+                .map(|v| match v {
+                    Ok(None) | Err(_) => None,
+                    Ok(Some(v)) => {
+                        if v.control.can_use() {
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    }
+                })
+                .collect()
         })
-        .collect();
+        .unwrap_or(vec![None; result_len]);
 
     let representations = body
         .variables

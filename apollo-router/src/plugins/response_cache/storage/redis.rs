@@ -18,7 +18,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tokio_util::future::FutureExt;
+use tokio_util::time::FutureExt;
 use tower::BoxError;
 
 use super::CacheEntry;
@@ -397,20 +397,20 @@ impl CacheStorage for Storage {
     async fn internal_fetch_multiple(
         &self,
         cache_keys: &[&str],
-    ) -> StorageResult<Vec<Option<CacheEntry>>> {
+    ) -> StorageResult<Vec<StorageResult<Option<CacheEntry>>>> {
         let keys: Vec<String> = cache_keys.iter().map(|key| key.to_string()).collect();
         let options = Options {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Option<CacheValue>> =
+        let values: Vec<Result<Option<CacheValue>, _>> =
             self.storage.get_multiple_with_options(keys, options).await;
 
         let entries = values
             .into_iter()
             .zip(cache_keys)
-            .map(|(opt_value, cache_key)| {
-                opt_value.map(|value| CacheEntry::from((*cache_key, value)))
+            .map(|(res_value, cache_key)| {
+                res_value.map(|opt_value| opt_value.map(|value| CacheEntry::from((*cache_key, value))))
             })
             .collect();
 
@@ -597,6 +597,7 @@ mod tests {
     use super::Config;
     use super::Storage;
     use super::now;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugins::response_cache::ErrorCode;
     use crate::plugins::response_cache::storage::CacheStorage;
     use crate::plugins::response_cache::storage::Document;
@@ -1422,37 +1423,47 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_errors_are_captured() -> Result<(), BoxError> {
-        let config = Config {
-            fetch_timeout: Duration::from_nanos(0),
-            ..redis_config(false)
-        };
-        let (_drop_tx, drop_rx) = broadcast::channel(2);
-        let storage = Storage::new(&config, drop_rx).await?;
-        storage.truncate_namespace().await?;
-
-        let document = common_document();
-
-        // because of how tokio::timeout polls, it's possible for a command to finish before the
-        // timeout is polled (even if the duration is 0). perform the check in a loop to give it
-        // a few changes to trigger.
-        let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(5) {
-            let error = match storage.fetch(&document.key, "S1").await {
-                Ok(Some(_)) => {
-                    panic!("Should not have encountered a value")
-                }
-                Ok(None) => {
-                    // element not found, try again to hit the timeout
-                    continue;
-                }
-                Err(err) => err,
+        async move {
+            let config = Config {
+                fetch_timeout: Duration::from_nanos(0),
+                ..redis_config(false)
             };
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&config, drop_rx).await?;
+            storage.truncate_namespace().await?;
 
-            assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
-            assert_eq!(error.code(), "TIMEOUT");
-            return Ok(());
+            let document = common_document();
+
+            // because of how tokio::timeout polls, it's possible for a command to finish before the
+            // timeout is polled (even if the duration is 0). perform the check in a loop to give it
+            // a few changes to trigger.
+            let now = Instant::now();
+            while now.elapsed() < Duration::from_secs(5) {
+                // NotFound manifests as Ok<Vec<None>> with fetch multiple, try again if that is the case
+                let error = match storage.fetch_multiple(&[&document.key], "S1").await {
+                    Ok(v) => {
+                        if v.iter().all(|e| e.is_none()) {
+                            continue;
+                        }
+                        panic!("Value was unexpected");
+                    }
+                    Err(err) => err,
+                };
+
+                assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
+                assert_eq!(error.code(), "TIMEOUT");
+                assert_counter!(
+                    "apollo.router.operations.response_cache.fetch.error",
+                    1,
+                    "code" = "TIMEOUT",
+                    "subgraph.name" = "S1"
+                );
+                return Ok(());
+            }
+
+            panic!("Never observed a timeout");
         }
-
-        panic!("Never observed a timeout");
+        .with_metrics()
+        .await
     }
 }
