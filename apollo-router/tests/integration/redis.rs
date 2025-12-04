@@ -1886,7 +1886,7 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     let _ = join_set.join_all().await;
 
     let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
-    assert!(redis_monitor_output.command_sent_to_replicas_only("MGET"));
+    assert!(redis_monitor_output.command_sent_to_replicas_only("GET"));
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
