@@ -1793,8 +1793,12 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
     assert!(redis_monitor_output.command_sent_to_any("GET"));
 }
 
+// NB: the `num_products` parameter determines how many `Product` entities will be requested from
+//  the `reviews` subgraph. This is useful to check that `get_multiple` works properly with different
+//  numbers of keys.
+#[rstest::rstest]
 #[tokio::test(flavor = "multi_thread")]
-async fn test_redis_uses_replicas_in_clusters_for_mgets() {
+async fn test_redis_uses_replicas_in_clusters_for_mgets(#[values(1, 3, 5)] num_products: usize) {
     if !graph_os_enabled() {
         return;
     }
@@ -1802,16 +1806,16 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     let router_config = include_str!("fixtures/response_cache_redis_cluster.router.yaml");
     let mut subgraph_overrides = HashMap::new();
 
+    let products = [
+        json!({"__typename":"Product","upc":"1","name":"Table","reviews":[{"id":"review1"}]}),
+        json!({"__typename":"Product","upc":"2","name":"Chair","reviews":[{"id":"review2"}]}),
+        json!({"__typename":"Product","upc":"3","name":"Desk","reviews":[{"id":"review3"}]}),
+        json!({"__typename":"Product","upc":"4","name":"Lamp","reviews":[{"id":"review4"}]}),
+        json!({"__typename":"Product","upc":"5","name":"Sofa","reviews":[{"id":"review5"}]}),
+    ];
+
     let products_response = ResponseTemplate::new(200)
-        .set_body_json(serde_json::json! {{"data": {
-            "topProducts": [
-                {"__typename":"Product","upc":"1","name":"Table","reviews":[{"id":"review1"}]},
-                {"__typename":"Product","upc":"2","name":"Chair","reviews":[{"id":"review2"}]},
-                {"__typename":"Product","upc":"3","name":"Desk","reviews":[{"id":"review3"}]},
-                {"__typename":"Product","upc":"4","name":"Lamp","reviews":[{"id":"review4"}]},
-                {"__typename":"Product","upc":"5","name":"Sofa","reviews":[{"id":"review5"}]}
-            ]
-        }}})
+        .set_body_json(serde_json::json! {{"data": {"topProducts": products[..num_products]}}})
         .insert_header("cache-control", "max-age=500, public");
 
     let reviews_response = ResponseTemplate::new(200)
@@ -1886,7 +1890,7 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     let _ = join_set.join_all().await;
 
     let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
-    assert!(redis_monitor_output.command_sent_to_replicas_only("MGET"));
+    assert!(redis_monitor_output.command_sent_to_replicas_only("GET"));
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
@@ -1899,7 +1903,7 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
     router.assert_metrics_does_not_contain(parse_error).await;
 
-    let example_cache_key = "version:1.1:subgraph:reviews:type:Product:representation:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let example_cache_key = "version:1.1:subgraph:reviews:type:Product:representation:dd668a3ba05fb2fcd9e372b7063fe717f3ff1c209c29fa8367b8324e49775115:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     router
         .assert_redis_cache_contains(example_cache_key, None)
         .await;

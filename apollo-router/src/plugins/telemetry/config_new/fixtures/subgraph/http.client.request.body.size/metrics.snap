@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
-description: Server request body size metrics
+description: Subgraph request body size metric
 expression: "&metrics.all()"
 info:
   telemetry:
@@ -9,15 +9,17 @@ info:
         router:
           http.server.active_requests: false
           http.server.request.duration: false
-          http.server.response.body.size: true
+          http.server.response.body.size: false
+        subgraph:
+          http.client.request.duration: false
+          http.client.request.body.size: true
 ---
-- name: http.server.response.body.size
-  description: Size of HTTP server response bodies.
+- name: http.client.request.body.size
+  description: Size of HTTP client request bodies.
   unit: By
   data:
     datapoints:
-      - sum: 18
+      - sum: 54
         count: 1
         attributes:
-          http.request.method: GET
-          http.response.status_code: 200
+          subgraph.name: products
