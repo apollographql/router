@@ -665,19 +665,11 @@ impl RedisCacheStorage {
     ///  because `NotFound` shouldn't be considered an error.
     pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
         &self,
-        mut keys: Vec<RedisKey<K>>,
+        keys: Vec<RedisKey<K>>,
         options: Options,
     ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
         tracing::trace!("getting multiple values from redis: {:?}", keys);
-        let client = self.client();
-
-        if keys.len() == 1 {
-            let key = self.make_key(keys.swap_remove(0));
-            let res_value: Result<RedisValue<V>, RedisError> =
-                client.with_options(&options).get(key).await;
-            let value = res_value.inspect_err(|e| self.record_error(e))?;
-            Ok(vec![Ok(value)])
-        } else if self.is_cluster {
+        if self.is_cluster {
             // we cannot do an MGET across hash slots (error: "ERR CROSSSLOT Keys in request don't
             // hash to the same slot").
             // we either need to group the keys by hash slot, or just send a GET for each key; given
@@ -687,7 +679,7 @@ impl RedisCacheStorage {
 
             // then we query all the key groups at the same time
             // use `client.replicas()` since we're in a cluster and can take advantage of read-replicas
-            let client = client.replicas().with_options(&options);
+            let client = self.client().replicas().with_options(&options);
             let mut tasks = Vec::with_capacity(len);
             for (index, key) in keys.into_iter().enumerate() {
                 let client = client.clone();
@@ -709,7 +701,8 @@ impl RedisCacheStorage {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            let values: Vec<Option<RedisValue<V>>> = client
+            let values: Vec<Option<RedisValue<V>>> = self
+                .client()
                 .with_options(&options)
                 .mget(keys)
                 .await
