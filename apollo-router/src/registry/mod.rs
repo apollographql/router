@@ -309,22 +309,22 @@ pub(crate) fn stream_from_oci(
         let before_request = Instant::now();
         loop {
             match fetch_oci_manifest_digest(&oci_config).await {
-                    Ok(current_digest) => {
-                        u64_counter_with_unit!(
-                            "apollo.router.oci.blob.count",
-                            "Total number of requests to get manifest for a Graph Artifact",
-                            "{count}",
-                            1u64,
-                            status = "success"
-                        );
-                        f64_histogram_with_unit!(
-                            "apollo.router.oci.manifest.duration.seconds",
-                            "Duration of fetching manifest from OCI.",
-                            "s",
-                            before_request.elapsed().as_secs_f64(),
-                            url = oci_config.reference.to_string(),
-                            kind = "new"
-                        );
+                Ok(current_digest) => {
+                    u64_counter_with_unit!(
+                        "apollo.router.oci.blob.count",
+                        "Total number of requests to get manifest for a Graph Artifact",
+                        "{count}",
+                        1u64,
+                        status = "success"
+                    );
+                    f64_histogram_with_unit!(
+                        "apollo.router.oci.manifest.duration.seconds",
+                        "Duration of fetching manifest from OCI.",
+                        "s",
+                        before_request.elapsed().as_secs_f64(),
+                        url = oci_config.reference.to_string(),
+                        kind = "new"
+                    );
                     if last_digest.as_deref() == Some(current_digest.as_str()) {
                         // Digest unchanged, skip fetching the full schema
                         tracing::debug!("oci manifest digest unchanged, skipping schema fetch");
