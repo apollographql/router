@@ -27,6 +27,7 @@ members = [
     "examples/throw-error/rhai",
     "fuzz",
     "fuzz/subgraph",
+    "redis_derive",
     "xtask",
 ]
 

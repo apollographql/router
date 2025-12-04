@@ -14,7 +14,6 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::redis;
 
 #[derive(thiserror::Error, Display, Debug, Eq, PartialEq)]
 #[error("GraphQL response was malformed: {reason}")]
@@ -25,7 +24,9 @@ pub(crate) struct MalformedResponseError {
 
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default, redis_derive::SerializableValue,
+)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Response {
@@ -254,8 +255,6 @@ impl From<ExecutionResponse> for Response {
         }
     }
 }
-
-impl redis::ValueType for Response {}
 
 #[cfg(test)]
 mod tests {

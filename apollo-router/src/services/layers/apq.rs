@@ -11,7 +11,9 @@ use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::cache;
 use crate::cache::DeduplicatingCache;
+use crate::redis;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
@@ -27,6 +29,30 @@ pub(crate) struct PersistedQuery {
     pub(crate) version: u8,
     #[serde(rename = "sha256Hash")]
     pub(crate) sha256hash: String,
+}
+
+// Wrapper type for the value stored in the APQ Redis cache.
+//
+// Ideally we would just store the string directly, but the previous Redis implementation serialized
+// everything before putting it in the cache -- including bare strings. For backwards compatibility,
+// we need to serialize this value too.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct PersistedQueryCacheValue(String);
+impl redis::ValueType for PersistedQueryCacheValue {
+    fn try_from_redis_value(value: redis::FredValue) -> redis::FredResult<Self> {
+        let query = redis::try_from_redis_value(value)?;
+        Ok(Self(query))
+    }
+
+    fn try_into_redis_value(self) -> redis::FredResult<redis::FredValue> {
+        redis::try_into_redis_value(self.0)
+    }
+}
+
+impl cache::storage::ValueType for PersistedQueryCacheValue {
+    fn estimated_size(&self) -> Option<usize> {
+        self.0.estimated_size()
+    }
 }
 
 impl PersistedQuery {
@@ -52,7 +78,7 @@ impl PersistedQuery {
 #[derive(Clone)]
 pub(crate) struct APQLayer {
     /// set to None if APQ is disabled
-    cache: Option<DeduplicatingCache<String, String>>,
+    cache: Option<DeduplicatingCache<String, PersistedQueryCacheValue>>,
 }
 
 impl APQLayer {
@@ -64,7 +90,7 @@ impl APQLayer {
 }
 
 impl APQLayer {
-    pub(crate) fn with_cache(cache: DeduplicatingCache<String, String>) -> Self {
+    pub(crate) fn with_cache(cache: DeduplicatingCache<String, PersistedQueryCacheValue>) -> Self {
         Self { cache: Some(cache) }
     }
 
@@ -107,7 +133,7 @@ impl APQLayer {
 /// populates the query string in the request body.
 /// The request is rejected if the hash is not present in the cache.
 async fn apq_request(
-    cache: &DeduplicatingCache<String, String>,
+    cache: &DeduplicatingCache<String, PersistedQueryCacheValue>,
     mut request: SupergraphRequest,
 ) -> Result<SupergraphRequest, SupergraphResponse> {
     let maybe_query_hash =
@@ -123,7 +149,9 @@ async fn apq_request(
                 let query = query.to_owned();
                 let cache = cache.clone();
                 tokio::spawn(async move {
-                    cache.insert(redis_key(&query_hash), query).await;
+                    cache
+                        .insert(redis_key(&query_hash), PersistedQueryCacheValue(query))
+                        .await;
                 });
                 Ok(request)
             } else {
@@ -154,7 +182,7 @@ async fn apq_request(
             {
                 let _ = request.context.insert(PERSISTED_QUERY_CACHE_HIT, true);
                 tracing::trace!("apq: cache hit");
-                request.supergraph_request.body_mut().query = Some(cached_query);
+                request.supergraph_request.body_mut().query = Some(cached_query.0);
                 Ok(request)
             } else {
                 let _ = request.context.insert(PERSISTED_QUERY_CACHE_HIT, false);

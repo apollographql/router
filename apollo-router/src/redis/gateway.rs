@@ -731,11 +731,12 @@ mod test {
 
     #[test]
     fn ensure_invalid_payload_serialization_doesnt_fail() {
-        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        #[derive(
+            Clone, Debug, serde::Serialize, serde::Deserialize, redis_derive::SerializableValue,
+        )]
         struct Stuff {
             time: SystemTime,
         }
-        impl redis::ValueType for Stuff {}
 
         let invalid_json_payload = redis::value::Value(Stuff {
             // this systemtime is invalid, serialization will fail

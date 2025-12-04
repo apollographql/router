@@ -300,6 +300,8 @@ tikv-jemallocator = { version = "0.6.0", features = ["profiling"], optional = tr
 tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats", "profiling"], optional = true }
 tikv-jemalloc-sys = { version = "0.6.0", features = ["profiling"] }
 
+redis_derive = { path = "../redis_derive" }
+
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 ctor = "0.6.0"

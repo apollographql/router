@@ -489,12 +489,12 @@ mod tests {
                 .await
                 .expect("Failed to create Redis storage with mocks");
 
-            #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+            #[derive(
+                Clone, Debug, serde::Serialize, serde::Deserialize, redis_derive::SerializableValue,
+            )]
             struct TestValue {
                 data: String,
             }
-
-            impl redis::ValueType for TestValue {}
 
             let test_key = "test_key";
             let test_value = TestValue {

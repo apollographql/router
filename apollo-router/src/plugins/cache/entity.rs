@@ -1122,13 +1122,11 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
     })
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, redis_derive::SerializableValue)]
 struct CacheEntry {
     control: CacheControl,
     data: Value,
 }
-
-impl redis::ValueType for CacheEntry {}
 
 impl ValueType for CacheEntry {
     fn estimated_size(&self) -> Option<usize> {

@@ -35,15 +35,13 @@ use crate::redis;
 
 pub(crate) type Config = super::config::Config;
 
-#[derive(Deserialize, Debug, Clone, Serialize)]
+#[derive(Deserialize, Debug, Clone, Serialize, redis_derive::SerializableValue)]
 struct CacheValue {
     data: serde_json_bytes::Value,
     cache_control: CacheControl,
     // Only set in debug mode
     cache_tags: Option<HashSet<String>>,
 }
-
-impl redis::ValueType for CacheValue {}
 
 impl From<(&str, CacheValue)> for CacheEntry {
     fn from((cache_key, cache_value): (&str, CacheValue)) -> Self {

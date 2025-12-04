@@ -838,7 +838,16 @@ impl Hasher for StructHasher {
     }
 }
 
-impl redis::ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {}
+impl redis::ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
+    fn try_from_redis_value(value: redis::FredValue) -> redis::FredResult<Self> {
+        redis::try_from_redis_value(value)
+    }
+
+    fn try_into_redis_value(self) -> redis::FredResult<redis::FredValue> {
+        redis::try_into_redis_value(self)
+    }
+}
+
 impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
     fn estimated_size(&self) -> Option<usize> {
         match self {

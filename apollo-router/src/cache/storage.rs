@@ -329,13 +329,13 @@ mod test {
     use crate::cache::storage::CacheStorage;
     use crate::cache::storage::ValueType;
     use crate::metrics::FutureMetricsExt;
-    use crate::redis;
 
     #[tokio::test]
     async fn test_metrics() {
-        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        #[derive(
+            Clone, Debug, serde::Serialize, serde::Deserialize, redis_derive::SerializableValue,
+        )]
         struct Stuff {}
-        impl redis::ValueType for Stuff {}
         impl ValueType for Stuff {
             fn estimated_size(&self) -> Option<usize> {
                 Some(1)
@@ -370,9 +370,10 @@ mod test {
     #[tokio::test]
     #[should_panic]
     async fn test_metrics_not_emitted_where_no_estimated_size() {
-        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        #[derive(
+            Clone, Debug, serde::Serialize, serde::Deserialize, redis_derive::SerializableValue,
+        )]
         struct Stuff {}
-        impl redis::ValueType for Stuff {}
         impl ValueType for Stuff {
             fn estimated_size(&self) -> Option<usize> {
                 None
@@ -401,11 +402,12 @@ mod test {
 
     #[tokio::test]
     async fn test_metrics_eviction() {
-        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        #[derive(
+            Clone, Debug, serde::Serialize, serde::Deserialize, redis_derive::SerializableValue,
+        )]
         struct Stuff {
             test: String,
         }
-        impl redis::ValueType for Stuff {}
         impl ValueType for Stuff {
             fn estimated_size(&self) -> Option<usize> {
                 Some(estimate_size(self))
