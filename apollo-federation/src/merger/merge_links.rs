@@ -23,7 +23,7 @@ use crate::schema::type_and_directive_specification::DirectiveCompositionSpecifi
 pub(crate) struct CoreDirectiveInSubgraphs {
     url: Url,
     name: Name,
-    definitions_per_subgraph: HashMap<String, DirectiveDefinition>,
+    definitions_per_subgraph: IndexMap<String, DirectiveDefinition>,
     composition_spec: DirectiveCompositionSpecification,
 }
 
@@ -123,13 +123,15 @@ impl Merger {
                         .definitions_per_subgraph
                         .insert(subgraph.name.clone(), (**definition).clone());
                 } else {
+                    let mut definitions_per_subgraph = IndexMap::default();
+                    definitions_per_subgraph.insert(
+                        subgraph.name.clone(),
+                        (**definition).clone(),
+                    );
                     let for_version = CoreDirectiveInSubgraphs {
                         url: source.url.clone(),
                         name: import.element.clone(),
-                        definitions_per_subgraph: HashMap::from([(
-                            subgraph.name.clone(),
-                            (**definition).clone(),
-                        )]),
+                        definitions_per_subgraph,
                         composition_spec,
                     };
                     for_feature.insert(major, for_version);
