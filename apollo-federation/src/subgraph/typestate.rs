@@ -913,6 +913,12 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     trace!("expand_links: on_directive_definition_and_schema_parsed");
     FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
 
+    // Re-collect metadata to pick up any directives that were added by expand_known_features
+    trace!("expand_links: collect_links_metadata (after expansion)");
+    schema.collect_links_metadata()?;
+    trace!("expand_links: collect_shallow_references (after expansion)");
+    schema.collect_shallow_references();
+
     // Also, the backfilled definitions mean we can collect deep references.
     // Ignore the error case, which means the schema has invalid references. It will be
     // reported later in the validation phase.

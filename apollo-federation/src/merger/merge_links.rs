@@ -211,12 +211,21 @@ impl Merger {
             };
             let supergraph_info = supergraph_info_by_identity
                 .entry(spec_in_supergraph.identity().clone())
-                .or_insert(vec![CoreDirectiveInSupergraph {
+                .or_insert_with(Vec::new);
+            
+            // Check if this directive is already in the list
+            if !supergraph_info.iter().any(|d| d.name_in_feature == subgraph_core_directive.name) {
+                trace!("    Adding @{} to supergraph_info", subgraph_core_directive.name);
+                supergraph_info.push(CoreDirectiveInSupergraph {
                     spec_in_supergraph,
                     name_in_feature: subgraph_core_directive.name.clone(),
                     name_in_supergraph: name_in_supergraph.clone(),
                     composition_spec: subgraph_core_directive.composition_spec.clone(),
-                }]);
+                });
+            } else {
+                trace!("    @{} already in supergraph_info", subgraph_core_directive.name);
+            }
+            
             assert!(
                 supergraph_info
                     .iter()
