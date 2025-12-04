@@ -226,7 +226,7 @@ impl Merger {
                     ))
                 }
             }
-            self.error_reporter.report_mismatch_hint::<Directive, DirectiveTargetPosition, ()>(
+            self.error_reporter.report_mismatch_hint::<Directive, DirectiveTargetPosition>(
                     HintCode::InconsistentNonRepeatableDirectiveArguments,
                     format!("Non-repeatable directive @{name} is applied to \"{dest}\" in multiple subgraphs but with incompatible arguments. "),
                     &most_used_directive,
@@ -402,7 +402,7 @@ impl Merger {
                 // An executable directive could appear in any place of a query and thus get to any subgraph, so we cannot keep an
                 // executable directive unless it is in all subgraphs. We use an 'intersection' strategy.
                 dest.remove(&mut self.merged)?;
-                self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, DirectiveDefinitionPosition,()>(
+                self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, DirectiveDefinitionPosition>(
                     HintCode::InconsistentExecutableDirectivePresence,
                     format!("Executable directive \"@{name}\" will not be part of the supergraph as it does not appear in all subgraphs: "),
                     dest,
@@ -444,7 +444,7 @@ impl Merger {
                     self.subgraphs[*idx].name, locations
                 );
                 if locations.is_empty() {
-                    self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, DirectiveDefinitionPosition, ()>(
+                    self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, DirectiveDefinitionPosition>(
                         HintCode::NoExecutableDirectiveLocationsIntersection,
                         format!("Executable directive \"@{name}\" has no location that is common to all subgraphs: "),
                         dest,
@@ -467,7 +467,7 @@ impl Merger {
         let supergraph_dest = dest.get(self.merged.schema())?;
 
         if inconsistent_repeatable {
-            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition>(
                 HintCode::InconsistentExecutableDirectiveRepeatable,
                 format!("Executable directive \"@{name}\" will not be marked repeatable in the supergraph as it is inconsistently marked repeatable in subgraphs: "),
                 supergraph_dest,
@@ -482,7 +482,7 @@ impl Merger {
             );
         }
         if inconsistent_locations {
-            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition>(
                 HintCode::InconsistentExecutableDirectiveLocations,
                 format!(
                     "Executable directive \"@{name}\" has inconsistent locations across subgraphs "

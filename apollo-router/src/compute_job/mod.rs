@@ -110,7 +110,7 @@ impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
     }
 }
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::IntoStaticStr)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum ComputeJobType {
     QueryParsing,
