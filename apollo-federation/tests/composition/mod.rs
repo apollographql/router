@@ -13,10 +13,9 @@ mod compose_validation;
 mod connectors;
 mod demand_control;
 mod directive_argument_merge_strategies;
+mod external;
 mod fed1_shareability;
 mod hints;
-// TODO: remove #[ignore] from tests once all fns called by Merger::merge() are implemented
-mod external;
 mod override_directive;
 mod subscription;
 mod supergraph_reversibility;

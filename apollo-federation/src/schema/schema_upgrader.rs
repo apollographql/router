@@ -125,7 +125,7 @@ impl SchemaUpgrader {
         subgraph: Subgraph<Expanded>,
     ) -> Result<Subgraph<Upgraded>, FederationError> {
         // Run pre-upgrade validations to check for issues that would prevent upgrade
-        let upgrade_metadata = UpgradeMetadata {
+        let mut upgrade_metadata = UpgradeMetadata {
             subgraph_name: subgraph.name.clone(),
             key_directive_name: subgraph.key_directive_name()?.clone(),
             requires_directive_name: subgraph.requires_directive_name()?.clone(),
@@ -148,7 +148,7 @@ impl SchemaUpgrader {
         self.remove_external_on_object_types(&mut schema);
 
         // Note that we remove all external on type extensions first, so we don't have to care about it later in @key, @provides and @requires.
-        self.remove_external_on_type_extensions(&upgrade_metadata, &mut schema)?;
+        self.remove_external_on_type_extensions(&mut upgrade_metadata, &mut schema)?;
 
         self.fix_inactive_provides_and_requires(&mut schema)?;
 
@@ -469,7 +469,7 @@ impl SchemaUpgrader {
 
     fn remove_external_on_type_extensions(
         &self,
-        upgrade_metadata: &UpgradeMetadata,
+        upgrade_metadata: &mut UpgradeMetadata,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let Some(metadata) = &schema.subgraph_metadata else {
@@ -569,7 +569,9 @@ impl SchemaUpgrader {
 
         for (pos, directive) in &to_remove {
             pos.remove_directive(schema, directive);
+            upgrade_metadata.metadata.remove_external_field(pos);
         }
+
         Ok(())
     }
 
@@ -1081,6 +1083,7 @@ fn is_interface_object_used(subgraph: &Subgraph<Expanded>) -> Result<bool, Feder
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::coord;
     use test_log::test;
 
     use super::*;
@@ -1899,5 +1902,78 @@ mod tests {
           sdl: String
         }
         "###);
+    }
+
+    #[test]
+    fn removes_external_from_composite_key_fields_in_extension_without_key() {
+        let subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "",
+            r#"
+            type Query {
+                items: [Item!]!
+            }
+
+            type Item @key(fields: "id sku") {
+                id: ID!
+                sku: String!
+                name: String
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let subgraph2 = Subgraph::parse(
+            "subgraph2",
+            "",
+            r#"
+            # Extension without @key - fields should have @external removed
+            # because they're part of the key in subgraph1
+            extend type Item {
+                id: ID! @external
+                sku: String! @external
+                price: Float
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let [_s1, s2]: [Subgraph<_>; 2] =
+            upgrade_subgraphs_if_necessary(vec![subgraph1, subgraph2])
+                .expect("upgrades schema")
+                .try_into()
+                .expect("Expected 2 elements");
+
+        // Verify that subgraph2's Item type was upgraded successfully
+        // and doesn't have @external on the key fields
+        let s2_schema = s2.schema().schema();
+
+        let id_field = coord!(Item.id)
+            .lookup_field(s2_schema)
+            .expect("id field exists");
+        assert!(
+            !id_field.directives.has("external"),
+            "id should not have @external"
+        );
+
+        let sku_field = coord!(Item.sku)
+            .lookup_field(s2_schema)
+            .expect("sku field exists");
+        assert!(
+            !sku_field.directives.has("external"),
+            "sku should not have @external"
+        );
+
+        let price_field = coord!(Item.price)
+            .lookup_field(s2_schema)
+            .expect("price field exists");
+        assert!(
+            !price_field.directives.has("external"),
+            "price should not have @external"
+        );
     }
 }
