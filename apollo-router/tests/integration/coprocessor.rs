@@ -612,14 +612,11 @@ async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError>
 
     // looks sort of over-complicated but we need to access and mutate the key data across threads
     // (test thread and the mock server's thread)
-    let received_cache_keys: Arc<
-        Mutex<
-            Option<(
-                serde_json::Value,
-                serde_json::Map<String, serde_json::Value>,
-            )>,
-        >,
-    > = Arc::new(Mutex::new(None));
+    type CacheKey = (
+        serde_json::Value,
+        serde_json::Map<String, serde_json::Value>,
+    );
+    let received_cache_keys: Arc<Mutex<Option<CacheKey>>> = Arc::new(Mutex::new(None));
     let received_cache_keys_clone = received_cache_keys.clone();
 
     // coprocessor mock
@@ -633,17 +630,13 @@ async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError>
 
             // we're targeting the response stage to make sure keys are available by then (they
             // should be, but this is an understated yet critical part of what we're testing)
-            if stage == "SupergraphResponse" {
-                if let Some(context) = body.get("context") {
-                    if let Some(entries) = context.get("entries").and_then(|e| e.as_object()) {
-                        if let Some(cache_keys) =
-                            entries.get("apollo::response_cache::debug_cached_keys")
-                        {
-                            *received_cache_keys_clone.lock().unwrap() =
-                                Some((cache_keys.clone(), entries.clone()));
-                        }
-                    }
-                }
+            if stage == "SupergraphResponse"
+                && let Some(context) = body.get("context")
+                && let Some(entries) = context.get("entries").and_then(|e| e.as_object())
+                && let Some(cache_keys) = entries.get("apollo::response_cache::debug_cached_keys")
+            {
+                *received_cache_keys_clone.lock().unwrap() =
+                    Some((cache_keys.clone(), entries.clone()));
             }
 
             ResponseTemplate::new(200).set_body_json(body)
