@@ -192,8 +192,9 @@ where
                 let instant_redis = Instant::now();
                 if let Some(redis_gateway) = self.redis.as_ref() {
                     let inner_key = key.clone();
+                    // NB: use GETEX to update the ttl if so configured
                     let redis_value: Option<V> = redis_gateway
-                        .get(inner_key)
+                        .getex(inner_key)
                         .await
                         .ok()
                         .flatten()

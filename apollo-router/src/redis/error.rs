@@ -18,6 +18,7 @@ pub(crate) enum Error {
     InvalidResponse(String),
     IO(String),
     Moved(String),
+    Panic(String),
     Parse(String),
     Replica(String),
     Routing(String),
@@ -41,6 +42,7 @@ impl Error {
             Self::InvalidResponse(_) => "invalid_response",
             Self::IO(_) => "io",
             Self::Moved(_) => "moved",
+            Self::Panic(_) => "panic",
             Self::Parse(_) => "parse",
             Self::Replica(_) => "replica",
             Self::Routing(_) => "routing",
@@ -97,6 +99,23 @@ impl From<&fred::error::Error> for Error {
 impl From<fred::error::Error> for Error {
     fn from(error: fred::error::Error) -> Self {
         (&error).into()
+    }
+}
+
+impl From<tokio::task::JoinError> for Error {
+    fn from(error: tokio::task::JoinError) -> Self {
+        let error_str = error.to_string();
+        if error.is_cancelled() {
+            Self::Canceled(error_str)
+        } else {
+            Self::Panic(error_str)
+        }
+    }
+}
+
+impl From<tokio::time::error::Elapsed> for Error {
+    fn from(_: tokio::time::error::Elapsed) -> Self {
+        Self::Timeout
     }
 }
 

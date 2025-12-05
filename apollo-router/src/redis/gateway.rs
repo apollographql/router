@@ -8,6 +8,7 @@ use std::time::Duration;
 use fred::clients::Client;
 use fred::clients::Pipeline;
 use fred::interfaces::EventInterface;
+use fred::interfaces::SortedSetsInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
 use fred::prelude::ClientLike;
@@ -29,6 +30,8 @@ use futures::Stream;
 use futures::TryStreamExt;
 use futures::future::join_all;
 use tokio::sync::broadcast::error::RecvError;
+use tokio::task::JoinSet;
+use tokio_util::future::FutureExt;
 use tower::BoxError;
 use url::Url;
 
@@ -427,49 +430,6 @@ impl Gateway {
         }
     }
 
-    pub(crate) async fn get<K: KeyType, V: ValueType>(&self, key: K) -> Result<Option<V>, Error> {
-        self.get_with_options(key, Options::default()).await
-    }
-
-    pub(crate) async fn get_with_options<K: KeyType, V: ValueType>(
-        &self,
-        key: K,
-        options: Options,
-    ) -> Result<Option<V>, Error> {
-        let key = self.make_key(key);
-        if self.reset_ttl
-            && let Some(ttl) = self.ttl
-        {
-            let pipeline = self.pipeline().with_options(&options);
-            let _: () = pipeline
-                .get(&key)
-                .await
-                .inspect_err(|e| self.record_error(e))?;
-            let _: () = pipeline
-                .expire(&key, ttl.as_secs() as i64, None)
-                .await
-                .inspect_err(|e| self.record_error(e))?;
-
-            let (value, _timeout_set): (Value<Option<V>>, bool) =
-                pipeline.all().await.inspect_err(|e| self.record_error(e))?;
-            Ok(value.0)
-        } else if self.is_cluster {
-            let client = self.client().replicas().with_options(&options);
-            let value: Value<Option<V>> = client
-                .get(key)
-                .await
-                .inspect_err(|e| self.record_error(e))?;
-            Ok(value.0)
-        } else {
-            let client = self.client().with_options(&options);
-            let value: Value<Option<V>> = client
-                .get(key)
-                .await
-                .inspect_err(|e| self.record_error(e))?;
-            Ok(value.0)
-        }
-    }
-
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<K>,
@@ -718,6 +678,154 @@ impl Gateway {
                 .unwrap_or(key),
             None => key,
         }
+    }
+}
+
+// Public API for Redis commands - function names should be strongly mapped to redis command names.
+impl Gateway {
+    pub(crate) async fn del<K: KeyType, I: Iterator<Item = K>>(
+        &self,
+        keys: I,
+    ) -> Result<u64, Error> {
+        let keys: Vec<String> = keys.into_iter().map(|k| self.make_key(k)).collect();
+        if self.is_cluster {
+            // execute each DEL in a joinset
+            let mut join_set: JoinSet<Result<u64, _>> = JoinSet::new();
+            for key in keys {
+                let client = self.client();
+                join_set.spawn(async move { client.del(key).await });
+            }
+
+            let mut count = 0;
+            while let Some(result) = join_set.join_next().await {
+                count += result??;
+            }
+            Ok(count)
+        } else {
+            let count = self.client().del(keys).await?;
+            Ok(count)
+        }
+    }
+
+    pub(crate) async fn expireat<K: KeyType>(
+        &self,
+        key: K,
+        timestamp: i64,
+        options: Option<super::options::expire::Options>,
+    ) -> Result<(), Error> {
+        let key = self.make_key(key);
+        let _: Value<Option<usize>> = self
+            .client()
+            .expire_at(key, timestamp, options.map(Into::into))
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn get<K: KeyType, V: ValueType>(&self, key: K) -> Result<Option<V>, Error> {
+        let key = self.make_key(key);
+
+        let result: Result<Value<Option<V>>, _> = if self.is_cluster {
+            self.client().replicas().get(key).await
+        } else {
+            self.client().get(key).await
+        };
+
+        let value = result.inspect_err(|e| self.record_error(e))?;
+        Ok(value.0)
+    }
+
+    // get key _and_ update TTL IFF self.reset_ttl && self.ttl.is_some
+    // otherwise, fall back to just get
+    pub(crate) async fn getex<K: KeyType, V: ValueType>(&self, key: K) -> Result<Option<V>, Error> {
+        // NB: GETEX was released in redis OSS 6.2 (feb 2022) but fred doesn't support it for some reason.
+        //  use a pipeline instead
+        if self.reset_ttl
+            && let Some(ttl) = self.ttl
+        {
+            let key = self.make_key(key);
+            let pipeline = self.pipeline();
+            let _: () = pipeline
+                .get(&key)
+                .await
+                .inspect_err(|e| self.record_error(e))?;
+            let _: () = pipeline
+                .expire(&key, ttl.as_secs() as i64, None)
+                .await
+                .inspect_err(|e| self.record_error(e))?;
+
+            let (value, _timeout_set): (Value<Option<V>>, bool) =
+                pipeline.all().await.inspect_err(|e| self.record_error(e))?;
+            Ok(value.0)
+        } else {
+            self.get(key).await
+        }
+    }
+
+    // TODO: merge with insert
+    pub(crate) async fn set<K: KeyType, V: ValueType>(
+        &self,
+        key: K,
+        value: V,
+        expiration: Option<super::options::Expiration>,
+    ) -> Result<(), Error> {
+        let key = self.make_key(key);
+        let _: Value<Option<()>> = self
+            .client()
+            .set(key, Value(value), expiration.map(Into::into), None, false)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn zadd<K: KeyType, V: ValueType>(
+        &self,
+        key: K,
+        elements: Vec<(f64, V)>,
+        ordering: Option<super::options::zadd::Ordering>,
+    ) -> Result<(), Error> {
+        let key = self.make_key(key);
+        let elements: Vec<(f64, fred::types::Value)> = elements
+            .into_iter()
+            .map(|(score, element)| {
+                let parsed_value: Result<fred::types::Value, _> = Value(element).try_into();
+                parsed_value.map(|v| (score, v))
+            })
+            .collect::<Result<Vec<(_, _)>, _>>()?;
+
+        let _added: u64 = self
+            .client()
+            .zadd(key, None, ordering.map(Into::into), false, false, elements)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn zrange<K: KeyType, V: ValueType>(
+        &self,
+        key: K,
+        min_index: i64,
+        max_index: i64,
+    ) -> Result<Vec<V>, Error> {
+        let key = self.make_key(key);
+        // NB: Option<> shouldn't be possible, but it makes the types easier when working with fred
+        // TODO: document this better
+        let elements: Vec<Value<Option<V>>> = self
+            .client()
+            .zrange(key, min_index, max_index, None, false, None, false)
+            .await?;
+        Ok(elements.into_iter().filter_map(|v| v.0).collect())
+    }
+
+    pub(crate) async fn zremrangebyscore<K: KeyType>(
+        &self,
+        key: K,
+        min_score: f64,
+        max_score: f64,
+    ) -> Result<u64, Error> {
+        let key = self.make_key(key);
+        let items_removed = self
+            .client()
+            .zremrangebyscore(key, min_score, max_score)
+            .await?;
+        Ok(items_removed)
     }
 }
 

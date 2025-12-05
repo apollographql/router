@@ -926,7 +926,8 @@ async fn cache_lookup_root(
         private_id,
     );
 
-    let cache_result: Result<Option<CacheEntry>, _> = cache.get(key.clone()).await;
+    // NB: use GETEX to update the ttl if so configured
+    let cache_result: Result<Option<CacheEntry>, _> = cache.getex(key.clone()).await;
 
     match cache_result {
         Ok(Some(value)) => {

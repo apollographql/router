@@ -24,6 +24,7 @@ use tower::BoxError;
 use super::CacheEntry;
 use super::CacheStorage;
 use super::Document;
+use super::Error;
 use super::StorageResult;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::metrics::record_maintenance_duration;
@@ -99,44 +100,32 @@ impl Storage {
     }
 
     async fn invalidate_keys(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
-        let options = Options {
-            timeout: Some(self.invalidate_timeout()),
-            ..Options::default()
-        };
-        let pipeline = self.storage.pipeline().with_options(&options);
+        let mut join_set = JoinSet::default();
         for invalidation_key in &invalidation_keys {
             let invalidation_key =
                 format!("version:{RESPONSE_CACHE_VERSION}:cache-tag:{invalidation_key}");
             self.send_to_maintenance_queue(invalidation_key.clone());
 
-            let redis_key = self.make_key(invalidation_key.clone());
-            let _: () = pipeline
-                .zrange(redis_key, 0, -1, None, false, None, false)
-                .await
-                .map_err(redis::Error::from)?;
+            let storage = self.storage.clone();
+            join_set.spawn(async move { storage.zrange(invalidation_key, 0, -1).await });
         }
 
-        let results: Vec<Vec<String>> = pipeline.all().await.map_err(redis::Error::from)?;
-        let all_keys: HashSet<String> = results.into_iter().flatten().collect();
+        let mut all_keys: HashSet<String> = HashSet::new();
+        while let Some(result) = join_set.join_next().await {
+            all_keys.extend(result??);
+        }
+
         if all_keys.is_empty() {
             return Ok(0);
         }
 
-        // add namespace to keys
-        let keys = all_keys
-            .into_iter()
-            .map(|key| self.make_key(key))
-            .map(fred::types::Key::from);
-        let deleted = self
-            .storage
-            .delete_from_scan_result_with_options(keys, options)
-            .await?;
+        let deleted = self.storage.del(all_keys.into_iter()).await?;
 
         // NOTE: we don't delete elements from the cache tag sorted sets. if we did, we would likely
         // encounter a race condition - if another router inserted a value associated with this cache
         // tag between when we run the `zrange` and the `delete`.
         // it's safer to just rely on the TTL-based cleanup.
-        Ok(deleted as u64)
+        Ok(deleted)
     }
 
     fn send_to_maintenance_queue(&self, cache_tag_key: String) {
@@ -186,21 +175,10 @@ impl Storage {
         cache_tag_key: String,
         cutoff_time: f64,
     ) -> StorageResult<u64> {
-        // Returns number of items removed
-        let options = Options {
-            timeout: Some(self.maintenance_timeout()),
-            ..Options::default()
-        };
-
-        // NB: add namespace to cache tag
-        let cache_tag_key = self.make_key(cache_tag_key);
         Ok(self
             .storage
-            .client()
-            .with_options(&options)
-            .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff_time)
-            .await
-            .map_err(redis::Error::from)?)
+            .zremrangebyscore(cache_tag_key, f64::NEG_INFINITY, cutoff_time)
+            .await?)
     }
 
     /// Create a list of the cache tags that describe this document, without namespaces.
@@ -299,11 +277,7 @@ impl CacheStorage for Storage {
             }
         }
 
-        let options = Options {
-            timeout: Some(self.insert_timeout()),
-            ..Options::default()
-        };
-        let pipeline = self.storage.pipeline().with_options(&options);
+        let mut join_set = JoinSet::new();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             self.send_to_maintenance_queue(cache_tag_key.clone());
 
@@ -316,18 +290,15 @@ impl CacheStorage for Storage {
                 .fold(now as f64, f64::max);
             let cache_tag_expiry_time = max_expiry_time as i64 + 1;
 
-            let redis_key = self.make_key(cache_tag_key);
-
-            let _: Result<(), _> = pipeline
-                .zadd(
-                    redis_key.clone(),
-                    None,
-                    Some(Ordering::GreaterThan),
-                    false,
-                    false,
-                    elements,
-                )
-                .await;
+            let cache_tag_key_clone = cache_tag_key.clone();
+            let storage = self.storage.clone();
+            let ordering = redis::options::zadd::Ordering::GreaterThan;
+            join_set.spawn(async move {
+                storage
+                    .zadd(cache_tag_key_clone, elements, Some(ordering))
+                    .await
+                    .map_err(Error::from)
+            });
 
             // > A non-volatile key is treated as an infinite TTL for the purpose of GT and LT.
             // > The GT, LT and NX options are mutually exclusive.
@@ -336,46 +307,58 @@ impl CacheStorage for Storage {
             // what we want are NX (set when key has no expiry) AND GT (set when new expiry is greater
             // than the current one).
             // that means we have to call `expire_at` twice :(
-            for exp_opt in [ExpireOptions::NX, ExpireOptions::GT] {
-                let _: Result<(), _> = pipeline
-                    .expire_at(redis_key.clone(), cache_tag_expiry_time, Some(exp_opt))
-                    .await;
+            for exp_opt in [
+                redis::options::expire::Options::MissingOnly,
+                redis::options::expire::Options::GreaterThan,
+            ] {
+                let cache_tag_key = cache_tag_key.clone();
+                let storage = self.storage.clone();
+                join_set.spawn(async move {
+                    storage
+                        .expireat(cache_tag_key, cache_tag_expiry_time, Some(exp_opt))
+                        .await
+                        .map_err(Error::from)
+                });
             }
         }
 
-        let result_vec = pipeline.try_all::<Value>().await;
-        for result in result_vec {
-            if let Err(err) = result {
-                tracing::debug!("Caught error during cache tag update: {err:?}");
-                return Err(redis::Error::from(err).into());
+        while let Some(result) = join_set.join_next().await {
+            match super::flatten_storage_error(result).map_err(Into::into) {
+                Ok(()) => {}
+                Err(err) => {
+                    tracing::info!("Caught error during cache tag update: {err:?}");
+                    return Err(err);
+                }
             }
         }
 
         // phase 3
-        let pipeline = self.storage.pipeline().with_options(&options);
+        let mut join_set: JoinSet<Result<(), Error>> = JoinSet::new();
         for (document, cache_tags) in batch_docs.into_iter().zip(original_cache_tags.into_iter()) {
-            let value = CacheValue {
+            let expiration =
+                redis::options::Expiration::At((now + document.expire.as_secs()) as i64);
+            let cache_value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
                 cache_tags: document.debug.then(|| cache_tags.into_iter().collect()),
             };
-            let _: () = pipeline
-                .set::<(), _, _>(
-                    self.make_key(document.key),
-                    &serde_json::to_string(&value)?,
-                    Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
-                    None,
-                    false,
-                )
-                .await
-                .map_err(redis::Error::from)?;
+
+            let storage = self.storage.clone();
+            join_set.spawn(async move {
+                storage
+                    .set(document.key, cache_value, Some(expiration))
+                    .await
+                    .map_err(Error::from)
+            });
         }
 
-        let result_vec = pipeline.try_all::<Value>().await;
-        for result in result_vec {
-            if let Err(err) = result {
-                tracing::debug!("Caught error during document insert: {err:?}");
-                return Err(redis::Error::from(err).into());
+        while let Some(result) = join_set.join_next().await {
+            match super::flatten_storage_error(result).map_err(Into::into) {
+                Ok(()) => {}
+                Err(err) => {
+                    tracing::info!("Caught error during document insert: {err:?}");
+                    return Err(err);
+                }
             }
         }
 
@@ -383,12 +366,7 @@ impl CacheStorage for Storage {
     }
 
     async fn internal_fetch(&self, cache_key: &str) -> StorageResult<Option<CacheEntry>> {
-        // NB: don't need `make_key` for `get` - the storage layer already runs it
-        let options = Options {
-            timeout: Some(self.fetch_timeout()),
-            ..Options::default()
-        };
-        let value: Option<CacheValue> = self.storage.get_with_options(cache_key, options).await?;
+        let value: Option<CacheValue> = self.storage.get(cache_key).await?;
         Ok(value.map(|v| CacheEntry::from((cache_key, v))))
     }
 
@@ -397,14 +375,7 @@ impl CacheStorage for Storage {
         cache_keys: &[&str],
     ) -> StorageResult<Vec<StorageResult<Option<CacheEntry>>>> {
         let keys: Vec<String> = cache_keys.iter().map(|key| key.to_string()).collect();
-        let options = Options {
-            timeout: Some(self.fetch_timeout()),
-            ..Options::default()
-        };
-        let values: Vec<Result<Option<CacheValue>, _>> = self
-            .storage
-            .get_multiple_with_options(keys, options)
-            .await?;
+        let values: Vec<Result<Option<CacheValue>, _>> = self.storage.get_multiple(keys).await?;
 
         let entries = values
             .into_iter()

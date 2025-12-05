@@ -4,6 +4,7 @@ mod error;
 mod gateway;
 mod key;
 mod metrics;
+pub(crate) mod options;
 mod pool;
 mod value;
 
