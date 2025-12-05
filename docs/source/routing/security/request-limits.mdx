@@ -17,6 +17,7 @@ limits:
   http_max_request_bytes: 2000000 # Default value: 2 MB
   http1_max_request_headers: 200 # Default value: 100
   http1_max_request_buf_size: 800kb # Default value: 400kib
+  http2_max_headers_list_size: 32kb # Default value: 16kb, but is subject to change
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
@@ -290,6 +291,12 @@ If router receives more headers than the buffer size, it responds to the client 
 ### `http1_max_request_buf_size`
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
+
+### `http2_max_headers_list_size`
+
+Limit the maximum size of the HTTP/2 header list. Default is 16KiB, but is subject to change.
+
+If the router receives a request with HTTP/2 headers whose total size exceeds the configured limit, it responds to the client with `431 Request Header Fields Too Large`.
 
 ## Parser-based limits
 

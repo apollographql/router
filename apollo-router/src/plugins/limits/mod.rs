@@ -120,7 +120,7 @@ pub(crate) struct Config {
     /// If router receives more headers than allowed size of the header list, it responds to the client with
     /// "431 Request Header Fields Too Large".
     #[schemars(with = "Option<String>", default)]
-    pub(crate) http2_max_headers_list_bytes: Option<ByteSize>,
+    pub(crate) http2_max_headers_list_size: Option<ByteSize>,
 
     /// Limit the depth of nested list fields in introspection queries
     /// to protect avoid generating huge responses. Returns a GraphQL
@@ -142,7 +142,7 @@ impl Default for Config {
             http_max_request_bytes: 2_000_000,
             http1_max_request_headers: None,
             http1_max_request_buf_size: None,
-            http2_max_headers_list_bytes: None,
+            http2_max_headers_list_size: None,
             parser_max_tokens: 15_000,
 
             // This is `apollo-parser`’s default, which protects against stack overflow
