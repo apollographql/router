@@ -14,6 +14,7 @@ mod connectors;
 mod demand_control;
 mod directive_argument_merge_strategies;
 mod external;
+mod fed1_shareability;
 mod hints;
 mod override_directive;
 mod subscription;

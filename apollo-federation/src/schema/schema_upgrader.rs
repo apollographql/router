@@ -10,6 +10,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use either::Either;
+use itertools::Itertools;
 use tracing::instrument;
 
 use super::FederationSchema;
@@ -1020,37 +1021,23 @@ fn inner_upgrade_subgraphs_if_necessary(
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
+    let mut errors: Vec<CompositionError> = vec![];
+    let subgraphs = subgraphs
+        .into_iter()
+        .filter_map(|sg| match sg.normalize_root_types() {
+            Ok(s) => Some(s),
+            Err(e) => {
+                errors.extend(e.to_composition_errors());
+                None
+            }
+        })
+        .collect_vec();
+
     // Upgrade subgraphs (if necessary)
     let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
 
-    let mut errors: Vec<CompositionError> = vec![];
-
-    // Normalize root types (if necessary)
-    let normalized: Vec<_> = upgraded
-        .into_iter()
-        .filter_map(|subgraph| match subgraph {
-            Either::Left(s) => match s.normalize_root_types() {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    errors.extend(e.to_composition_errors());
-                    None
-                }
-            },
-            Either::Right(mut s) => {
-                match s.normalize_root_types() {
-                    Ok(()) => {}
-                    Err(e) => {
-                        errors.extend(e.to_composition_errors());
-                        return None;
-                    }
-                }
-                Some(Either::Right(s))
-            }
-        })
-        .collect();
-
     // Validate subgraphs (if either upgraded or normalized)
-    let validated: Vec<Subgraph<Validated>> = normalized
+    let validated: Vec<Subgraph<Validated>> = upgraded
         .into_iter()
         .filter_map(|subgraph| match subgraph {
             Either::Left(s) => {
