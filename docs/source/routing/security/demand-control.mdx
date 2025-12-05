@@ -238,6 +238,240 @@ Customize `demand_control` with the following settings:
 
 When enabling `demand_control` for the first time, set it to `measure` mode. This will allow you to observe the cost of your operations before setting your maximum cost.
 
+### Per-subgraph cost limits
+
+<Since version="Router v1.53.0" />
+
+In addition to the global operation cost limit, you can configure per-subgraph cost limits to protect individual subgraphs from being overloaded. This is particularly useful when different subgraphs have different capacity constraints or when you want to ensure that no single subgraph receives queries that exceed its capabilities.
+
+The router calculates the cost for each subgraph query separately and rejects the operation if any subgraph's cost exceeds its configured limit, even if the total operation cost is within the global limit.
+
+Configure per-subgraph limits using the `subgraph_limits` option:
+
+```yaml title="router.yaml"
+demand_control:
+  enabled: true
+  mode: enforce
+  strategy:
+    static_estimated:
+      list_size: 10
+      max: 5000  # Global limit
+      subgraph_limits:
+        all:
+          max: 1000  # Default limit for all subgraphs
+        subgraphs:
+          products:
+            max: 800  # Override for products subgraph
+          reviews:
+            max: 1200  # Override for reviews subgraph
+```
+
+| Option                                    | Valid values | Default value | Description                                                                                                                                    |
+| ----------------------------------------- | ------------ | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subgraph_limits`                        | object       | --            | Configuration for per-subgraph cost limits.                                                                                                     |
+| `subgraph_limits.all.max`                | number       | --            | Default cost limit that applies to all subgraphs unless overridden by a specific subgraph limit.                                              |
+| `subgraph_limits.subgraphs.<subgraph>.max` | number       | --            | Cost limit for a specific subgraph. This overrides the `all` default for the specified subgraph. The subgraph name must match the subgraph name in your supergraph schema. |
+
+**Example scenario:**
+
+Given the configuration above:
+- Global limit: 5000
+- Default subgraph limit: 1000
+- Products subgraph limit: 800
+- Reviews subgraph limit: 1200
+
+A query with total cost 2000 that splits into:
+- Products subgraph: 500 cost
+- Reviews subgraph: 1500 cost
+
+This query would be **rejected** because:
+- Total cost (2000) < Global limit (5000) ✓
+- Products cost (500) < Products limit (800) ✓
+- Reviews cost (1500) > Reviews limit (1200) ✗
+
+The router returns a `SUBGRAPH_COST_TOO_EXPENSIVE` error with details about which subgraph exceeded its limit.
+
+### Subgraph cost limit configuration scenarios
+
+The following scenarios demonstrate different ways to configure per-subgraph cost limits and what telemetry is available in each case.
+
+#### Scenario 1: No subgraph limits configured
+
+When `subgraph_limits` is not configured, only the global operation cost limit (`max`) is enforced. However, subgraph cost telemetry is still available in both `measure` and `enforce` modes.
+
+```yaml title="router.yaml"
+demand_control:
+  enabled: true
+  mode: measure  # or enforce
+  strategy:
+    static_estimated:
+      list_size: 10
+      max: 5000  # Only global limit enforced
+```
+
+**Telemetry available:**
+- `subgraph.cost.estimated` attribute on subgraph spans
+- `subgraph.cost.estimated` histogram instrument
+- All subgraph costs are calculated and stored in context, even though no limits are enforced
+
+**Behavior:**
+- Subgraph costs are calculated for all subgraphs
+- No subgraph-specific limits are checked
+- Operations are only rejected if they exceed the global `max` limit (in `enforce` mode)
+
+#### Scenario 2: Default limit for all subgraphs
+
+When you configure a default limit using `subgraph_limits.all.max`, all subgraphs inherit this limit unless overridden.
+
+```yaml title="router.yaml"
+demand_control:
+  enabled: true
+  mode: enforce
+  strategy:
+    static_estimated:
+      list_size: 10
+      max: 5000  # Global limit
+      subgraph_limits:
+        all:
+          max: 1000  # Default limit applies to all subgraphs
+```
+
+**Telemetry available:**
+- `subgraph.cost.estimated` attribute on subgraph spans
+- `subgraph.cost.estimated` histogram instrument
+- All subgraph costs are calculated and available for telemetry
+
+**Behavior:**
+- All subgraphs have a limit of 1000
+- If any subgraph's cost exceeds 1000, the operation is rejected (in `enforce` mode)
+- The global limit of 5000 is also checked
+
+**Example:**
+A query with total cost 2000 that splits into:
+- Products subgraph: 800 cost ✓ (within limit)
+- Reviews subgraph: 1200 cost ✗ (exceeds limit of 1000)
+
+This query would be **rejected** because the Reviews subgraph exceeds its limit, even though the total cost (2000) is below the global limit (5000).
+
+#### Scenario 3: Default with one subgraph override
+
+You can set a default limit for all subgraphs and override it for specific subgraphs.
+
+```yaml title="router.yaml"
+demand_control:
+  enabled: true
+  mode: enforce
+  strategy:
+    static_estimated:
+      list_size: 10
+      max: 5000  # Global limit
+      subgraph_limits:
+        all:
+          max: 1000  # Default limit for all subgraphs
+        subgraphs:
+          products:
+            max: 800  # Override: products has a lower limit
+```
+
+**Telemetry available:**
+- `subgraph.cost.estimated` attribute on subgraph spans
+- `subgraph.cost.estimated` histogram instrument
+- All subgraph costs are calculated and available for telemetry
+
+**Behavior:**
+- Products subgraph has a limit of 800 (override)
+- All other subgraphs (e.g., reviews, inventory) have a limit of 1000 (default)
+- The global limit of 5000 is also checked
+
+**Example:**
+A query with total cost 2000 that splits into:
+- Products subgraph: 900 cost ✗ (exceeds override limit of 800)
+- Reviews subgraph: 1100 cost ✗ (exceeds default limit of 1000)
+
+This query would be **rejected** because both subgraphs exceed their respective limits.
+
+#### Scenario 4: One subgraph limit without a default
+
+You can configure limits for specific subgraphs without setting a default. Subgraphs without explicit limits will not have their costs checked, but their costs are still calculated and available in telemetry.
+
+```yaml title="router.yaml"
+demand_control:
+  enabled: true
+  mode: enforce
+  strategy:
+    static_estimated:
+      list_size: 10
+      max: 5000  # Global limit
+      subgraph_limits:
+        subgraphs:
+          products:
+            max: 800  # Only products has a limit
+```
+
+**Telemetry available:**
+- `subgraph.cost.estimated` attribute on subgraph spans (for all subgraphs)
+- `subgraph.cost.estimated` histogram instrument (includes all subgraphs)
+- All subgraph costs are calculated and stored, regardless of whether limits are configured
+
+**Behavior:**
+- Products subgraph has a limit of 800 and will be checked
+- Other subgraphs (e.g., reviews, inventory) have no limit and will not be checked
+- The global limit of 5000 is still checked
+- Subgraph costs for all subgraphs are still calculated and available in telemetry
+
+**Example:**
+A query with total cost 2000 that splits into:
+- Products subgraph: 900 cost ✗ (exceeds limit of 800)
+- Reviews subgraph: 1100 cost ✓ (no limit configured, so not checked)
+
+This query would be **rejected** because:
+- Products subgraph exceeds its limit of 800
+- Even though Reviews has no limit, the Products limit violation causes rejection
+
+**Note:** When using this configuration pattern, only the subgraphs with explicitly configured limits are protected. Other subgraphs rely solely on the global limit for protection.
+
+### Telemetry in measure mode
+
+Subgraph cost telemetry is available in both `measure` and `enforce` modes. In `measure` mode, the router calculates and stores subgraph costs but does not reject operations, making it ideal for observing subgraph costs before configuring limits.
+
+**Telemetry available in measure mode:**
+- `subgraph.cost.estimated` attribute on subgraph spans
+- `subgraph.cost.estimated` histogram instrument with `subgraph.name` attribute
+- All subgraph costs are calculated and stored in context
+
+**Example configuration:**
+
+```yaml title="router.yaml"
+demand_control:
+  enabled: true
+  mode: measure  # Observe costs without rejecting
+  strategy:
+    static_estimated:
+      list_size: 10
+      max: 5000
+      subgraph_limits:
+        all:
+          max: 1000
+
+telemetry:
+  instrumentation:
+    spans:
+      subgraph:
+        attributes:
+          subgraph.cost.estimated: true
+    instruments:
+      subgraph:
+        subgraph.cost.estimated:
+          attributes:
+            subgraph.name: true
+```
+
+This configuration allows you to:
+1. Observe subgraph costs in your telemetry system
+2. Analyze which subgraphs are receiving high-cost queries
+3. Make informed decisions about appropriate subgraph limits
+4. Switch to `enforce` mode once limits are configured
+
 ## Telemetry for demand control
 
 <Tip>
@@ -270,6 +504,24 @@ Attributes for `cost` can be applied to instruments, spans, and events—anywher
 | `cost.estimated` | boolean | The estimated cost of an operation before execution.                                             |
 | `cost.delta`     | boolean | The difference between the actual and estimated cost.                                            |
 | `cost.result`    | boolean | The return code of the cost calculation. `COST_OK` or an [error code](/router/errors/#demand-control) |
+
+#### Subgraph cost attributes
+
+<Since version="Router v1.53.0" />
+
+Subgraph cost attributes can be applied to subgraph spans and instruments:
+
+| Attribute                | Value   | Description                                                          |
+| ------------------------ | ------- | -------------------------------------------------------------------- |
+| `subgraph.cost.estimated` | boolean | The estimated cost of the subgraph query before execution.            |
+
+### Subgraph cost instruments
+
+<Since version="Router v1.53.0" />
+
+| Instrument                | Description                                                          |
+| ------------------------- | -------------------------------------------------------------------- |
+| `subgraph.cost.estimated` | A histogram of the estimated cost of subgraph queries. Includes `subgraph.name` as an attribute for filtering by subgraph. |
 
 ### Selectors
 
@@ -307,6 +559,33 @@ telemetry:
       supergraph:
         attributes:
           cost.estimated: true
+```
+
+#### Example subgraph cost span
+
+Enable the `subgraph.cost.estimated` attribute on `subgraph` spans:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      subgraph:
+        attributes:
+          subgraph.cost.estimated: true
+```
+
+#### Example subgraph cost instrument
+
+Enable a `subgraph.cost.estimated` histogram with `subgraph.name` attribute:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        subgraph.cost.estimated:
+          attributes:
+            subgraph.name: true
 ```
 
 #### Example event

@@ -24,8 +24,11 @@ use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
+use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
+use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
+use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::supergraph::Request;
 use crate::services::supergraph::Response;
@@ -43,6 +46,7 @@ const COST_ACTUAL_KEY: &str = "cost.actual";
 const COST_DELTA_KEY: &str = "cost.delta";
 const COST_ESTIMATED_KEY: &str = "cost.estimated";
 const COST_RESULT_KEY: &str = "cost.result";
+const SUBGRAPH_COST_ESTIMATED_KEY: &str = "subgraph.cost.estimated";
 
 /// Attributes for Cost
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
@@ -359,6 +363,135 @@ pub(crate) enum CostValue {
     Delta,
     /// The result of the cost calculation. This is the error code returned by the cost calculation.
     Result,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct SubgraphCostInstrumentsConfig {
+    /// A histogram of the estimated cost of the subgraph query using the currently configured cost model
+    #[serde(rename = "subgraph.cost.estimated")]
+    pub(crate) cost_estimated:
+        DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
+}
+
+impl SubgraphCostInstrumentsConfig {
+    pub(crate) fn new_static_instruments(&self) -> HashMap<String, StaticInstrument> {
+        let meter = metrics::meter_provider()
+            .meter(crate::plugins::telemetry::config_new::instruments::METER_NAME);
+
+        [(
+            SUBGRAPH_COST_ESTIMATED_KEY.to_string(),
+            StaticInstrument::Histogram(
+                meter
+                    .f64_histogram(SUBGRAPH_COST_ESTIMATED_KEY)
+                    .with_description(
+                        "Estimated cost of the subgraph query using the currently configured cost model",
+                    )
+                    .init(),
+            ),
+        )]
+        .into_iter()
+        .collect()
+    }
+
+    pub(crate) fn to_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> SubgraphCostInstruments {
+        let cost_estimated = self.cost_estimated.is_enabled().then(|| {
+            Self::histogram(
+                SUBGRAPH_COST_ESTIMATED_KEY,
+                &self.cost_estimated,
+                SubgraphSelector::Cost {
+                    cost_estimated: true,
+                },
+                &static_instruments,
+            )
+        });
+
+        SubgraphCostInstruments { cost_estimated }
+    }
+
+    fn histogram(
+        name: &'static str,
+        config: &DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
+        selector: SubgraphSelector,
+        static_instruments: &Arc<HashMap<String, StaticInstrument>>,
+    ) -> CustomHistogram<
+        subgraph::Request,
+        subgraph::Response,
+        (),
+        SubgraphAttributes,
+        SubgraphSelector,
+    > {
+        let mut nb_attributes = 0;
+        let selectors = match config {
+            DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
+            DefaultedStandardInstrument::Extendable { attributes } => {
+                nb_attributes = attributes.custom.len();
+                Some(attributes.clone())
+            }
+        };
+
+        CustomHistogram {
+            inner: Mutex::new(CustomHistogramInner {
+                increment: Increment::Custom(None),
+                condition: Condition::True,
+                histogram: Some(
+                    static_instruments
+                        .get(name)
+                        .expect("cannot get static instrument for subgraph cost; this should not happen")
+                        .as_histogram()
+                        .expect("cannot convert instrument to histogram for subgraph cost; this should not happen")
+                        .clone(),
+                ),
+                attributes: Vec::with_capacity(nb_attributes),
+                selector: Some(Arc::new(selector)),
+                selectors,
+                updated: false,
+                _phantom: PhantomData,
+            }),
+        }
+    }
+}
+
+/// Instruments for subgraph cost
+#[derive(Default)]
+pub(crate) struct SubgraphCostInstruments {
+    /// A histogram of the estimated cost of the subgraph query using the currently configured cost model
+    cost_estimated: Option<
+        CustomHistogram<
+            subgraph::Request,
+            subgraph::Response,
+            (),
+            SubgraphAttributes,
+            SubgraphSelector,
+        >,
+    >,
+}
+
+impl Instrumented for SubgraphCostInstruments {
+    type Request = subgraph::Request;
+    type Response = subgraph::Response;
+    type EventResponse = ();
+
+    fn on_request(&self, _request: &Self::Request) {
+        // Cost is only available on response
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        if let Some(cost_estimated) = &self.cost_estimated {
+            cost_estimated.on_response(response);
+        }
+    }
+
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) {
+        // Cost is only available on successful response
+    }
+
+    fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {
+        // Not applicable for subgraph instruments
+    }
 }
 
 pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {

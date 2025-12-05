@@ -591,6 +591,8 @@ impl InstrumentsConfig {
             }
         }
 
+        static_instruments.extend(self.subgraph.attributes.cost.new_static_instruments());
+
         static_instruments
     }
 
@@ -722,6 +724,11 @@ impl InstrumentsConfig {
             http_client_request_duration,
             http_client_request_body_size,
             http_client_response_body_size,
+            cost: self
+                .subgraph
+                .attributes
+                .cost
+                .to_instruments(static_instruments.clone()),
             custom: CustomInstruments::new(&self.subgraph.custom, static_instruments),
         }
     }

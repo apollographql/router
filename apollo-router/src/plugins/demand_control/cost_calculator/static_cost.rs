@@ -518,6 +518,144 @@ impl StaticCostCalculator {
         self.score_plan_node(&query_plan.root, variables)
     }
 
+    /// Calculate the cost per subgraph from a query plan.
+    /// Returns a HashMap mapping subgraph name to its total cost.
+    pub(crate) fn planned_per_subgraph(
+        &self,
+        query_plan: &QueryPlan,
+        variables: &Object,
+    ) -> Result<HashMap<String, f64>, DemandControlError> {
+        let mut subgraph_costs = HashMap::default();
+        self.score_plan_node_per_subgraph(&query_plan.root, variables, &mut subgraph_costs)?;
+        Ok(subgraph_costs)
+    }
+
+    fn score_plan_node_per_subgraph(
+        &self,
+        plan_node: &PlanNode,
+        variables: &Object,
+        subgraph_costs: &mut HashMap<String, f64>,
+    ) -> Result<(), DemandControlError> {
+        match plan_node {
+            PlanNode::Sequence { nodes } => {
+                self.summed_score_of_nodes_per_subgraph(nodes, variables, subgraph_costs)
+            }
+            PlanNode::Parallel { nodes } => {
+                self.summed_score_of_nodes_per_subgraph(nodes, variables, subgraph_costs)
+            }
+            PlanNode::Flatten(flatten_node) => {
+                self.score_plan_node_per_subgraph(&flatten_node.node, variables, subgraph_costs)
+            }
+            PlanNode::Condition {
+                condition: _,
+                if_clause,
+                else_clause,
+            } => self.max_score_of_nodes_per_subgraph(
+                if_clause,
+                else_clause,
+                variables,
+                subgraph_costs,
+            ),
+            PlanNode::Defer { primary, deferred } => self
+                .summed_score_of_deferred_nodes_per_subgraph(
+                    primary,
+                    deferred,
+                    variables,
+                    subgraph_costs,
+                ),
+            PlanNode::Fetch(fetch_node) => {
+                let cost = self.estimated_cost_of_operation(
+                    &fetch_node.service_name,
+                    &fetch_node.operation,
+                    variables,
+                )?;
+                *subgraph_costs
+                    .entry(fetch_node.service_name.to_string())
+                    .or_insert(0.0) += cost;
+                Ok(())
+            }
+            PlanNode::Subscription { primary, rest: _ } => {
+                let cost = self.estimated_cost_of_operation(
+                    &primary.service_name,
+                    &primary.operation,
+                    variables,
+                )?;
+                *subgraph_costs
+                    .entry(primary.service_name.to_string())
+                    .or_insert(0.0) += cost;
+                Ok(())
+            }
+        }
+    }
+
+    fn max_score_of_nodes_per_subgraph(
+        &self,
+        left: &Option<Box<PlanNode>>,
+        right: &Option<Box<PlanNode>>,
+        variables: &Object,
+        subgraph_costs: &mut HashMap<String, f64>,
+    ) -> Result<(), DemandControlError> {
+        match (left, right) {
+            (None, None) => Ok(()),
+            (None, Some(right)) => {
+                self.score_plan_node_per_subgraph(right, variables, subgraph_costs)
+            }
+            (Some(left), None) => {
+                self.score_plan_node_per_subgraph(left, variables, subgraph_costs)
+            }
+            (Some(left), Some(right)) => {
+                let mut left_costs = HashMap::default();
+                self.score_plan_node_per_subgraph(left, variables, &mut left_costs)?;
+                let mut right_costs = HashMap::default();
+                self.score_plan_node_per_subgraph(right, variables, &mut right_costs)?;
+                // Take the maximum cost per subgraph across branches
+                for (subgraph, cost) in left_costs {
+                    subgraph_costs
+                        .entry(subgraph)
+                        .and_modify(|c| *c = (*c).max(cost))
+                        .or_insert(cost);
+                }
+                for (subgraph, cost) in right_costs {
+                    subgraph_costs
+                        .entry(subgraph)
+                        .and_modify(|c| *c = (*c).max(cost))
+                        .or_insert(cost);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn summed_score_of_deferred_nodes_per_subgraph(
+        &self,
+        primary: &Primary,
+        deferred: &Vec<DeferredNode>,
+        variables: &Object,
+        subgraph_costs: &mut HashMap<String, f64>,
+    ) -> Result<(), DemandControlError> {
+        if let Some(node) = &primary.node {
+            self.score_plan_node_per_subgraph(node, variables, subgraph_costs)?;
+        }
+        for d in deferred {
+            if let Some(node) = &d.node {
+                self.score_plan_node_per_subgraph(node, variables, subgraph_costs)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn summed_score_of_nodes_per_subgraph(
+        &self,
+        nodes: &Vec<PlanNode>,
+        variables: &Object,
+        subgraph_costs: &mut HashMap<String, f64>,
+    ) -> Result<(), DemandControlError> {
+        for node in nodes {
+            self.score_plan_node_per_subgraph(node, variables, subgraph_costs)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn actual(
         &self,
         request: &ExecutableDocument,
@@ -1174,5 +1312,95 @@ mod tests {
         assert_eq!(estimated_cost(schema, query, variables), 1.0);
         assert_eq!(planned_cost_js(schema, query, variables).await, 1.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 1.0);
+    }
+
+    async fn planned_cost_per_subgraph_js(
+        schema_str: &str,
+        query_str: &str,
+        variables_str: &str,
+    ) -> HashMap<String, f64> {
+        let config: Arc<Configuration> = Arc::new(Default::default());
+        let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
+        let variables = serde_json::from_str::<Value>(variables_str)
+            .unwrap()
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        let supergraph_schema = schema.supergraph_schema().clone();
+
+        let mut planner = QueryPlannerService::new(schema.into(), config.clone())
+            .await
+            .unwrap();
+
+        let ctx = Context::new();
+        ctx.extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(query.clone()));
+
+        let planner_res = planner
+            .call(QueryPlannerRequest::new(
+                query_str.to_string(),
+                None,
+                query,
+                CacheKeyMetadata::default(),
+                PlanOptions::default(),
+                ComputeJobType::QueryPlanning,
+            ))
+            .await
+            .unwrap();
+        let query_plan = match planner_res.content.unwrap() {
+            QueryPlannerContent::Plan { plan } => plan,
+            _ => panic!("Query planner returned unexpected non-plan content"),
+        };
+
+        let schema = DemandControlledSchema::new(Arc::new(supergraph_schema)).unwrap();
+        let mut demand_controlled_subgraph_schemas = HashMap::new();
+        for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
+            let demand_controlled_subgraph_schema =
+                DemandControlledSchema::new(subgraph_schema.schema.clone()).unwrap();
+            demand_controlled_subgraph_schemas
+                .insert(subgraph_name.to_string(), demand_controlled_subgraph_schema);
+        }
+
+        let calculator = StaticCostCalculator::new(
+            Arc::new(schema),
+            Arc::new(demand_controlled_subgraph_schemas),
+            100,
+        );
+
+        calculator
+            .planned_per_subgraph(&query_plan, &variables)
+            .unwrap()
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_per_subgraph_costs() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_named_query.graphql");
+        let variables = "{}";
+
+        let subgraph_costs = planned_cost_per_subgraph_js(schema, query, variables).await;
+
+        // Verify that costs are calculated per subgraph
+        assert!(!subgraph_costs.is_empty());
+        // Verify total cost matches sum of subgraph costs
+        let total_from_subgraphs: f64 = subgraph_costs.values().sum();
+        let total_cost = planned_cost_js(schema, query, variables).await;
+        assert_eq!(total_from_subgraphs, total_cost);
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_multiple_subgraphs() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_fragment_query.graphql");
+        let variables = "{}";
+
+        let subgraph_costs = planned_cost_per_subgraph_js(schema, query, variables).await;
+
+        // Should have costs for multiple subgraphs
+        assert!(subgraph_costs.len() > 1);
+        // Verify total cost matches sum of subgraph costs
+        let total_from_subgraphs: f64 = subgraph_costs.values().sum();
+        let total_cost = planned_cost_js(schema, query, variables).await;
+        assert_eq!(total_from_subgraphs, total_cost);
     }
 }

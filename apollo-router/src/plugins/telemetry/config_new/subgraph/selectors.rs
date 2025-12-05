@@ -289,6 +289,11 @@ pub(crate) enum SubgraphSelector {
         /// Select data you want from the computed cache control from response caching
         response_cache_control: CacheControlSelector,
     },
+    /// Cost attributes for subgraph queries
+    Cost {
+        /// The estimated cost of the subgraph query
+        cost_estimated: bool,
+    },
 }
 
 impl Selector for SubgraphSelector {
@@ -742,6 +747,12 @@ impl Selector for SubgraphSelector {
                     }
                 })
             }
+            SubgraphSelector::Cost { cost_estimated } if *cost_estimated => response
+                .context
+                .get_subgraph_estimated_cost(&response.subgraph_name)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
             // For request
             _ => None,
         }
@@ -838,6 +849,7 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::Cache { .. }
                     | SubgraphSelector::ResponseCache { .. }
                     | SubgraphSelector::ResponseCacheControl { .. }
+                    | SubgraphSelector::Cost { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,

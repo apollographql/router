@@ -1,0 +1,13 @@
+demand_control:
+  enabled: true
+  mode: enforce
+  strategy:
+    static_estimated:
+      list_size: 10
+      max: 5000
+      subgraph_limits:
+        all:
+          max: 50
+        subgraphs:
+          products:
+            max: 200

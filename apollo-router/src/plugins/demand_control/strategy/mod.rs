@@ -93,14 +93,30 @@ impl StrategyFactory {
 
     pub(crate) fn create(&self) -> Strategy {
         let strategy: Arc<dyn StrategyImpl> = match &self.config.strategy {
-            StrategyConfig::StaticEstimated { list_size, max } => Arc::new(StaticEstimated {
-                max: *max,
-                cost_calculator: StaticCostCalculator::new(
-                    self.supergraph_schema.clone(),
-                    self.subgraph_schemas.clone(),
-                    *list_size,
-                ),
-            }),
+            StrategyConfig::StaticEstimated {
+                list_size,
+                max,
+                subgraph_limits,
+            } => {
+                // Convert SubgraphConfiguration to HashMap for easier lookup
+                let mut subgraph_limits_map = HashMap::default();
+                for (subgraph_name, limit_config) in subgraph_limits.subgraphs.iter() {
+                    subgraph_limits_map.insert(subgraph_name.clone(), limit_config.max);
+                }
+                // Store the "all" default separately - we'll check it during request processing
+                let all_default = subgraph_limits.all.max;
+
+                Arc::new(StaticEstimated {
+                    max: *max,
+                    subgraph_limits: subgraph_limits_map,
+                    all_default_limit: all_default,
+                    cost_calculator: StaticCostCalculator::new(
+                        self.supergraph_schema.clone(),
+                        self.subgraph_schemas.clone(),
+                        *list_size,
+                    ),
+                })
+            }
             #[cfg(test)]
             StrategyConfig::Test { stage, error } => Arc::new(test::Test {
                 stage: stage.clone(),

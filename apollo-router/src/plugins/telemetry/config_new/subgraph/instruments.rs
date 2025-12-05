@@ -11,6 +11,8 @@ use crate::plugins::telemetry::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::cost::SubgraphCostInstruments;
+use crate::plugins::telemetry::config_new::cost::SubgraphCostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
@@ -36,6 +38,9 @@ pub(crate) struct SubgraphInstrumentsConfig {
     #[serde(rename = "http.client.response.body.size")]
     pub(crate) http_client_response_body_size:
         DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
+
+    #[serde(flatten)]
+    pub(crate) cost: SubgraphCostInstrumentsConfig,
 }
 
 impl DefaultForLevel for SubgraphInstrumentsConfig {
@@ -107,6 +112,7 @@ pub(crate) struct SubgraphInstruments {
             SubgraphSelector,
         >,
     >,
+    pub(crate) cost: SubgraphCostInstruments,
     pub(crate) custom: SubgraphCustomInstruments,
 }
 
@@ -138,6 +144,7 @@ impl Instrumented for SubgraphInstruments {
         if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
             http_client_response_body_size.on_response(response);
         }
+        self.cost.on_response(response);
         self.custom.on_response(response);
     }
 

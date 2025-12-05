@@ -23,6 +23,7 @@ pub(crate) const SUBGRAPH_GRAPHQL_OPERATION_NAME: Key =
     Key::from_static_str("subgraph.graphql.operation.name");
 pub(crate) const SUBGRAPH_GRAPHQL_OPERATION_TYPE: Key =
     Key::from_static_str("subgraph.graphql.operation.type");
+pub(crate) const SUBGRAPH_COST_ESTIMATED: Key = Key::from_static_str("subgraph.cost.estimated");
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, buildstructor::Builder)]
 #[serde(deny_unknown_fields, default)]
@@ -68,6 +69,10 @@ pub(crate) struct SubgraphAttributes {
     /// The number of times the request has been resent
     #[serde(rename = "http.request.resend_count")]
     http_request_resend_count: Option<StandardAttribute>,
+
+    /// The estimated cost of the subgraph query using the currently configured cost model
+    #[serde(rename = "subgraph.cost.estimated")]
+    cost_estimated: Option<StandardAttribute>,
 }
 
 impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphAttributes {
@@ -129,6 +134,13 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphAttributes
             attrs.push(KeyValue::new(key, resend_count as i64));
         }
 
+        // Add cost attribute if configured
+        if let Some(cost) =
+            self.cost_estimated_if_configured(&response.context, &response.subgraph_name)
+        {
+            attrs.push(cost);
+        }
+
         attrs
     }
 
@@ -154,6 +166,14 @@ impl From<SubgraphRequestResendCountKey<'_>> for String {
             "apollo::telemetry::http_request_resend_count_{}",
             value.subgraph_req_id
         )
+    }
+}
+
+impl SubgraphAttributes {
+    fn cost_estimated_if_configured(&self, ctx: &Context, subgraph_name: &str) -> Option<KeyValue> {
+        let key = self.cost_estimated.as_ref()?.key(SUBGRAPH_COST_ESTIMATED)?;
+        let value = ctx.get_subgraph_estimated_cost(subgraph_name).ok()??;
+        Some(KeyValue::new(key, value))
     }
 }
 
