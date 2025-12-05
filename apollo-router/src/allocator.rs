@@ -1,4 +1,6 @@
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 use std::alloc::GlobalAlloc;
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 use std::alloc::Layout;
 use std::cell::Cell;
 use std::ffi::CStr;
