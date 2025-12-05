@@ -107,6 +107,7 @@ struct SubgraphPathContextInfo {
 #[derive(PartialEq, Eq, Hash)]
 pub(super) struct SubgraphContextKey {
     tail_subgraph_name: Arc<str>,
+    tail_type: QueryGraphNodeType,
     contexts: SubgraphPathContexts,
 }
 
@@ -809,14 +810,14 @@ impl ValidationState {
         subgraph_path_infos: Option<&[SubgraphPathInfo]>,
     ) -> Result<IndexSet<SubgraphContextKey>, FederationError> {
         let map_to_context_key = |path_info: &SubgraphPathInfo| {
+            let query_graph_node = path_info
+                .path
+                .path
+                .graph()
+                .node_weight(path_info.path.path.tail())?;
             Ok(SubgraphContextKey {
-                tail_subgraph_name: path_info
-                    .path
-                    .path
-                    .graph()
-                    .node_weight(path_info.path.path.tail())?
-                    .source
-                    .clone(),
+                tail_subgraph_name: query_graph_node.source.clone(),
+                tail_type: query_graph_node.type_.clone(),
                 contexts: path_info.contexts.clone(),
             })
         };
