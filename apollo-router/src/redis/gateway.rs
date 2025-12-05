@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -18,7 +17,6 @@ use fred::prelude::Options;
 use fred::prelude::TcpConfig;
 use fred::types::Builder;
 use fred::types::Expiration;
-use fred::types::cluster::ClusterRouting;
 use fred::types::config::ClusterDiscoveryPolicy;
 use fred::types::config::Config as RedisConfig;
 use fred::types::config::ReconnectPolicy;
@@ -26,12 +24,13 @@ use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
+use fred::types::scan::Scanner;
 use futures::Stream;
 use futures::TryStreamExt;
 use futures::future::join_all;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinSet;
-use tokio_util::future::FutureExt;
+use tokio_stream::StreamExt;
 use tower::BoxError;
 use url::Url;
 
@@ -45,6 +44,10 @@ use super::pool::DropSafeRedisPool;
 use super::value::Value;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
+
+// TODO document this:
+//  note that there aren't tokio::timeouts happening within the gateway, other than the client timeouts
+//  configured in the router config.
 
 pub(crate) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 
@@ -325,10 +328,6 @@ impl Gateway {
         })
     }
 
-    pub(crate) fn ttl(&self) -> Option<Duration> {
-        self.ttl
-    }
-
     /// Helper method to record Redis errors for metrics
     fn record_error<E: Into<Error>>(&self, error: E) {
         record_redis_error(&error.into(), self.inner.caller);
@@ -561,124 +560,6 @@ impl Gateway {
             }
         }
     }
-
-    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
-    /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, Error>
-    where
-        I: Iterator<Item = fred::types::Key>,
-    {
-        self.delete_from_scan_result_with_options(keys, Options::default())
-            .await
-    }
-
-    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
-    /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result_with_options<I>(
-        &self,
-        keys: I,
-        options: Options,
-    ) -> Result<u32, Error>
-    where
-        I: Iterator<Item = fred::types::Key>,
-    {
-        let mut h: HashMap<u16, Vec<fred::types::Key>> = HashMap::new();
-        for key in keys.into_iter() {
-            let hash = ClusterRouting::hash_key(key.as_bytes());
-            let entry = h.entry(hash).or_default();
-            entry.push(key);
-        }
-
-        // then we execute against all the key groups at the same time
-        let results: Vec<Result<u32, _>> = join_all(h.into_values().map(|keys| async {
-            let client = self.client().with_options(&options);
-            client.del(keys).await
-        }))
-        .await;
-
-        let mut total = 0;
-        for result in results {
-            let count = result.inspect_err(|e| self.record_error(e))?;
-            total += count;
-        }
-
-        Ok(total)
-    }
-
-    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
-    pub(crate) fn scan_with_namespaced_results(
-        &self,
-        pattern: String,
-        count: Option<u32>,
-    ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, Error>> + Send>> {
-        let pattern = self.make_key(Key(pattern));
-        if self.is_cluster {
-            // NOTE: scans might be better send to only the read replicas, but the read-only client
-            // doesn't have a scan_cluster(), just a paginated version called scan_page()
-            Box::pin(
-                self.client()
-                    .scan_cluster(pattern, count, None)
-                    .map_err(Error::from),
-            )
-        } else {
-            Box::pin(
-                self.client()
-                    .scan(pattern, count, None)
-                    .map_err(Error::from),
-            )
-        }
-    }
-}
-
-#[cfg(all(
-    test,
-    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
-))]
-impl Gateway {
-    pub(crate) async fn truncate_namespace(&self) -> Result<(), Error> {
-        use fred::prelude::Key;
-        use futures::StreamExt;
-
-        if self.namespace.is_none() {
-            return Ok(());
-        }
-
-        // find all members of this namespace via `SCAN`
-        let pattern = self.make_key(Key("*"));
-        let client = self.client();
-        let mut stream: Pin<Box<dyn Stream<Item = Result<Key, Error>>>> = if self.is_cluster {
-            Box::pin(
-                client
-                    .scan_cluster_buffered(pattern, None, None)
-                    .map_err(Into::into),
-            )
-        } else {
-            Box::pin(
-                client
-                    .scan_buffered(pattern, None, None)
-                    .map_err(Into::into),
-            )
-        };
-
-        let mut keys = Vec::new();
-        while let Some(key) = stream.next().await {
-            keys.push(key?);
-        }
-
-        // remove all members of this namespace
-        self.delete_from_scan_result(keys.into_iter()).await?;
-        Ok(())
-    }
-
-    pub(crate) fn strip_namespace(&self, key: String) -> String {
-        match &self.namespace {
-            Some(namespace) => key
-                .strip_prefix(&format!("{namespace}:"))
-                .map(ToString::to_string)
-                .unwrap_or(key),
-            None => key,
-        }
-    }
 }
 
 // Public API for Redis commands - function names should be strongly mapped to redis command names.
@@ -688,23 +569,7 @@ impl Gateway {
         keys: I,
     ) -> Result<u64, Error> {
         let keys: Vec<String> = keys.into_iter().map(|k| self.make_key(k)).collect();
-        if self.is_cluster {
-            // execute each DEL in a joinset
-            let mut join_set: JoinSet<Result<u64, _>> = JoinSet::new();
-            for key in keys {
-                let client = self.client();
-                join_set.spawn(async move { client.del(key).await });
-            }
-
-            let mut count = 0;
-            while let Some(result) = join_set.join_next().await {
-                count += result??;
-            }
-            Ok(count)
-        } else {
-            let count = self.client().del(keys).await?;
-            Ok(count)
-        }
+        self.delete_keys(keys).await
     }
 
     pub(crate) async fn expireat<K: KeyType>(
@@ -758,6 +623,29 @@ impl Gateway {
             Ok(value.0)
         } else {
             self.get(key).await
+        }
+    }
+
+    fn scan<K: KeyType>(
+        &self,
+        pattern: K,
+        count: Option<u32>,
+    ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, Error>> + Send>> {
+        let pattern = self.make_key(pattern);
+        if self.is_cluster {
+            // NOTE: scans might be better send to only the read replicas, but the read-only client
+            // doesn't have a scan_cluster(), just a paginated version called scan_page()
+            Box::pin(
+                self.client()
+                    .scan_cluster(pattern, count, None)
+                    .map_err(Error::from),
+            )
+        } else {
+            Box::pin(
+                self.client()
+                    .scan(pattern, count, None)
+                    .map_err(Error::from),
+            )
         }
     }
 
@@ -826,6 +714,177 @@ impl Gateway {
             .zremrangebyscore(key, min_score, max_score)
             .await?;
         Ok(items_removed)
+    }
+}
+
+// Public API for Redis commands used in testing - function names should be strongly mapped to redis command names.
+#[cfg(test)]
+impl Gateway {
+    pub(crate) async fn expiretime<K: KeyType>(&self, key: K) -> Result<Option<i64>, Error> {
+        let key = self.make_key(key);
+        let value = self.client().expire_time(key).await?;
+
+        // * value == -1 if the key exists but has no expire time
+        // * value == -2 if the key does not exist
+        if value >= 0 {
+            Ok(Some(value))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub(crate) async fn ttl<K: KeyType>(&self, key: K) -> Result<Option<Duration>, Error> {
+        let key = self.make_key(key);
+        let value: i64 = self.client().ttl(key).await?;
+
+        // * value == -1 if the key exists but has no expire time
+        // * value == -2 if the key does not exist
+        if value >= 0 {
+            Ok(Some(Duration::new(value as u64, 0)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub(crate) async fn zcard<K: KeyType>(&self, key: K) -> Result<Option<u64>, Error> {
+        let key = self.make_key(key);
+        let value = self.client().zcard(key).await?;
+        Ok(value)
+    }
+
+    pub(crate) async fn zscore<K: KeyType, L: KeyType>(
+        &self,
+        key: K,
+        member: L,
+    ) -> Result<Option<f64>, Error> {
+        let key = self.make_key(key);
+        let member = member.to_string();
+        let value = self.client().zscore(key, member).await?;
+        Ok(value)
+    }
+}
+
+// Public API for abstractions on top of redis commands
+impl Gateway {
+    // delete all elements matching {namespace}:{pattern}
+    // NB: weird return type to expose the fact that we can be partially through a delete operation
+    // before encountering an error. TODO: is this actulaly necessary?
+    pub(crate) async fn scan_and_delete<K: KeyType>(
+        &self,
+        pattern: K,
+        count: Option<u32>,
+    ) -> Result<u64, (u64, Error)> {
+        let mut deleted = 0;
+        let mut scan_result_stream = self.scan(pattern, count);
+        while let Some(scan_result) = scan_result_stream.next().await {
+            let mut scan_result: ScanResult = scan_result.map_err(|err| (deleted, err.into()))?;
+            if let Some(keys) = scan_result.take_results()
+                && !keys.is_empty()
+            {
+                // turn keys into Vec<String> and pass to the delete function
+                // NOTE: these keys are already namespaced, which is why we use self.delete_keys
+                // rather than self.del
+                let keys = keys
+                    .into_iter()
+                    .filter_map(|key| key.into_string())
+                    .collect();
+                match self.delete_keys(keys).await {
+                    Ok(count) => deleted += count,
+                    Err(err) => return Err((deleted, err.into())),
+                }
+            }
+        }
+
+        Ok(deleted)
+    }
+}
+
+// Public API for abstractions on top of redis commands
+#[cfg(test)]
+impl Gateway {
+    // TODO: real fn accepts a list of keys and returns the number of those that exist... but that's not
+    //  needed at this time
+    pub(crate) async fn exists<K: KeyType>(&self, key: K) -> Result<bool, Error> {
+        let key = self.make_key(key);
+        let count: u64 = self.client().exists(key).await?;
+        Ok(count == 1)
+    }
+
+    pub(crate) async fn truncate_namespace(&self) -> Result<(), Error> {
+        if self.namespace.is_none() {
+            panic!("Will not truncate as no namespace was provided");
+        }
+        match self.scan_and_delete("*", Some(100)).await {
+            Ok(_) => Ok(()),
+            Err((_, err)) => Err(err),
+        }
+    }
+
+    /// TODO better docs Return a list of all keys in this namespace, with the namespace string stripped from
+    /// each key.
+    pub(crate) async fn all_keys_in_namespace(&self) -> Result<Vec<String>, Error> {
+        let mut keys = Vec::new();
+        let mut scan_result_stream = self.scan("*", None);
+        while let Some(scan_result) = scan_result_stream.next().await {
+            if let Some(page_keys) = scan_result?.take_results() {
+                keys.extend(
+                    page_keys
+                        .into_iter()
+                        .filter_map(|key| key.into_string())
+                        .map(|key| self.strip_namespace(key)),
+                );
+            }
+        }
+
+        Ok(keys)
+    }
+
+    // see if a sorted set member exists. returns Ok(false) if (a) the sorted set doesn't exist
+    // or (b) the member doesn't exist in the set
+    pub(crate) async fn zexists<K: KeyType, L: KeyType>(
+        &self,
+        key: K,
+        member: L,
+    ) -> Result<bool, Error> {
+        Ok(self.zscore(key, member).await?.is_some())
+    }
+}
+
+#[cfg(test)]
+// Other misc stuff
+impl Gateway {
+    fn strip_namespace(&self, key: String) -> String {
+        match &self.namespace {
+            Some(namespace) => key
+                .strip_prefix(&format!("{namespace}:"))
+                .map(ToString::to_string)
+                .unwrap_or(key),
+            None => key,
+        }
+    }
+}
+
+// Other misc stuff that doesn't map directly to a key
+impl Gateway {
+    // TODO doc: this doesn't postprocess the keys to add the namespace
+    async fn delete_keys(&self, keys: Vec<String>) -> Result<u64, Error> {
+        if self.is_cluster {
+            // execute each DEL in a joinset
+            let mut join_set: JoinSet<Result<u64, _>> = JoinSet::new();
+            for key in keys {
+                let client = self.client();
+                join_set.spawn(async move { client.del(key).await });
+            }
+
+            let mut count = 0;
+            while let Some(result) = join_set.join_next().await {
+                count += result??;
+            }
+            Ok(count)
+        } else {
+            let count = self.client().del(keys).await?;
+            Ok(count)
+        }
     }
 }
 
@@ -1104,6 +1163,38 @@ mod test {
                     values.into_iter().map(|v| v.ok().flatten()).collect();
                 assert_eq!(parsed_values, expected_values);
             }
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn test_truncation_removes_all_keys_in_namespace(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = redis::Gateway::new(
+                redis_config(clustered),
+                "test_truncation_removes_all_keys_in_namespace",
+            )
+            .await?;
+
+            storage.truncate_namespace().await?;
+            assert!(storage.all_keys_in_namespace().await?.is_empty());
+
+            // add a few keys to this namespace
+            let data = [("hello", "world".to_string()), ("foo", "bar".to_string())];
+            storage.insert_multiple(&data, None).await;
+
+            assert!(storage.exists("hello").await?);
+            assert!(storage.exists("foo").await?);
+
+            let keys = storage.all_keys_in_namespace().await?;
+            assert!(!keys.is_empty());
+            assert_eq!(keys.len(), 2);
+
+            // truncate the namespace and make sure it's empty again
+            storage.truncate_namespace().await?;
+            assert!(storage.all_keys_in_namespace().await?.is_empty());
 
             Ok(())
         }

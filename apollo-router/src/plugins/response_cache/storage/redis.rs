@@ -5,14 +5,6 @@ use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use fred::interfaces::ClientLike;
-use fred::interfaces::KeysInterface;
-use fred::interfaces::SortedSetsInterface;
-use fred::prelude::Options;
-use fred::types::Expiration;
-use fred::types::ExpireOptions;
-use fred::types::Value;
-use fred::types::sorted_sets::Ordering;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::sync::broadcast;
@@ -93,10 +85,6 @@ impl Storage {
         };
         s.perform_periodic_maintenance(cache_tag_rx, drop_rx).await;
         Ok(s)
-    }
-
-    fn make_key<K: redis::KeyType>(&self, key: K) -> String {
-        self.storage.make_key(key)
     }
 
     async fn invalidate_keys(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
@@ -468,88 +456,6 @@ impl Storage {
         s.perform_periodic_maintenance(cache_tag_rx, drop_rx).await;
         Ok(s)
     }
-
-    /// Return a list of all keys in this namespace, with the namespace string stripped from
-    /// each key.
-    async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
-        use fred::types::scan::Scanner;
-        use tokio_stream::StreamExt;
-
-        let mut scan_stream = self
-            .storage
-            .scan_with_namespaced_results(String::from("*"), None);
-        let mut keys = Vec::default();
-        while let Some(result) = scan_stream.next().await {
-            if let Some(page_keys) = result?.take_results() {
-                let mut str_keys: Vec<String> = page_keys
-                    .into_iter()
-                    .map(|k| k.into_string().unwrap())
-                    .map(|k| self.storage.strip_namespace(k))
-                    .collect();
-                keys.append(&mut str_keys);
-            }
-        }
-
-        Ok(keys)
-    }
-
-    async fn ttl(&self, key: &str) -> StorageResult<i64> {
-        let key = self.make_key(key);
-        Ok(self
-            .storage
-            .client()
-            .ttl(key)
-            .await
-            .map_err(redis::Error::from)?)
-    }
-
-    async fn expire_time(&self, key: &str) -> StorageResult<i64> {
-        let key = self.make_key(key);
-        Ok(self
-            .storage
-            .client()
-            .expire_time(key)
-            .await
-            .map_err(redis::Error::from)?)
-    }
-
-    async fn zscore(&self, sorted_set_key: &str, member: &str) -> Result<i64, BoxError> {
-        let sorted_set_key = self.make_key(sorted_set_key);
-        let score: String = self.storage.client().zscore(sorted_set_key, member).await?;
-        Ok(score.parse()?)
-    }
-
-    async fn zcard(&self, sorted_set_key: &str) -> StorageResult<u64> {
-        let sorted_set_key = self.make_key(sorted_set_key);
-        let cardinality = self
-            .storage
-            .client()
-            .zcard(sorted_set_key)
-            .await
-            .map_err(redis::Error::from)?;
-        Ok(cardinality)
-    }
-
-    async fn zexists(&self, sorted_set_key: &str, member: &str) -> StorageResult<bool> {
-        let sorted_set_key = self.make_key(sorted_set_key);
-        let score: Option<String> = self
-            .storage
-            .client()
-            .zscore(sorted_set_key, member)
-            .await
-            .map_err(redis::Error::from)?;
-        Ok(score.is_some())
-    }
-
-    async fn exists(&self, key: &str) -> StorageResult<bool> {
-        let key = self.make_key(key);
-        Ok(self
-            .storage
-            .client()
-            .exists(key)
-            .await
-            .map_err(redis::Error::from)?)
-    }
 }
 
 #[cfg(all(
@@ -669,7 +575,7 @@ mod tests {
                 storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME);
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
-            let keys = storage.all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace().await?;
             assert!(keys.contains(&document_key));
             for key in &expected_cache_tag_keys {
                 assert!(keys.contains(key), "missing {key}");
@@ -678,23 +584,27 @@ mod tests {
 
             // extract the TTL for each key. the TTL for the document must be less than the TTL for each
             // of the invalidation keys.
-            let document_ttl = storage.ttl(&document_key).await?;
-            assert!(document_ttl > 0);
+            let document_ttl = storage.storage.ttl(&document_key).await?.unwrap();
+            assert!(document_ttl > Duration::ZERO);
 
             for cache_tag_key in &expected_cache_tag_keys {
-                let cache_tag_ttl = storage.ttl(cache_tag_key).await?;
-                assert!(cache_tag_ttl > 0, "{cache_tag_key}");
+                let cache_tag_ttl = storage.storage.ttl(cache_tag_key).await?.unwrap();
+                assert!(cache_tag_ttl > Duration::ZERO, "{cache_tag_key}");
                 assert!(document_ttl < cache_tag_ttl, "{cache_tag_key}")
             }
 
             // extract the expiry time for the document key. it should match the sorted set score in each
             // of the cache tags.
-            let document_expire_time = storage.expire_time(&document_key).await?;
+            let document_expire_time = storage.storage.expiretime(&document_key).await?.unwrap();
             assert!(document_expire_time > 0);
 
             for cache_tag_key in &expected_cache_tag_keys {
-                let document_score = storage.zscore(cache_tag_key, &document_key).await?;
-                assert_eq!(document_expire_time, document_score);
+                let document_score = storage
+                    .storage
+                    .zscore(cache_tag_key, &document_key)
+                    .await?
+                    .unwrap();
+                assert_eq!(document_expire_time, document_score as i64);
             }
 
             Ok(())
@@ -764,7 +674,7 @@ mod tests {
             );
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
-            let keys = storage.all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace().await?;
             for expected_document_key in &expected_document_keys {
                 assert!(keys.contains(expected_document_key));
             }
@@ -774,10 +684,10 @@ mod tests {
             assert_eq!(keys.len(), 6); // 2 documents + 4 cache tags
 
             // extract all TTLs
-            let mut ttls: HashMap<String, i64> = HashMap::default();
+            let mut ttls: HashMap<String, Duration> = HashMap::default();
             for key in &keys {
-                let ttl = storage.ttl(key).await?;
-                assert!(ttl > 0);
+                let ttl = storage.storage.ttl(key).await?.unwrap();
+                assert!(ttl > Duration::ZERO);
                 ttls.insert(key.clone(), ttl);
             }
 
@@ -790,7 +700,7 @@ mod tests {
 
                 // the document TTL should be close to the expiry time on the document (within some range
                 // of acceptable redis latency - 10s for now)
-                assert!(document.expire.as_secs() as i64 - *document_ttl < 10);
+                assert!(document.expire - *document_ttl < Duration::from_secs(10));
 
                 for cache_tag_key in cache_tag_keys {
                     let cache_tag_ttl = ttls.get(cache_tag_key).unwrap();
@@ -803,12 +713,16 @@ mod tests {
                 let document_key = &expected_document_keys[index];
                 let cache_tag_keys = &expected_cache_tag_keys[index];
 
-                let document_expire_time = storage.expire_time(document_key).await?;
+                let document_expire_time = storage.storage.expiretime(document_key).await?.unwrap();
                 assert!(document_expire_time > 0);
 
                 for cache_tag_key in cache_tag_keys {
-                    let document_score = storage.zscore(cache_tag_key, document_key).await?;
-                    assert_eq!(document_expire_time, document_score);
+                    let document_score = storage
+                        .storage
+                        .zscore(cache_tag_key, document_key)
+                        .await?
+                        .unwrap();
+                    assert_eq!(document_expire_time, document_score as i64);
                 }
             }
 
@@ -831,12 +745,12 @@ mod tests {
             };
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
-            let keys = storage.all_keys_in_namespace().await?;
+            let keys = storage.storage.all_keys_in_namespace().await?;
 
             // save current expiry times
             let mut expire_times: HashMap<String, i64> = HashMap::default();
             for key in &keys {
-                let expire_time = storage.expire_time(key).await?;
+                let expire_time = storage.storage.expiretime(key).await?.unwrap();
                 assert!(expire_time > 0);
                 expire_times.insert(key.clone(), expire_time);
             }
@@ -851,7 +765,7 @@ mod tests {
 
             // fetch new expiry times; they should be the same
             for key in keys {
-                let new_expire_time = storage.expire_time(&key).await?;
+                let new_expire_time = storage.storage.expiretime(&key).await?.unwrap();
                 assert!(new_expire_time > 0);
                 assert_eq!(*expire_times.get(&key).unwrap(), new_expire_time);
             }
@@ -891,14 +805,14 @@ mod tests {
             let keys = storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME);
 
             // save current scores
-            let mut scores: HashMap<String, i64> = HashMap::default();
+            let mut scores: HashMap<String, f64> = HashMap::default();
             let mut expire_times: HashMap<String, i64> = HashMap::default();
             for key in &keys {
-                let score = storage.zscore(key, &document_key).await?;
-                assert!(score > 0);
+                let score = storage.storage.zscore(key, &document_key).await?.unwrap();
+                assert!(score > 0.0);
                 scores.insert(key.clone(), score);
 
-                let expire_time = storage.expire_time(key).await?;
+                let expire_time = storage.storage.expiretime(key).await?.unwrap();
                 assert!(expire_time > 0);
                 expire_times.insert(key.clone(), expire_time);
             }
@@ -919,16 +833,16 @@ mod tests {
             assert_eq!(stored_data.data, document.data);
 
             // the TTL on the document should be aligned with the new document expiry time
-            let ttl = storage.ttl(&document_key).await?;
-            assert!(ttl <= document.expire.as_secs() as i64);
+            let ttl = storage.storage.ttl(&document_key).await?.unwrap();
+            assert!(ttl <= document.expire);
 
             // however, the TTL on the cache tags and the score in the cache tags will be the same
             for key in keys {
-                let score = storage.zscore(&key, &document_key).await?;
-                assert!(score > 0);
+                let score = storage.storage.zscore(&key, &document_key).await?.unwrap();
+                assert!(score > 0.0);
                 assert_eq!(*scores.get(&key).unwrap(), score);
 
-                let expire_time = storage.expire_time(&key).await?;
+                let expire_time = storage.storage.expiretime(&key).await?.unwrap();
                 assert!(expire_time > 0);
                 assert_eq!(*expire_times.get(&key).unwrap(), expire_time);
             }
@@ -981,18 +895,18 @@ mod tests {
             assert_eq!(stored_data.data, document.data);
 
             // the TTL on the document should be aligned with the new document expiry time
-            let ttl = storage.ttl(&document_key).await?;
-            assert!(ttl <= document.expire.as_secs() as i64);
-            assert!(ttl > old_ttl.as_secs() as i64);
+            let ttl = storage.storage.ttl(&document_key).await?.unwrap();
+            assert!(ttl <= document.expire);
+            assert!(ttl > old_ttl);
 
-            let doc_expire_time = storage.expire_time(&document_key).await?;
+            let doc_expire_time = storage.storage.expiretime(&document_key).await?.unwrap();
 
             // the TTL on the cache tags and the score in the cache tags should have also increased
             for key in keys {
-                let score = storage.zscore(&key, &document_key).await?;
-                assert!(doc_expire_time <= score);
+                let score = storage.storage.zscore(&key, &document_key).await?.unwrap();
+                assert!(doc_expire_time <= score as i64);
 
-                let expire_time = storage.expire_time(&key).await?;
+                let expire_time = storage.storage.expiretime(&key).await?.unwrap();
                 assert!(doc_expire_time < expire_time);
             }
 
@@ -1003,13 +917,12 @@ mod tests {
     /// Tests that ensure that if a key's cache tag cannot be updated, the key will not be updated.
     mod cache_tag_insert_failure_should_abort_key_insertion {
         use std::sync::Arc;
+        use std::time::Duration;
 
         use fred::error::Error;
         use fred::error::ErrorKind;
-        use fred::interfaces::KeysInterface;
         use fred::mocks::MockCommand;
         use fred::mocks::Mocks;
-        use fred::prelude::Expiration;
         use fred::prelude::Value;
         use parking_lot::RwLock;
         use tokio::sync::broadcast;
@@ -1039,12 +952,10 @@ mod tests {
                 storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME);
 
             let insert_invalid_cache_tag = |key: String| async {
-                let namespaced_key = storage.make_key(key);
                 let _: () = storage
                     .storage
-                    .client()
-                    .set(namespaced_key, 1, Some(Expiration::EX(60)), None, false)
-                    .await?;
+                    .insert(key, 1, Some(Duration::from_secs(60)))
+                    .await;
                 Ok::<(), BoxError>(())
             };
 
@@ -1061,7 +972,7 @@ mod tests {
                     "cache tag {key} should have caused insertion failure"
                 ));
 
-                assert!(!storage.exists(&document_key).await?);
+                assert!(!storage.storage.exists(&document_key).await?);
             }
 
             // this should also be true if inserting multiple documents, even if only one of the
@@ -1093,7 +1004,7 @@ mod tests {
                     ));
 
                 for document in &documents {
-                    assert!(!storage.exists(&document.key).await?);
+                    assert!(!storage.storage.exists(&document.key).await?);
                 }
             }
 
@@ -1127,7 +1038,7 @@ mod tests {
             .await?;
 
             let document = common_document();
-            let document_key = Value::from(storage.make_key(document.key.clone()));
+            let document_key = Value::from(storage.storage.make_key(document.key.clone()));
 
             let result = storage.insert(document, SUBGRAPH_NAME).await;
             let error = result.expect_err("should have timed out via redis");
@@ -1182,29 +1093,34 @@ mod tests {
 
         // ensure that we have three elements in the 'whole-subgraph' invalidation key
         let invalidation_key = storage.cache_tag_permutations(&[], SUBGRAPH_NAME).remove(0);
-        assert_eq!(storage.zcard(&invalidation_key).await?, 3);
+        assert_eq!(storage.storage.zcard(&invalidation_key).await?.unwrap(), 3);
 
         let doc_key1 = "key1";
         let doc_key2 = "key2";
         let doc_key3 = "key3";
         for key in [&doc_key1, &doc_key2, &doc_key3] {
-            assert!(storage.zexists(&invalidation_key, key).await?);
+            assert!(storage.storage.zexists(&invalidation_key, key).await?);
         }
 
         // manually trigger maintenance with a time in the future, in between the expiry times of doc1
         // and docs 2 and 3. therefore, we should remove `key1` and leave `key2` and `key3`
-        let cutoff = now() + 10;
-        assert!(storage.zscore(&invalidation_key, doc_key1).await? < cutoff as i64);
+        let cutoff = (now() + 10) as f64;
+        let doc_key1_score = storage
+            .storage
+            .zscore(&invalidation_key, doc_key1)
+            .await?
+            .unwrap();
+        assert!(doc_key1_score < cutoff);
         let removed_keys = storage
-            .remove_keys_from_cache_tag_by_cutoff(invalidation_key.clone(), cutoff as f64)
+            .remove_keys_from_cache_tag_by_cutoff(invalidation_key.clone(), cutoff)
             .await?;
         assert_eq!(removed_keys, 1);
 
         // now we should have two elements in the 'whole-subgraph' invalidation key
-        assert_eq!(storage.zcard(&invalidation_key).await?, 2);
-        assert!(!storage.zexists(&invalidation_key, doc_key1).await?);
-        assert!(storage.zexists(&invalidation_key, doc_key2).await?);
-        assert!(storage.zexists(&invalidation_key, doc_key3).await?);
+        assert_eq!(storage.storage.zcard(&invalidation_key).await?.unwrap(), 2);
+        assert!(!storage.storage.zexists(&invalidation_key, doc_key1).await?);
+        assert!(storage.storage.zexists(&invalidation_key, doc_key2).await?);
+        assert!(storage.storage.zexists(&invalidation_key, doc_key3).await?);
 
         // manually trigger maintenance with the time set way in the future
         let cutoff = now() + 1000;
@@ -1214,9 +1130,9 @@ mod tests {
         assert_eq!(removed_keys, 2);
 
         // now we should have zero elements in the 'whole-subgraph' invalidation key
-        assert_eq!(storage.zcard(&invalidation_key).await?, 0);
+        assert_eq!(storage.storage.zcard(&invalidation_key).await?.unwrap(), 0);
         for key in [&doc_key1, &doc_key2, &doc_key3] {
-            assert!(!storage.zexists(&invalidation_key, key).await?);
+            assert!(!storage.storage.zexists(&invalidation_key, key).await?);
         }
 
         Ok(())
@@ -1263,14 +1179,14 @@ mod tests {
             // invalidate just subgraph1
             let num_invalidated = storage.invalidate_by_subgraph("S1", "subgraph").await?;
             assert_eq!(num_invalidated, 1);
-            assert!(!storage.exists("key1").await?);
-            assert!(storage.exists("key2").await?);
+            assert!(!storage.storage.exists("key1").await?);
+            assert!(storage.storage.exists("key2").await?);
 
             // invalidate subgraph2
             let num_invalidated = storage.invalidate_by_subgraph("S2", "subgraph").await?;
             assert_eq!(num_invalidated, 2);
-            assert!(!storage.exists("key2").await?);
-            assert!(!storage.exists("key3").await?);
+            assert!(!storage.storage.exists("key2").await?);
+            assert!(!storage.storage.exists("key3").await?);
 
             Ok(())
         }
@@ -1314,9 +1230,9 @@ mod tests {
                 .await?;
             assert_eq!(invalidated.len(), 1);
             assert_eq!(*invalidated.get("S2").unwrap(), 1);
-            assert!(storage.exists("key1").await?);
-            assert!(!storage.exists("key2").await?);
-            assert!(storage.exists("key3").await?);
+            assert!(storage.storage.exists("key1").await?);
+            assert!(!storage.storage.exists("key2").await?);
+            assert!(storage.storage.exists("key3").await?);
 
             Ok(())
         }
@@ -1377,18 +1293,18 @@ mod tests {
             let document_key = document.key.clone();
 
             storage.insert(document, "S1").await?;
-            assert!(storage.exists(&document_key).await?);
+            assert!(storage.storage.exists(&document_key).await?);
 
             let invalidated = storage.invalidate_by_subgraph("S1", "subgraph").await?;
             assert_eq!(invalidated, 1);
 
-            assert!(!storage.exists(&document_key).await?);
+            assert!(!storage.storage.exists(&document_key).await?);
 
             // re-invalidate - storage still shouldn't have the key in it, and it shouldn't
             // encounter an error
             let invalidated = storage.invalidate_by_subgraph("S1", "subgraph").await?;
             assert_eq!(invalidated, 0);
-            assert!(!storage.exists(&document_key).await?);
+            assert!(!storage.storage.exists(&document_key).await?);
 
             Ok(())
         }

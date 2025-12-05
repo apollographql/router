@@ -540,7 +540,7 @@ impl EntityCache {
             .map(|t| t.0)
             .or_else(|| match self.subgraphs.all.ttl.clone() {
                 Some(ttl) => Some(ttl.0),
-                None => storage.ttl(),
+                None => storage.ttl,
             })
     }
 }

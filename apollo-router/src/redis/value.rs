@@ -1,3 +1,5 @@
+//! TODO: better docs for this...
+
 use std::fmt;
 
 use fred::error::Error as RedisError;

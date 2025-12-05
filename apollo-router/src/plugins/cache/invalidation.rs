@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use fred::types::scan::Scanner;
 use futures::StreamExt;
 use futures::stream;
 use itertools::Itertools;
@@ -106,36 +105,20 @@ impl Invalidation {
             key_prefix
         );
 
-        let mut stream =
-            redis_storage.scan_with_namespaced_results(key_prefix.clone(), Some(self.scan_count));
-        let mut count = 0u64;
-        let mut error = None;
-
-        while let Some(res) = stream.next().await {
-            match res {
-                Err(e) => {
-                    tracing::error!(
-                        pattern = key_prefix,
-                        error = %e,
-                        message = "error scanning for key",
-                    );
-                    error = Some(e);
-                    break;
-                }
-                Ok(mut scan_res) => {
-                    if let Some(keys) = scan_res.take_results()
-                        && !keys.is_empty()
-                    {
-                        let deleted = redis_storage
-                            .delete_from_scan_result(keys.into_iter())
-                            .await
-                            .unwrap_or(0) as u64;
-                        count += deleted;
-                    }
-                    scan_res.next();
-                }
+        let (count, error) = match redis_storage
+            .scan_and_delete(key_prefix.clone(), Some(self.scan_count))
+            .await
+        {
+            Ok(deleted) => (deleted, None),
+            Err((deleted, error)) => {
+                tracing::error!(
+                    pattern = key_prefix,
+                    error = %error,
+                    message = "error scanning for key",
+                );
+                (deleted, Some(error))
             }
-        }
+        };
 
         u64_counter!(
             "apollo.router.operations.entity.invalidation.entry",

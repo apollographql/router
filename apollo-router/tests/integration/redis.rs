@@ -2006,6 +2006,9 @@ async fn test_redis_in_standalone_mode_for_mgets() {
     assert_eq!(redis_monitor_output.num_nodes(), 1);
     assert!(redis_monitor_output.command_sent_to_any("MGET"));
 
+    router.read_logs();
+    router.print_logs();
+
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
     router.assert_metrics_does_not_contain(io_error).await;
