@@ -611,28 +611,7 @@ impl TransitionGraphPath {
                     QueryGraphEdgeTransition::Downcast {
                         to_type_position, ..
                     } => {
-                        // Check if we're in an @interfaceObject context
-                        let subgraph_schema = graph.schema_by_source(subgraph)?;
-                        let mut is_interface_object = false;
-                        if let Some(metadata) = subgraph_schema.subgraph_metadata()
-                            && let Ok(Some(interface_object_directive)) = metadata
-                                .federation_spec_definition()
-                                .interface_object_directive_definition(subgraph_schema)
-                            && let OutputTypeDefinitionPosition::Object(object_pos) = tail_type_pos
-                            && let Ok(object_def) = object_pos.get(subgraph_schema.schema())
-                        {
-                            is_interface_object =
-                                object_def.directives.has(&interface_object_directive.name);
-                        };
-
-                        if is_interface_object {
-                            format!(
-                                "no subgraph can be reached to resolve the implementation type of @interfaceObject type \"{}\"",
-                                tail_type_pos.type_name()
-                            )
-                        } else {
-                            format!("cannot find type \"{to_type_position}\"")
-                        }
+                        format!("cannot find type \"{to_type_position}\"")
                     }
                     _ => {
                         bail!("Unhandled direct transition {}", transition);

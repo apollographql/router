@@ -102,7 +102,7 @@ pub(super) fn shareable_field_non_intersecting_runtime_types_error(
         implies at least some common runtime types between the subgraphs.",
         operation, field_definition_position, field.ty, type_strings,
     );
-    errors.push(CompositionError::SatisfiabilityError { message });
+    errors.push(CompositionError::ShareableHasMismatchedRuntimeTypes { message });
     Ok(())
 }
 
