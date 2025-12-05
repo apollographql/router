@@ -4,3 +4,4 @@ When starting the router, a warning is now displayed if the `OTEL_EXPORTER_OTLP_
 
 This warning helps users understand that their telemetry configuration may not be sending data where expected when this environment variable is present.
 
+By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/8729
