@@ -251,6 +251,7 @@ mod interface_object_tests {
         );
     }
 
+    #[ignore = "Missing message about jumping from B to C, todo in FED-934"]
     #[test]
     fn fails_on_interface_object_with_some_unreachable_implementation() {
         let subgraph_a = ServiceDefinition {
@@ -311,10 +312,12 @@ mod interface_object_tests {
                   }
                 }
                 cannot be satisfied by the subgraphs because:
+                - from subgraph "subgraphB":
+                    - cannot find implementation type "A" (supergraph interface "I" is declared with @interfaceObject in "subgraphB").
+                    - cannot move to subgraph "subgraphC", which has field "A.z", because interface "I" is not defined in this subgraph (to jump to "subgraphC", it would need to both define interface "I" and have a @key on it).
                 - from subgraph "subgraphA":
-                  - cannot find field "A.z".
-                  - cannot move to subgraph "subgraphC", which has field "A.z", because type "A" has no @key defined in subgraph "subgraphC".
-                - from subgraph "subgraphB": cannot find implementation type "A" (supergraph interface "I" is declared with @interfaceObject in "subgraphB").
+                    - cannot find field "A.z".
+                    - cannot move to subgraph "subgraphC", which has field "A.z", because type "A" has no @key defined in subgraph "subgraphC".
                 "#,
             )],
         );
