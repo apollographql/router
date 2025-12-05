@@ -35,6 +35,7 @@ ignore = [
     "RUSTSEC-2024-0320", # TODO replace the `yaml-rust` crate with a maintained equivalent
     "RUSTSEC-2024-0436", # TODO replace the `paste` crate with a maintained equivalent
     "RUSTSEC-2024-0388", # TODO replace the `derivative` crate with a maintained equivalent
+    "RUSTSEC-2025-0134", # TODO figure out what to do with rustls-pemfile, which is no longer maintained (trans dep of hyper-rustls, tonic)
 ]
 
 # This section is considered when running `cargo deny check licenses`
