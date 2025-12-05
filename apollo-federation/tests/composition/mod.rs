@@ -28,6 +28,7 @@ pub(crate) mod test_helpers {
     use apollo_federation::composition::compose;
     use apollo_federation::error::CompositionError;
     use apollo_federation::error::FederationError;
+    use apollo_federation::subgraph::test_utils::remove_indentation;
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::CompositionHint;
     use apollo_federation::supergraph::Satisfiable;
@@ -113,6 +114,9 @@ pub(crate) mod test_helpers {
         // Verify each expected error code and message
         for (i, (expected_code, expected_message)) in expected_errors.iter().enumerate() {
             let (error_code, error_str) = &error_strings[i];
+
+            let error_str = remove_indentation(error_str);
+            let expected_message = remove_indentation(expected_message);
 
             // Check error code
             assert!(
