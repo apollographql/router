@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use http::Uri;
 use opentelemetry::Key;
-use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -13,6 +13,7 @@ use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::error_handler::NamedSpanExporter;
+use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
@@ -60,7 +61,7 @@ impl TracingConfigurator for Config {
 
         let named_exporter = NamedSpanExporter::new(exporter, "zipkin");
         builder.with_span_processor(
-            BatchSpanProcessor::builder(named_exporter)
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("zipkin-tracing"))
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),

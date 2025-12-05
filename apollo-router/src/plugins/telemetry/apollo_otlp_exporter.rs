@@ -6,6 +6,8 @@ use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
+use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
+use opentelemetry_otlp::Compression::Gzip;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
@@ -15,6 +17,7 @@ use opentelemetry_sdk::trace::SpanLinks;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
+use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
@@ -67,10 +70,17 @@ impl ApolloOtlpExporter {
         let mut otlp_exporter = match protocol {
             Protocol::Grpc => opentelemetry_otlp::SpanExporter::builder()
                 .with_tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                .with_timeout(batch_config.max_export_timeout)
+                .with_endpoint(endpoint.to_string())
+                .with_metadata(metadata)
+                .with_compression(Gzip)
                 .build()?,
             // So far only using HTTP path for testing - the Studio backend only accepts GRPC today.
             Protocol::Http => opentelemetry_otlp::SpanExporter::builder()
                 .with_http()
+                .with_timeout(batch_config.max_export_timeout)
+                .with_endpoint(endpoint.to_string())
                 .build()?,
         };
 

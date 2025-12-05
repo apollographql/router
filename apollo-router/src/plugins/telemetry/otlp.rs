@@ -1,11 +1,15 @@
 //! Shared configuration for Otlp tracing and metrics.
-use std::collections::HashMap;
-
+use fred::prelude::TlsConfig;
 use http::Uri;
+use opentelemetry_otlp::Protocol::Grpc;
+use opentelemetry_otlp::{HasExportConfig, HttpExporterBuilder, HttpExporterBuilderSet, MetricExporter, MetricExporterBuilder, SpanExporter, SpanExporterBuilder, TonicExporterBuilder, WithExportConfig, WithHttpConfig, WithTonicConfig};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashMap;
+use log::warn;
+use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
@@ -147,7 +151,108 @@ pub(super) fn process_endpoint(
         .transpose()
 }
 
-impl Config {}
+impl Config {
+    // We have make some repetitive code here because OTel's
+    // TonicExporterBuilder::build_span_exporter and ::build_metric_exporter are protected when they
+    // shouldn't be.
+    pub(crate) fn span_exporter(
+        &self,
+        kind: TelemetryDataKind,
+    ) -> Result<SpanExporter, BoxError> {
+        let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
+        match self.protocol{
+            Protocol::Grpc => {
+                let tls_config_opt = self.tls_config(&endpoint_opt)?;
+                let mut builder = SpanExporter::builder()
+                    .with_tonic()
+                    .with_protocol(Grpc)
+                    .with_timeout(self.batch_processor.max_export_timeout)
+                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
+                if let Some(tls_config) = tls_config_opt {
+                    builder = builder.with_tls_config(tls_config);
+                }
+                if  let Some(endpoint) = &endpoint_opt {
+                    builder = builder.with_endpoint(endpoint)
+                }
+                Ok(builder.build()?)
+            },
+            Protocol::Http => {
+                let headers = self.http.headers.clone();
+                let mut builder = SpanExporter::builder()
+                    .with_http()
+                    .with_protocol(Grpc)
+                    .with_timeout(self.batch_processor.max_export_timeout)
+                    .with_headers(headers);
+                if  let Some(endpoint) = &endpoint_opt {
+                    builder = builder.with_endpoint(endpoint)
+                }
+                Ok(builder.build()?)
+            }
+        }
+    }
+
+    pub(crate) fn metric_exporter(
+        &self,
+        kind:TelemetryDataKind,
+    ) -> Result<MetricExporter, BoxError> {
+        let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
+        match self.protocol {
+            Protocol::Grpc => {
+                // Figure out if we need to set tls config for our exporter
+                let tls_config_opt = self.tls_config(&endpoint_opt)?;
+                let mut builder = MetricExporter::builder()
+                    .with_tonic()
+                    .with_protocol(Grpc)
+                    .with_timeout(self.batch_processor.max_export_timeout)
+                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
+
+                if let Some(endpoint) = endpoint_opt {
+                    builder = builder.with_endpoint(endpoint);
+                }
+                if let Some(tls_config) = tls_config_opt {
+                    builder = builder.with_tls_config(tls_config);
+                }
+
+                Ok(builder.build()?)
+            }
+            Protocol::Http => {
+                let headers = self.http.headers.clone();
+                let temporality = match self.temporality {
+                    Temporality::Cumulative => {
+                        opentelemetry_sdk::metrics::Temporality::Cumulative
+                    }
+                    Temporality::Delta => {
+                        opentelemetry_sdk::metrics::Temporality::Delta
+                    }
+                };
+                let mut builder = MetricExporter::builder()
+                    .with_http()
+                    .with_protocol(Grpc)
+                    .with_timeout(self.batch_processor.max_export_timeout)
+                    .with_headers(headers)
+                    .with_temporality(temporality);
+                if let Some(endpoint) = endpoint_opt {
+                    builder = builder.with_endpoint(endpoint);
+                }
+                Ok(builder.build()?)
+            }
+        }
+    }
+
+    fn tls_config(&self, endpoint_opt: &Option<String>) -> Result<Option<ClientTlsConfig>, BoxError> {
+        let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
+            if !endpoint.is_empty() {
+                let tls_url = Uri::try_from(endpoint)?;
+                Some(self.grpc.clone().to_tls_config(&tls_url)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        Ok(tls_config_opt)
+    }
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]

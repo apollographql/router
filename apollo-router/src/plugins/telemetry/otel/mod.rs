@@ -1,5 +1,6 @@
 /// Implementation of the trace::Layer as a source of OpenTelemetry data.
 pub(crate) mod layer;
+pub(crate) mod named_runtime_channel;
 /// Span extension which enables OpenTelemetry context management.
 pub(crate) mod span_ext;
 /// Protocols for OpenTelemetry Tracers that are compatible with Tracing

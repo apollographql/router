@@ -14,10 +14,13 @@ use opentelemetry::Value;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanKind;
 use opentelemetry_datadog::DatadogTraceState;
-use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::{runtime, Resource};
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
+
+
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -38,6 +41,7 @@ use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::error_handler::NamedSpanExporter;
+use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
@@ -220,7 +224,10 @@ impl TracingConfigurator for Config {
         };
         let named_exporter = NamedSpanExporter::new(wrapper, "datadog");
 
-        let batch_processor = opentelemetry_sdk::trace::BatchSpanProcessor::builder(named_exporter)
+        let batch_processor = BatchSpanProcessor::builder(
+            named_exporter,
+            NamedTokioRuntime::new("datadog-tracing"),
+        )
             .with_batch_config(self.batch_processor.clone().into())
             .build()
             .filtered();
