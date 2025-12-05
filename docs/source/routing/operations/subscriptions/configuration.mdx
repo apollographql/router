@@ -7,9 +7,12 @@ minVersion: Router v1.22.0
 
 <PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
 
-Rate limits apply on the Free plan.
-Subscription pricing applies on Developer and Standard plans.
-Developer and Standard plans require Router v2.6.0 or later.
+**For cloud routers**, subscriptions are available on all plans:
+- Rate limits apply on the Free plan.
+- Subscription pricing applies on Developer and Standard plans.
+- Developer and Standard plans require Router v2.6.0 or later.
+
+**For self-hosted routers**, subscriptions require an Enterprise plan (see [Prerequisites](#prerequisites) below).
 
 </PlanRequired>
 
@@ -21,8 +24,9 @@ Before you add `Subscription` fields to your subgraphs, do all of the following 
 
 1. Update your router instances to version `1.22.0` or later. [Download the latest version.](/graphos/routing/get-started)
     - Previous versions of the router don't support subscription operations.
-1. Make sure your router is [connected to a GraphOS Enterprise organization](/router/enterprise-features/#enabling-enterprise-features).
+1. **For self-hosted routers only**: Make sure your router is [connected to a GraphOS Enterprise organization](/router/enterprise-features/#enabling-enterprise-features).
     - Subscription support is an Enterprise feature of self-hosted routers.
+    - Cloud routers support subscriptions on all plans.
 1. **If you compose your router's supergraph schema with GraphOS** (instead of with the Rover CLI), [update your build pipeline](/graphos/graphs/updating#2-update-your-build-pipeline) to use Apollo Federation 2.4 or later.
     - Previous versions of Apollo Federation don't support subscription operations.
 
