@@ -208,7 +208,7 @@ async fn pull_oci(
 /// development/testing and disables SSL accordingly.
 async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
     let host = registry.split(":").next().expect("host must be provided");
-    if host == "localhost" || host == "127.0.0.1" {
+    if host == "localhost" || host == "127.0.0.1" || host == "dockerhost" {
         ClientProtocol::Http
     } else {
         ClientProtocol::Https
