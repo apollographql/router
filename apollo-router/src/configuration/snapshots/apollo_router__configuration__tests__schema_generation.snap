@@ -4597,6 +4597,17 @@ expression: "&schema"
           ],
           "description": "The number of times the request has been resent"
         },
+        "subgraph.cost.estimated": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StandardAttribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The estimated cost of the subgraph query using the currently configured cost model"
+        },
         "subgraph.graphql.document": {
           "anyOf": [
             {
@@ -4659,6 +4670,17 @@ expression: "&schema"
             }
           ],
           "description": "The number of times the request has been resent"
+        },
+        "subgraph.cost.estimated": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StandardAttribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The estimated cost of the subgraph query using the currently configured cost model"
         },
         "subgraph.graphql.document": {
           "anyOf": [
@@ -4767,6 +4789,14 @@ expression: "&schema"
             }
           ],
           "description": "Histogram of client response body size"
+        },
+        "subgraph.cost.estimated": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StandardInstrumentExtendedSubgraphAttributesWithSubgraphSelector"
+            }
+          ],
+          "description": "A histogram of the estimated cost of the subgraph query using the currently configured cost model"
         }
       },
       "type": "object"
@@ -9107,9 +9137,23 @@ expression: "&schema"
                   "type": "integer"
                 },
                 "max": {
-                  "description": "The maximum cost of a query",
+                  "description": "The maximum cost of a query (global limit)",
                   "format": "double",
                   "type": "number"
+                },
+                "subgraph_limits": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/SubgraphSubgraphCostLimitConfiguration"
+                    }
+                  ],
+                  "default": {
+                    "all": {
+                      "max": null
+                    },
+                    "subgraphs": {}
+                  },
+                  "description": "Per-subgraph cost limits"
                 }
               },
               "required": [
@@ -9451,6 +9495,22 @@ expression: "&schema"
           "default": {},
           "description": "A map of `@source(name:)` to configuration for that source",
           "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphCostLimit": {
+      "additionalProperties": false,
+      "description": "Configuration for per-subgraph cost limits",
+      "properties": {
+        "max": {
+          "default": null,
+          "description": "The maximum cost allowed for this subgraph",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10258,6 +10318,20 @@ expression: "&schema"
             "response_cache_control"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Cost attributes for subgraph queries",
+          "properties": {
+            "cost_estimated": {
+              "description": "The estimated cost of the subgraph query",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "cost_estimated"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -10456,6 +10530,31 @@ expression: "&schema"
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/Subgraph2"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphSubgraphCostLimitConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphCostLimit"
+            }
+          ],
+          "default": {
+            "max": null
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphCostLimit"
           },
           "default": {},
           "description": "per subgraph options",

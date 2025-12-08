@@ -12,6 +12,7 @@ use tower::ServiceExt;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
+use crate::integration::common::graph_os_enabled;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_response_errors() {
@@ -303,6 +304,9 @@ fn expect_errors(response: graphql::Response, expected_error_codes: &[&str]) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_request_bytes_limit_with_coprocessor() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
     let mut router = IntegrationTest::builder()
         .config(include_str!(
             "fixtures/request_bytes_limit_with_coprocessor.router.yaml"
@@ -321,6 +325,9 @@ async fn test_request_bytes_limit_with_coprocessor() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_request_bytes_limit() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
     let mut router = IntegrationTest::builder()
         .config(include_str!("fixtures/request_bytes_limit.router.yaml"))
         .build()
