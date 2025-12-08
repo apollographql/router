@@ -19,7 +19,7 @@ Configuration yaml:
   .preview_entity_cache.enabled
 
 * Response caching
-  .preview_response_cache.enabled
+  .response_cache.enabled
 
 * Federated subscriptions
   .subscription.enabled

@@ -10,7 +10,7 @@ Configuration yaml:
   .authentication.router
 
 * Subgraph response caching
-  .preview_response_cache.enabled
+  .response_cache.enabled
 
 * Federated subscriptions
   .subscription.enabled
