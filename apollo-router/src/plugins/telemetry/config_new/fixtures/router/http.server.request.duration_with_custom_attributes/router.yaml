@@ -3,6 +3,7 @@ telemetry:
     instruments:
       router:
         http.server.active_requests: false
+        http.server.response.body.size: false
         http.server.request.duration:
           attributes:
             http.request.method:

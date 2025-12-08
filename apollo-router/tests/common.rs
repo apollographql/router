@@ -1717,7 +1717,7 @@ fn merge_overrides(
     }
 
     // Override the listening address always since we spawn the router on a
-    // random port.
+    // random port. However, don't override Unix socket paths.
     match config
         .as_object_mut()
         .and_then(|o| o.get_mut("supergraph"))
@@ -1734,10 +1734,20 @@ fn merge_overrides(
             }
         }
         Some(supergraph_conf) => {
-            supergraph_conf.insert(
-                "listen".to_string(),
-                serde_json::Value::String(bind_addr.to_string()),
-            );
+            // check if the listen address is a Unix socket path (ie, starts with /)
+            let is_unix_socket = supergraph_conf
+                .get("listen")
+                .and_then(|v| v.as_str())
+                .map(|s| s.starts_with('/'))
+                .unwrap_or(false);
+
+            // only override if it's not a Unix socket
+            if !is_unix_socket {
+                supergraph_conf.insert(
+                    "listen".to_string(),
+                    serde_json::Value::String(bind_addr.to_string()),
+                );
+            }
         }
     }
 
@@ -1790,9 +1800,9 @@ fn merge_overrides(
     };
 
     insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
-    insert_redis_namespace(config.pointer_mut("/preview_response_cache/subgraph/all/redis"));
+    insert_redis_namespace(config.pointer_mut("/response_cache/subgraph/all/redis"));
     if let Some(response_cache_per_subgraph) = config
-        .pointer_mut("/preview_response_cache/subgraph/subgraphs")
+        .pointer_mut("/response_cache/subgraph/subgraphs")
         .and_then(|o| o.as_object_mut())
     {
         for subgraph_config in response_cache_per_subgraph.values_mut() {
@@ -1819,7 +1829,7 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         return Some(convert_urls(urls));
     }
 
-    if let Some(response_cache_config) = config.pointer("/preview_response_cache/subgraph") {
+    if let Some(response_cache_config) = config.pointer("/response_cache/subgraph") {
         if let Some(urls) = response_cache_config
             .pointer("/all/redis/urls")
             .and_then(|o| o.as_array())

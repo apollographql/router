@@ -4,5 +4,6 @@ telemetry:
       router:
         http.server.active_requests: true
         http.server.request.duration: false
+        http.server.response.body.size: false
       subgraph:
         http.client.request.duration: false

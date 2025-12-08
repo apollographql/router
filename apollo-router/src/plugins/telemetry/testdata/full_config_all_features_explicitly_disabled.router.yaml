@@ -19,7 +19,7 @@ preview_entity_cache:
         urls: ["redis://..."]
 
 # Disable response cache
-preview_response_cache:
+response_cache:
   enabled: false
   subgraph:
     all:
