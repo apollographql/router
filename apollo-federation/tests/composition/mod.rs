@@ -9,6 +9,7 @@ mod compose_set_context;
 mod compose_tag;
 mod compose_type_merging;
 mod compose_types;
+mod compose_upgrade_subgraphs;
 mod compose_validation;
 mod connectors;
 mod demand_control;
