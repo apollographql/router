@@ -32,10 +32,10 @@ use opentelemetry::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::{runtime, Resource};
 use opentelemetry_sdk::testing::trace::NoopSpanExporter;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
-use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use parking_lot::Mutex;
@@ -387,6 +387,7 @@ impl Telemetry {
                             .with_protocol(Protocol::HttpBinary)
                             .build()
                             .expect("otlp pipeline failed"),
+                        runtime::Tokio
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -403,6 +404,7 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
+                        runtime::Tokio
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -419,6 +421,7 @@ impl Telemetry {
                         opentelemetry_zipkin::ZipkinExporter::builder()
                             .build()
                             .expect("zipkin pipeline failed"),
+                        runtime::Tokio
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()

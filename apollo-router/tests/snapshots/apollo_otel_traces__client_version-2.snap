@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/apollo_otel_traces.rs
 expression: report
+snapshot_kind: text
 ---
 resourceSpans:
   - resource:
@@ -23,7 +24,20 @@ resourceSpans:
         - key: apollo.user.agent
           value:
             stringValue: "[redacted]"
+        - key: service.name
+          value:
+            stringValue: unknown_service
+        - key: telemetry.sdk.language
+          value:
+            stringValue: rust
+        - key: telemetry.sdk.name
+          value:
+            stringValue: opentelemetry
+        - key: telemetry.sdk.version
+          value:
+            stringValue: 0.30.0
       droppedAttributesCount: 0
+      entityRefs: []
     scopeSpans:
       - scope:
           name: apollo-router
