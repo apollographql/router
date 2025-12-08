@@ -103,10 +103,19 @@ impl<'schema> Selection<'schema> {
         )?;
 
         // Fork based on ConnectSpec version:
-        // - v0.1/v0.2: Use legacy visitor-based validation (frozen, will be removed)
-        //   because these versions return Unknown for any -> method result
-        // - v0.3+: Use shape-driven validation (actively maintained)
-        if schema.connect_link.spec < ConnectSpec::V0_3 {
+        //
+        // - v0.1/v0.2/v0.3: Use legacy visitor-based validation
+        //   (behaviorally frozen for forwards/backwards compatibility)
+        //   Note: in v0.1 and v0.2, all -> method result shapes were
+        //   Unknown, so the shape-based validation would not work at
+        //   all. In v0.3, -> method shape checking was fully enabled,
+        //   but v0.3 shipped before the shape-based validation code was
+        //   ready, so we still use the legacy path for v0.3, even
+        //   though it could in principle swap over to shape-based
+        //   validation at some point if need arises.
+        //
+        // - v0.4+: Use shape-driven validation (actively maintained)
+        if schema.connect_link.spec < ConnectSpec::V0_4 {
             // Legacy path for v0.1/v0.2 compatibility
             self.type_check_legacy(schema)
         } else {

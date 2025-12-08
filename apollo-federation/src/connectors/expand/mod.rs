@@ -169,10 +169,10 @@ fn split_subgraph(
     let connector_map = Connector::from_schema(subgraph.schema.schema(), &subgraph.name)?;
 
     // Fork based on ConnectSpec version:
-    // - v0.2: Use legacy visitor-based expansion (frozen, will be removed)
-    // - v0.3+: Use shape-driven expansion (actively maintained)
-    if link.spec < ConnectSpec::V0_3 {
-        // Legacy path for v0.2 compatibility
+    // - v0.1/v0.2/v0.3: Use legacy visitor-based expansion (frozen for compatibility)
+    // - v0.4+: Use shape-driven expansion (actively maintained)
+    if link.spec < ConnectSpec::V0_4 {
+        // Legacy path for v0.1/v0.2/v0.3 compatibility
         let expander = helpers::LegacyExpander::new(link, &subgraph);
         connector_map
             .into_iter()
