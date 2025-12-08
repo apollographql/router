@@ -631,9 +631,9 @@ could not create router: CORS configuration error:
 **Upgrade step****: Validate your CORS configuration. For details, go to [CORS configuration documentation](/graphos/routing/security/cors).
 
 ### Early enforcement of CSRF
-In Router v1.x, if you sent an empty `Content-Type` header, the Router would fail with an HTTP 415. We now catch this header issue earlier in the request lifecycle and still return an 4XX error. It is now a HTTP 400 with the following error:
+In Router v1, if you send an empty `Content-Type` header, the Router fails with an HTTP `415` error. The Router now catches this issue earlier in the request lifecycle and returns an HTTP `400` error with the following message:
 
-```
+```text
 This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). Please either specify a 'content-type' header (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight
 ```
 
