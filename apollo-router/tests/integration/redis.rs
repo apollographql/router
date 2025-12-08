@@ -1536,3 +1536,439 @@ async fn test_redis_connections_are_closed_on_router_reload() {
 
     router.assert_metrics_contains(expected_metric, None).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_emits_response_size_avg_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    router.execute_several_default_queries(2).await;
+
+    let experimental_response_avg_metric = r#"experimental_apollo_router_cache_redis_response_size_avg{kind="query planner",otel_scope_name="apollo/router"}"#;
+    router
+        .assert_metric_non_zero(experimental_response_avg_metric, None)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_emits_request_size_avg_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    router.execute_several_default_queries(2).await;
+
+    let experimental_response_avg_metric = r#"experimental_apollo_router_cache_redis_request_size_avg{kind="query planner",otel_scope_name="apollo/router"}"#;
+    router
+        .assert_metric_non_zero(experimental_response_avg_metric, None)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_emits_configuration_error_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let config = json!({
+        "include_subgraph_errors": {
+            "all": true,
+        },
+        "preview_entity_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "redis": {
+                        "urls": ["invalid-redis-schem://127.0.0.1:7000"], // invalid schema!
+                        "ttl": "10m",
+                        "required_to_start": false, // don't fail startup, allow errors during runtime
+                    },
+                },
+            },
+        },
+        "telemetry": {
+            "exporters": {
+                "metrics": {
+                    "prometheus": {
+                        "enabled": true,
+                        "listen": "127.0.0.1:0",
+                        "path": "/metrics",
+                    },
+                },
+            },
+        },
+        "experimental_mock_subgraphs": subgraphs_with_many_entities(10),
+    });
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config).unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute queries that will attempt Redis operations and fail
+    for _ in 0..3 {
+        let query = Query::builder()
+            .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+            .build();
+        let (_trace_id, response) = router.execute_query(query).await;
+        // The query should still succeed (using fallback) even though Redis fails
+        assert_eq!(response.status(), 200);
+    }
+
+    router
+        .assert_metric_non_zero(
+            r#"apollo_router_cache_redis_errors_total{error_type="config",kind="entity",otel_scope_name="apollo/router"}"#,
+            None,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_uses_replicas_when_clustered() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let namespace = Uuid::new_v4().to_string();
+    let redis_monitor = RedisMonitor::new(&REDIS_CLUSTER_PORTS).await;
+
+    // NB: `reset_ttl` must be false in the config, otherwise GETs will be sent to primary
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .redis_namespace(&namespace)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    router.execute_several_default_queries(2).await;
+
+    let redis_monitor_output = redis_monitor.collect().await;
+    assert!(
+        redis_monitor_output
+            .namespaced(&namespace)
+            .command_sent_to_replicas_only("GET")
+    );
+
+    let replicas_output = redis_monitor_output.replicas(true);
+    assert!(replicas_output.command_sent_to_all("READONLY"));
+
+    let primaries_output = redis_monitor_output.replicas(false);
+    assert!(!primaries_output.command_sent_to_any("READONLY"));
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
+
+    // check that there were no parse errors; these might show up when fred can't read the cluster
+    // state properly
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(parse_error).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let namespace = Uuid::new_v4().to_string();
+    let redis_monitor = RedisMonitor::new(&REDIS_STANDALONE_PORT).await;
+
+    let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .log("trace,jsonpath_lib=info")
+        .redis_namespace(&namespace)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let expected_metric = r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 2"#;
+    router.assert_metrics_contains(expected_metric, None).await;
+
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    let responses = router.execute_several_default_queries(2).await;
+    for response in responses {
+        let r = response.1.text().await;
+        eprintln!("{r:?}");
+    }
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
+
+    // check that there were no parse errors; these might show up when fred can't read the cluster
+    // state properly
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(parse_error).await;
+
+    let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
+    assert_eq!(redis_monitor_output.num_nodes(), 1);
+    assert!(redis_monitor_output.command_sent_to_any("GET"));
+}
+
+// NB: the `num_products` parameter determines how many `Product` entities will be requested from
+//  the `reviews` subgraph. This is useful to check that `get_multiple` works properly with different
+//  numbers of keys.
+#[rstest::rstest]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_uses_replicas_in_clusters_for_mgets(#[values(1, 3, 5)] num_products: usize) {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/response_cache_redis_cluster.router.yaml");
+    let mut subgraph_overrides = HashMap::new();
+
+    let products = [
+        json!({"__typename":"Product","upc":"1","name":"Table","reviews":[{"id":"review1"}]}),
+        json!({"__typename":"Product","upc":"2","name":"Chair","reviews":[{"id":"review2"}]}),
+        json!({"__typename":"Product","upc":"3","name":"Desk","reviews":[{"id":"review3"}]}),
+        json!({"__typename":"Product","upc":"4","name":"Lamp","reviews":[{"id":"review4"}]}),
+        json!({"__typename":"Product","upc":"5","name":"Sofa","reviews":[{"id":"review5"}]}),
+    ];
+
+    let products_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {"topProducts": products[..num_products]}}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let reviews_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"Review","id":"review1","author":{"__typename":"User","id":"user1"}},
+                {"__typename":"Review","id":"review2","author":{"__typename":"User","id":"user2"}},
+                {"__typename":"Review","id":"review3","author":{"__typename":"User","id":"user3"}},
+                {"__typename":"Review","id":"review4","author":{"__typename":"User","id":"user4"}},
+                {"__typename":"Review","id":"review5","author":{"__typename":"User","id":"user5"}}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let accounts_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"User","id":"user1"},
+                {"__typename":"User","id":"user2"},
+                {"__typename":"User","id":"user3"},
+                {"__typename":"User","id":"user4"},
+                {"__typename":"User","id":"user5"}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let mock_products_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_reviews_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_accounts_subgraph = wiremock::MockServer::builder().start().await;
+
+    for (name, mock_server, response) in [
+        ("products", &mock_products_subgraph, products_response),
+        ("reviews", &mock_reviews_subgraph, reviews_response),
+        ("accounts", &mock_accounts_subgraph, accounts_response),
+    ] {
+        let http_method = Method::POST;
+        let mocked_response = Mock::given(method(http_method))
+            .and(path_regex(".*"))
+            .respond_with(response);
+
+        mocked_response.mount(mock_server).await;
+        subgraph_overrides.insert(name.to_string(), mock_server.uri());
+    }
+
+    let namespace = namespace();
+
+    let mut router = IntegrationTest::builder()
+        .redis_namespace(&namespace)
+        .config(router_config)
+        .subgraph_overrides(subgraph_overrides)
+        .log("trace,jsonpath_lib=info")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let redis_monitor = RedisMonitor::new(&REDIS_CLUSTER_PORTS).await;
+
+    // send a few different queries to ensure a redis cache hit
+    let mut join_set = JoinSet::new();
+    for _ in 0..5 {
+        let query = Query::builder()
+            .body(
+                json!({"query":"{ topProducts(first: 5) { name reviews { id } } }","variables":{}}),
+            )
+            .header("cache-control", "public")
+            .build();
+
+        join_set.spawn(router.execute_query(query));
+    }
+    let _ = join_set.join_all().await;
+
+    let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
+    assert!(redis_monitor_output.command_sent_to_replicas_only("GET"));
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
+
+    // check that there were no parse errors; parse errors happen whenever a response from redis to
+    // fred can't be understood by fred, which can be redis config issues, type conversion
+    // shenanigans, or things like being in the middle of a transaction (pipeline) and trying to
+    // convert a value
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
+    router.assert_metrics_does_not_contain(parse_error).await;
+
+    let example_cache_key = "version:1.1:subgraph:reviews:type:Product:representation:dd668a3ba05fb2fcd9e372b7063fe717f3ff1c209c29fa8367b8324e49775115:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    router
+        .assert_redis_cache_contains(example_cache_key, None)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_in_standalone_mode_for_mgets() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/response_cache_redis_standalone.router.yaml");
+
+    // name, url
+    let mut subgraph_overrides = HashMap::new();
+
+    let products_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "topProducts": [
+                {"__typename":"Product","upc":"1","name":"Table","reviews":[{"id":"review1"}]},
+                {"__typename":"Product","upc":"2","name":"Chair","reviews":[{"id":"review2"}]},
+                {"__typename":"Product","upc":"3","name":"Desk","reviews":[{"id":"review3"}]},
+                {"__typename":"Product","upc":"4","name":"Lamp","reviews":[{"id":"review4"}]},
+                {"__typename":"Product","upc":"5","name":"Sofa","reviews":[{"id":"review5"}]}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let reviews_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"Review","id":"review1","author":{"__typename":"User","id":"user1"}},
+                {"__typename":"Review","id":"review2","author":{"__typename":"User","id":"user2"}},
+                {"__typename":"Review","id":"review3","author":{"__typename":"User","id":"user3"}},
+                {"__typename":"Review","id":"review4","author":{"__typename":"User","id":"user4"}},
+                {"__typename":"Review","id":"review5","author":{"__typename":"User","id":"user5"}}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let accounts_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"User","id":"user1"},
+                {"__typename":"User","id":"user2"},
+                {"__typename":"User","id":"user3"},
+                {"__typename":"User","id":"user4"},
+                {"__typename":"User","id":"user5"}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let mock_products_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_reviews_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_accounts_subgraph = wiremock::MockServer::builder().start().await;
+
+    for (name, mock_server, response) in [
+        ("products", &mock_products_subgraph, products_response),
+        ("reviews", &mock_reviews_subgraph, reviews_response),
+        ("accounts", &mock_accounts_subgraph, accounts_response),
+    ] {
+        let http_method = Method::POST;
+        let mocked_response = Mock::given(method(http_method))
+            .and(path_regex(".*"))
+            .respond_with(response);
+
+        mocked_response.mount(mock_server).await;
+        subgraph_overrides.insert(name.to_string(), mock_server.uri());
+    }
+
+    let namespace = namespace();
+    let redis_monitor = RedisMonitor::new(&REDIS_STANDALONE_PORT).await;
+
+    let mut router = IntegrationTest::builder()
+        .redis_namespace(&namespace)
+        .config(router_config)
+        .subgraph_overrides(subgraph_overrides)
+        .log("trace,jsonpath_lib=info")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // send a few different queries to ensure a redis cache hit
+    let mut join_set = JoinSet::new();
+    for _ in 0..5 {
+        let query = Query::builder()
+            .body(
+                json!({"query":"{ topProducts(first: 5) { name reviews { id } } }","variables":{}}),
+            )
+            .header("cache-control", "public")
+            .build();
+        join_set.spawn(router.execute_query(query));
+    }
+    let _ = join_set.join_all().await;
+
+    // when there's only 1 node, the MGET will be sent to it
+    let redis_monitor_output = redis_monitor.collect().await;
+    assert_eq!(redis_monitor_output.num_nodes(), 1);
+    assert!(redis_monitor_output.command_sent_to_any("MGET"));
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
+
+    // check that there were no parse errors; parse errors happen whenever a response from redis to
+    // fred can't be understood by fred, which can be redis config issues, type conversion
+    // shenanigans, or things like being in the middle of a transaction (pipeline) and trying to
+    // convert a value
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
+    router.assert_metrics_does_not_contain(parse_error).await;
+
+    let example_cache_key = "version:1.1:subgraph:reviews:type:Product:representation:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    router
+        .assert_redis_cache_contains(example_cache_key, None)
+        .await;
+}

@@ -360,6 +360,14 @@ impl RedisCacheStorage {
                     max_timeout: Some(DEFAULT_INTERNAL_REDIS_TIMEOUT),
                     interval: Duration::from_secs(3),
                 };
+
+                // PR-8405: must not use lazy connections or else commands will queue rather than being sent
+                // PR-8671: must only disable lazy connections in cluster mode. otherwise, fred will
+                //  try to connect to unreachable replicas and fall over.
+                //  https://github.com/aembke/fred.rs/blob/f222ad7bfba844dbdc57e93da61b0a5483858df9/src/router/replicas.rs#L34
+                if is_cluster {
+                    config.replica.lazy_connections = false;
+                }
             })
             .with_performance_config(|config| {
                 config.default_command_timeout = timeout;
@@ -602,111 +610,95 @@ impl RedisCacheStorage {
         options: Options,
     ) -> Result<RedisValue<V>, RedisError> {
         let key = self.make_key(key);
-        match self.ttl {
-            Some(ttl) if self.reset_ttl => {
-                let pipeline = self.pipeline().with_options(&options);
-                let _: () = pipeline
-                    .get(&key)
-                    .await
-                    .inspect_err(|e| self.record_error(e))?;
-                let _: () = pipeline
-                    .expire(&key, ttl.as_secs() as i64, None)
-                    .await
-                    .inspect_err(|e| self.record_error(e))?;
+        if self.reset_ttl
+            && let Some(ttl) = self.ttl
+        {
+            let pipeline = self.pipeline().with_options(&options);
+            let _: () = pipeline
+                .get(&key)
+                .await
+                .inspect_err(|e| self.record_error(e))?;
+            let _: () = pipeline
+                .expire(&key, ttl.as_secs() as i64, None)
+                .await
+                .inspect_err(|e| self.record_error(e))?;
 
-                let (value, _timeout_set): (RedisValue<V>, bool) =
-                    pipeline.all().await.inspect_err(|e| self.record_error(e))?;
-                Ok(value)
-            }
-            _ => {
-                let client = self.inner.next().with_options(&options);
-                client.get(key).await.inspect_err(|e| self.record_error(e))
-            }
+            let (value, _timeout_set): (RedisValue<V>, bool) =
+                pipeline.all().await.inspect_err(|e| self.record_error(e))?;
+            Ok(value)
+        } else if self.is_cluster {
+            let client = self.client().replicas().with_options(&options);
+            client.get(key).await.inspect_err(|e| self.record_error(e))
+        } else {
+            let client = self.client().with_options(&options);
+            client.get(key).await.inspect_err(|e| self.record_error(e))
         }
     }
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
-    ) -> Vec<Option<RedisValue<V>>> {
+    ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
         self.get_multiple_with_options(keys, Options::default())
             .await
     }
 
+    /// `Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError>` is a horrible return type but
+    /// is needed to capture the multiple levels of errors that can occur.
+    ///
+    /// The outer `Result` covers total failures (ie the standalone node is down), while the inner
+    /// `Result`s cover partial cluster failures and values not being found.
+    ///
+    /// TODO: in the future gateway, we will probably have to make this `Result<Vec<Result<Option<Value>>>>`
+    ///  because `NotFound` shouldn't be considered an error.
     pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
         &self,
-        mut keys: Vec<RedisKey<K>>,
+        keys: Vec<RedisKey<K>>,
         options: Options,
-    ) -> Vec<Option<RedisValue<V>>> {
-        // NB: MGET is different from GET in that it returns `Option`s rather than `Result`s.
-        //  > For every key that does not hold a string value or does not exist, the special value
-        //    nil is returned. Because of this, the operation never fails.
-        //    - https://redis.io/docs/latest/commands/mget/
-
+    ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
         tracing::trace!("getting multiple values from redis: {:?}", keys);
-
-        if keys.len() == 1 {
-            let key = self.make_key(keys.remove(0));
-            let client = self.inner.next().with_options(&options);
-            let res = client
-                .get(key)
-                .await
-                .inspect_err(|e| self.record_error(e))
-                .ok();
-            vec![res]
-        } else if self.is_cluster {
-            // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
-            // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
-            // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
+        if self.is_cluster {
+            // we cannot do an MGET across hash slots (error: "ERR CROSSSLOT Keys in request don't
+            // hash to the same slot").
+            // we either need to group the keys by hash slot, or just send a GET for each key; given
+            // that there are 16384 slots and we're using multiplexing, there shouldn't be a
+            // performance penalty by just sending a GET per key.
             let len = keys.len();
-            let mut h: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
-            for (index, key) in keys.into_iter().enumerate() {
-                let key = self.make_key(key);
-                let hash = ClusterRouting::hash_key(key.as_bytes());
-                let entry = h.entry(hash).or_default();
-                entry.0.push(index);
-                entry.1.push(key);
-            }
 
             // then we query all the key groups at the same time
-            let mut tasks = Vec::new();
-            for (_shard, (indexes, keys)) in h {
-                let client = self.inner.next().with_options(&options);
+            // use `client.replicas()` since we're in a cluster and can take advantage of read-replicas
+            let client = self.client().replicas().with_options(&options);
+            let mut tasks = Vec::with_capacity(len);
+            for (index, key) in keys.into_iter().enumerate() {
+                let client = client.clone();
                 tasks.push(async move {
-                    let result: Result<Vec<Option<RedisValue<V>>>, _> = client.mget(keys).await;
-                    (indexes, result)
-                });
+                    let res_value: Result<RedisValue<V>, RedisError> =
+                        client.get(self.make_key(key)).await;
+                    (index, res_value)
+                })
             }
 
-            // then we have to assemble the results, by making sure that the values are in the same order as
-            // the keys argument's order
-            let mut result = vec![None; len];
-            for (indexes, result_value) in join_all(tasks).await.into_iter() {
-                match result_value {
-                    Ok(values) => {
-                        for (index, value) in indexes.into_iter().zip(values.into_iter()) {
-                            result[index] = value;
-                        }
-                    }
-                    Err(e) => {
-                        self.record_error(&e);
-                    }
-                }
-            }
-
-            result
+            let mut results_with_indexes = join_all(tasks).await;
+            results_with_indexes.sort_unstable_by_key(|(index, _)| *index);
+            Ok(results_with_indexes
+                .into_iter()
+                .map(|(_, value)| value.inspect_err(|e| self.record_error(e)))
+                .collect())
         } else {
-            let len = keys.len();
             let keys = keys
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            let client = self.inner.next().with_options(&options);
-            client
+            let values: Vec<Option<RedisValue<V>>> = self
+                .client()
+                .with_options(&options)
                 .mget(keys)
                 .await
-                .inspect_err(|e| self.record_error(e))
-                .unwrap_or_else(|_| vec![None; len])
+                .inspect_err(|e| self.record_error(e))?;
+            Ok(values
+                .into_iter()
+                .map(|v| v.ok_or(RedisError::new(RedisErrorKind::NotFound, "")))
+                .collect())
         }
     }
 
@@ -1098,12 +1090,123 @@ mod test {
                 .map(|value| value.map(ToString::to_string))
                 .collect();
 
-            let values = storage.get_multiple(keys).await;
-            let parsed_values: Vec<Option<String>> =
-                values.into_iter().map(|v| v.map(|v| v.0)).collect();
-            assert_eq!(parsed_values, expected_values);
+        fn redis_config(clustered: bool) -> crate::configuration::RedisCache {
+            let url = if clustered {
+                "redis-cluster://localhost:7000"
+            } else {
+                "redis://localhost:6379"
+            };
+
+            let config_json = json!({
+                "urls": [url],
+                "namespace": random_namespace(),
+                "required_to_start": true,
+                "ttl": "60s"
+            });
+
+            serde_json::from_value(config_json).expect("invalid redis cache configuration")
         }
 
-        Ok(())
+        /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
+        ///
+        /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
+        /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
+        /// used on keys which map to different hash slots, even if those hash slots are on the same node.
+        ///
+        /// This test inserts data that is guaranteed to hash to different slots to verify that
+        /// `RedisCacheStorage` is well-behaved when operating against a cluster.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
+            let clustered = true;
+            let storage =
+                RedisCacheStorage::new(redis_config(clustered), "test_redis_storage").await?;
+
+            // insert values which reflect different cluster slots
+            let mut data = HashMap::default();
+            let expected_value = rand::rng().next_u32() as usize;
+            let unique_cluster_slot_count = |data: &HashMap<RedisKey<String>, _>| {
+                data.keys()
+                    .map(|key| ClusterRouting::hash_key(key.0.as_bytes()))
+                    .unique()
+                    .count()
+            };
+
+            while unique_cluster_slot_count(&data) < 50 {
+                // NB: include {} around key so that this key is what determines the cluster hash slot - adding
+                // the namespace will otherwise change the slot
+                let key = rand::rng()
+                    .sample_iter(&Alphanumeric)
+                    .take(10)
+                    .map(char::from)
+                    .collect::<String>();
+                data.insert(RedisKey(format!("{{{}}}", key)), RedisValue(expected_value));
+            }
+
+            // insert values
+            let keys: Vec<_> = data.keys().cloned().collect();
+            let data: Vec<_> = data.into_iter().collect();
+            storage.insert_multiple(&data, None).await;
+
+            // make a `get` call for each key and ensure that it has the expected value. this tests both
+            // the `get` and `insert_multiple` functions
+            for key in &keys {
+                let value: RedisValue<usize> = storage.get(key.clone()).await?;
+                assert_eq!(value.0, expected_value);
+            }
+
+            // test the `mget` functionality
+            let values = storage.get_multiple(keys).await?;
+            for value in values {
+                let value: RedisValue<usize> = value?;
+                assert_eq!(value.0, expected_value);
+            }
+
+            Ok(())
+        }
+
+        /// Test that `get_multiple` returns items in the correct order.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn test_get_multiple_is_ordered(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage =
+                RedisCacheStorage::new(redis_config(clustered), "test_get_multiple_is_ordered")
+                    .await?;
+
+            let data = [("a", "1"), ("b", "2"), ("c", "3")]
+                .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
+            storage.insert_multiple(&data, None).await;
+
+            // check different orders of fetches to make everything is ordered correctly, including
+            // when some values are none
+            let test_cases = vec![
+                (vec!["a", "b", "c"], vec![Some("1"), Some("2"), Some("3")]),
+                (vec!["c", "b", "a"], vec![Some("3"), Some("2"), Some("1")]),
+                (vec!["d", "b", "c"], vec![None, Some("2"), Some("3")]),
+                (
+                    vec!["d", "3", "s", "b", "s", "1", "c", "Y"],
+                    vec![None, None, None, Some("2"), None, None, Some("3"), None],
+                ),
+            ];
+
+            for (keys, expected_values) in test_cases {
+                let keys: Vec<RedisKey<_>> = keys
+                    .into_iter()
+                    .map(|key| RedisKey(key.to_string()))
+                    .collect();
+                let expected_values: Vec<Option<String>> = expected_values
+                    .into_iter()
+                    .map(|value| value.map(ToString::to_string))
+                    .collect();
+
+                let values = storage.get_multiple(keys).await?;
+                let parsed_values: Vec<Option<String>> =
+                    values.into_iter().map(|v| v.ok().map(|v| v.0)).collect();
+                assert_eq!(parsed_values, expected_values);
+            }
+
+            Ok(())
+        }
     }
 }
