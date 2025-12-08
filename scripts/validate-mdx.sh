@@ -7,6 +7,7 @@
 # If a directory is provided, it validates all .mdx files in that directory
 #
 # Requirements: Node.js and npm must be installed
+# Optional: jq for more robust JSON parsing (falls back to grep if not available)
 # MDX version: @mdx-js/mdx@^3.0.0
 #
 # Note: This script installs @mdx-js/mdx in a temporary directory for each run
@@ -101,19 +102,31 @@ for file in "${FILES[@]}"; do
     
     RESULT=$(cd "$TEMP_DIR" && node validate.js "$file" 2>&1 || true)
     
-    # Parse JSON result properly
-    if echo "$RESULT" | grep -q '"valid":true'; then
-        echo -e "${GREEN}✓${NC} $DISPLAY_FILE"
-    else
-        echo -e "${RED}✗${NC} $DISPLAY_FILE"
-        # Extract error message from JSON
-        ERROR_MSG=$(echo "$RESULT" | grep -o '"error":"[^"]*"' | sed 's/"error":"//; s/"$//' | sed 's/\\"/"/g')
-        if [ -n "$ERROR_MSG" ]; then
-            echo "  Error: $ERROR_MSG"
+    # Check if jq is available for robust JSON parsing
+    if command -v jq &> /dev/null; then
+        if echo "$RESULT" | jq -e '.valid == true' > /dev/null 2>&1; then
+            echo -e "${GREEN}✓${NC} $DISPLAY_FILE"
         else
-            echo "  Error: Unable to parse validation error"
+            echo -e "${RED}✗${NC} $DISPLAY_FILE"
+            ERROR_MSG=$(echo "$RESULT" | jq -r '.error // "Unable to parse validation error"')
+            echo "  Error: $ERROR_MSG"
+            FAILED=$((FAILED + 1))
         fi
-        FAILED=$((FAILED + 1))
+    else
+        # Fallback to grep if jq is not available
+        if echo "$RESULT" | grep -q '"valid":true'; then
+            echo -e "${GREEN}✓${NC} $DISPLAY_FILE"
+        else
+            echo -e "${RED}✗${NC} $DISPLAY_FILE"
+            # Extract error message from JSON (basic approach)
+            ERROR_MSG=$(echo "$RESULT" | grep -o '"error":"[^"]*"' | sed 's/"error":"//; s/"$//' | sed 's/\\"/"/g')
+            if [ -n "$ERROR_MSG" ]; then
+                echo "  Error: $ERROR_MSG"
+            else
+                echo "  Error: Unable to parse validation error"
+            fi
+            FAILED=$((FAILED + 1))
+        fi
     fi
 done
 
