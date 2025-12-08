@@ -630,6 +630,14 @@ could not create router: CORS configuration error:
 
 **Upgrade step****: Validate your CORS configuration. For details, go to [CORS configuration documentation](/graphos/routing/security/cors).
 
+### Early enforcement of CSRF
+In Router v1, if you send an empty `Content-Type` header, the Router fails with an HTTP `415` error. The Router now catches this issue earlier in the request lifecycle and returns an HTTP `400` error with the following message:
+
+```text
+This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). Please either specify a 'content-type' header (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight
+```
+
+
 ## Deploy your router
 
 Make sure that you are referencing the correct router release: **v{products.router.version("connectors").version}**
