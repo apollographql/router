@@ -1,10 +1,16 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # This script validates MDX files in the docs directory
 # Usage: ./scripts/validate-mdx.sh [file_or_directory]
 #
 # If no argument is provided, it validates all .mdx files in docs/source
 # If a file is provided, it validates only that file
 # If a directory is provided, it validates all .mdx files in that directory
+#
+# Requirements: Node.js and npm must be installed
+# MDX version: @mdx-js/mdx@^3.0.0
+#
+# Note: This script installs @mdx-js/mdx in a temporary directory for each run
+# to avoid requiring global installation. The temp directory is cleaned up on exit.
 
 set -e
 
@@ -40,13 +46,16 @@ const { compile } = require('@mdx-js/mdx');
 async function validateMdx(filepath) {
   try {
     const content = fs.readFileSync(filepath, 'utf8');
-    await compile(content, { jsx: true });
+    // Use compile without deprecated jsx option
+    await compile(content);
     return { valid: true };
   } catch (error) {
     return { 
       valid: false, 
       error: error.message,
-      position: error.position
+      position: error.position,
+      line: error.position?.start?.line,
+      column: error.position?.start?.column
     };
   }
 }
@@ -92,11 +101,18 @@ for file in "${FILES[@]}"; do
     
     RESULT=$(cd "$TEMP_DIR" && node validate.js "$file" 2>&1 || true)
     
+    # Parse JSON result properly
     if echo "$RESULT" | grep -q '"valid":true'; then
         echo -e "${GREEN}✓${NC} $DISPLAY_FILE"
     else
         echo -e "${RED}✗${NC} $DISPLAY_FILE"
-        echo "$RESULT" | grep -o '"error":"[^"]*"' | sed 's/"error":"/  Error: /' | sed 's/"$//'
+        # Extract error message from JSON
+        ERROR_MSG=$(echo "$RESULT" | grep -o '"error":"[^"]*"' | sed 's/"error":"//; s/"$//' | sed 's/\\"/"/g')
+        if [ -n "$ERROR_MSG" ]; then
+            echo "  Error: $ERROR_MSG"
+        else
+            echo "  Error: Unable to parse validation error"
+        fi
         FAILED=$((FAILED + 1))
     fi
 done
