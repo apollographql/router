@@ -50,7 +50,6 @@ const JOIN_DIRECTIVE_DIRECTIVE_NAME: Name = name!("join__directive");
 pub(super) fn carryover_directives(
     from: &FederationSchema,
     to: &mut FederationSchema,
-    specs: impl Iterator<Item = ConnectSpec>,
     subgraph_name_replacements: &MultiMap<&str, String>,
     connect_directive_names: HashMap<String, [Name; 2]>,
 ) -> Result<(), FederationError> {
@@ -88,11 +87,10 @@ pub(super) fn carryover_directives(
         })
         .collect();
 
-    // @join__directive(graph: [], name: "link", args: { url: "https://specs.apollo.dev/connect/v0.1" })
-    // this must exist for license key enforcement
-    for spec in specs {
-        SchemaDefinitionPosition.insert_directive(to, spec.join_directive_application().into())?;
-    }
+    // NOTE: We used to create @join__directive directives here for license enforcement,
+    // but the merger already handles this correctly by collecting directives from all
+    // subgraphs and creating the appropriate @join__directive applications.
+    // Creating them here caused issues with invalid enum value references.
 
     // @link for connect
     if let Some(link) = metadata.for_identity(&ConnectSpec::identity()) {
@@ -880,11 +878,47 @@ mod tests {
     use insta::assert_snapshot;
 
     use super::carryover_directives;
-    use crate::connectors::ConnectSpec;
     use crate::merge::merge_federation_subgraphs;
     use crate::schema::FederationSchema;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::supergraph::extract_subgraphs_from_supergraph;
+
+    #[test]
+    fn test_carryover_fixes_empty_graphs() {
+        // Test that we fix the buggy graphs: [] directive from old schemas
+        let sdl = include_str!("tests/schemas/expand/buggy_graphs_empty.graphql");
+        let schema = Schema::parse(sdl, "buggy.graphql").expect("parse failed");
+        let supergraph_schema = FederationSchema::new(schema).expect("federation schema failed");
+
+        // Verify the input has the buggy directive
+        let input_sdl = supergraph_schema.schema().serialize().to_string();
+        assert!(
+            input_sdl.contains("graphs: []"),
+            "Input should have buggy graphs: []"
+        );
+
+        let subgraphs = extract_subgraphs_from_supergraph(&supergraph_schema, None)
+            .expect("extract subgraphs failed");
+        let merged = merge_federation_subgraphs(subgraphs).expect("merge failed");
+        let mut schema =
+            FederationSchema::new(merged.schema.into_inner()).expect("federation schema failed");
+
+        carryover_directives(
+            &supergraph_schema,
+            &mut schema,
+            &Default::default(),
+            Default::default(),
+        )
+        .expect("carryover failed");
+
+        let output_sdl = schema.schema().serialize().to_string();
+        // Verify the output does NOT have the buggy directive
+        assert!(
+            !output_sdl.contains("graphs: []"),
+            "Output should NOT have buggy graphs: []"
+        );
+        assert_snapshot!("carryover_fixes_empty_graphs", output_sdl);
+    }
 
     #[test]
     fn test_carryover() {
@@ -909,7 +943,6 @@ mod tests {
         carryover_directives(
             &supergraph_schema,
             &mut schema,
-            [ConnectSpec::V0_1].into_iter(),
             &Default::default(),
             Default::default(),
         )

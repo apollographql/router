@@ -241,8 +241,6 @@ Start following the steps below to start a release PR.  The process is **not ful
      - Run our compliance checks and update the `licenses.html` file as appropriate.
      - Ensure we're not using any incompatible licenses in the release.
 
-7. **MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is supported by the Routter.
-
 11. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
 
     ```
