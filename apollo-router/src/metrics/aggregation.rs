@@ -522,7 +522,7 @@ mod test {
                 MeterProviderBuilder::default()
                     .with_reader(reader.clone())
                     .build(),
-            )
+            ),
         );
 
         let counter = meter_provider

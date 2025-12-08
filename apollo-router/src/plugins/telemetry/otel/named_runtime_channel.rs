@@ -1,7 +1,7 @@
 use std::fmt::Debug;
+use std::future::Future;
 use std::time::Duration;
 
-use std::future::Future;
 use opentelemetry_sdk::runtime::Runtime;
 use opentelemetry_sdk::runtime::RuntimeChannel;
 use opentelemetry_sdk::runtime::Tokio;
@@ -25,7 +25,10 @@ impl NamedTokioRuntime {
 }
 
 impl Runtime for NamedTokioRuntime {
-    fn spawn<F>(&self, future: F) where F: Future<Output = ()> + Send + 'static {
+    fn spawn<F>(&self, future: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
         self.parent.spawn(future)
     }
 

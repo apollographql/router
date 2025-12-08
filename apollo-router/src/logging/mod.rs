@@ -68,7 +68,7 @@ pub(crate) mod test {
             } else {
                 let parsed_log: Vec<Value> = log
                     .lines()
-                    .map(|line| {
+                    .filter_map(|line| {
                         let mut line: serde_json::Value = serde_json::from_str(line).unwrap();
                         // move the message field to the top level
                         let fields = line
@@ -79,7 +79,10 @@ pub(crate) mod test {
                             .as_object_mut()
                             .unwrap();
                         // Remove noisy OTel logs when meter provider is dropped
-                        if matches!(fields.get("name").and_then(|v| v.as_str()), Some("MeterProvider.Drop")){
+                        if matches!(
+                            fields.get("name").and_then(|v| v.as_str()),
+                            Some("MeterProvider.Drop")
+                        ) {
                             return None;
                         }
 
@@ -89,7 +92,6 @@ pub(crate) mod test {
                             .insert("message".to_string(), message);
                         Some(line)
                     })
-                    .flatten()// Remove None values
                     .collect();
                 serde_json::json!(parsed_log)
             };

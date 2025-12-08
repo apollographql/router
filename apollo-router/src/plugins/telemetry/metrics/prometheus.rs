@@ -4,8 +4,10 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use opentelemetry_prometheus::ResourceSelector;
-use opentelemetry_sdk::metrics::{Aggregation, Instrument, Stream};
-use prometheus::{Encoder};
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::Stream;
+use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
 use schemars::JsonSchema;
@@ -15,7 +17,8 @@ use tower_service::Service;
 
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
-use crate::plugins::telemetry::config::{Conf, MetricAggregation};
+use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::MetricAggregation;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::services::router;
@@ -94,19 +97,18 @@ impl MetricsConfigurator for Config {
             .collect::<Vec<_>>();
         let aggregation_view = move |i: &Instrument| {
             if !custom_histogram_view_names.contains(&i.name().to_string()) {
-            Some(
-                Stream::builder()
-                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: common_buckets.clone(),
-                        record_min_max: true,
-                    })
-                    .build()
-                    .unwrap(),
-            )
+                Some(
+                    Stream::builder()
+                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                            boundaries: common_buckets.clone(),
+                            record_min_max: true,
+                        })
+                        .build()
+                        .unwrap(),
+                )
             } else {
                 None
             }
-
         };
 
         builder

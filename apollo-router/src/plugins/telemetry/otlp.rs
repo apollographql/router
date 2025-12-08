@@ -1,14 +1,17 @@
 //! Shared configuration for Otlp tracing and metrics.
-use fred::prelude::TlsConfig;
+use std::collections::HashMap;
+
 use http::Uri;
+use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::Protocol::Grpc;
-use opentelemetry_otlp::{HasExportConfig, HttpExporterBuilder, HttpExporterBuilderSet, MetricExporter, MetricExporterBuilder, SpanExporter, SpanExporterBuilder, TonicExporterBuilder, WithExportConfig, WithHttpConfig, WithTonicConfig};
+use opentelemetry_otlp::SpanExporter;
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::WithHttpConfig;
+use opentelemetry_otlp::WithTonicConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
-use log::warn;
 use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
@@ -155,12 +158,9 @@ impl Config {
     // We have make some repetitive code here because OTel's
     // TonicExporterBuilder::build_span_exporter and ::build_metric_exporter are protected when they
     // shouldn't be.
-    pub(crate) fn span_exporter(
-        &self,
-        kind: TelemetryDataKind,
-    ) -> Result<SpanExporter, BoxError> {
+    pub(crate) fn span_exporter(&self, kind: TelemetryDataKind) -> Result<SpanExporter, BoxError> {
         let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
-        match self.protocol{
+        match self.protocol {
             Protocol::Grpc => {
                 let tls_config_opt = self.tls_config(&endpoint_opt)?;
                 let mut builder = SpanExporter::builder()
@@ -171,11 +171,11 @@ impl Config {
                 if let Some(tls_config) = tls_config_opt {
                     builder = builder.with_tls_config(tls_config);
                 }
-                if  let Some(endpoint) = &endpoint_opt {
+                if let Some(endpoint) = &endpoint_opt {
                     builder = builder.with_endpoint(endpoint)
                 }
                 Ok(builder.build()?)
-            },
+            }
             Protocol::Http => {
                 let headers = self.http.headers.clone();
                 let mut builder = SpanExporter::builder()
@@ -183,7 +183,7 @@ impl Config {
                     .with_protocol(Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_headers(headers);
-                if  let Some(endpoint) = &endpoint_opt {
+                if let Some(endpoint) = &endpoint_opt {
                     builder = builder.with_endpoint(endpoint)
                 }
                 Ok(builder.build()?)
@@ -193,7 +193,7 @@ impl Config {
 
     pub(crate) fn metric_exporter(
         &self,
-        kind:TelemetryDataKind,
+        kind: TelemetryDataKind,
     ) -> Result<MetricExporter, BoxError> {
         let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
         match self.protocol {
@@ -218,12 +218,8 @@ impl Config {
             Protocol::Http => {
                 let headers = self.http.headers.clone();
                 let temporality = match self.temporality {
-                    Temporality::Cumulative => {
-                        opentelemetry_sdk::metrics::Temporality::Cumulative
-                    }
-                    Temporality::Delta => {
-                        opentelemetry_sdk::metrics::Temporality::Delta
-                    }
+                    Temporality::Cumulative => opentelemetry_sdk::metrics::Temporality::Cumulative,
+                    Temporality::Delta => opentelemetry_sdk::metrics::Temporality::Delta,
                 };
                 let mut builder = MetricExporter::builder()
                     .with_http()
@@ -239,7 +235,10 @@ impl Config {
         }
     }
 
-    fn tls_config(&self, endpoint_opt: &Option<String>) -> Result<Option<ClientTlsConfig>, BoxError> {
+    fn tls_config(
+        &self,
+        endpoint_opt: &Option<String>,
+    ) -> Result<Option<ClientTlsConfig>, BoxError> {
         let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
             if !endpoint.is_empty() {
                 let tls_url = Uri::try_from(endpoint)?;

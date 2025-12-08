@@ -1,6 +1,5 @@
 //! Tracing configuration for apollo telemetry.
 
-use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use serde::Serialize;
 use tower::BoxError;
