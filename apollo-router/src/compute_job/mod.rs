@@ -2,12 +2,16 @@ mod metrics;
 
 use std::future::Future;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
+use tokio::task_local;
 use tracing::Instrument;
 use tracing::Span;
 use tracing::info_span;
@@ -52,6 +56,7 @@ fn thread_pool_size() -> usize {
 
 pub(crate) struct JobStatus<'a, T> {
     result_sender: &'a oneshot::Sender<std::thread::Result<T>>,
+    cancelled: Option<Arc<AtomicBool>>,
 }
 
 impl<T> JobStatus<'_, T> {
@@ -64,7 +69,13 @@ impl<T> JobStatus<'_, T> {
     /// In this case, a long-running job should try to cancel itself
     /// to avoid needless resource consumption.
     pub(crate) fn check_for_cooperative_cancellation(&self) -> ControlFlow<()> {
-        if self.result_sender.is_closed() {
+        if self.result_sender.is_closed()
+            || self
+                .cancelled
+                .as_ref()
+                .map(|c| c.load(Ordering::Relaxed))
+                .unwrap_or(false)
+        {
             ControlFlow::Break(())
         } else {
             ControlFlow::Continue(())
@@ -198,6 +209,10 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
     })
 }
 
+task_local! {
+    pub(crate) static CANCEL_JOB: Option<Arc<AtomicBool>>;
+}
+
 /// Returns a future that resolves to a `Result` that is `Ok` if `f` returned or `Err` if it panicked.
 pub(crate) fn execute<T, F>(
     compute_job_type: ComputeJobType,
@@ -216,8 +231,14 @@ where
     span.in_scope(|| {
         let mut job_watcher = JobWatcher::new(compute_job_type);
         let (tx, rx) = oneshot::channel();
+        // Since the compute job runs in a separate thread, we retrieve the cancellation flag task local storage
+        // and pass it into the status.
+        let cancelled = CANCEL_JOB.try_with(|b| b.clone()).ok().flatten();
         let wrapped_job_fn = Box::new(move || {
-            let status = JobStatus { result_sender: &tx };
+            let status = JobStatus {
+                result_sender: &tx,
+                cancelled,
+            };
             // `AssertUnwindSafe` here is correct because this `catch_unwind`
             // is paired with `resume_unwind` below, so the overall effect on unwind safety
             // is the same as if the caller had executed `job` directly without a thread pool.
