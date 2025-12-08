@@ -28,25 +28,6 @@ For detailed instructions on developing the router, see [`DEVELOPMENT.md`](./DEV
 
 To contribute to these docs, you can add or edit the `.mdx` files in the `/docs/source` directory.  Generally speaking, you can preview those as Markdown, but to get a fully functioning preview link to the documentation you will need to open a pull-request with your changes. After opening the pull request, you will receive a comment on your PR with a link to a rendered preview of the documentation.
 
-### Validating MDX files
-
-You can validate MDX files locally before opening a pull request using the provided validation script:
-
-```bash
-# Validate a single file
-./scripts/validate-mdx.sh docs/source/routing/upgrade/from-router-v1.mdx
-
-# Validate all MDX files in docs/source
-./scripts/validate-mdx.sh docs/source
-
-# Validate all MDX files in a specific directory
-./scripts/validate-mdx.sh docs/source/routing/customization
-```
-
-Common issues:
-- **HTML comments are not valid in MDX**: Use `{/* comment */}` instead of `<!-- comment -->`
-- Ensure all JSX tags are properly closed
-
 ## Continuous Integration
 
 This project uses CircleCI as its continuous integration pipeline.   At the current time, it is not possible for external contributors to trigger a CircleCI run due to the security implications of exposing environment variables to our build process.  If you open a pull request as an external contributor, after the PR is accepted and reviewed, a core team member will copy it to another PR before it merges.
