@@ -38,6 +38,7 @@ use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::join_spec_definition::JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -500,6 +501,10 @@ impl Merger {
         // Add missing interface object fields to implementations
         trace!("Adding missing interface object fields to implementations");
         self.add_missing_interface_object_fields_to_implementations()?;
+
+        // Remove redundant @join__field directives (after backfilling interface object fields)
+        trace!("Removing redundant @join__field directives");
+        self.remove_redundant_join_fields()?;
 
         // Return result
         let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
@@ -2467,6 +2472,144 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             result.extend(locations);
         }
         result
+    }
+
+    /// Remove redundant @join__field directives after the merge phase.
+    /// A @join__field directive is considered redundant if:
+    /// 1. The field has a @join__field for each graph in the schema
+    /// 2. Each @join__field has only the `graph` argument (no other arguments like requires, provides, etc.)
+    pub(crate) fn remove_redundant_join_fields(&mut self) -> Result<(), FederationError> {
+        let Some(join_field_directive_name) = self
+            .join_spec_definition
+            .directive_name_in_schema(&self.merged, &JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            return Ok(());
+        };
+
+        let graph_enum = self
+            .join_spec_definition
+            .graph_enum_definition(&self.merged)?;
+        let graph_enum_values: Vec<Name> = graph_enum.values.keys().cloned().collect();
+
+        let referencers = self.merged.referencers();
+        let field_positions = referencers.get_directive(&join_field_directive_name)?;
+        let positions_to_process: Vec<DirectiveTargetPosition> = field_positions.iter().collect();
+
+        for pos in positions_to_process {
+            match pos {
+                DirectiveTargetPosition::ObjectField(obj_field) => {
+                    let field = obj_field.make_mut(self.merged.schema_mut())?;
+                    let field = field.make_mut();
+
+                    let mut join_field_graph_values: HashSet<Name> = HashSet::new();
+                    let mut has_non_graph_argument = false;
+                    for join_field_directive in field.directives.get_all(&join_field_directive_name)
+                    {
+                        if let Some(graph_arg) = join_field_directive
+                            .arguments
+                            .iter()
+                            .find(|arg| arg.name == JOIN_GRAPH_ARGUMENT_NAME)
+                        {
+                            if let Value::Enum(graph_name) = graph_arg.value.as_ref() {
+                                join_field_graph_values.insert(graph_name.clone());
+                            }
+                        }
+                        if join_field_directive
+                            .arguments
+                            .iter()
+                            .any(|arg| arg.name != JOIN_GRAPH_ARGUMENT_NAME)
+                        {
+                            has_non_graph_argument = true;
+                        }
+                    }
+
+                    if !has_non_graph_argument
+                        && graph_enum_values
+                            .iter()
+                            .all(|g| join_field_graph_values.contains(g))
+                    {
+                        field
+                            .directives
+                            .retain(|d| d.name != join_field_directive_name);
+                    }
+                }
+                DirectiveTargetPosition::InterfaceField(intf_field) => {
+                    let field = intf_field.make_mut(self.merged.schema_mut())?;
+                    let field = field.make_mut();
+
+                    let mut join_field_graph_values: HashSet<Name> = HashSet::new();
+                    let mut has_non_graph_argument = false;
+                    for join_field_directive in field.directives.get_all(&join_field_directive_name)
+                    {
+                        if let Some(graph_arg) = join_field_directive
+                            .arguments
+                            .iter()
+                            .find(|arg| arg.name == JOIN_GRAPH_ARGUMENT_NAME)
+                        {
+                            if let Value::Enum(graph_name) = graph_arg.value.as_ref() {
+                                join_field_graph_values.insert(graph_name.clone());
+                            }
+                        }
+                        if join_field_directive
+                            .arguments
+                            .iter()
+                            .any(|arg| arg.name != JOIN_GRAPH_ARGUMENT_NAME)
+                        {
+                            has_non_graph_argument = true;
+                        }
+                    }
+
+                    if !has_non_graph_argument
+                        && graph_enum_values
+                            .iter()
+                            .all(|g| join_field_graph_values.contains(g))
+                    {
+                        field
+                            .directives
+                            .retain(|d| d.name != join_field_directive_name);
+                    }
+                }
+                DirectiveTargetPosition::InputObjectField(input_field) => {
+                    let field = input_field.make_mut(self.merged.schema_mut())?;
+                    let field = field.make_mut();
+
+                    let mut join_field_graph_values: HashSet<Name> = HashSet::new();
+                    let mut has_non_graph_argument = false;
+                    for join_field_directive in field.directives.get_all(&join_field_directive_name)
+                    {
+                        if let Some(graph_arg) = join_field_directive
+                            .arguments
+                            .iter()
+                            .find(|arg| arg.name == JOIN_GRAPH_ARGUMENT_NAME)
+                        {
+                            if let Value::Enum(graph_name) = graph_arg.value.as_ref() {
+                                join_field_graph_values.insert(graph_name.clone());
+                            }
+                        }
+                        if join_field_directive
+                            .arguments
+                            .iter()
+                            .any(|arg| arg.name != JOIN_GRAPH_ARGUMENT_NAME)
+                        {
+                            has_non_graph_argument = true;
+                        }
+                    }
+
+                    if !has_non_graph_argument
+                        && graph_enum_values
+                            .iter()
+                            .all(|g| join_field_graph_values.contains(g))
+                    {
+                        field
+                            .directives
+                            .retain(|d| d.name != join_field_directive_name);
+                    }
+                }
+                _ => bail!("Found @join__field application at unexpected location: {pos}"),
+            }
+        }
+
+        Ok(())
     }
 }
 
