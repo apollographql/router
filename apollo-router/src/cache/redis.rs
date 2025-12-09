@@ -149,7 +149,7 @@ impl Drop for DropSafeRedisPool {
             let _ = inner
                 .quit()
                 .await
-                .inspect_err(|err| record_redis_error(&err, caller, "shutdown"));
+                .inspect_err(|err| record_redis_error(err, caller, "shutdown"));
         });
         // Metrics collector will be dropped automatically and its Drop impl will abort the task
     }
