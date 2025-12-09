@@ -210,6 +210,7 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
 }
 
 task_local! {
+    /// This can be set to true from a parent task to cancel a child compute job.
     pub(crate) static CANCEL_JOB: Option<Arc<AtomicBool>>;
 }
 
