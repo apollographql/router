@@ -324,7 +324,11 @@ fn removes_redundant_join_field_directives() {
     let schema = supergraph.schema().schema();
 
     // Fields in both subgraphs should not have @join__field
-    for field_coord in [coord!(Product.id), coord!(Product.name), coord!(Product.price)] {
+    for field_coord in [
+        coord!(Product.id),
+        coord!(Product.name),
+        coord!(Product.price),
+    ] {
         let field = field_coord.lookup_field(schema).expect("Field exists");
         let has_join_field = field.directives.iter().any(|d| d.name == "join__field");
         assert!(

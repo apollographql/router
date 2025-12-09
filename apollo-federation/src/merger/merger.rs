@@ -2497,28 +2497,27 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         let positions_to_process: Vec<DirectiveTargetPosition> = field_positions.iter().collect();
 
         for pos in positions_to_process {
-            let result = match &pos {
+            match &pos {
                 DirectiveTargetPosition::ObjectField(field) => self
                     .remove_redundant_join_fields_from_position(
                         field,
                         &join_field_directive_name,
                         &graph_enum_values,
-                    ),
+                    )?,
                 DirectiveTargetPosition::InterfaceField(field) => self
                     .remove_redundant_join_fields_from_position(
                         field,
                         &join_field_directive_name,
                         &graph_enum_values,
-                    ),
+                    )?,
                 DirectiveTargetPosition::InputObjectField(field) => self
                     .remove_redundant_join_fields_from_position(
                         field,
                         &join_field_directive_name,
                         &graph_enum_values,
-                    ),
+                    )?,
                 _ => bail!("Found @join__field application at unexpected location: {pos}"),
-            };
-            result?;
+            }
         }
 
         Ok(())
