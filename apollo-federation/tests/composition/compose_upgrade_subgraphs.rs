@@ -17,6 +17,7 @@ fn fed1_preserves_custom_directive_descriptions() {
             """ This is a description of the custom directive """
             directive @customDirective(value: String!) on FIELD_DEFINITION | OBJECT
 
+            """ This is a description of the custom directive 2 """
             directive @key(fields: _FieldSet!) on OBJECT
 
             scalar _FieldSet
@@ -34,6 +35,8 @@ fn fed1_preserves_custom_directive_descriptions() {
     .expect("parses schema")
     .expand_links()
     .expect("expands schema");
+
+    assert_snapshot!(subgraph.schema_string());
 
     let [upgraded]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
         .expect("upgrades schema")
@@ -123,6 +126,9 @@ fn fed2_uses_standard_federation_directive_definitions() {
         r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
+            """ This is my custom description for the key directive """
+            directive @key(fields: federation__FieldSet!) on OBJECT
 
             type Query {
                 hello: String

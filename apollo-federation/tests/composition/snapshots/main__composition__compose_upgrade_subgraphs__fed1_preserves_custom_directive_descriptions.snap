@@ -1,37 +1,30 @@
 ---
 source: apollo-federation/tests/composition/compose_upgrade_subgraphs.rs
-expression: upgraded.schema_string()
+expression: subgraph.schema_string()
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+schema @core(feature: "https://specs.apollo.dev/core/v0.2") @core(feature: "https://specs.apollo.dev/federation/v1.0") {
   query: Query
 }
 
 " This is a description of the custom directive "
 directive @customDirective(value: String!) on FIELD_DEFINITION | OBJECT
 
-directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+" This is a description of the custom directive 2 "
+directive @key(fields: _FieldSet!) on OBJECT
 
-directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @core(feature: String, as: String, for: core__Purpose) repeatable on SCHEMA
 
-directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
 
-directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
 
 directive @external(reason: String) on OBJECT | FIELD_DEFINITION
 
-directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
 directive @extends on OBJECT | INTERFACE
 
-directive @shareable repeatable on OBJECT | FIELD_DEFINITION
-
-directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-
-directive @override(from: String!) on FIELD_DEFINITION
-
-directive @composeDirective(name: String) repeatable on SCHEMA
-
-directive @interfaceObject on OBJECT
+scalar _FieldSet
 
 type Query {
   hello: String
@@ -44,7 +37,7 @@ type A @key(fields: "id") {
   name: String @customDirective(value: "test")
 }
 
-enum link__Purpose {
+enum core__Purpose {
   """
   `SECURITY` features provide metadata necessary to securely resolve fields.
   """
@@ -54,10 +47,6 @@ enum link__Purpose {
   """
   EXECUTION
 }
-
-scalar link__Import
-
-scalar federation__FieldSet
 
 scalar _Any
 

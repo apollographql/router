@@ -212,13 +212,20 @@ impl SchemaUpgrader {
         //            the schema and valid.
 
         // Fed1 links and definitions are removed here, so we can add fed2 links below.
-        self.remove_fed1_links_and_definitions(&mut schema)?;
+        // - save federation directive definitions here
+        let removed_defs = self.remove_fed1_links_and_definitions(&mut schema)?;
 
         // Add link spec & federation 2 spec.
         let inner_schema = schema_as_fed2_subgraph(schema, false)?;
 
         // re-expand all federation directive definitions
-        expand_schema(inner_schema)
+        let schema = expand_schema(inner_schema)?;
+
+        // restore descriptions on federation directives
+        for def in removed_defs {
+            // patch the new definition with the old description
+        }
+        Ok(schema)
     }
 
     // integrates checkForExtensionWithNoBase from the JS code
@@ -357,14 +364,18 @@ impl SchemaUpgrader {
             name!("tag"),
         ];
 
+        let removed_defs = Vec<_>;
         let definitions: Vec<DirectiveDefinitionPosition> =
             schema.get_directive_definitions().collect();
         for definition in &definitions {
             if directives_to_remove.contains(&definition.directive_name) {
-                schema
+                let removed = schema
                     .schema
                     .directive_definitions
                     .shift_remove(&definition.directive_name);
+                if let Some(removed) = removed {
+                    removed_defs.push(removed);
+                }
                 schema
                     .referencers
                     .directives
@@ -404,7 +415,7 @@ impl SchemaUpgrader {
         {
             union_obj.remove(schema)?;
         }
-        Ok(())
+        Ok(removed_defs)
     }
 
     fn remove_external_on_interface(&self, schema: &mut FederationSchema) {
