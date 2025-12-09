@@ -25,7 +25,7 @@ pub(crate) enum OciReferenceType {
     /// Tag reference (e.g., `:latest`, `:v1.0.0`)
     Tag,
     /// SHA256 digest reference (e.g., `@sha256:...`)
-    Sha,
+    Digest,
 }
 
 /// Validate an OCI reference string and determine its type.
@@ -59,7 +59,7 @@ pub(crate) fn validate_oci_reference(
             match (parsed_reference.digest(), parsed_reference.tag()) {
                 (Some(digest), None) => {
                     tracing::debug!("validated OCI digest reference: {}", digest);
-                    Ok((reference.to_string(), OciReferenceType::Sha))
+                    Ok((reference.to_string(), OciReferenceType::Digest))
                 }
                 (None, Some(tag)) => {
                     tracing::debug!("validated OCI tag reference: {}", tag);
@@ -91,9 +91,6 @@ pub struct OciConfig {
 
     /// OCI Compliant URL pointing to the release bundle
     pub reference: String,
-
-    /// Graph artifact reference (tag or digest)
-    pub graph_artifact_reference: String,
 
     /// Hot reload enabled
     pub hot_reload: bool,
@@ -465,7 +462,6 @@ mod tests {
         OciConfig {
             apollo_key: "test-api-key".to_string(),
             reference: reference.clone(),
-            graph_artifact_reference: reference,
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
         }
@@ -814,7 +810,7 @@ mod tests {
             );
             let (reference, ref_type) = result.unwrap();
             assert_eq!(reference, ref_str);
-            assert_eq!(ref_type, OciReferenceType::Sha);
+            assert_eq!(ref_type, OciReferenceType::Digest);
         }
 
         // Test valid tag references

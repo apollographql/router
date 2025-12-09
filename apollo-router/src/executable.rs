@@ -252,7 +252,6 @@ impl Opt {
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
             reference: validated_reference,
-            graph_artifact_reference: graph_artifact_reference.clone(),
             hot_reload: APOLLO_ROUTER_HOT_RELOAD_CLI.load(Ordering::Relaxed),
             poll_interval: INITIAL_OCI_POLL_INTERVAL,
         })
