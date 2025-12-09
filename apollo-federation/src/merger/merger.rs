@@ -763,9 +763,8 @@ impl Merger {
                 };
             Some(type_kind_description)
         };
-        // TODO: Third type param is supposed to be representation of AST nodes
         self.error_reporter
-            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition, ()>(
+            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition>(
                 CompositionError::TypeKindMismatch {
                     message: format!(
                         "Type \"{}\" has mismatched kind: it is defined as ",
@@ -1619,8 +1618,7 @@ impl Merger {
             {
                 self.error_reporter.report_mismatch_hint::<
                     ObjectOrInterfaceTypeDefinitionPosition,
-                    ObjectOrInterfaceTypeDefinitionPosition,
-                    ()>(
+                    ObjectOrInterfaceTypeDefinitionPosition>(
                         hint_id.clone(),
 format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\": ",
                             type_description,
@@ -1667,7 +1665,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             }
         }
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize, ()>(
+            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize>(
                 HintCode::InconsistentEntity,
                 format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
                     &obj.type_name,
@@ -1964,7 +1962,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 }
             };
 
-            self.error_reporter.report_mismatch_error::<Type, T, ()>(
+            self.error_reporter.report_mismatch_error::<Type, T>(
                 error,
                 &ty,
                 sources,
@@ -1997,7 +1995,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 "subtype"
             };
 
-            self.error_reporter.report_mismatch_hint::<Type, T, ()>(
+            self.error_reporter.report_mismatch_hint::<Type, T>(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs: ",
@@ -2252,7 +2250,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 } else {
                     format!("Element \"{dest}\"")
                 };
-                self.error_reporter.report_mismatch_hint::<T, T, ()>(
+                self.error_reporter.report_mismatch_hint::<T, T>(
                     HintCode::InconsistentDescription,
                     format!("{name} has inconsistent descriptions across subgraphs. "),
                     dest,
@@ -2446,55 +2444,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         F: FnMut(&Option<T>, usize) -> bool,
     {
         sources.iter().any(|(idx, source)| predicate(source, *idx))
-    }
-
-    // TODO: These error reporting functions are not yet fully implemented
-    pub(crate) fn report_mismatch_error_with_specifics<T>(
-        &mut self,
-        error: CompositionError,
-        sources: &Sources<T>,
-        accessor: impl Fn(&Option<T>) -> &str,
-    ) {
-        // Build a detailed error message by showing which subgraphs have/don't have the element
-        let mut details = Vec::new();
-        let mut has_subgraphs = Vec::new();
-        let mut missing_subgraphs = Vec::new();
-
-        for (&idx, source) in sources.iter() {
-            let subgraph_name = if idx < self.names.len() {
-                &self.names[idx]
-            } else {
-                "unknown"
-            };
-
-            let result = accessor(source);
-            if result == "yes" {
-                has_subgraphs.push(subgraph_name);
-            } else {
-                missing_subgraphs.push(subgraph_name);
-            }
-        }
-
-        // Format the subgraph lists
-        if !has_subgraphs.is_empty() {
-            details.push(format!("defined in {}", has_subgraphs.join(", ")));
-        }
-        if !missing_subgraphs.is_empty() {
-            details.push(format!("but not in {}", missing_subgraphs.join(", ")));
-        }
-
-        // Create the enhanced error with details
-        let enhanced_error = match error {
-            CompositionError::EnumValueMismatch { message } => {
-                CompositionError::EnumValueMismatch {
-                    message: format!("{}{}", message, details.join(" ")),
-                }
-            }
-            // Add other error types as needed
-            other => other,
-        };
-
-        self.error_reporter.add_error(enhanced_error);
     }
 
     pub(crate) fn source_locations<T>(&self, sources: &Sources<Node<T>>) -> Vec<SubgraphLocation> {

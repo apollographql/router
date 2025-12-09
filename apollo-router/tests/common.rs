@@ -1810,9 +1810,9 @@ fn merge_overrides(
     };
 
     insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
-    insert_redis_namespace(config.pointer_mut("/preview_response_cache/subgraph/all/redis"));
+    insert_redis_namespace(config.pointer_mut("/response_cache/subgraph/all/redis"));
     if let Some(response_cache_per_subgraph) = config
-        .pointer_mut("/preview_response_cache/subgraph/subgraphs")
+        .pointer_mut("/response_cache/subgraph/subgraphs")
         .and_then(|o| o.as_object_mut())
     {
         for subgraph_config in response_cache_per_subgraph.values_mut() {
@@ -1839,7 +1839,7 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         return Some(convert_urls(urls));
     }
 
-    if let Some(response_cache_config) = config.pointer("/preview_response_cache/subgraph") {
+    if let Some(response_cache_config) = config.pointer("/response_cache/subgraph") {
         if let Some(urls) = response_cache_config
             .pointer("/all/redis/urls")
             .and_then(|o| o.as_array())

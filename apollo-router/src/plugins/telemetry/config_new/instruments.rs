@@ -401,11 +401,7 @@ impl InstrumentsConfig {
                                     )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(RouterSelector::ResponseHeader {
-                                response_header: "content-length".to_string(),
-                                redact: None,
-                                default: None,
-                            })),
+                            selector: Some(Arc::new(RouterSelector::ResponseSizeHint { response_size_hint: true })),
                             selectors,
                             updated: false,
                             _phantom: PhantomData,
@@ -671,10 +667,8 @@ impl InstrumentsConfig {
                                 )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(SubgraphSelector::SubgraphRequestHeader {
-                                subgraph_request_header: "content-length".to_string(),
-                                redact: None,
-                                default: None,
+                            selector: Some(Arc::new(SubgraphSelector::SubgraphRequestBodySize {
+                                subgraph_request_body_size: true,
                             })),
                             selectors,
                             updated: false,
@@ -2566,6 +2560,7 @@ mod tests {
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
+    use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
     use crate::plugins::telemetry::config_new::supergraph::instruments::SupergraphCustomInstruments;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
@@ -3028,6 +3023,13 @@ mod tests {
                                         .subgraph_request(http_request)
                                         .build();
 
+                                        let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
+                                        let body_size = body.len();
+                                        request.context.extensions()
+                                            .with_lock(|lock| {
+                                                lock.insert(SubgraphRequestBodySize(body_size as u64));
+                                            });
+
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
                                     apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
                                     cache_instruments.as_mut().unwrap().on_request(&request);
@@ -3463,7 +3465,6 @@ mod tests {
                 .status_code(StatusCode::BAD_REQUEST)
                 .header("content-type", "application/json")
                 .header("x-my-header", "TEST")
-                .header("content-length", "35")
                 .data(json!({"errors": [{"message": "nope"}]}))
                 .build()
                 .unwrap();
@@ -3483,7 +3484,7 @@ mod tests {
             assert_histogram_sum!("http.server.request.body.size", 35.0);
             assert_histogram_sum!(
                 "http.server.response.body.size",
-                35.0,
+                40.0,
                 "acme.my_attribute" = "TEST"
             );
 
@@ -3500,7 +3501,6 @@ mod tests {
                 .context(router_req.context.clone())
                 .status_code(StatusCode::BAD_REQUEST)
                 .header("content-type", "application/json")
-                .header("content-length", "35")
                 .data(json!({"errors": [{"message": "nope"}]}))
                 .build()
                 .unwrap();
@@ -3520,12 +3520,12 @@ mod tests {
             assert_histogram_sum!("http.server.request.body.size", 70.0);
             assert_histogram_sum!(
                 "http.server.response.body.size",
-                35.0,
+                40.0,
                 "acme.my_attribute" = "TEST"
             );
             assert_histogram_sum!(
                 "http.server.response.body.size",
-                35.0,
+                40.0,
                 "acme.my_attribute" = "unknown"
             );
 
@@ -3541,7 +3541,6 @@ mod tests {
                 .context(router_req.context.clone())
                 .status_code(StatusCode::OK)
                 .header("content-type", "application/json")
-                .header("content-length", "35")
                 .data(json!({"errors": [{"message": "nope"}]}))
                 .build()
                 .unwrap();

@@ -1741,7 +1741,7 @@ impl Telemetry {
             // Response cache's top-level enabled flag defaults to false. If the top-level flag is
             // enabled, the feature is considered enabled regardless of the subgraph-level enabled
             // settings.
-            response_cache: full_config["preview_response_cache"]["enabled"]
+            response_cache: full_config["response_cache"]["enabled"]
                 .as_bool()
                 .unwrap_or(false),
         }

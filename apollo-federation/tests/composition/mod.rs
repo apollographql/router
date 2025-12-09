@@ -14,9 +14,9 @@ mod compose_validation;
 mod connectors;
 mod demand_control;
 mod directive_argument_merge_strategies;
-mod hints;
-// TODO: remove #[ignore] from tests once all fns called by Merger::merge() are implemented
 mod external;
+mod fed1_shareability;
+mod hints;
 mod override_directive;
 mod subscription;
 mod supergraph_reversibility;
@@ -29,6 +29,7 @@ pub(crate) mod test_helpers {
     use apollo_federation::composition::compose;
     use apollo_federation::error::CompositionError;
     use apollo_federation::error::FederationError;
+    use apollo_federation::subgraph::test_utils::remove_indentation;
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::CompositionHint;
     use apollo_federation::supergraph::Satisfiable;
@@ -115,18 +116,21 @@ pub(crate) mod test_helpers {
         for (i, (expected_code, expected_message)) in expected_errors.iter().enumerate() {
             let (error_code, error_str) = &error_strings[i];
 
+            let error_str = remove_indentation(error_str);
+            let expected_message = remove_indentation(expected_message);
+
             // Check error code
             assert!(
-                error_code.contains(expected_code),
-                "Error at index {} does not contain expected code.\n\nEXPECTED:\n{}\nACTUAL:\n{}",
+                error_code == expected_code,
+                "Error at index {} does not equal expected code.\n\nEXPECTED:\n{}\nACTUAL:\n{}",
                 i,
                 format_args!("code: {}\nmessage: {}\n", expected_code, expected_message),
                 format_args!("code: {}\nmessage: {}\n", error_code, error_str)
             );
             // Check error message
             assert!(
-                error_str.contains(expected_message),
-                "Error at index {} does not contain expected message.\n\nEXPECTED:\n{}\nACTUAL:\n{}",
+                error_str == expected_message,
+                "Error at index {} does not equal expected message.\n\nEXPECTED:\n{}\nACTUAL:\n{}",
                 i,
                 format_args!("code: {}\nmessage: {}\n", expected_code, expected_message),
                 format_args!("code: {}\nmessage: {}\n", error_code, error_str)

@@ -142,9 +142,9 @@ impl MonitorOutput {
     }
 
     pub fn command_sent_to_replicas_only(&self, cmd: &str) -> bool {
-        let mget_sent_to_replica = self.replicas(true).command_sent_to_any(cmd);
-        let mget_sent_to_primary = self.replicas(false).command_sent_to_any(cmd);
-        mget_sent_to_replica && !mget_sent_to_primary
+        let cmd_sent_to_replica = self.replicas(true).command_sent_to_any(cmd);
+        let cmd_sent_to_primary = self.replicas(false).command_sent_to_any(cmd);
+        cmd_sent_to_replica && !cmd_sent_to_primary
     }
 
     pub fn num_nodes(&self) -> usize {

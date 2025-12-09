@@ -347,7 +347,7 @@ impl LicenseEnforcementReport {
         if !allowed_features.contains(&AllowedFeature::ResponseCaching) {
             configuration_restrictions.push(
                 ConfigurationRestriction::builder()
-                    .path("$.preview_response_cache.enabled")
+                    .path("$.response_cache.enabled")
                     .value(true)
                     .name("Subgraph response caching")
                     .build(),
@@ -589,7 +589,7 @@ impl AllowedFeature {
             "authorization" => Some(AllowedFeature::Authorization),
             "authentication" => Some(AllowedFeature::Authentication),
             "preview_entity_cache" => Some(AllowedFeature::EntityCaching),
-            "preview_response_cache" => Some(AllowedFeature::ResponseCaching),
+            "response_cache" => Some(AllowedFeature::ResponseCaching),
             "demand_control" => Some(AllowedFeature::DemandControl),
             "coprocessor" => Some(AllowedFeature::Coprocessors),
             _other => None,
