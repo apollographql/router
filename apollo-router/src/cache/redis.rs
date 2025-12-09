@@ -400,14 +400,7 @@ impl RedisCacheStorage {
             tokio::spawn(async move {
                 loop {
                     match error_rx.recv().await {
-                        Ok((error, Some(server))) => {
-                            tracing::error!("Redis client ({server:?}) error: {error:?}",);
-                            record_redis_error(&error, caller);
-                        }
-                        Ok((error, None)) => {
-                            tracing::error!("Redis client error: {error:?}",);
-                            record_redis_error(&error, caller);
-                        }
+                        Ok((error, _)) => record_redis_error(&error, caller),
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,
                     }
