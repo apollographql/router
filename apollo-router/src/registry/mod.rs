@@ -104,6 +104,7 @@ pub struct OciConfig {
 #[derive(Debug, Clone)]
 pub(crate) struct OciContent {
     pub schema: String,
+    pub launch_id: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -121,6 +122,7 @@ pub(crate) enum OciError {
 const APOLLO_REGISTRY_ENDING: &str = "apollographql.com";
 const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
+const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str = "com.apollograph.launch.id";
 
 impl From<oci_client::ParseError> for OciError {
     fn from(value: oci_client::ParseError) -> Self {
@@ -194,8 +196,17 @@ async fn fetch_oci_from_reference(
     tracing::debug!("pulling oci blob");
     let schema = fetch_oci_blob(client, reference, &schema_layer).await?;
 
+    let annotations = manifest.annotations;
+
+    let launch_id = match &annotations {
+        Some(a) => a.get(APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION),
+        None => None,
+    }
+    .cloned();
+
     Ok(OciContent {
         schema: String::from_utf8(schema)?,
+        launch_id,
     })
 }
 
@@ -437,9 +448,7 @@ pub(crate) fn stream_from_oci(
                                 tracing::debug!("fetched schema from oci registry");
                                 let schema_state = SchemaState {
                                     sdl: oci_result.schema,
-                                    // TODO: Add launch_id from graph artifact
-                                    // https://apollographql.atlassian.net/browse/REG-1634
-                                    launch_id: None,
+                                    launch_id: oci_result.launch_id,
                                 };
                                 if let Err(e) = sender.send(Ok(schema_state)).await {
                                     tracing::debug!(
@@ -480,6 +489,7 @@ pub(crate) fn stream_from_oci(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
@@ -533,7 +543,10 @@ mod tests {
         schema_data: Vec<u8>,
     }
 
-    fn create_manifest_from_schema_layer(schema_data: &str) -> SchemaLayerManifest {
+    fn create_manifest_from_schema_layer(
+        schema_data: &str,
+        annotations: Option<BTreeMap<String, String>>,
+    ) -> SchemaLayerManifest {
         let schema_layer = ImageLayer {
             data: schema_data.to_string().into_bytes(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
@@ -553,7 +566,7 @@ mod tests {
             }],
             subject: None,
             artifact_type: None,
-            annotations: None,
+            annotations,
         });
         let manifest_digest = calculate_manifest_digest(&oci_manifest);
         SchemaLayerManifest {
@@ -637,7 +650,24 @@ mod tests {
         }
     }
 
-    async fn setup_mocks(mock_server: MockServer, layers: Vec<ImageLayer>) -> Reference {
+    fn generate_manifest_annotations(launch_id: Option<&str>) -> BTreeMap<String, String> {
+        let mut manifest_annotations = BTreeMap::new();
+
+        if let Some(lid) = launch_id {
+            manifest_annotations.insert(
+                APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION.to_string(),
+                lid.to_string(),
+            );
+        }
+
+        manifest_annotations
+    }
+
+    async fn setup_mocks(
+        mock_server: &MockServer,
+        layers: Vec<ImageLayer>,
+        manifest_annotations: Option<BTreeMap<String, String>>,
+    ) -> Reference {
         let graph_id = "test-graph-id";
         let reference = "latest";
 
@@ -655,7 +685,7 @@ mod tests {
                         .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
                         .set_body_bytes(layer.data.clone()),
                 )
-                .mount(&mock_server)
+                .mount(mock_server)
                 .await;
             OciDescriptor {
                 media_type: layer.media_type.clone(),
@@ -681,7 +711,7 @@ mod tests {
             layers: layer_descriptors,
             subject: None,
             artifact_type: None,
-            annotations: None,
+            annotations: manifest_annotations,
         });
         let manifest_digest = calculate_manifest_digest(&oci_manifest);
 
@@ -693,7 +723,7 @@ mod tests {
                     .append_header("Docker-Content-Digest", manifest_digest.clone())
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
             )
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         // Set up GET request for full manifest (used by pull_image_manifest)
@@ -705,7 +735,7 @@ mod tests {
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
                     .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
             )
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         format!("{}/{graph_id}:{reference}", mock_server.address())
@@ -715,7 +745,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn fetch_blob() {
-        let mock_server = MockServer::start().await;
+        let mock_server = &MockServer::start().await;
         let mut client = Client::new(ClientConfig {
             protocol: ClientProtocol::Http,
             ..Default::default()
@@ -725,7 +755,7 @@ mod tests {
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
-        let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
+        let image_reference = setup_mocks(mock_server, vec![schema_layer], None).await;
         let result = fetch_oci_from_reference(
             &mut client,
             &RegistryAuth::Anonymous,
@@ -739,7 +769,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn handle_extra_layers() {
-        let mock_server = MockServer::start().await;
+        let mock_server = &MockServer::start().await;
         let mut client = Client::new(ClientConfig {
             protocol: ClientProtocol::Http,
             ..Default::default()
@@ -754,7 +784,8 @@ mod tests {
             media_type: "foo_bar".to_string(),
             annotations: None,
         };
-        let image_reference = setup_mocks(mock_server, vec![schema_layer, random_layer]).await;
+        let image_reference =
+            setup_mocks(mock_server, vec![schema_layer, random_layer], None).await;
         let result = fetch_oci_from_reference(
             &mut client,
             &RegistryAuth::Anonymous,
@@ -768,7 +799,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn error_layer_not_found() {
-        let mock_server = MockServer::start().await;
+        let mock_server = &MockServer::start().await;
         let mut client = Client::new(ClientConfig {
             protocol: ClientProtocol::Http,
             ..Default::default()
@@ -778,7 +809,7 @@ mod tests {
             media_type: "foo_bar".to_string(),
             annotations: None,
         };
-        let image_reference = setup_mocks(mock_server, vec![random_layer]).await;
+        let image_reference = setup_mocks(mock_server, vec![random_layer], None).await;
         let result = fetch_oci_from_reference(
             &mut client,
             &RegistryAuth::Anonymous,
@@ -974,13 +1005,77 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stream_from_oci_success() {
-        let mock_server = MockServer::start().await;
+        let mock_server = &MockServer::start().await;
+
         let schema_layer = ImageLayer {
             data: "test schema".to_string().into_bytes(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
-        let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
+
+        let launch_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string();
+        let manifest_annotations = generate_manifest_annotations(Some(&launch_id.clone()));
+
+        let image_reference =
+            setup_mocks(mock_server, vec![schema_layer], Some(manifest_annotations)).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Ok(schema_state) => {
+                assert_eq!(schema_state.sdl, "test schema");
+                assert_eq!(schema_state.launch_id, Some(launch_id));
+            }
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_oci_missing_manifests() {
+        let mock_server = &MockServer::start().await;
+
+        let schema_layer = ImageLayer {
+            data: "test schema".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+
+        let image_reference = setup_mocks(mock_server, vec![schema_layer], None).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Ok(schema_state) => {
+                assert_eq!(schema_state.sdl, "test schema");
+                assert_eq!(schema_state.launch_id, None);
+            }
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_oci_missing_launch_id_manifest() {
+        let mock_server = &MockServer::start().await;
+
+        let schema_layer = ImageLayer {
+            data: "test schema".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+
+        let manifest_annotations = generate_manifest_annotations(None);
+        let image_reference =
+            setup_mocks(mock_server, vec![schema_layer], Some(manifest_annotations)).await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
         let results = stream_from_oci(oci_config)
@@ -1000,10 +1095,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stream_from_oci_digest_unchanged_no_fetch() {
-        let mock_server = MockServer::start().await;
+        let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
-        let manifest_info = create_manifest_from_schema_layer("test schema");
+        let manifest_info = create_manifest_from_schema_layer("test schema", None);
         let blob_url = Url::parse(&format!(
             "{}/v2/{graph_id}/blobs/{}",
             mock_server.uri(),
@@ -1023,7 +1118,7 @@ mod tests {
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
                     .set_body_bytes(schema_data.clone())
             })
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         let manifest_url = Url::parse(&format!(
@@ -1042,7 +1137,7 @@ mod tests {
                     .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
             )
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         // GET requests for manifest
@@ -1054,7 +1149,7 @@ mod tests {
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
                     .set_body_bytes(serde_json::to_vec(&manifest_info.oci_manifest).unwrap()),
             )
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
@@ -1097,13 +1192,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_create_oci_schema_stream_tag_with_hot_reload() {
-        let mock_server = MockServer::start().await;
+        let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
             data: "test schema".to_string().into_bytes(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
-        let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
+        let image_reference = setup_mocks(mock_server, vec![schema_layer], None).await;
 
         // Create OciConfig with tag reference and hot-reload enabled
         let oci_config = OciConfig {
@@ -1132,13 +1227,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_create_oci_schema_stream_tag_without_hot_reload() {
-        let mock_server = MockServer::start().await;
+        let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
             data: "test schema".to_string().into_bytes(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
-        let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
+        let image_reference = setup_mocks(mock_server, vec![schema_layer], None).await;
 
         // Create OciConfig with tag reference and hot-reload disabled
         let oci_config = OciConfig {
@@ -1189,7 +1284,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_create_oci_schema_stream_digest_without_hot_reload() {
-        let mock_server = MockServer::start().await;
+        let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
             data: "test schema".to_string().into_bytes(),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
@@ -1197,7 +1292,7 @@ mod tests {
         };
 
         // Create manifest first to get the digest
-        let oci_manifest = create_manifest_from_schema_layer("test schema");
+        let oci_manifest = create_manifest_from_schema_layer("test schema", None);
         let manifest_digest = oci_manifest.manifest_digest.clone();
 
         // Set up mocks manually for digest reference
@@ -1216,7 +1311,7 @@ mod tests {
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
                     .set_body_bytes(schema_layer.data.clone()),
             )
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         let manifest_digest_url = Url::parse(&format!(
@@ -1234,7 +1329,7 @@ mod tests {
                     .append_header("Docker-Content-Digest", &manifest_digest)
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
             )
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         // Set up GET request for manifest digest
@@ -1246,7 +1341,7 @@ mod tests {
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
                     .set_body_bytes(serde_json::to_vec(&oci_manifest.oci_manifest).unwrap()),
             )
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         // Create digest reference
@@ -1276,12 +1371,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stream_from_oci_digest_changed_fetches_schema() {
-        let mock_server = MockServer::start().await;
+        let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
         let blob_request_count = Arc::new(AtomicUsize::new(0));
 
-        let manifest_info1 = create_manifest_from_schema_layer("schema 1");
+        let manifest_info1 = create_manifest_from_schema_layer("schema 1", None);
         let blob_url1 = Url::parse(&format!(
             "{}/v2/{graph_id}/blobs/{}",
             mock_server.uri(),
@@ -1298,10 +1393,10 @@ mod tests {
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
                     .set_body_bytes(manifest_info1.schema_data.clone())
             })
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
-        let manifest_info2 = create_manifest_from_schema_layer("schema 2");
+        let manifest_info2 = create_manifest_from_schema_layer("schema 2", None);
         let blob_url2 = Url::parse(&format!(
             "{}/v2/{graph_id}/blobs/{}",
             mock_server.uri(),
@@ -1317,7 +1412,7 @@ mod tests {
                     .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
                     .set_body_bytes(manifest_info2.schema_data.clone())
             })
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         let manifest_url = Url::parse(&format!(
@@ -1339,7 +1434,7 @@ mod tests {
                 ])),
             })
             .expect(2..=3)
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         // mock requests for manifest1 then manifest2
@@ -1358,7 +1453,7 @@ mod tests {
                 ])),
             })
             .expect(2..=3)
-            .mount(&mock_server)
+            .mount(mock_server)
             .await;
 
         let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
