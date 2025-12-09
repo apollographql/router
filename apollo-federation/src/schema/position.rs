@@ -595,6 +595,43 @@ impl HasType for ObjectOrInterfaceFieldDefinitionPosition {
     }
 }
 
+pub(crate) trait HasMutableDirectives {
+    fn directives_mut<'schema>(
+        &self,
+        schema: &'schema mut Schema,
+    ) -> Result<&'schema mut ast::DirectiveList, FederationError>;
+}
+
+impl HasMutableDirectives for ObjectFieldDefinitionPosition {
+    fn directives_mut<'schema>(
+        &self,
+        schema: &'schema mut Schema,
+    ) -> Result<&'schema mut ast::DirectiveList, FederationError> {
+        let field = self.make_mut(schema)?;
+        Ok(&mut field.make_mut().directives)
+    }
+}
+
+impl HasMutableDirectives for InterfaceFieldDefinitionPosition {
+    fn directives_mut<'schema>(
+        &self,
+        schema: &'schema mut Schema,
+    ) -> Result<&'schema mut ast::DirectiveList, FederationError> {
+        let field = self.make_mut(schema)?;
+        Ok(&mut field.make_mut().directives)
+    }
+}
+
+impl HasMutableDirectives for InputObjectFieldDefinitionPosition {
+    fn directives_mut<'schema>(
+        &self,
+        schema: &'schema mut Schema,
+    ) -> Result<&'schema mut ast::DirectiveList, FederationError> {
+        let field = self.make_mut(schema)?;
+        Ok(&mut field.make_mut().directives)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
