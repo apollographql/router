@@ -51,7 +51,7 @@ async fn websocket_handler_with_header_capture(
     *state.captured_headers.lock() = Some(headers.clone());
     info!("Captured WebSocket upgrade headers: {:?}", headers);
 
-    ws.on_upgrade(|socket| handle_websocket(socket))
+    ws.on_upgrade(handle_websocket)
 }
 
 /// Handle the WebSocket connection after upgrade
@@ -65,59 +65,59 @@ async fn handle_websocket(mut socket: WebSocket) {
                 info!("Received WebSocket message: {}", text);
 
                 // Parse the message
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if let Some(msg_type) = value.get("type").and_then(|t| t.as_str()) {
-                        match msg_type {
-                            "connection_init" => {
-                                // Send connection_ack
-                                let ack = json!({"type": "connection_ack"});
-                                if socket
-                                    .send(Message::Text(ack.to_string().into()))
-                                    .await
-                                    .is_err()
-                                {
-                                    break;
-                                }
-                            }
-                            "subscribe" => {
-                                // Send a subscription response
-                                let id = value.get("id").and_then(|v| v.as_str()).unwrap_or("1");
-                                let response = json!({
-                                    "id": id,
-                                    "type": "next",
-                                    "payload": {
-                                        "data": {
-                                            "userWasCreated": {
-                                                "name": "Test User",
-                                                "reviews": [{"body": "Test Review"}]
-                                            }
-                                        }
-                                    }
-                                });
-                                if socket
-                                    .send(Message::Text(response.to_string().into()))
-                                    .await
-                                    .is_err()
-                                {
-                                    break;
-                                }
-
-                                // Send complete
-                                let complete = json!({"id": id, "type": "complete"});
-                                if socket
-                                    .send(Message::Text(complete.to_string().into()))
-                                    .await
-                                    .is_err()
-                                {
-                                    break;
-                                }
-                            }
-                            "complete" => {
-                                // Client is closing the subscription
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
+                    && let Some(msg_type) = value.get("type").and_then(|t| t.as_str())
+                {
+                    match msg_type {
+                        "connection_init" => {
+                            // Send connection_ack
+                            let ack = json!({"type": "connection_ack"});
+                            if socket
+                                .send(Message::Text(ack.to_string().into()))
+                                .await
+                                .is_err()
+                            {
                                 break;
                             }
-                            _ => {}
                         }
+                        "subscribe" => {
+                            // Send a subscription response
+                            let id = value.get("id").and_then(|v| v.as_str()).unwrap_or("1");
+                            let response = json!({
+                                "id": id,
+                                "type": "next",
+                                "payload": {
+                                    "data": {
+                                        "userWasCreated": {
+                                            "name": "Test User",
+                                            "reviews": [{"body": "Test Review"}]
+                                        }
+                                    }
+                                }
+                            });
+                            if socket
+                                .send(Message::Text(response.to_string().into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+
+                            // Send complete
+                            let complete = json!({"id": id, "type": "complete"});
+                            if socket
+                                .send(Message::Text(complete.to_string().into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        "complete" => {
+                            // Client is closing the subscription
+                            break;
+                        }
+                        _ => {}
                     }
                 }
             }
