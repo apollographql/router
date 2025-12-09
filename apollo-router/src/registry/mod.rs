@@ -359,7 +359,7 @@ pub(crate) fn stream_from_oci(
                                     status = "success"
                                 );
                                 f64_histogram_with_unit!(
-                                    "apollo.router.oci.manifest.duration.seconds",
+                                    "apollo.router.oci.blob.duration.seconds",
                                     "Duration of fetch for GrAr blob.",
                                     "s",
                                     before_request.elapsed().as_secs_f64(),

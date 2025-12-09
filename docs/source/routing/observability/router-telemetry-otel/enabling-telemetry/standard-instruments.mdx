@@ -185,6 +185,27 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 </Note>
 
+### Graph Artifacts
+
+- `apollo.router.oci.manifest.count` - Number of requests made to get the manifest for a large GrAr blob, attributes:
+  - `url`: The Uplink URL that was polled
+  - `status`: (`success`, `failure`)
+- `apollo.router.oci.manifest.duration.seconds` - Duration of request to get OCI manifest of larger blob, attributes:
+    - `url`: The Uplink URL that was polled
+    - `kind`: (`got_manifest`, `oci_error`, `new`, `unchanged`)
+- `apollo.router.oci.blob.count` - Number of made fetches to get entire blob of GrAr, attributes:
+  - `status`: (`success`, `failure`)
+  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
+- `apollo.router.oci.manifest.blob.seconds` - Duration of requests to get entire GrAr blob, attributes:
+  - `url`: The Uplink URL that was polled
+  - `kind`: (`oci_error`, `new`)
+
+<Note>
+
+As with the initial call to Uplink, calls to the GraphArtifacts endpoint during router startup is not reflected in metrics.
+
+</Note>
+
 ### Subscriptions
 
 <Tip>
