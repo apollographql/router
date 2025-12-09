@@ -438,4 +438,32 @@ mod tests {
             e => panic!("job did not cancel as expected: {e:?}"),
         };
     }
+
+    #[tokio::test]
+    async fn test_cancel_with_task_local() {
+        let (side_channel_sender, side_channel_receiver) = oneshot::channel();
+
+        let queue_receiver = crate::compute_job::CANCEL_JOB.scope(
+            Some(Arc::new(AtomicBool::new(true))),
+            async move {
+                execute(ComputeJobType::Introspection, move |status| {
+                    // We expect the first iteration to succeed,
+                    // but let’s add lots of margin for CI machines with super-busy CPU cores
+                    for _ in 0..1_000 {
+                        std::thread::sleep(Duration::from_millis(10));
+                        if status.check_for_cooperative_cancellation().is_break() {
+                            side_channel_sender.send(Ok(())).unwrap();
+                            return;
+                        }
+                    }
+                    side_channel_sender.send(Err(())).unwrap();
+                })
+            },
+        );
+
+        match tokio::join!(side_channel_receiver, queue_receiver) {
+            (Ok(Ok(())), _) => {}
+            (e, _) => panic!("job did not cancel as expected: {e:?}"),
+        };
+    }
 }
