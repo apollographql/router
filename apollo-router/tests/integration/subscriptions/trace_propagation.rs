@@ -165,6 +165,16 @@ async fn test_datadog_trace_headers_in_websocket_upgrade() -> Result<(), BoxErro
 
     // Create router config with Datadog telemetry
     let config = r#"
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      all:
+        path: /ws
+      subgraphs:
+        accounts:
+          path: /ws
+          protocol: graphql_ws
 telemetry:
   exporters:
     tracing:
@@ -172,13 +182,8 @@ telemetry:
         datadog: true
       datadog:
         enabled: true
-
-subscriptions:
-  enabled: true
-  mode:
-    passthrough:
-      all:
-        path: /ws
+override_subgraph_url:
+  accounts: http://localhost:{{SUBGRAPH_PORT}}
 "#;
 
     let mut router = IntegrationTest::builder()
@@ -189,7 +194,7 @@ subscriptions:
         .await;
 
     // Override the subgraph URL to point to our capturing WebSocket server
-    router.set_address_from_uri("SUBGRAPH_PORT", &format!("http://{}/", ws_addr));
+    router.set_address_from_uri("SUBGRAPH_PORT", &format!("http://{}", ws_addr));
 
     router.start().await;
     router.assert_started().await;
@@ -292,18 +297,23 @@ async fn test_w3c_trace_headers_in_websocket_upgrade() -> Result<(), BoxError> {
 
     // Create router config with W3C propagation
     let config = r#"
-telemetry:
-  exporters:
-    tracing:
-      propagation:
-        trace_context: true
-
-subscriptions:
+subscription:
   enabled: true
   mode:
     passthrough:
       all:
         path: /ws
+      subgraphs:
+        accounts:
+          path: /ws
+          protocol: graphql_ws
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        trace_context: true
+override_subgraph_url:
+  accounts: http://localhost:{{SUBGRAPH_PORT}}
 "#;
 
     let mut router = IntegrationTest::builder()
@@ -314,7 +324,7 @@ subscriptions:
         .await;
 
     // Override the subgraph URL to point to our capturing WebSocket server
-    router.set_address_from_uri("SUBGRAPH_PORT", &format!("http://{}/", ws_addr));
+    router.set_address_from_uri("SUBGRAPH_PORT", &format!("http://{}", ws_addr));
 
     router.start().await;
     router.assert_started().await;
