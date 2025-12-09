@@ -8,7 +8,7 @@ use opentelemetry_otlp::MetricExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::{Aggregation, InstrumentKind};
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::runtime;
@@ -206,28 +206,36 @@ impl Config {
             ])
             .build();
 
-        let view_default_aggregation = |_i: &Instrument| {
-            Some(
-                Stream::builder()
-                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: default_buckets(),
-                        record_min_max: true,
-                    })
-                    .build()
-                    .unwrap(),
-            )
+        let view_default_aggregation = |i: &Instrument| {
+            if matches!(i.kind(), InstrumentKind::Histogram) {
+                Some(
+                    Stream::builder()
+                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                            boundaries: default_buckets(),
+                            record_min_max: true,
+                        })
+                        .build()
+                        .unwrap(),
+                )
+            } else {
+                None
+            }
         };
 
-        let view_custom_aggregation = |_i: &Instrument| {
-            Some(
-                Stream::builder()
-                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: exponential_buckets(0.001399084909, 1.1, 129).unwrap(),
-                        record_min_max: true,
-                    })
-                    .build()
-                    .unwrap(),
-            )
+        let view_custom_aggregation = |i: &Instrument| {
+            if matches!(i.kind(), InstrumentKind::Histogram) {
+                Some(
+                    Stream::builder()
+                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                            boundaries: exponential_buckets(0.001399084909, 1.1, 129).unwrap(),
+                            record_min_max: true,
+                        })
+                        .build()
+                        .unwrap(),
+                )
+            } else {
+                None
+            }
         };
 
         builder
