@@ -23,7 +23,7 @@ use crate::schema::type_and_directive_specification::DirectiveCompositionSpecifi
 pub(crate) struct CoreDirectiveInSubgraphs {
     url: Url,
     name: Name,
-    definitions_per_subgraph: HashMap<String, DirectiveDefinition>,
+    definitions_per_subgraph: IndexMap<String, DirectiveDefinition>,
     composition_spec: DirectiveCompositionSpecification,
 }
 
@@ -123,13 +123,12 @@ impl Merger {
                         .definitions_per_subgraph
                         .insert(subgraph.name.clone(), (**definition).clone());
                 } else {
+                    let mut definitions_per_subgraph = IndexMap::default();
+                    definitions_per_subgraph.insert(subgraph.name.clone(), (**definition).clone());
                     let for_version = CoreDirectiveInSubgraphs {
                         url: source.url.clone(),
                         name: import.element.clone(),
-                        definitions_per_subgraph: HashMap::from([(
-                            subgraph.name.clone(),
-                            (**definition).clone(),
-                        )]),
+                        definitions_per_subgraph,
                         composition_spec,
                     };
                     for_feature.insert(major, for_version);
@@ -211,19 +210,29 @@ impl Merger {
             };
             let supergraph_info = supergraph_info_by_identity
                 .entry(spec_in_supergraph.identity().clone())
-                .or_insert(vec![CoreDirectiveInSupergraph {
+                .or_default();
+
+            if !supergraph_info
+                .iter()
+                .any(|d| d.name_in_feature == subgraph_core_directive.name)
+            {
+                supergraph_info.push(CoreDirectiveInSupergraph {
                     spec_in_supergraph,
                     name_in_feature: subgraph_core_directive.name.clone(),
                     name_in_supergraph: name_in_supergraph.clone(),
                     composition_spec: subgraph_core_directive.composition_spec.clone(),
-                }]);
-            assert!(
-                supergraph_info
-                    .iter()
-                    .all(|s| s.spec_in_supergraph.url() == spec_in_supergraph.url()),
-                "Spec {} directives disagree on version for supergraph",
-                spec_in_supergraph.url()
-            );
+                });
+            }
+
+            if supergraph_info
+                .iter()
+                .any(|s| s.spec_in_supergraph.url() != spec_in_supergraph.url())
+            {
+                bail!(
+                    "Spec {} directives disagree on version for supergraph",
+                    spec_in_supergraph.url()
+                )
+            }
         }
 
         for supergraph_core_directives in supergraph_info_by_identity.values() {

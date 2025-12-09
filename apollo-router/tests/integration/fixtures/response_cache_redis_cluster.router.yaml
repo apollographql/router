@@ -1,4 +1,4 @@
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:

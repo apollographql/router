@@ -10,6 +10,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use either::Either;
+use itertools::Itertools;
 use tracing::instrument;
 
 use super::FederationSchema;
@@ -156,7 +157,7 @@ impl SchemaUpgrader {
         self.remove_directives_on_interface(&upgrade_metadata, &mut schema)?;
 
         // Note that this rule rely on being after `remove_directives_on_interface` in practice (in that it doesn't check interfaces).
-        self.remove_provides_on_non_composite(&mut schema)?;
+        self.remove_provides_on_non_composite(&subgraph, &mut schema)?;
 
         // Note that this should come _after_ all the other changes that may remove/update federation directives, since those may create unused
         // externals. Which is why this is toward  the end.
@@ -687,32 +688,33 @@ impl SchemaUpgrader {
 
     fn remove_provides_on_non_composite(
         &self,
+        subgraph: &Subgraph<Expanded>,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        let Some(metadata) = &schema.subgraph_metadata else {
+        let Some(provides_directive) = subgraph.provides_directive_name()? else {
             return Ok(());
         };
-
-        let provides_directive = metadata
-            .federation_spec_definition()
-            .provides_directive_definition(schema)?;
-
-        #[allow(clippy::iter_overeager_cloned)] // TODO: remove this
-        let references_to_remove: Vec<_> = schema
+        let Some(targets) = subgraph
+            .schema()
             .referencers()
-            .get_directive(provides_directive.name.as_str())?
-            .object_fields
-            .iter()
-            .cloned()
-            .filter(|ref_field| {
-                schema
-                    .get_type(ref_field.type_name.clone())
-                    .map(|t| !t.is_composite_type())
-                    .unwrap_or(false)
-            })
-            .collect();
-        for reference in &references_to_remove {
-            reference.remove(schema)?;
+            .directives
+            .get(&provides_directive)
+        else {
+            return Ok(());
+        };
+        for obj_field_pos in targets.object_fields.iter() {
+            let field = obj_field_pos.make_mut(&mut schema.schema)?;
+            let return_type = field.ty.inner_named_type();
+            if subgraph
+                .schema()
+                .try_get_type(return_type.clone())
+                .is_some_and(|t| !t.is_composite_type())
+            {
+                let field = field.make_mut();
+                field
+                    .directives
+                    .retain(|d| d.name != provides_directive.as_str());
+            }
         }
         Ok(())
     }
@@ -1020,37 +1022,23 @@ fn inner_upgrade_subgraphs_if_necessary(
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
+    let mut errors: Vec<CompositionError> = vec![];
+    let subgraphs = subgraphs
+        .into_iter()
+        .filter_map(|sg| match sg.normalize_root_types() {
+            Ok(s) => Some(s),
+            Err(e) => {
+                errors.extend(e.to_composition_errors());
+                None
+            }
+        })
+        .collect_vec();
+
     // Upgrade subgraphs (if necessary)
     let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
 
-    let mut errors: Vec<CompositionError> = vec![];
-
-    // Normalize root types (if necessary)
-    let normalized: Vec<_> = upgraded
-        .into_iter()
-        .filter_map(|subgraph| match subgraph {
-            Either::Left(s) => match s.normalize_root_types() {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    errors.extend(e.to_composition_errors());
-                    None
-                }
-            },
-            Either::Right(mut s) => {
-                match s.normalize_root_types() {
-                    Ok(()) => {}
-                    Err(e) => {
-                        errors.extend(e.to_composition_errors());
-                        return None;
-                    }
-                }
-                Some(Either::Right(s))
-            }
-        })
-        .collect();
-
     // Validate subgraphs (if either upgraded or normalized)
-    let validated: Vec<Subgraph<Validated>> = normalized
+    let validated: Vec<Subgraph<Validated>> = upgraded
         .into_iter()
         .filter_map(|subgraph| match subgraph {
             Either::Left(s) => {
@@ -1742,8 +1730,7 @@ mod tests {
     }
 
     #[test]
-    fn ignore_error_for_provides_field_set_on_scalar_field() {
-        // This used to generate a wrong error.
+    fn removes_provides_on_non_composite_fields() {
         let subgraphs = vec![
             (
                 "subgraph1",
@@ -1778,11 +1765,14 @@ mod tests {
                     .expect("expands schema")
             })
             .collect::<Vec<_>>();
-        let errors = upgrade_subgraphs_if_necessary(expanded).expect_err("fails to upgrade schema");
-        assert_eq!(errors.len(), 1);
-        assert_eq!(
-            errors[0].to_string(),
-            r#"[subgraph1] Cannot have both @provides and @external on field "User.id""#
+        let upgraded = upgrade_subgraphs_if_necessary(expanded).expect("failed to upgrade schema");
+        let changed_schema = upgraded[0].schema().schema();
+        let id_field = coord!(User.id)
+            .lookup_field(changed_schema)
+            .expect("field exists");
+        assert!(
+            id_field.directives.get("provides").is_none(),
+            "User.id in subgraph1 should not have @provides"
         );
     }
 
