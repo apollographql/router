@@ -6,7 +6,7 @@ description: Learn about hot reloading supergraph schemas, including support mat
 
 Hot reloading enables the router to update its supergraph schema without restarting, providing zero-downtime schema updates. Hot reloading is not available for all schema loading methods, and causes performance degradation during reload.
 
-## Hot Reload Support Matrix
+## Hot reload support matrix
 
 | Schema Source | Hot Reload Support | Notes |
 |---------------|-------------------|-------|
@@ -14,7 +14,7 @@ Hot reloading enables the router to update its supergraph schema without restart
 | **Local file** | ✅ Yes | Requires `--hot-reload` flag or `APOLLO_ROUTER_HOT_RELOAD=true` |
 | **Remote URLs** | ❌ No | Schema fetched once at startup |
 
-## Performance Considerations
+## Performance considerations
 
 When using hot reloading for supergraph schemas, be aware of the following performance considerations:
 
@@ -22,7 +22,7 @@ When using hot reloading for supergraph schemas, be aware of the following perfo
 - **Request handling:** During reload, new requests might experience slight latency increases while the new schema is being processed.
 - **Memory usage:** The router maintains both the old and new schema briefly during reload, temporarily increasing memory usage.
 
-## Production Recommendations
+## Production recommendations
 
 For production deployments with high traffic:
 
@@ -32,7 +32,7 @@ For production deployments with high traffic:
 
 For more details on production deployment strategies, see [Deployment Strategies](/graphos/routing/configuration/deployment-strategies).
 
-## Related Documentation
+## Related documentation
 
 - [Router Configuration Overview](/graphos/routing/configuration/overview) - Overview of all schema loading options
 - [Deployment Strategies](/graphos/routing/configuration/deployment-strategies) - Deployment strategies with immutable artifacts

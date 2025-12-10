@@ -22,9 +22,9 @@ See [Schema from Graph Artifacts](/graphos/routing/configuration/schema-oci) for
 
 # Launch router fleets
 
-## Blue/Green Deployment
+## Blue/Green deployment
 
-In a [blue/green deployment](https://en.wikipedia.org/wiki/Blue%E2%80%93green_deployment), two separate fleets of routers are pinned to different schemas.
+In a [blue/green deployment](https://en.wikipedia.org/wiki/Blue%E2%80%93green_deployment), you pin two separate fleets of routers to different schemas.
 
 1. Launch the **Blue** fleet with the initial URI.
 2. Make a change to a subgraph and let it build.
@@ -35,7 +35,7 @@ In a [blue/green deployment](https://en.wikipedia.org/wiki/Blue%E2%80%93green_de
 
 ### 1. Launch the Blue router fleet
 
-Using the URI queried above as the Graph Artifact Reference:
+Use the URI queried above as the Graph Artifact Reference:
 
 ```bash
 APOLLO_KEY="your-api-key" \
@@ -45,7 +45,7 @@ router
 
 ### 2. Publish a new subgraph to GraphOS
 
-GraphOS will compose a new supergraph, but your router fleet will not automatically deploy. Query for the new graph artifact URI using the above queries.
+GraphOS composes a new supergraph, but your router fleet does not automatically deploy. Query for the new graph artifact URI using the above queries.
 
 
 ### 3. Launch the Green router fleet
@@ -61,7 +61,7 @@ router
 
 Use your existing infrastructure to monitor and adjust your load balancer's weighted routing as appropriate.
 
-### Benefits of Blue/Green Deployment
+### Benefits of Blue/Green deployment
 
 Pros:
 

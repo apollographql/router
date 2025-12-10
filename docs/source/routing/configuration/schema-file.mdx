@@ -10,7 +10,7 @@ Loading schemas from local files gives you complete control over which schema ve
 
 # Configuration
 
-## Command Line
+## Command line
 
 Use the `-s` or `--supergraph` option:
 
@@ -18,7 +18,7 @@ Use the `-s` or `--supergraph` option:
 router --supergraph ./supergraph.graphql
 ```
 
-## Environment Variable
+## Environment variable
 
 Set the `APOLLO_ROUTER_SUPERGRAPH_PATH` environment variable:
 
@@ -90,19 +90,19 @@ spec:
           name: supergraph-schema
 ```
 
-# Hot Reloading
+# Hot reloading
 
 Enable hot reloading to automatically reload the schema when the file changes.
 
 **Note:** Hot reloading has performance implications and might not be suitable for production environments. See [Hot Reload](/graphos/routing/configuration/hot-reload) for details.
 
-## Command Line
+## Command line
 
 ```bash
 router --supergraph ./supergraph.graphql --hot-reload
 ```
 
-## Environment Variable
+## Environment variable
 
 ```bash
 APOLLO_ROUTER_SUPERGRAPH_PATH=./supergraph.graphql \
@@ -110,7 +110,7 @@ APOLLO_ROUTER_HOT_RELOAD=true \
 router
 ```
 
-## Development Mode
+## Development mode
 
 Development mode automatically enables hot reloading:
 
@@ -119,7 +119,7 @@ router --supergraph ./supergraph.graphql --dev
 ```
 
 
-# Best Practices
+# Best practices
 
 1. **Version control**: Store schema files in version control to track changes.
 2. **CI/CD integration**: Download schemas in CI/CD pipelines for reproducible deployments.
@@ -128,7 +128,7 @@ router --supergraph ./supergraph.graphql --dev
 5. **Use ConfigMaps for Kubernetes**: Store schemas in ConfigMaps for Kubernetes deployments.
 
 
-# Related Documentation
+# Related documentation
 
 - [Router Configuration Overview](/graphos/routing/configuration/overview) - Overview of all schema loading options
 - [Hot Reload](/graphos/routing/configuration/hot-reload) - Hot reloading details and performance considerations
