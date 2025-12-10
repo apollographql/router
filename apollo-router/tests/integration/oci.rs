@@ -157,6 +157,7 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
             artifact_reference.into(),
         )]))
         .subgraph_overrides(subgraph_overrides)
+        .hot_reload(false)
         .build()
         .await;
 
