@@ -9,7 +9,7 @@ use futures::prelude::*;
 use url::Url;
 
 use crate::registry::OciConfig;
-use crate::registry::stream_from_oci;
+use crate::registry::create_oci_schema_stream;
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
 use crate::router::Event::UpdateSchema;
@@ -161,20 +161,26 @@ impl SchemaSource {
             }
             SchemaSource::OCI(oci_config) => {
                 tracing::debug!("using oci as schema source");
-                stream_from_oci(oci_config)
-                    .filter_map(|res| {
-                        future::ready(match res {
-                            Ok(schema) => {
-                                let update_schema = UpdateSchema(schema);
-                                Some(update_schema)
-                            }
-                            Err(e) => {
-                                tracing::error!("{}", e);
-                                None
-                            }
+                match create_oci_schema_stream(oci_config) {
+                    Ok(stream) => Pin::new(Box::new(stream))
+                        .filter_map(|res| {
+                            future::ready(match res {
+                                Ok(schema) => {
+                                    let update_schema = UpdateSchema(schema);
+                                    Some(update_schema)
+                                }
+                                Err(e) => {
+                                    tracing::error!("{}", e);
+                                    None
+                                }
+                            })
                         })
-                    })
-                    .boxed()
+                        .boxed(),
+                    Err(e) => {
+                        tracing::error!("failed to create OCI schema stream: {}", e);
+                        stream::empty().boxed()
+                    }
+                }
             }
         }
         .chain(stream::iter(vec![NoMoreSchema]))

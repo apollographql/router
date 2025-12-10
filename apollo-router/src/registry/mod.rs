@@ -1,9 +1,11 @@
+use std::pin::Pin;
 use std::string::FromUtf8Error;
 use std::time::Duration;
 use std::time::Instant;
 
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
+use futures::stream;
 use futures::Stream;
 use futures::StreamExt;
 use oci_client::Client;
@@ -293,6 +295,52 @@ pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciE
         &reference,
     )
     .await
+}
+
+/// Type alias for OCI schema stream
+type OciSchemaStream = Pin<Box<dyn Stream<Item = Result<SchemaState, OciError>> + Send>>;
+
+/// Create a schema stream from OCI config based on reference type and hot-reload setting.
+///
+/// Returns a stream that yields schema updates based on the configuration:
+/// - Tag + hot-reload: Streams updates as the tag changes
+/// - Tag + no hot-reload: Returns an error (not yet allowed)
+/// - Digest + hot-reload: Returns an error (digests never change)
+/// - Digest + no hot-reload: Fetches schema once and returns it as a single-item stream
+pub(crate) fn create_oci_schema_stream(
+    oci_config: OciConfig,
+) -> Result<OciSchemaStream, anyhow::Error> {
+
+    // Validate the reference to determine its type
+    let (_, ref_type) = validate_oci_reference(&oci_config.reference)?;
+
+    match (ref_type, oci_config.hot_reload) {
+        (OciReferenceType::Tag, true) => {
+            Ok(Box::pin(stream_from_oci(oci_config)))
+        }
+        (OciReferenceType::Tag, false) => {
+            Err(anyhow::anyhow!(
+                "Tag references without --hot-reload are not yet supported."
+            ))
+        }
+        (OciReferenceType::Digest, true) => {
+            Err(anyhow::anyhow!(
+                "Digest references are immutable so --hot-reload flag is not allowed."
+            ))
+        }
+        (OciReferenceType::Digest, false) => {
+            let oci_config_clone = oci_config.clone();
+            let stream = stream::once(async move {
+                fetch_oci(&oci_config_clone)
+                    .await
+                    .map(|oci_content| SchemaState {
+                        sdl: oci_content.schema,
+                        launch_id: None,
+                    })
+            });
+            Ok(Box::pin(stream))
+        }
+    }
 }
 
 /// Regularly fetch from OCI registry at the configured polling interval
@@ -1019,6 +1067,180 @@ mod tests {
             1,
             "Blob should not be fetched again when digest is unchanged"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_oci_schema_stream_tag_with_hot_reload() {
+        let mock_server = MockServer::start().await;
+        let schema_layer = ImageLayer {
+            data: "test schema".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
+        
+        // Create OciConfig with tag reference and hot-reload enabled
+        let oci_config = OciConfig {
+            apollo_key: "test-api-key".to_string(),
+            reference: image_reference.to_string(),
+            hot_reload: true,
+            poll_interval: Duration::from_millis(10),
+        };
+
+        let result = create_oci_schema_stream(oci_config);
+        assert!(result.is_ok(), "Tag with hot-reload should succeed");
+        
+        let mut stream = result.unwrap();
+        let first_result = stream.next().await;
+        assert!(first_result.is_some(), "Stream should yield at least one result");
+        match first_result.unwrap() {
+            Ok(schema_state) => {
+                assert_eq!(schema_state.sdl, "test schema");
+            }
+            Err(e) => panic!("Expected success, got error: {e}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_oci_schema_stream_tag_without_hot_reload() {
+        let mock_server = MockServer::start().await;
+        let schema_layer = ImageLayer {
+            data: "test schema".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
+        
+        // Create OciConfig with tag reference and hot-reload disabled
+        let oci_config = OciConfig {
+            apollo_key: "test-api-key".to_string(),
+            reference: image_reference.to_string(),
+            hot_reload: false,
+            poll_interval: Duration::from_millis(10),
+        };
+
+        let result = create_oci_schema_stream(oci_config);
+        assert!(result.is_err(), "Tag without hot-reload should fail");
+        if let Err(e) = result {
+            let error_msg = e.to_string();
+            assert!(
+                error_msg.contains("Tag references without --hot-reload are not yet supported."),
+                "Error message should mention hot-reload requirement, got: {}",
+                error_msg
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_oci_schema_stream_digest_with_hot_reload() {
+        // Create a digest reference
+        let digest_reference = "registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        
+        // Create OciConfig with digest reference and hot-reload enabled
+        let oci_config = OciConfig {
+            apollo_key: "test-api-key".to_string(),
+            reference: digest_reference.to_string(),
+            hot_reload: true,
+            poll_interval: Duration::from_millis(10),
+        };
+
+        let result = create_oci_schema_stream(oci_config);
+        assert!(result.is_err(), "Digest with hot-reload should fail");
+        if let Err(e) = result {
+            let error_msg = e.to_string();
+            assert!(
+                error_msg.contains("Digest references are immutable so --hot-reload flag is not allowed."),
+                "Error message should mention that hot-reload cannot be enabled for digests, got: {}",
+                error_msg
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_oci_schema_stream_digest_without_hot_reload() {
+        let mock_server = MockServer::start().await;
+        let schema_layer = ImageLayer {
+            data: "test schema".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        
+        // Create manifest first to get the digest
+        let oci_manifest = create_manifest_from_schema_layer("test schema");
+        let manifest_digest = oci_manifest.manifest_digest.clone();
+        
+        // Set up mocks manually for digest reference
+        let graph_id = "test-graph-id";
+        let blob_digest = schema_layer.sha256_digest();
+        let blob_url = Url::parse(&format!(
+            "{}/v2/{graph_id}/blobs/{blob_digest}",
+            mock_server.uri()
+        ))
+        .expect("url must be valid");
+        
+        Mock::given(method("GET"))
+            .and(path(blob_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(schema_layer.data.clone()),
+            )
+            .mount(&mock_server)
+            .await;
+        
+        let manifest_digest_url = Url::parse(&format!(
+            "{}/v2/{graph_id}/manifests/{}",
+            mock_server.uri(),
+            manifest_digest
+        ))
+        .expect("url must be valid");
+        
+        // Set up HEAD request for manifest digest
+        Mock::given(method("HEAD"))
+            .and(path(manifest_digest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", &manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .mount(&mock_server)
+            .await;
+        
+        // Set up GET request for manifest digest
+        Mock::given(method("GET"))
+            .and(path(manifest_digest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", &manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(serde_json::to_vec(&oci_manifest.oci_manifest).unwrap()),
+            )
+            .mount(&mock_server)
+            .await;
+        
+        // Create digest reference
+        let digest_ref = format!("{}/{graph_id}@{}", mock_server.address(), manifest_digest);
+        
+        // Create OciConfig with digest reference and hot-reload disabled
+        let oci_config_digest = OciConfig {
+            apollo_key: "test-api-key".to_string(),
+            reference: digest_ref,
+            hot_reload: false,
+            poll_interval: Duration::from_millis(10),
+        };
+        
+        let result = create_oci_schema_stream(oci_config_digest);
+        assert!(result.is_ok(), "Digest without hot-reload should succeed");
+        
+        let mut stream = result.unwrap();
+        let first_result = stream.next().await;
+        assert!(first_result.is_some(), "Stream should yield one result");
+        match first_result.unwrap() {
+            Ok(schema_state) => {
+                assert_eq!(schema_state.sdl, "test schema");
+            }
+            Err(e) => panic!("Expected success, got error: {e}"),
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
