@@ -383,13 +383,12 @@ impl SchemaUpgrader {
                     .schema
                     .directive_definitions
                     .get(&definition.directive_name)
+                    && directive_def.description.is_some()
                 {
-                    if directive_def.description.is_some() {
-                        saved_descriptions.insert(
-                            definition.directive_name.clone(),
-                            directive_def.description.clone(),
-                        );
-                    }
+                    saved_descriptions.insert(
+                        definition.directive_name.clone(),
+                        directive_def.description.clone(),
+                    );
                 }
 
                 schema
