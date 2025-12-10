@@ -267,6 +267,7 @@ mod tests {
     use crate::plugins::response_cache::plugin::StorageInterface;
     use crate::plugins::response_cache::storage::redis::Config;
     use crate::plugins::response_cache::storage::redis::Storage;
+    use crate::services::router::body;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
@@ -537,5 +538,63 @@ mod tests {
             &HeaderValue::from_static("application/json")
         );
         assert!(res.response.status() != StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_invalidation_service_deny_unknown_fields() {
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(
+            &Config::test(false, "test_invalidation_service_good_shared_key_subgraphs"),
+            drop_rx,
+        )
+        .await
+        .unwrap();
+        let storage = Arc::new(StorageInterface::from(storage));
+        let invalidation = Invalidation::new(storage.clone()).await.unwrap();
+
+        let config = Arc::new(SubgraphConfiguration {
+            all: Subgraph {
+                ttl: None,
+                enabled: Some(true),
+                redis: None,
+                private_id: None,
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: String::from("test"),
+                }),
+            },
+            subgraphs: HashMap::new(),
+        });
+        // Trying to invalidation with shared_key on subgraph test for a subgraph foo
+        let service = InvalidationService::new(config, invalidation);
+        let req = router::Request::fake_builder()
+            .method(http::Method::POST)
+            .header(AUTHORIZATION, "test")
+            .body(
+                serde_json::to_vec(&[serde_json::json!({
+                    "kind": "type",
+                    "subgraph": "foo",
+                    "type": "User",
+                    "key": {
+                        "id": "1"
+                    }
+                })])
+                .unwrap(),
+            )
+            .build()
+            .unwrap();
+        let res = service.oneshot(req).await.unwrap();
+        assert_eq!(
+            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            &HeaderValue::from_static("application/json")
+        );
+        assert!(res.response.status() != StatusCode::UNAUTHORIZED);
+        assert_eq!(res.response.status(), StatusCode::BAD_REQUEST);
+        let response_body_str = body::into_string(res.response.into_body()).await.unwrap();
+        assert!(
+            response_body_str
+                .contains("failed to deserialize the request body into JSON: unknown field")
+        );
+        dbg!(response_body_str);
     }
 }
