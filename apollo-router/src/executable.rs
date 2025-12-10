@@ -116,9 +116,12 @@ pub struct Opt {
         alias = "hr",
         long = "hot-reload",
         env = "APOLLO_ROUTER_HOT_RELOAD",
-        action(ArgAction::SetTrue)
+        action(ArgAction::Set),
+        num_args = 0..=1,
+        require_equals(false),
+        value_parser = FalseyValueParser::new()
     )]
-    hot_reload: bool,
+    hot_reload: Option<bool>,
 
     /// Configuration location relative to the project directory.
     #[clap(
@@ -252,7 +255,7 @@ impl Opt {
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
             reference: validated_reference,
-            hot_reload: APOLLO_ROUTER_HOT_RELOAD_CLI.load(Ordering::Relaxed),
+            hot_reload: self.hot_reload.unwrap_or(false),
             poll_interval: INITIAL_OCI_POLL_INTERVAL,
         })
     }
@@ -368,7 +371,7 @@ impl Executable {
         *APOLLO_ROUTER_LISTEN_ADDRESS.lock() = opt.listen_address;
         *APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE.lock() = opt.graph_artifact_reference.clone();
         // Only set hot_reload if explicitly true
-        if opt.hot_reload {
+        if opt.hot_reload.unwrap_or(false) {
             APOLLO_ROUTER_HOT_RELOAD_CLI.store(true, Ordering::Relaxed);
         }
         APOLLO_ROUTER_DEV_MODE.store(opt.dev, Ordering::Relaxed);
@@ -456,8 +459,19 @@ impl Executable {
         mut opt: Opt,
     ) -> Result<()> {
         let current_directory = std::env::current_dir()?;
-        // Enable hot reload when dev mode is enabled
-        opt.hot_reload = opt.hot_reload || opt.dev;
+        // Allow bare use of --hot-reload without needing to set it to true on the command
+        // line. Treated as a special case because when specified by environment variable,
+        // it should default to false.
+        if opt.hot_reload.is_none() && std::env::var("APOLLO_ROUTER_HOT_RELOAD").is_err() {
+            let args: Vec<String> = std::env::args().collect();
+            if args.iter().any(|arg| arg == "--hot-reload" || arg == "-hr") {
+                opt.hot_reload = Some(true);
+            }
+        }
+
+        // Enable hot reload when dev mode is enabled, overrides env var/cli
+        let hot_reload_value = opt.hot_reload.unwrap_or(false) || opt.dev;
+        opt.hot_reload = Some(hot_reload_value);
 
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
@@ -479,7 +493,7 @@ impl Executable {
 
                     ConfigurationSource::File {
                         path,
-                        watch: opt.hot_reload,
+                        watch: opt.hot_reload.unwrap_or(false),
                     }
                 })
                 .unwrap_or_default(),
@@ -545,14 +559,14 @@ impl Executable {
                 };
                 SchemaSource::File {
                     path: supergraph_path,
-                    watch: opt.hot_reload,
+                    watch: opt.hot_reload.unwrap_or(false),
                 }
             }
             (_, _, Some(supergraph_urls), _, _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
-                if opt.hot_reload {
+                if opt.hot_reload.unwrap_or(false) {
                     tracing::warn!(
                         "Schema hot reloading is disabled for --supergraph-urls / APOLLO_ROUTER_SUPERGRAPH_URLS."
                     );
@@ -683,7 +697,7 @@ impl Executable {
                     };
                     LicenseSource::File {
                         path: license_path,
-                        watch: opt.hot_reload,
+                        watch: opt.hot_reload.unwrap_or(false),
                     }
                 }
                 (Some(_license), _, _, _) => LicenseSource::Env,
@@ -856,7 +870,7 @@ mod tests {
 
             let opt = Opt {
                 log_level: "error".to_string(),
-                hot_reload: false,
+                hot_reload: Some(false),
                 config_path: None,
                 dev: false,
                 supergraph_path: None,
@@ -937,7 +951,7 @@ mod tests {
 
             let opt = Opt {
                 log_level: "error".to_string(),
-                hot_reload: false,
+                hot_reload: Some(false),
                 config_path: None,
                 dev: false,
                 supergraph_path: None,
