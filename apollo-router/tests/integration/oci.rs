@@ -175,12 +175,10 @@ async fn test_router_oci_cannot_fetch_schema() -> Result<(), BoxError> {
 
     let mut router = IntegrationTest::builder()
         .config(MIN_CONFIG)
-        .env(HashMap::from([
-            (
-                String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
-                ARTIFACT_REFERENCE_404.into(),
-            )
-        ]))
+        .env(HashMap::from([(
+            String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+            ARTIFACT_REFERENCE_404.into(),
+        )]))
         .build()
         .await;
 
