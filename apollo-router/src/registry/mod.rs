@@ -5,9 +5,9 @@ use std::time::Instant;
 
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
-use futures::stream;
 use futures::Stream;
 use futures::StreamExt;
+use futures::stream;
 use oci_client::Client;
 use oci_client::Reference;
 use oci_client::client::ClientConfig;
@@ -310,24 +310,17 @@ type OciSchemaStream = Pin<Box<dyn Stream<Item = Result<SchemaState, OciError>> 
 pub(crate) fn create_oci_schema_stream(
     oci_config: OciConfig,
 ) -> Result<OciSchemaStream, anyhow::Error> {
-
     // Validate the reference to determine its type
     let (_, ref_type) = validate_oci_reference(&oci_config.reference)?;
 
     match (ref_type, oci_config.hot_reload) {
-        (OciReferenceType::Tag, true) => {
-            Ok(Box::pin(stream_from_oci(oci_config)))
-        }
-        (OciReferenceType::Tag, false) => {
-            Err(anyhow::anyhow!(
-                "Tag references without --hot-reload are not yet supported."
-            ))
-        }
-        (OciReferenceType::Digest, true) => {
-            Err(anyhow::anyhow!(
-                "Digest references are immutable so --hot-reload flag is not allowed."
-            ))
-        }
+        (OciReferenceType::Tag, true) => Ok(Box::pin(stream_from_oci(oci_config))),
+        (OciReferenceType::Tag, false) => Err(anyhow::anyhow!(
+            "Tag references without --hot-reload are not yet supported."
+        )),
+        (OciReferenceType::Digest, true) => Err(anyhow::anyhow!(
+            "Digest references are immutable so --hot-reload flag is not allowed."
+        )),
         (OciReferenceType::Digest, false) => {
             let oci_config_clone = oci_config.clone();
             let stream = stream::once(async move {
@@ -1078,7 +1071,7 @@ mod tests {
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
-        
+
         // Create OciConfig with tag reference and hot-reload enabled
         let oci_config = OciConfig {
             apollo_key: "test-api-key".to_string(),
@@ -1089,10 +1082,13 @@ mod tests {
 
         let result = create_oci_schema_stream(oci_config);
         assert!(result.is_ok(), "Tag with hot-reload should succeed");
-        
+
         let mut stream = result.unwrap();
         let first_result = stream.next().await;
-        assert!(first_result.is_some(), "Stream should yield at least one result");
+        assert!(
+            first_result.is_some(),
+            "Stream should yield at least one result"
+        );
         match first_result.unwrap() {
             Ok(schema_state) => {
                 assert_eq!(schema_state.sdl, "test schema");
@@ -1110,7 +1106,7 @@ mod tests {
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
-        
+
         // Create OciConfig with tag reference and hot-reload disabled
         let oci_config = OciConfig {
             apollo_key: "test-api-key".to_string(),
@@ -1135,7 +1131,7 @@ mod tests {
     async fn test_create_oci_schema_stream_digest_with_hot_reload() {
         // Create a digest reference
         let digest_reference = "registry.example.com/repo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
-        
+
         // Create OciConfig with digest reference and hot-reload enabled
         let oci_config = OciConfig {
             apollo_key: "test-api-key".to_string(),
@@ -1149,7 +1145,9 @@ mod tests {
         if let Err(e) = result {
             let error_msg = e.to_string();
             assert!(
-                error_msg.contains("Digest references are immutable so --hot-reload flag is not allowed."),
+                error_msg.contains(
+                    "Digest references are immutable so --hot-reload flag is not allowed."
+                ),
                 "Error message should mention that hot-reload cannot be enabled for digests, got: {}",
                 error_msg
             );
@@ -1164,11 +1162,11 @@ mod tests {
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
-        
+
         // Create manifest first to get the digest
         let oci_manifest = create_manifest_from_schema_layer("test schema");
         let manifest_digest = oci_manifest.manifest_digest.clone();
-        
+
         // Set up mocks manually for digest reference
         let graph_id = "test-graph-id";
         let blob_digest = schema_layer.sha256_digest();
@@ -1177,7 +1175,7 @@ mod tests {
             mock_server.uri()
         ))
         .expect("url must be valid");
-        
+
         Mock::given(method("GET"))
             .and(path(blob_url.path()))
             .respond_with(
@@ -1187,14 +1185,14 @@ mod tests {
             )
             .mount(&mock_server)
             .await;
-        
+
         let manifest_digest_url = Url::parse(&format!(
             "{}/v2/{graph_id}/manifests/{}",
             mock_server.uri(),
             manifest_digest
         ))
         .expect("url must be valid");
-        
+
         // Set up HEAD request for manifest digest
         Mock::given(method("HEAD"))
             .and(path(manifest_digest_url.path()))
@@ -1205,7 +1203,7 @@ mod tests {
             )
             .mount(&mock_server)
             .await;
-        
+
         // Set up GET request for manifest digest
         Mock::given(method("GET"))
             .and(path(manifest_digest_url.path()))
@@ -1217,10 +1215,10 @@ mod tests {
             )
             .mount(&mock_server)
             .await;
-        
+
         // Create digest reference
         let digest_ref = format!("{}/{graph_id}@{}", mock_server.address(), manifest_digest);
-        
+
         // Create OciConfig with digest reference and hot-reload disabled
         let oci_config_digest = OciConfig {
             apollo_key: "test-api-key".to_string(),
@@ -1228,10 +1226,10 @@ mod tests {
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
         };
-        
+
         let result = create_oci_schema_stream(oci_config_digest);
         assert!(result.is_ok(), "Digest without hot-reload should succeed");
-        
+
         let mut stream = result.unwrap();
         let first_result = stream.next().await;
         assert!(first_result.is_some(), "Stream should yield one result");
