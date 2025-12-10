@@ -1,4 +1,6 @@
 //! Configuration for the telemetry plugin.
+
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
@@ -700,9 +702,30 @@ impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
 }
 
 impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
-    fn from(_tracing_common: &TracingCommon) -> Self {
-        opentelemetry_sdk::trace::Config::default()
+    fn from(config: &TracingCommon) -> Self {
+        let mut common = opentelemetry_sdk::trace::Config::default();
+
+        let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
+        if config.parent_based_sampler {
+            sampler = parent_based(sampler);
+        } else {
+            common.sampler = Box::new(sampler);
+        }
+
+        common.span_limits.max_events_per_span = config.max_events_per_span;
+        common.span_limits.max_attributes_per_span = config.max_attributes_per_span;
+        common.span_limits.max_links_per_span = config.max_links_per_span;
+        common.span_limits.max_attributes_per_event = config.max_attributes_per_event;
+        common.span_limits.max_attributes_per_link = config.max_attributes_per_link;
+
+        // Take the default first, then config, then env resources, then env variable. Last entry wins
+        common.resource = Cow::Owned(config.to_resource());
+        common
     }
+}
+
+fn parent_based(sampler: opentelemetry_sdk::trace::Sampler) -> opentelemetry_sdk::trace::Sampler {
+    opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(sampler))
 }
 
 impl Conf {
