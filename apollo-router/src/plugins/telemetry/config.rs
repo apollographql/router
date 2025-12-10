@@ -708,9 +708,8 @@ impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
         let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
-        } else {
-            common.sampler = Box::new(sampler);
         }
+        common.sampler = Box::new(sampler);
 
         common.span_limits.max_events_per_span = config.max_events_per_span;
         common.span_limits.max_attributes_per_span = config.max_attributes_per_span;
