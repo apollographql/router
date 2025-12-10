@@ -210,40 +210,55 @@ override_subgraph_url:
         response.status()
     );
 
-    // Give the WebSocket connection time to complete the upgrade
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let (tx, mut rx) = tokio::sync::watch::channel(None::<HeaderMap>);
 
-    // Verify that headers were captured
-    let captured_headers = header_state.get_captured_headers();
-    assert!(
-        captured_headers.is_some(),
-        "WebSocket upgrade request headers should have been captured"
-    );
+    let capture_headers = async || {
+        loop {
+            if let Some(captured) = header_state.get_captured_headers() {
+                tx.send(Some(captured))
+                    .expect("failed to send the captured headers to the reciever");
+                break;
+            } else {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    };
 
-    let headers = captured_headers.unwrap();
-    info!("Captured headers: {:?}", headers);
+    tokio::time::timeout(Duration::from_millis(1000), capture_headers())
+        .await
+        .expect("timed out waiting for headers to be captured");
+
+    // Check that we've received the captured headers
+    rx.changed()
+        .await
+        .expect("captured headers never changed from None -> Some<HeaderMap>");
+
+    let captured_headers = rx
+        .borrow_and_update()
+        .clone()
+        .expect("failed to capture headers; None when they should be Some<HeaderMap>");
 
     // Verify Datadog trace headers are present
     assert!(
-        headers.contains_key("x-datadog-trace-id"),
+        captured_headers.contains_key("x-datadog-trace-id"),
         "x-datadog-trace-id header should be present in WebSocket upgrade request. Headers: {:?}",
-        headers
+        captured_headers
     );
 
     assert!(
-        headers.contains_key("x-datadog-parent-id"),
+        captured_headers.contains_key("x-datadog-parent-id"),
         "x-datadog-parent-id header should be present in WebSocket upgrade request. Headers: {:?}",
-        headers
+        captured_headers
     );
 
     assert!(
-        headers.contains_key("x-datadog-sampling-priority"),
+        captured_headers.contains_key("x-datadog-sampling-priority"),
         "x-datadog-sampling-priority header should be present in WebSocket upgrade request. Headers: {:?}",
-        headers
+        captured_headers
     );
 
     // Verify the trace ID is in decimal format (Datadog's format)
-    if let Some(trace_id) = headers.get("x-datadog-trace-id") {
+    if let Some(trace_id) = captured_headers.get("x-datadog-trace-id") {
         let trace_id_str = trace_id.to_str().unwrap();
         assert!(
             trace_id_str.parse::<u64>().is_ok(),
@@ -261,7 +276,7 @@ override_subgraph_url:
     }
 
     // Verify the parent ID is in decimal format
-    if let Some(parent_id) = headers.get("x-datadog-parent-id") {
+    if let Some(parent_id) = captured_headers.get("x-datadog-parent-id") {
         let parent_id_str = parent_id.to_str().unwrap();
         assert!(
             parent_id_str.parse::<u64>().is_ok(),
@@ -271,7 +286,7 @@ override_subgraph_url:
     }
 
     // Verify sampling priority is a valid integer
-    if let Some(priority) = headers.get("x-datadog-sampling-priority") {
+    if let Some(priority) = captured_headers.get("x-datadog-sampling-priority") {
         let priority_str = priority.to_str().unwrap();
         assert!(
             priority_str.parse::<i32>().is_ok(),
@@ -340,17 +355,37 @@ override_subgraph_url:
         response.status()
     );
 
-    // Give the WebSocket connection time to complete the upgrade
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let (tx, mut rx) = tokio::sync::watch::channel(None::<HeaderMap>);
+
+    let capture_headers = async || {
+        loop {
+            if let Some(captured) = header_state.get_captured_headers() {
+                tx.send(Some(captured))
+                    .expect("failed to send the captured headers to the reciever");
+                break;
+            } else {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    };
+
+    tokio::time::timeout(Duration::from_millis(1000), capture_headers())
+        .await
+        .expect("timed out waiting for headers to be captured");
+
+    // Check that we've received the captured headers
+    rx.changed()
+        .await
+        .expect("captured headers never changed from None -> Some<HeaderMap>");
+    let captured_headers = rx.borrow_and_update();
 
     // Verify that headers were captured
-    let captured_headers = header_state.get_captured_headers();
     assert!(
         captured_headers.is_some(),
         "WebSocket upgrade request headers should have been captured"
     );
 
-    let headers = captured_headers.unwrap();
+    let headers = captured_headers.clone().unwrap();
     info!("Captured headers: {:?}", headers);
 
     // Verify W3C traceparent header is present
