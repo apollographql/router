@@ -179,11 +179,7 @@ async fn test_router_oci_cannot_fetch_schema() -> Result<(), BoxError> {
             (
                 String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
                 ARTIFACT_REFERENCE_404.into(),
-            ),
-            (
-                String::from("APOLLO_ROUTER_HOT_RELOAD"),
-                String::from("false").into(),
-            ),
+            )
         ]))
         .build()
         .await;
