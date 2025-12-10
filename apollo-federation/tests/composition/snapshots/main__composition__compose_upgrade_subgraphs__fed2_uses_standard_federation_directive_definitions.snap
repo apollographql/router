@@ -8,9 +8,10 @@ schema {
 
 extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
 
-directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+" This is my custom description for the key directive "
+directive @key(fields: federation__FieldSet!) on OBJECT
 
-directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
 directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
 

@@ -6,12 +6,9 @@ schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://spec
   query: Query
 }
 
-" This is a description of the custom directive "
-directive @customDirective(value: String!) on FIELD_DEFINITION | OBJECT
-
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-" This is a description of the custom directive 2 "
+" This is my custom description for the key directive "
 directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
 
 directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
@@ -42,7 +39,6 @@ type Query {
 
 type A @key(fields: "id") {
   id: ID!
-  name: String @customDirective(value: "test")
 }
 
 enum link__Purpose {

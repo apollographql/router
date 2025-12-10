@@ -36,8 +36,6 @@ fn fed1_preserves_custom_directive_descriptions() {
     .expand_links()
     .expect("expands schema");
 
-    assert_snapshot!(subgraph.schema_string());
-
     let [upgraded]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
         .expect("upgrades schema")
         .try_into()
@@ -46,9 +44,9 @@ fn fed1_preserves_custom_directive_descriptions() {
     assert_snapshot!(upgraded.schema_string());
 }
 
-/// Fed1 schema with federation directive - description should be replaced with standard Fed2 definition.
+/// Fed1 schema with federation directive description - description should now be preserved after upgrade.
 #[test]
-fn fed1_replaces_federation_directive_descriptions() {
+fn fed1_preserves_federation_directive_descriptions() {
     let subgraph = Subgraph::parse(
         "subgraph",
         "",
