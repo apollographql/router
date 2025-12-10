@@ -15,3 +15,8 @@ preview_file_uploads:
         max_files: 5
 include_subgraph_errors:
   all: true
+telemetry:
+  exporters:
+    metrics:
+      otlp:
+        enabled: true

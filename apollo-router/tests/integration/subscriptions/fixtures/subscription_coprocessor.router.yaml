@@ -58,3 +58,8 @@ headers:
     request:
       - propagate:
           named: custom_id
+telemetry:
+  exporters:
+    metrics:
+      otlp:
+        enabled: true

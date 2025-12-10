@@ -15,3 +15,8 @@ demand_control:
     static_estimated:
       list_size: 10
       max: 1000
+telemetry:
+  exporters:
+    metrics:
+      otlp:
+        enabled: true
