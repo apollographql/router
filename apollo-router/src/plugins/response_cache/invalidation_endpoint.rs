@@ -595,6 +595,5 @@ mod tests {
             response_body_str
                 .contains("failed to deserialize the request body into JSON: unknown field")
         );
-        dbg!(response_body_str);
     }
 }
