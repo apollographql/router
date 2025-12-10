@@ -170,17 +170,19 @@ fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
     }
 }
 
-async fn pull_oci(
+/// Fetch the manifest, extract the blob location, and fetch the blob.
+async fn fetch_oci_from_reference(
     client: &mut Client,
     auth: &RegistryAuth,
     reference: &Reference,
+    oci_config: Option<&OciConfig>,
 ) -> Result<OciContent, OciError> {
     tracing::debug!("pulling oci manifest");
-    // We aren't using the default `pull` function because that validates that all the layers are in the
-    // set of supported layers. Since we want to be able to add new layers for new features, we want the
-    // client to have forwards compatibility.
-    // To achieve that, we are going to fetch the manifest and then fetch the layers that this code cares about directly.
-    let (manifest, _) = client.pull_image_manifest(reference, auth).await?;
+    // The OCI Client has a pull() function, but that validates that all the layers are in the list of
+    // supported layers. Apollo wants to add new layers as features evolve and routers in the field will
+    // break if they get an unsupported layer type. Instead, this code narrowly fetches only the layers
+    // understands.
+    let (manifest, _) = fetch_oci_manifest(client, auth, reference, oci_config).await?;
 
     let schema_layer = manifest
         .layers
@@ -190,14 +192,43 @@ async fn pull_oci(
         .clone();
 
     tracing::debug!("pulling oci blob");
-    let mut schema = Vec::new();
-    client
-        .pull_blob(reference, &schema_layer, &mut schema)
-        .await?;
+    let schema = fetch_oci_blob(client, reference, &schema_layer).await?;
 
     Ok(OciContent {
         schema: String::from_utf8(schema)?,
     })
+}
+
+/// Fetch the full OCI manifest to determine the location of the schema blob
+async fn fetch_oci_manifest(
+    client: &mut Client,
+    auth: &RegistryAuth,
+    reference: &Reference,
+    oci_config: Option<&OciConfig>,
+) -> Result<(oci_client::manifest::OciImageManifest, String), OciError> {
+    match client.pull_image_manifest(reference, auth).await {
+        Ok(result) => Ok(result),
+        Err(err) => {
+            // Log error with consistent message format when oci_config is provided
+            if oci_config.is_some() {
+                tracing::error!("error fetching manifest digest from oci registry: {}", err);
+            }
+            Err(err.into())
+        }
+    }
+}
+
+/// Fetch the schema from the OCI blob
+async fn fetch_oci_blob(
+    client: &mut Client,
+    reference: &Reference,
+    schema_layer: &oci_client::manifest::OciDescriptor,
+) -> Result<Vec<u8>, OciError> {
+    let mut blob_data = Vec::new();
+    client
+        .pull_blob(reference, schema_layer, &mut blob_data)
+        .await?;
+    Ok(blob_data)
 }
 
 /// The oci reference may not contain the protocol, only hostname[:port]. As a result,
@@ -214,7 +245,7 @@ async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
     }
 }
 
-/// Fetch just the manifest digest without fetching the full manifest
+/// Fetch the manifest digest (without fetching the full manifest) to detect changes
 pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<String, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
@@ -262,12 +293,14 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
                 kind = "oci_error",
                 error = "error response from OCI"
             );
+            tracing::error!("error fetching manifest digest from oci registry: {}", err);
             Err(err.into())
         }
     }
 }
 
-/// Fetch an OCI bundle
+/// Fetch an OCI bundle by parsing the Graph Artifact reference, building auth,
+/// inferring the correct protocol, and calling the internal fetch function.
 pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
@@ -286,15 +319,55 @@ pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciE
         1u64
     );
 
-    pull_oci(
+    let before_request = Instant::now();
+    match fetch_oci_from_reference(
         &mut Client::new(ClientConfig {
             protocol,
             ..Default::default()
         }),
         &auth,
         &reference,
+        Some(oci_config),
     )
     .await
+    {
+        Ok(content) => {
+            u64_counter_with_unit!(
+                "apollo.router.oci.blob.count",
+                "Number of requests to get blob for a Graph Artifact",
+                "{count}",
+                1u64,
+                status = "success"
+            );
+            f64_histogram_with_unit!(
+                "apollo.router.oci.blob.duration.seconds",
+                "Duration of fetch for GrAr blob.",
+                "s",
+                before_request.elapsed().as_secs_f64(),
+                url = oci_config.reference.to_string(),
+                kind = "new"
+            );
+            Ok(content)
+        }
+        Err(err) => {
+            u64_counter_with_unit!(
+                "apollo.router.oci.blob.count",
+                "Number of requests to get blob for a Graph Artifact",
+                "{count}",
+                1u64,
+                status = "failure"
+            );
+            f64_histogram!(
+                "apollo.router.oci.blob.duration.seconds",
+                "Duration of fetch for GrAr blob.",
+                before_request.elapsed().as_secs_f64(),
+                url = oci_config.reference.to_string(),
+                kind = "oci_error"
+            );
+            tracing::error!("error fetching schema from oci registry: {}", err);
+            Err(err)
+        }
+    }
 }
 
 /// Type alias for OCI schema stream
@@ -348,21 +421,6 @@ pub(crate) fn stream_from_oci(
         loop {
             match fetch_oci_manifest_digest(&oci_config).await {
                 Ok(current_digest) => {
-                    u64_counter_with_unit!(
-                        "apollo.router.oci.blob.count",
-                        "Total number of requests to get manifest for a Graph Artifact",
-                        "{count}",
-                        1u64,
-                        status = "success"
-                    );
-                    f64_histogram_with_unit!(
-                        "apollo.router.oci.manifest.duration.seconds",
-                        "Duration of fetching manifest from OCI.",
-                        "s",
-                        before_request.elapsed().as_secs_f64(),
-                        url = oci_config.reference.to_string(),
-                        kind = "new"
-                    );
                     if last_digest.as_deref() == Some(current_digest.as_str()) {
                         // Digest unchanged, skip fetching the full schema
                         tracing::debug!("oci manifest digest unchanged, skipping schema fetch");
@@ -389,21 +447,6 @@ pub(crate) fn stream_from_oci(
                         match fetch_oci(&oci_config).await {
                             Ok(oci_result) => {
                                 tracing::debug!("fetched schema from oci registry");
-                                u64_counter_with_unit!(
-                                    "apollo.router.oci.blob.count",
-                                    "Number of requests to get blob for a Graph Artifact",
-                                    "{count}",
-                                    1u64,
-                                    status = "success"
-                                );
-                                f64_histogram_with_unit!(
-                                    "apollo.router.oci.blob.duration.seconds",
-                                    "Duration of fetch for GrAr blob.",
-                                    "s",
-                                    before_request.elapsed().as_secs_f64(),
-                                    url = oci_config.reference.to_string(),
-                                    kind = "new"
-                                );
                                 let schema_state = SchemaState {
                                     sdl: oci_result.schema,
                                     launch_id: None, //TODO: Add launch_id
@@ -416,21 +459,7 @@ pub(crate) fn stream_from_oci(
                                 }
                             }
                             Err(err) => {
-                                u64_counter_with_unit!(
-                                    "apollo.router.oci.blob.count",
-                                    "Number of requests to get blob for a Graph Artifact",
-                                    "{count}",
-                                    1u64,
-                                    status = "failure"
-                                );
-                                f64_histogram!(
-                                    "apollo.router.oci.blob.duration.seconds",
-                                    "Duration of fetch for GrAr blob.",
-                                    before_request.elapsed().as_secs_f64(),
-                                    url = oci_config.reference.to_string(),
-                                    kind = "oci_error"
-                                );
-                                tracing::error!("error fetching schema from oci registry: {}", err);
+                                // Error logging is now handled in fetch_oci
                                 if let Err(e) = sender.send(Err(err)).await {
                                     tracing::debug!(
                                         "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
@@ -442,7 +471,7 @@ pub(crate) fn stream_from_oci(
                     }
                 }
                 Err(err) => {
-                    tracing::error!("error fetching manifest digest from oci registry: {}", err);
+                    // Error logging is now handled in fetch_oci_manifest_digest
                     if let Err(e) = sender.send(Err(err)).await {
                         tracing::debug!(
                             "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
@@ -708,9 +737,14 @@ mod tests {
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
-        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
-            .await
-            .expect("failed to fetch oci bundle");
+        let result = fetch_oci_from_reference(
+            &mut client,
+            &RegistryAuth::Anonymous,
+            &image_reference,
+            None,
+        )
+        .await
+        .expect("failed to fetch oci bundle");
         assert_eq!(result.schema, "test schema");
     }
 
@@ -732,9 +766,14 @@ mod tests {
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![schema_layer, random_layer]).await;
-        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
-            .await
-            .expect("failed to fetch oci bundle");
+        let result = fetch_oci_from_reference(
+            &mut client,
+            &RegistryAuth::Anonymous,
+            &image_reference,
+            None,
+        )
+        .await
+        .expect("failed to fetch oci bundle");
         assert_eq!(result.schema, "test schema");
     }
 
@@ -751,9 +790,14 @@ mod tests {
             annotations: None,
         };
         let image_reference = setup_mocks(mock_server, vec![random_layer]).await;
-        let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
-            .await
-            .expect_err("expect can't fetch oci bundle");
+        let result = fetch_oci_from_reference(
+            &mut client,
+            &RegistryAuth::Anonymous,
+            &image_reference,
+            None,
+        )
+        .await
+        .expect_err("expect can't fetch oci bundle");
         if let LayerMissingTitle = result {
             // Expected error
         } else {
@@ -1296,6 +1340,7 @@ mod tests {
         .expect("url must be valid");
 
         // mock returns digest1, then digest2 sequentially
+        // Stream loop: 2 HEAD requests (one per poll to check if digest changed)
         let _ = Mock::given(method("HEAD"))
             .and(path(manifest_url.path()))
             .respond_with(SequentialManifestDigests {
