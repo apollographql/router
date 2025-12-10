@@ -8,7 +8,7 @@ When you push your schema to GraphOS, Apollo stores an immutable artifact contai
 
 # Overview
 
-OCI (Open Container Initiative) artifact references provide immutable, versioned schema references that are ideal for production deployments. Each artifact is identified by a sha256 digest, ensuring that the same reference always points to the exact same schema version.
+OCI (Open Container Initiative) artifact references provide immutable, versioned schema references that are ideal for production deployments. Each artifact is identified by a SHA256 digest, ensuring that the same reference always points to the exact same schema version.
 
 By default, OCI artifacts are stored in Apollo's registry (`artifact.api.apollographql.com`), which requires network connectivity. However, you can also run your own local OCI registry for complete independence from external services.
 
@@ -62,7 +62,7 @@ router --graph-artifact-reference artifact.api.apollographql.com/my-graph-a50b9d
 
 ### Environment Variables
 
-Set the APOLLO_GRAPH_ARTIFACT_REFERENCE environment variable
+Set the `APOLLO_GRAPH_ARTIFACT_REFERENCE` environment variable.
 
 ```bash
 APOLLO_GRAPH_ARTIFACT_REFERENCE="artifact.api.apollographql.com/my-graph-a50b9d546b298e5a@sha256:14409db3d8a8d74ff9e9a0b5712c0aa8d574bcacc3656e1bc0c55ecf97cd9264"
@@ -74,19 +74,19 @@ router
 
 For complete independence from external services, you can run your own local OCI registry. This is useful for:
 
-* Remove dependence on Apollo for deployments
-* Enhanced security and compliance requirements
-* Reduced network latency
-* Complete control over artifact storage
+- Remove dependence on Apollo for deployments
+- Enhance security and compliance
+- Reduce network latency
+- Maintain complete control over artifact storage
 
 
 # Best Practices
 
-1. **Use digest references for production**: SHA256 digests ensure deterministic deployments
-3. **Automate reference retrieval**: Integrate Platform API queries into your CI/CD pipeline
-4. **Track deployment versions**: Track metrics on the schema changes in each environment
-5. **Use blue/green deployments**: Leverage immutable references for zero-downtime updates
-6. **Consider local registry**: Balance your uptime considerations with the complexity of managing Graph Artifacts yourself
+1. **Use digest references for production**: SHA256 digests ensure deterministic deployments.
+2. **Automate reference retrieval**: Integrate Platform API queries into your CI/CD pipeline.
+3. **Track deployment versions**: Track metrics on the schema changes in each environment.
+4. **Use blue/green deployments**: Use immutable references for zero-downtime updates.
+5. **Consider a local registry**: Balance your uptime considerations with the complexity of managing Graph Artifacts yourself.
 
 ## Related Documentation
 

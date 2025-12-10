@@ -94,7 +94,7 @@ spec:
 
 Enable hot reloading to automatically reload the schema when the file changes.
 
-**Note:** Hot reloading has performance implications and may not be suitable for production environments. See [Hot Reload](/graphos/routing/configuration/hot-reload) for details.
+**Note:** Hot reloading has performance implications and might not be suitable for production environments. See [Hot Reload](/graphos/routing/configuration/hot-reload) for details.
 
 ## Command Line
 
@@ -121,15 +121,15 @@ router --supergraph ./supergraph.graphql --dev
 
 # Best Practices
 
-1. **Version control**: Store schema files in version control to track changes
-2. **CI/CD integration**: Download schemas in CI/CD pipelines for reproducible deployments
-3. **Use hot reload for development only**: Avoid hot reloading in production due to performance impact
-4. **Validate schemas**: Validate schemas before deploying to catch errors early
-5. **Use ConfigMaps for Kubernetes**: Store schemas in ConfigMaps for Kubernetes deployments
+1. **Version control**: Store schema files in version control to track changes.
+2. **CI/CD integration**: Download schemas in CI/CD pipelines for reproducible deployments.
+3. **Use hot reload for development only**: Avoid hot reloading in production due to performance impact.
+4. **Validate schemas**: Validate schemas before deploying to catch errors early.
+5. **Use ConfigMaps for Kubernetes**: Store schemas in ConfigMaps for Kubernetes deployments.
 
 
 # Related Documentation
 
-* [Router Configuration Overview](/graphos/routing/configuration/overview) - Overview of all schema loading options
-* [Hot Reload](/graphos/routing/configuration/hot-reload) - Hot reloading details and performance considerations
-* [Rover CLI](/rover) - Schema composition and management tools
+- [Router Configuration Overview](/graphos/routing/configuration/overview) - Overview of all schema loading options
+- [Hot Reload](/graphos/routing/configuration/hot-reload) - Hot reloading details and performance considerations
+- [Rover CLI](/rover) - Schema composition and management tools

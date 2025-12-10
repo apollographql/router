@@ -33,7 +33,7 @@ In a [blue/green deployment](https://en.wikipedia.org/wiki/Blue%E2%80%93green_de
 5. Monitor for errors, and if necessary, shift traffic back to **Blue**.
 
 
-### 1. Launching the Blue router fleet
+### 1. Launch the Blue router fleet
 
 Using the URI queried above as the Graph Artifact Reference:
 
@@ -48,7 +48,7 @@ router
 GraphOS will compose a new supergraph, but your router fleet will not automatically deploy. Query for the new graph artifact URI using the above queries.
 
 
-### 3. Launching the Green router fleet
+### 3. Launch the Green router fleet
 
 ```bash
 # Using tag reference
@@ -57,7 +57,7 @@ APOLLO_GRAPH_ARTIFACT_REFERENCE="artifact.api.apollographql.com/my-graph-a50b9d5
 router
 ```
 
-### 5-6. Shift traffic and monitor
+### 4-5. Shift traffic and monitor
 
 Use your existing infrastructure to monitor and adjust your load balancer's weighted routing as appropriate.
 
@@ -89,6 +89,6 @@ Pros:
 
 Cons:
 
-* Slower rollback (requires pod restarts)
-* Less control over traffic distribution
-* Failover requires full environment creation
+- Slower rollback (requires pod restarts)
+- Less control over traffic distribution
+- Failover requires full environment creation

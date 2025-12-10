@@ -4,7 +4,7 @@ subtitle: Zero-downtime schema updates
 description: Learn about hot reloading supergraph schemas, including support matrix, performance considerations, and production recommendations.
 ---
 
-Hot reloading allows the router to update its supergraph schema without restarting, providing zero-downtime schema updates. However, hot reloading is not available for all schema loading methods, and there are performance considerations to be aware of.
+Hot reloading enables the router to update its supergraph schema without restarting, providing zero-downtime schema updates. Hot reloading is not available for all schema loading methods, and causes performance degradation during reload.
 
 ## Hot Reload Support Matrix
 
@@ -19,7 +19,7 @@ Hot reloading allows the router to update its supergraph schema without restarti
 When using hot reloading for supergraph schemas, be aware of the following performance considerations:
 
 - **Schema reloading overhead:** Each schema reload requires parsing and validation, which temporarily increases CPU usage.
-- **Request handling:** During reload, new requests may experience slight latency increases while the new schema is being processed.
+- **Request handling:** During reload, new requests might experience slight latency increases while the new schema is being processed.
 - **Memory usage:** The router maintains both the old and new schema briefly during reload, temporarily increasing memory usage.
 
 ## Production Recommendations
