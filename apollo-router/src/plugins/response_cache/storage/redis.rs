@@ -919,12 +919,6 @@ mod tests {
         use std::sync::Arc;
         use std::time::Duration;
 
-        use fred::error::Error;
-        use fred::error::ErrorKind;
-        use fred::mocks::MockCommand;
-        use fred::mocks::Mocks;
-        use fred::prelude::Value;
-        use parking_lot::RwLock;
         use tokio::sync::broadcast;
         use tower::BoxError;
 
@@ -934,8 +928,10 @@ mod tests {
         use crate::plugins::response_cache::ErrorCode;
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
+        use crate::plugins::response_cache::storage::error::Error as StorageError;
         use crate::plugins::response_cache::storage::redis::Storage;
         use crate::redis;
+        use crate::redis::test::MockStorageTimeout;
 
         /// Trigger failure by pre-setting the cache tag to an invalid type.
         #[tokio::test]
@@ -1014,21 +1010,8 @@ mod tests {
         #[tokio::test]
         #[rstest::rstest]
         async fn timeout_failure(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
-            use crate::plugins::response_cache::storage::error::Error as StorageError;
-
-            // Mock the Redis connection to be able to simulate a timeout error coming from within
-            // the `fred` client
-            #[derive(Default, Debug, Clone)]
-            struct MockStorage(Arc<RwLock<Vec<MockCommand>>>);
-            impl Mocks for MockStorage {
-                fn process_command(&self, command: MockCommand) -> Result<Value, Error> {
-                    self.0.write().push(command);
-                    Err(Error::new(ErrorKind::Timeout, "timeout"))
-                }
-            }
-
             let (_drop_tx, drop_rx) = broadcast::channel(2);
-            let mock_storage = Arc::new(MockStorage::default());
+            let mock_storage = Arc::new(MockStorageTimeout::default());
             let storage = Storage::mocked(
                 &redis_config(clustered),
                 clustered,
@@ -1038,7 +1021,7 @@ mod tests {
             .await?;
 
             let document = common_document();
-            let document_key = Value::from(storage.storage.make_key(document.key.clone()));
+            let document_key = storage.storage.make_key(&document.key).into();
 
             let result = storage.insert(document, SUBGRAPH_NAME).await;
             let error = result.expect_err("should have timed out via redis");
@@ -1050,7 +1033,7 @@ mod tests {
             assert_eq!(error.code(), "TIMEOUT");
 
             // make sure the insert function did not try to operate on the document key
-            for command in mock_storage.0.read().iter() {
+            for command in mock_storage.commands().iter() {
                 if command.cmd.contains("SET") && command.args.contains(&document_key) {
                     panic!("Command {command:?} set the document key");
                 }

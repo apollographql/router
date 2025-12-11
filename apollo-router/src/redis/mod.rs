@@ -8,6 +8,9 @@ pub(crate) mod options;
 mod pool;
 mod value;
 
+#[cfg(test)]
+pub(crate) mod test;
+
 pub(crate) use error::Error;
 pub(crate) use gateway::Gateway;
 pub(crate) use key::KeyType;
