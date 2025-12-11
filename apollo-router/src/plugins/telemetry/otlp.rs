@@ -74,16 +74,19 @@ pub(crate) enum TelemetryDataKind {
 // implementation unifies the processing of endpoints.
 //
 // The processing does the following:
-//  - If an endpoint is not specified, this results in `None`
-//  - If an endpoint is specified as "default", this results in `""`
-//  - If an endpoint is `""` or ends with a protocol appropriate suffix, we stop processing
+//  - If an endpoint is not specified, this results in `None` which will be treated as
+//    OTEL_EXPORTER_OTLP_GRPC_ENDPOINT_DEFAULT by the OTel SDK
+//  - If an endpoint is specified as "default" or `""`, this results in `None` which will be treated
+//    as OTEL_EXPORTER_OTLP_GRPC_ENDPOINT_DEFAULT by the OTel SDK
+//  - If an endpoint ends with a protocol appropriate suffix, we stop processing
 //  - If we continue processing:
 //      - If an endpoint has no scheme, we prepend "http://"
 //      - If our endpoint has no path, we append a protocol specific suffix
 //      - If it has a path, we return it unmodified
 //
-// Note: "" is the empty string and is thus interpreted by any opentelemetry sdk as indicating that
-// the default endpoint should be used.
+// Note: Due to a bug in the OTel SDK v0.30.0 no longer recognizes `""` as valid. This is fixed in
+// v0.31.0 where it is again recognized as a placeholder for OTEL_EXPORTER_OTLP_GRPC_ENDPOINT_DEFAULT.
+// For now, we'll treat `"deafult"` and `""` as it has the same result.
 //
 // If you are interested in learning more about opentelemetry endpoints:
 //  https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/exporter.md
@@ -93,65 +96,57 @@ pub(super) fn process_endpoint(
     kind: &TelemetryDataKind,
     protocol: &Protocol,
 ) -> Result<Option<String>, BoxError> {
-    // If there is no endpoint, None, do no processing because the user must be relying on the
-    // router processing OTEL environment variables for endpoint.
+    // If there is no endpoint (None, "", or "default"), do no processing because the user must be
+    // relying on the router processing OTEL environment variables for endpoint.
     // If there is an endpoint, Some(value), we must process that value. Most of this processing is
     // performed to try and remain backwards compatible with previous versions of the router which
     // depended on "non-standard" behaviour of the opentelemetry_otlp crate. I've tried documenting
     // each of the outcomes clearly for the benefit of future maintainers.
-    endpoint
-        .as_ref()
-        .map(|v| {
-            let mut base = if v == "default" {
-                "".to_string()
-            } else {
-                v.to_string()
+    match endpoint.as_ref() {
+        None => Ok(None),
+        Some(v) if v == "default" || v.is_empty() => Ok(None),
+        Some(v) => {
+            let mut base = v.to_string();
+            // We require a scheme on our endpoint or we can't parse it as a Uri.
+            // If we don't have one, prepend with "http://"
+            if !base.starts_with("http") {
+                base = format!("http://{base}");
+            }
+            // We expect different suffixes by protocol and signal type
+            let suffix = match protocol {
+                Protocol::Grpc => "/",
+                Protocol::Http => match kind {
+                    TelemetryDataKind::Metrics => "/v1/metrics",
+                    TelemetryDataKind::Traces => "/v1/traces",
+                },
             };
-            if base.is_empty() {
-                // We don't want to process empty strings
-                Ok(base)
+            if base.ends_with(suffix) {
+                // Our suffix is in place, all is good
+                Ok(Some(base))
             } else {
-                // We require a scheme on our endpoint or we can't parse it as a Uri.
-                // If we don't have one, prepend with "http://"
-                if !base.starts_with("http") {
-                    base = format!("http://{base}");
-                }
-                // We expect different suffixes by protocol and signal type
-                let suffix = match protocol {
-                    Protocol::Grpc => "/",
-                    Protocol::Http => match kind {
-                        TelemetryDataKind::Metrics => "/v1/metrics",
-                        TelemetryDataKind::Traces => "/v1/traces",
-                    },
-                };
-                if base.ends_with(suffix) {
-                    // Our suffix is in place, all is good
-                    Ok(base)
-                } else {
-                    let uri = http::Uri::try_from(&base)?;
-                    // Note: If our endpoint is "<scheme>:://host:port", then the path will be "/".
-                    // We already ensured that our base does not end with <suffix>, so we must append
-                    // <suffix>
-                    if uri.path() == "/" {
-                        // Remove any trailing slash from the base so we don't end up with a
-                        // double slash when concatenating e.g. "http://my-base//v1/metrics"
-                        if base.ends_with("/") {
-                            base.pop();
-                        }
-                        // We don't have a path, we need to add one
-                        Ok(format!("{base}{suffix}"))
-                    } else {
-                        // We have a path, it doesn't end with <suffix>, let it pass...
-                        // We could try and enforce the standard here and only let through paths
-                        // which end with the expected suffix. However, I think that would reduce
-                        // backwards compatibility and we should just trust that the user knows
-                        // what they are doing.
-                        Ok(base)
+                let uri = http::Uri::try_from(&base)?;
+                // Note: If our endpoint is "<scheme>:://host:port", then the path will be "/".
+                // We already ensured that our base does not end with <suffix>, so we must append
+                // <suffix>
+                if uri.path() == "/" {
+                    // Remove any trailing slash from the base so we don't end up with a
+                    // double slash when concatenating e.g. "http://my-base//v1/metrics"
+                    if base.ends_with("/") {
+                        base.pop();
                     }
+                    // We don't have a path, we need to add one
+                    Ok(Some(format!("{base}{suffix}")))
+                } else {
+                    // We have a path, it doesn't end with <suffix>, let it pass...
+                    // We could try and enforce the standard here and only let through paths
+                    // which end with the expected suffix. However, I think that would reduce
+                    // backwards compatibility and we should just trust that the user knows
+                    // what they are doing.
+                    Ok(Some(base))
                 }
             }
-        })
-        .transpose()
+        }
+    }
 }
 
 impl Config {
@@ -352,10 +347,15 @@ mod tests {
             process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
         assert_eq!(endpoint, processed_endpoint);
 
+        let endpoint = Some("".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
+        assert_eq!(None, processed_endpoint);
+
         let endpoint = Some("default".to_string());
         let processed_endpoint =
             process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
-        assert_eq!(Some("".to_string()), processed_endpoint);
+        assert_eq!(None, processed_endpoint);
 
         let endpoint = Some("https://api.apm.com:433/v1/traces".to_string());
         let processed_endpoint =
@@ -418,10 +418,15 @@ mod tests {
             process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
         assert_eq!(None, processed_endpoint);
 
+        let endpoint = Some("".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
+        assert_eq!(None, processed_endpoint);
+
         let endpoint = Some("default".to_string());
         let processed_endpoint =
             process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
-        assert_eq!(Some("".to_string()), processed_endpoint);
+        assert_eq!(None, processed_endpoint);
 
         let endpoint = Some("https://api.apm.com:433/v1/metrics".to_string());
         let processed_endpoint =
