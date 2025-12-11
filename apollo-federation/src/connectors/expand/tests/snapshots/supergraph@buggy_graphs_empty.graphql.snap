@@ -1,12 +1,8 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
-input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_inputs.graphql
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/buggy_graphs_empty.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [CONNECTORS_QUERY_FOO_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) {
-  query: Query
-}
-
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
@@ -47,19 +43,4 @@ input join__ContextArgument {
 
 scalar join__DirectiveArguments
 
-enum join__Graph {
-  CONNECTORS_QUERY_FOO_0 @join__graph(name: "connectors_Query_foo_0", url: "none")
-}
-
-input QuuxInput @join__type(graph: CONNECTORS_QUERY_FOO_0) {
-  quaz: String @join__field(graph: CONNECTORS_QUERY_FOO_0, type: "String")
-}
-
-input BazInput @join__type(graph: CONNECTORS_QUERY_FOO_0) {
-  buzz: String @join__field(graph: CONNECTORS_QUERY_FOO_0, type: "String")
-  quux: QuuxInput @join__field(graph: CONNECTORS_QUERY_FOO_0, type: "QuuxInput")
-}
-
-type Query @join__type(graph: CONNECTORS_QUERY_FOO_0) {
-  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String @join__field(graph: CONNECTORS_QUERY_FOO_0, type: "String")
-}
+enum join__Graph

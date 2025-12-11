@@ -19,7 +19,7 @@ override_subgraph_url:
   products: http://localhost:4005
 include_subgraph_errors:
   all: true
-preview_response_cache:
+response_cache:
   enabled: true
   debug: true
   invalidation:

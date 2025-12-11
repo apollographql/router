@@ -2,8 +2,7 @@
 title: Invalidation
 subtitle: Control cache freshness with passive TTL and active invalidation
 description: Configure time-to-live (TTL) for passive invalidation and use active invalidation to remove stale cache entries on demand.
-minVersion: Router v2.8.0
-releaseStage: preview
+minVersion: Router v2.10.0
 ---
 
 Cache invalidation ensures that cached data stays fresh. The router supports two approaches: passive TTL-based invalidation and active invalidation when you know data has changed.
@@ -37,7 +36,7 @@ This ensures that client responses never claim to be fresher than their least-fr
 Set a default TTL for all sources using response caching. Define this in per-subgraph configuration or inherit it from global configuration. The router uses this default TTL if the source returns a `Cache-Control` header without a `max-age` directive:
 
 ```yaml title="router.yaml"
-preview_response_cache:
+response_cache:
   enabled: true
   subgraph:
     all:
@@ -160,7 +159,7 @@ Use active invalidation when:
 
 ### Configure invalidation
 
-Configure response cache invalidation globally with `preview_response_cache.invalidation`. You can also override the global setting for a subgraph with `preview_response_cache.subgraph.subgraphs.SUBGRAPH_NAME.invalidation`.
+Configure response cache invalidation globally with `response_cache.invalidation`. You can also override the global setting for a subgraph with `response_cache.subgraph.subgraphs.SUBGRAPH_NAME.invalidation`.
 
 <Note>
 
@@ -171,7 +170,7 @@ Before sending invalidation requests, set the `INVALIDATION_SHARED_KEY` environm
 The following example shows both global and per-subgraph invalidation configuration:
 
 ```yaml title="router.yaml"
-preview_response_cache:
+response_cache:
   enabled: true
 
   # global invalidation configuration
