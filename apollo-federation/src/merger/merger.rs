@@ -1000,6 +1000,19 @@ impl Merger {
         let is_subscription = self.merged.is_subscription_root_type(&obj.type_name);
 
         let added = self.add_fields_shallow(obj.clone())?;
+        let subgraph_types = self
+            .subgraphs
+            .iter()
+            .enumerate()
+            .map(|(idx, subgraph)| {
+                let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> = subgraph
+                    .schema()
+                    .get_type(obj.type_name.clone())
+                    .ok()
+                    .and_then(|ty| ty.try_into().ok());
+                (idx, maybe_ty)
+            })
+            .collect();
 
         if added.is_empty() {
             trace!("Object has no fields to merge, removing from schema");
@@ -1007,20 +1020,6 @@ impl Merger {
         } else {
             for (field, subgraph_fields) in added {
                 if is_value_type {
-                    let subgraph_types = self
-                        .subgraphs
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, subgraph)| {
-                            let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> =
-                                subgraph
-                                    .schema()
-                                    .get_type(obj.type_name.clone())
-                                    .ok()
-                                    .and_then(|ty| ty.try_into().ok());
-                            (idx, maybe_ty)
-                        })
-                        .collect();
                     self.hint_on_inconsistent_value_type_field(
                         &subgraph_types,
                         &ObjectOrInterfaceTypeDefinitionPosition::Object(obj.clone()),
