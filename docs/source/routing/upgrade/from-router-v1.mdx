@@ -10,8 +10,6 @@ This upgrade guide describes the steps to upgrade your GraphOS Router deployment
 
 ## Upgrade strategy
 
-<!-- TODO: this needs a bit more expansion -->
-
 Before making any changes, auto-upgrade your configuration. This will remove options that already have no effect in v1.x, and make the rest of the upgrade easier.
 
 Check the changes that will be applied using:
@@ -102,7 +100,7 @@ These attributes represent how a span spends time (in nanoseconds) over its life
 
 ### Removed custom instrumentation selectors
 
-<!-- PR: https://github.com/apollographql/router/pull/6621 -->
+{/* PR: https://github.com/apollographql/router/pull/6621 */}
 
 The `subgraph_response_body` selector is removed in favor of `subgraph_response_data` and `subgraph_response_errors`.
 
@@ -129,7 +127,7 @@ telemetry:
 
 ### Scaffold no longer supported for Rust plugin code generation
 
-<!-- PR: https://github.com/apollographql/router/pull/6274 -->
+{/* PR: https://github.com/apollographql/router/pull/6274 */}
 
 Support for the `cargo-scaffold` command to generate boilerplate source code for a Rust plugin has been removed in router v2.x.
 
@@ -137,7 +135,7 @@ Support for the `cargo-scaffold` command to generate boilerplate source code for
 
 ### Removed configurable poll interval for Apollo Uplink
 
-<!-- PR: https://github.com/apollographql/router/pull/6268 -->
+{/* PR: https://github.com/apollographql/router/pull/6268 */}
 
 The configurable poll interval of Apollo Uplink has been removed in router v2.x.
 
@@ -145,7 +143,7 @@ The configurable poll interval of Apollo Uplink has been removed in router v2.x.
 
 ### Removed hot reloading of supergraph URLs
 
-<!-- PR: https://github.com/apollographql/router/pull/6567 -->
+{/* PR: https://github.com/apollographql/router/pull/6567 */}
 
 Hot reloading is no longer supported for supergraph URLs configured via either the `--supergraph-urls` command-line argument or the `APOLLO_ROUTER_SUPERGRAPH_URLS` environment variable. In router v1.x, if hot reloading was enabled, the router would repeatedly fetch the URLs on the interval specified by `--apollo-uplink-poll-interval`. This poll interval has been removed in v2.x.
 
@@ -314,7 +312,7 @@ Automatic configuration upgrades can still be applied explicitly.
 
 **Upgrade step**: use the `router config` commands as shown at the top of the upgrade guide.
 
-<!-- PR: https://github.com/apollographql/router/pull/6777 -->
+{/* PR: https://github.com/apollographql/router/pull/6777 */}
 
 ## Configuration changes
 
@@ -408,8 +406,6 @@ You can continue using deprecated context key names from router 1.x if you confi
 | `persisted_query_hit` | `apollo::apq::cache_hit` |
 | `persisted_query_register` | `apollo::apq::registered` |
 
-<!-- TODO(@goto-bus-stop): list configuration keys that contain context keys? -->
-
 ### Context Keys for Coprocessors
 
 The [context key renames](#renamed-context-keys) may impact your coprocessor logic. It can be tricky to update all context key usage together with the router upgrade. To aid this, the `context` option for Coprocessors has been extended.
@@ -488,7 +484,7 @@ No syntax changes are required when using the default endpoint path or a path wi
 
 ### Changed syntax for header propagation path
 
-<!-- PR: https://github.com/apollographql/router/pull/6621 -->
+{/* PR: https://github.com/apollographql/router/pull/6621 */}
 
 In router v2.x, the path used for selecting data from a client request body for [header propagation](/graphos/routing/header-propagation#insert) must comply with the [JSONPath](https://www.ietf.org/archive/id/draft-goessner-dispatch-jsonpath-00.html) spec. This means a `$` is now required to select the root element.
 
@@ -520,7 +516,7 @@ The following lists new capabilities in router v2.x that we recommend you use. T
 
 ### More granular logging with custom telemetry
 
-<!-- PR: https://github.com/apollographql/router/pull/6285 -->
+{/* PR: https://github.com/apollographql/router/pull/6285 */}
 
 Previously, router v1.x had an experimental `experimental_when_header` feature to log requests and responses if a request header was set to a specific value. This feature provided very limited control:
 
@@ -585,7 +581,7 @@ telemetry:
 
 ### Improved traffic shaping
 
-<!-- PR: https://github.com/apollographql/router/pull/6486 -->
+{/* PR: https://github.com/apollographql/router/pull/6486 */}
 
 Traffic shaping has been improved significantly in router v2.x. We've added a new mechanism, concurrency control, and we've improved the router's ability to observe timeout and traffic shaping restrictions correctly. These improvements do mean that clients of the router may see an increase in errors as traffic shaping constraints are enforced:
 
@@ -629,6 +625,14 @@ could not create router: CORS configuration error:
 ```
 
 **Upgrade step****: Validate your CORS configuration. For details, go to [CORS configuration documentation](/graphos/routing/security/cors).
+
+### Early enforcement of CSRF
+In Router v1, if you send an empty `Content-Type` header, the Router fails with an HTTP `415` error. The Router now catches this issue earlier in the request lifecycle and returns an HTTP `400` error with the following message:
+
+```text
+This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). Please either specify a 'content-type' header (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight
+```
+
 
 ## Deploy your router
 

@@ -77,10 +77,10 @@ pub(crate) struct Gateway {
 impl Gateway {
     pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)
-            .inspect_err(|err| record_redis_error(err, caller))?;
+            .inspect_err(|err| record_redis_error(err, caller, "startup"))?;
         let mut client_config = RedisConfig::from_url(url.as_str())
             .map_err(Into::into)
-            .inspect_err(|err| record_redis_error(err, caller))?;
+            .inspect_err(|err| record_redis_error(err, caller, "startup"))?;
         let is_cluster = client_config.server.is_clustered();
 
         if let Some(username) = config.username {
@@ -189,7 +189,7 @@ impl Gateway {
                         .server
                         .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint)
                         .map_err(Error::from)
-                        .inspect_err(|err| record_redis_error(err, caller));
+                        .inspect_err(|err| record_redis_error(err, caller, "startup"));
                 }
             })
             .with_connection_config(|config| {
@@ -231,16 +231,7 @@ impl Gateway {
             tokio::spawn(async move {
                 loop {
                     match error_rx.recv().await {
-                        Ok((error, Some(server))) => {
-                            let error: Error = error.into();
-                            tracing::error!("Redis client ({server:?}) error: {error:?}",);
-                            record_redis_error(&error, caller);
-                        }
-                        Ok((error, None)) => {
-                            let error: Error = error.into();
-                            tracing::error!("Redis client error: {error:?}",);
-                            record_redis_error(&error, caller);
-                        }
+                        Ok((error, _)) => record_redis_error(&error, caller, "client"),
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,
                     }
@@ -329,8 +320,8 @@ impl Gateway {
     }
 
     /// Helper method to record Redis errors for metrics
-    fn record_error<E: Into<Error>>(&self, error: E) {
-        record_redis_error(&error.into(), self.inner.caller);
+    fn record_query_error<E: Into<Error>>(&self, error: &RedisError) {
+        record_redis_error(error.into(), self.inner.caller, "query");
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, Error> {
@@ -523,7 +514,7 @@ impl Gateway {
         tracing::trace!("insert result {:?}", result);
 
         if let Err(err) = result {
-            self.record_error(&err);
+            self.record_query_error(&err);
         }
     }
 
@@ -556,7 +547,7 @@ impl Gateway {
             Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
             Err(err) => {
                 tracing::trace!("caught error during insert: {err:?}");
-                self.record_error(&err);
+                self.record_query_error(&err);
             }
         }
     }

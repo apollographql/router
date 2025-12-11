@@ -418,3 +418,37 @@ fn composes_subgraphs_with_directives_on_renamed_root_types() {
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let _supergraph = result.expect("Expected composition to succeed");
 }
+
+#[test]
+fn misc_conflicting_subgraph_names_sanitization() {
+    let sg1 = ServiceDefinition {
+        name: "mysubgraph",
+        type_defs: r#"
+        type Query {
+          foo: String
+        }
+        "#,
+    };
+
+    let sg2 = ServiceDefinition {
+        name: "MySubgraph",
+        type_defs: r#"
+        type Query {
+          bar: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[sg1, sg2]);
+    let supergraph = result.expect("Expected composition to succeed");
+
+    let schema_str = supergraph.schema().schema().to_string();
+    assert!(
+        schema_str.contains("MYSUBGRAPH_1"),
+        "Expected MYSUBGRAPH_1 in schema"
+    );
+    assert!(
+        schema_str.contains("MYSUBGRAPH_2"),
+        "Expected MYSUBGRAPH_2 in schema"
+    );
+}
