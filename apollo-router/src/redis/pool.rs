@@ -37,6 +37,7 @@ impl Drop for DropSafeRedisPool {
     fn drop(&mut self) {
         let inner = self.pool.clone();
         let caller = self.caller;
+        self.heartbeat_abort_handle.abort();
         tokio::spawn(async move {
             let result = inner.quit().await.map_err(Error::from);
             if let Err(err) = result {
@@ -46,6 +47,5 @@ impl Drop for DropSafeRedisPool {
         });
 
         // Metrics collector will be dropped automatically and its Drop impl will abort the task
-        self.heartbeat_abort_handle.abort();
     }
 }
