@@ -1000,19 +1000,16 @@ impl Merger {
         let is_subscription = self.merged.is_subscription_root_type(&obj.type_name);
 
         let added = self.add_fields_shallow(obj.clone())?;
-        let subgraph_types = self
-            .subgraphs
-            .iter()
-            .enumerate()
-            .map(|(idx, subgraph)| {
-                let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> = subgraph
-                    .schema()
-                    .get_type(obj.type_name.clone())
-                    .ok()
-                    .and_then(|ty| ty.try_into().ok());
-                (idx, maybe_ty)
-            })
-            .collect();
+        let mut subgraph_types =
+            IndexMap::with_capacity_and_hasher(self.subgraphs.len(), Default::default());
+        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> = subgraph
+                .schema()
+                .get_type(obj.type_name.clone())
+                .ok()
+                .and_then(|ty| ty.try_into().ok());
+            subgraph_types.insert(idx, maybe_ty);
+        }
 
         if added.is_empty() {
             trace!("Object has no fields to merge, removing from schema");
@@ -2574,4 +2571,19 @@ where
         .iter()
         .map(|(idx, source)| (*idx, f(source)))
         .collect()
+}
+
+pub(in crate::merger) fn map_sources_with_index<T, U, F>(
+    sources: Sources<T>,
+    mut f: F,
+) -> Sources<U>
+where
+    F: FnMut(usize, Option<T>) -> Option<U>,
+{
+    let mut mapped_sources: Sources<U> =
+        IndexMap::with_capacity_and_hasher(sources.len(), Default::default());
+    for (idx, source) in sources.into_iter() {
+        mapped_sources.insert(idx, f(idx, source));
+    }
+    mapped_sources
 }
