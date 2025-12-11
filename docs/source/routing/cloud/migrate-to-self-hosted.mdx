@@ -16,7 +16,7 @@ This guide provides step-by-step instructions to migrate graphs on Serverless or
 1. Change your graph's hosting mode to self-hosted.
 1. Deploy a self-hosted router.
 1. Validate and shift traffic to your self-hosted endpoint.
-1. Once all graphs have been migrated to self-hosted, move your organization to a supported plan.
+1. After you migrate all graphs to self-hosted, move your organization to a supported plan.
 
 ## Steps to migrate
 
@@ -54,6 +54,12 @@ Use the [`cloud config fetch` command](/rover/commands/cloud#cloud-config-fetch)
 
 In Studio, click the **Start the migration process** button at the top of the graph variant's page to change the graph's hosting mode to self-hosted.
 
+<img
+  className="screenshot"
+  alt="Start the migration process button in GraphOS Studio"
+  src="../../images/start-the-migration-process.png"
+/>
+
 Click **Confirm** to begin the process of migrating your graph to self-hosted.
 
 When the process is successful, you'll see a message confirming that your graph has been switched to self-hosted mode.
@@ -85,7 +91,7 @@ Validate the new endpoint, then gradually shift production traffic from the clou
 
 <Caution>
 
-All of your graphs must be migrated to self-hosted mode before you can move your organization to a supported plan.
+You must migrate all of your graphs to self-hosted mode before you can move your organization to a supported plan.
 
 </Caution>
 
@@ -96,7 +102,7 @@ All of your graphs must be migrated to self-hosted mode before you can move your
 <img
   className="screenshot"
   alt="Change plan button on the Billing and Usage page GraphOS Studio"
-  src="../../images/billing_and_usage_change_plan.png"
+  src="../../images/billing-and-usage-change-plan.png"
 />
 
 ## Frequently asked questions
