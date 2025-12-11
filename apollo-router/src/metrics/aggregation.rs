@@ -19,7 +19,7 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::{ManualReader, SdkMeterProvider};
 use parking_lot::Mutex;
 use strum::Display;
 use strum::EnumCount;
@@ -79,7 +79,13 @@ impl Default for Inner {
             providers: (0..MeterProviderType::COUNT)
                 .map(|_| {
                     (
-                        FilterMeterProvider::public(SdkMeterProvider::default()),
+                        FilterMeterProvider::public(
+                            SdkMeterProvider::builder()
+                                // Set with a noop reader so Async Instruments' pipelines don't
+                                // have an InstrumentCreationError that they have no inserters
+                                // (i.e. readers) when users don't enable telemetry.
+                                .with_reader(ManualReader::default())
+                                .build()),
                         HashMap::new(),
                     )
                 })

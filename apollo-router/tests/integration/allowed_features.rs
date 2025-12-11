@@ -117,11 +117,6 @@ async fn connectors_with_entity_caching_enabled_when_allowed_features_contains_f
                 subgraphs:
                     connectors:
                       enabled: true
-            telemetry:
-              exporters:
-                metrics:
-                  otlp:
-                    enabled: true
     "#,
         )
         .supergraph(PathBuf::from_iter([

@@ -22,8 +22,3 @@ coprocessor:
       body: true
     response:
       body: true
-telemetry:
-  exporters:
-    metrics:
-      otlp:
-        enabled: true
