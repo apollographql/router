@@ -1,8 +1,8 @@
-### fix(response_cache): change plugin ordering to make sure we can customize caching behavior at the subgraph level ([PR #8652](https://github.com/apollographql/router/pull/8652))
+### Customize response caching behavior at the subgraph level ([PR #8652](https://github.com/apollographql/router/pull/8652))
 
-With this change you'll now be able to customize cached response using rhai or coprocessors. It's also now possible to set a different [`private_id`](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization#configure-private_id) based on subgraph request (like headers for example). 
+You can now customize cached responses using Rhai or coprocessors. You can also set a different [`private_id`](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization#configure-private_id) based on subgraph request headers.
 
-Example of rhai script customizing the `private_id`:
+**Example Rhai script customizing `private_id`:**
 
 ```rhai
 fn subgraph_service(service, subgraph) {
@@ -12,7 +12,6 @@ fn subgraph_service(service, subgraph) {
         }
     });
 }
-
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8652
