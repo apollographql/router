@@ -120,7 +120,7 @@ impl From<tokio::time::error::Elapsed> for Error {
 }
 
 /// Record a Redis error as a metric, independent of having an active connection
-pub(crate) fn record(error: &Error, caller: &'static str) {
+pub(crate) fn record(error: &Error, caller: &'static str, context: &'static str) {
     u64_counter_with_unit!(
         "apollo.router.cache.redis.errors",
         "Number of Redis errors by type",
@@ -134,6 +134,7 @@ pub(crate) fn record(error: &Error, caller: &'static str) {
         tracing::error!(
             error_type = error.code(),
             caller = caller,
+            context = context,
             error = ?error,
             "Redis error occurred"
         );

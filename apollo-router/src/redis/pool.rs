@@ -41,7 +41,7 @@ impl Drop for DropSafeRedisPool {
             let result = inner.quit().await.map_err(Error::from);
             if let Err(err) = result {
                 tracing::warn!("Caught error while closing unused Redis connections: {err:?}");
-                super::error::record(&err, caller);
+                super::error::record(&err, caller, "shutdown");
             }
         });
 

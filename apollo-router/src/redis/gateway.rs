@@ -231,7 +231,7 @@ impl Gateway {
             tokio::spawn(async move {
                 loop {
                     match error_rx.recv().await {
-                        Ok((error, _)) => record_redis_error(&error, caller, "client"),
+                        Ok((error, _)) => record_redis_error(&error.into(), caller, "client"),
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,
                     }
@@ -320,8 +320,8 @@ impl Gateway {
     }
 
     /// Helper method to record Redis errors for metrics
-    fn record_query_error<E: Into<Error>>(&self, error: &RedisError) {
-        record_redis_error(error.into(), self.inner.caller, "query");
+    fn record_query_error<E: Into<Error>>(&self, error: E) {
+        record_redis_error(&error.into(), self.inner.caller, "query");
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, Error> {
@@ -471,7 +471,7 @@ impl Gateway {
                 .into_iter()
                 .map(|(_, value)| {
                     value
-                        .inspect_err(|e| self.record_error(e))
+                        .inspect_err(|e| self.record_query_error(e))
                         .map_err(Into::into)
                         .map(|res| res.0)
                 })
@@ -486,7 +486,7 @@ impl Gateway {
                 .with_options(&options)
                 .mget(keys)
                 .await
-                .inspect_err(|e| self.record_error(e))?;
+                .inspect_err(|e| self.record_query_error(e))?;
             Ok(values.into_iter().map(|v| Ok(v.0)).collect())
         }
     }
@@ -586,7 +586,7 @@ impl Gateway {
             self.client().get(key).await
         };
 
-        let value = result.inspect_err(|e| self.record_error(e))?;
+        let value = result.inspect_err(|e| self.record_query_error(e))?;
         Ok(value.0)
     }
 
@@ -603,14 +603,16 @@ impl Gateway {
             let _: () = pipeline
                 .get(&key)
                 .await
-                .inspect_err(|e| self.record_error(e))?;
+                .inspect_err(|e| self.record_query_error(e))?;
             let _: () = pipeline
                 .expire(&key, ttl.as_secs() as i64, None)
                 .await
-                .inspect_err(|e| self.record_error(e))?;
+                .inspect_err(|e| self.record_query_error(e))?;
 
-            let (value, _timeout_set): (Value<Option<V>>, bool) =
-                pipeline.all().await.inspect_err(|e| self.record_error(e))?;
+            let (value, _timeout_set): (Value<Option<V>>, bool) = pipeline
+                .all()
+                .await
+                .inspect_err(|e| self.record_query_error(e))?;
             Ok(value.0)
         } else {
             self.get(key).await
