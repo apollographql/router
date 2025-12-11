@@ -38,6 +38,7 @@ use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::join_spec_definition::JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -65,6 +66,7 @@ use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::HasDescription;
+use crate::schema::position::HasMutableDirectives;
 use crate::schema::position::HasType;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
@@ -500,6 +502,10 @@ impl Merger {
         // Add missing interface object fields to implementations
         trace!("Adding missing interface object fields to implementations");
         self.add_missing_interface_object_fields_to_implementations()?;
+
+        // Remove redundant @join__field directives (after backfilling interface object fields)
+        trace!("Removing redundant @join__field directives");
+        self.remove_redundant_join_fields()?;
 
         // Return result
         let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
@@ -2467,6 +2473,95 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             result.extend(locations);
         }
         result
+    }
+
+    /// Remove redundant @join__field directives after the merge phase.
+    /// A @join__field directive is considered redundant if:
+    /// 1. The field has a @join__field for each graph in the schema
+    /// 2. Each @join__field has only the `graph` argument (no other arguments like requires, provides, etc.)
+    pub(crate) fn remove_redundant_join_fields(&mut self) -> Result<(), FederationError> {
+        let Some(join_field_directive_name) = self
+            .join_spec_definition
+            .directive_name_in_schema(&self.merged, &JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            return Ok(());
+        };
+
+        let graph_enum = self
+            .join_spec_definition
+            .graph_enum_definition(&self.merged)?;
+        let graph_enum_values: Vec<Name> = graph_enum.values.keys().cloned().collect();
+
+        let referencers = self.merged.referencers();
+        let field_positions = referencers.get_directive(&join_field_directive_name)?;
+        let positions_to_process: Vec<DirectiveTargetPosition> = field_positions.iter().collect();
+
+        for pos in positions_to_process {
+            match &pos {
+                DirectiveTargetPosition::ObjectField(field) => self
+                    .remove_redundant_join_fields_from_position(
+                        field,
+                        &join_field_directive_name,
+                        &graph_enum_values,
+                    )?,
+                DirectiveTargetPosition::InterfaceField(field) => self
+                    .remove_redundant_join_fields_from_position(
+                        field,
+                        &join_field_directive_name,
+                        &graph_enum_values,
+                    )?,
+                DirectiveTargetPosition::InputObjectField(field) => self
+                    .remove_redundant_join_fields_from_position(
+                        field,
+                        &join_field_directive_name,
+                        &graph_enum_values,
+                    )?,
+                _ => bail!("Found @join__field application at unexpected location: {pos}"),
+            }
+        }
+
+        Ok(())
+    }
+
+    fn remove_redundant_join_fields_from_position<T>(
+        &mut self,
+        field_pos: &T,
+        join_field_directive_name: &Name,
+        graph_enum_values: &[Name],
+    ) -> Result<(), FederationError>
+    where
+        T: HasMutableDirectives,
+    {
+        let directives = field_pos.directives_mut(self.merged.schema_mut())?;
+
+        let mut join_field_graph_values: HashSet<Name> = HashSet::new();
+        let mut has_non_graph_argument = false;
+
+        for join_field_directive in directives.get_all(join_field_directive_name) {
+            if let Some(Value::Enum(graph_name)) = join_field_directive
+                .specified_argument_by_name(&JOIN_GRAPH_ARGUMENT_NAME)
+                .map(|v| v.as_ref())
+            {
+                join_field_graph_values.insert(graph_name.clone());
+            }
+            if join_field_directive
+                .arguments
+                .iter()
+                .any(|arg| arg.name != JOIN_GRAPH_ARGUMENT_NAME)
+            {
+                has_non_graph_argument = true;
+            }
+        }
+
+        if !has_non_graph_argument
+            && graph_enum_values
+                .iter()
+                .all(|g| join_field_graph_values.contains(g))
+        {
+            directives.retain(|d| &d.name != join_field_directive_name);
+        }
+
+        Ok(())
     }
 }
 
