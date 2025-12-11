@@ -1585,6 +1585,9 @@ async fn test_redis_connections_are_closed_on_router_reload() {
     router.assert_reloaded().await;
 
     router.assert_metrics_contains(expected_metric, None).await;
+
+    let error_metric = "apollo_router_cache_redis_errors_total";
+    router.assert_metrics_does_not_contain(error_metric).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

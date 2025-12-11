@@ -1,3 +1,5 @@
+use apollo_compiler::coord;
+
 use crate::composition::ServiceDefinition;
 use crate::composition::assert_composition_errors;
 use crate::composition::compose_as_fed2_subgraphs;
@@ -1220,4 +1222,37 @@ mod progressive_override {
             "#);
         }
     }
+}
+
+#[test]
+fn override_with_nonexistent_target_does_not_add_join_field() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+            type Query {
+                product: Product
+            }
+            type Product @shareable {
+                id: ID
+                name: String @override(from: "NonExistentSubgraph")
+                price: Int @override(from: "NonExistentSubgraph")
+            }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph1]);
+    let supergraph = result.expect("composition should succeed with hints");
+
+    let product = coord!(Product)
+        .lookup(supergraph.schema().schema())
+        .unwrap();
+    // The name and price fields should not have join__field applications because the override had an
+    // invalid target.
+    insta::assert_snapshot!(product, @r#"
+    type Product @join__type(graph: SUBGRAPH1) {
+      id: ID
+      name: String
+      price: Int
+    }
+    "#);
 }
