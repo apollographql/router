@@ -1,4 +1,4 @@
-### Fix subscription licensing discrepancy in documentation ([Issue #DXM-367](https://apollographql.atlassian.net/browse/DXM-367))
+### Fix subscription licensing discrepancy in documentation
 
 Corrected the subscription support documentation to accurately reflect that subscriptions are available on **all GraphOS plans** (Free, Developer, Standard, and Enterprise) with self-hosted routers, not just Enterprise plans.
 
