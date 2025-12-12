@@ -1112,12 +1112,12 @@ impl JoinSpecDefinition {
         // Process each sanitized name and its subgraphs
         for (sanitized_name, subgraphs_for_name) in sanitized_name_to_subgraphs {
             for (index, subgraph) in subgraphs_for_name.iter().enumerate() {
-                let enum_name = if index == 0 {
-                    // First subgraph gets the base sanitized name
+                let enum_name = if subgraphs_for_name.len() == 1 {
+                    // Only one subgraph with this sanitized name gets the base name
                     sanitized_name.clone()
                 } else {
-                    // Subsequent subgraphs get _1, _2, etc.
-                    format!("{sanitized_name}_{index}")
+                    // Multiple subgraphs with same sanitized name get _1, _2, etc.
+                    format!("{sanitized_name}_{}", index + 1)
                 };
 
                 let enum_value_name = Name::new(enum_name.as_str())?;

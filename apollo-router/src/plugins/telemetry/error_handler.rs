@@ -389,7 +389,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cardinality_overflow() {
+    async fn test_cardinality_overflow_1() {
         use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::registry::Registry;
 
@@ -411,6 +411,29 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_cardinality_overflow_2() {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::registry::Registry;
+
+        async {
+            let otel_layer = super::OtelErrorLayer::new();
+            let subscriber = Registry::default().with(otel_layer);
+            let _guard = tracing::subscriber::set_default(subscriber);
+
+            let msg = "Warning: Maximum data points for metric stream exceeded. Entry added to overflow.";
+
+            tracing::warn!(
+                target: "opentelemetry::metrics",
+                "{msg}"
+            );
+
+            assert_counter!("apollo.router.telemetry.metrics.cardinality_overflow", 1);
+        }
+            .with_metrics()
+            .await;
     }
 
     // Mock span exporter to test failures
