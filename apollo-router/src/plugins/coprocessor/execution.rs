@@ -98,6 +98,7 @@ impl ExecutionStage {
 
                 async move {
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_execution_request_stage(
                         http_client,
                         coprocessor_url,
@@ -105,6 +106,7 @@ impl ExecutionStage {
                         request,
                         request_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -112,14 +114,9 @@ impl ExecutionStage {
                         tracing::error!("coprocessor: execution request stage error: {error}");
                         error
                     });
-
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::ExecutionRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::ExecutionRequest, succeeded);
+                    }
                     result
                 }
             })
@@ -139,6 +136,7 @@ impl ExecutionStage {
                     let response: execution::Response = fut.await?;
 
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_execution_response_stage(
                         http_client,
                         coprocessor_url,
@@ -146,6 +144,7 @@ impl ExecutionStage {
                         response,
                         response_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -153,14 +152,9 @@ impl ExecutionStage {
                         tracing::error!("coprocessor: execution response stage error: {error}");
                         error
                     });
-
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::ExecutionResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::ExecutionResponse, succeeded);
+                    }
                     result
                 }
             })
@@ -186,6 +180,13 @@ impl ExecutionStage {
     }
 }
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_execution_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -193,6 +194,7 @@ async fn process_execution_request_stage<C>(
     mut request: execution::Request,
     request_config: ExecutionRequestConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<ControlFlow<execution::Response, execution::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -239,6 +241,8 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::ExecutionRequest, duration);
 
@@ -324,6 +328,13 @@ where
     Ok(ControlFlow::Continue(request))
 }
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_execution_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -331,6 +342,7 @@ async fn process_execution_response_stage<C>(
     response: execution::Response,
     response_config: ExecutionResponseConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<execution::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -381,6 +393,8 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::ExecutionResponse, duration);
 
