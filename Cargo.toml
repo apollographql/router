@@ -31,7 +31,7 @@ members = [
 ]
 
 [profile.release]
-codegen-units = 8
+codegen-units = 1
 lto = "fat"
 
 # this makes build scripts and proc macros faster to compile
