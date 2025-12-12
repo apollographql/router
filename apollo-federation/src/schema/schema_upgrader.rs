@@ -382,7 +382,7 @@ impl SchemaUpgrader {
                 if let Some(directive_def) = schema
                     .schema
                     .directive_definitions
-                    .get(&definition.directive_name)
+                    .shift_remove(&definition.directive_name)
                     && directive_def.description.is_some()
                 {
                     saved_descriptions.insert(
@@ -390,11 +390,6 @@ impl SchemaUpgrader {
                         directive_def.description.clone(),
                     );
                 }
-
-                schema
-                    .schema
-                    .directive_definitions
-                    .shift_remove(&definition.directive_name);
                 schema
                     .referencers
                     .directives
