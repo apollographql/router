@@ -678,19 +678,8 @@ impl<S: HasMetadata> Subgraph<S> {
     }
 
     pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {
-        let Ok(Some(interface_object)) = self
-            .metadata()
-            .federation_spec_definition()
-            .interface_object_directive_definition(self.schema())
-        else {
-            return false;
-        };
         if let TypeDefinitionPosition::Object(obj) = type_ {
-            let interface_object_referencers = self
-                .schema()
-                .referencers()
-                .get_directive(&interface_object.name);
-            return interface_object_referencers.is_ok_and(|refs| refs.object_types.contains(obj));
+            return self.metadata().is_interface_object_type(&obj.type_name);
         }
         false
     }

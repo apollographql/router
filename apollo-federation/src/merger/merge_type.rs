@@ -1,5 +1,6 @@
 use apollo_compiler::Name;
 use apollo_compiler::schema::Component;
+use indexmap::IndexMap;
 use tracing::instrument;
 
 use crate::bail;
@@ -11,6 +12,7 @@ use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
+use crate::merger::merge::map_sources_with_index;
 use crate::schema::position::TypeDefinitionPosition;
 
 impl Merger {
@@ -22,12 +24,12 @@ impl Merger {
                 type_def
             );
         };
-        let sources: Sources<TypeDefinitionPosition> = self
-            .subgraphs
-            .iter()
-            .enumerate()
-            .map(|(idx, subgraph)| (idx, subgraph.schema().get_type(type_def.clone()).ok()))
-            .collect();
+        let mut sources =
+            IndexMap::with_capacity_and_hasher(self.subgraphs.len(), Default::default());
+        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            let source = subgraph.schema().get_type(type_def.clone()).ok();
+            sources.insert(idx, source);
+        }
 
         self.check_for_extension_with_no_base(&sources, &dest);
         self.merge_description(&sources, &dest)?;
@@ -45,45 +47,36 @@ impl Merger {
                 self.merge_interface(itf)?;
             }
             TypeDefinitionPosition::Union(un) => {
-                let sources = sources
-                    .iter()
-                    .map(|(idx, pos)| {
-                        if let Some(TypeDefinitionPosition::Union(p)) = pos {
-                            let schema = self.subgraphs[*idx].schema().schema();
-                            (*idx, p.get(schema).ok().cloned())
-                        } else {
-                            (*idx, None)
-                        }
-                    })
-                    .collect();
+                let sources = map_sources_with_index(sources, |idx, pos| {
+                    if let Some(TypeDefinitionPosition::Union(p)) = pos {
+                        let schema = self.subgraphs[idx].schema().schema();
+                        p.get(schema).ok().cloned()
+                    } else {
+                        None
+                    }
+                });
                 self.merge_union(sources, &un)?;
             }
             TypeDefinitionPosition::Enum(en) => {
-                let sources = sources
-                    .iter()
-                    .map(|(idx, pos)| {
-                        if let Some(TypeDefinitionPosition::Enum(p)) = pos {
-                            let schema = self.subgraphs[*idx].schema().schema();
-                            (*idx, p.get(schema).ok().cloned())
-                        } else {
-                            (*idx, None)
-                        }
-                    })
-                    .collect();
+                let sources = map_sources_with_index(sources, |idx, pos| {
+                    if let Some(TypeDefinitionPosition::Enum(p)) = pos {
+                        let schema = self.subgraphs[idx].schema().schema();
+                        p.get(schema).ok().cloned()
+                    } else {
+                        None
+                    }
+                });
                 self.merge_enum(sources, &en)?;
             }
             TypeDefinitionPosition::InputObject(io) => {
-                let sources = sources
-                    .iter()
-                    .map(|(idx, pos)| {
-                        if let Some(TypeDefinitionPosition::InputObject(p)) = pos {
-                            let schema = self.subgraphs[*idx].schema().schema();
-                            (*idx, p.get(schema).ok().cloned())
-                        } else {
-                            (*idx, None)
-                        }
-                    })
-                    .collect();
+                let sources = map_sources_with_index(sources, |idx, pos| {
+                    if let Some(TypeDefinitionPosition::InputObject(p)) = pos {
+                        let schema = self.subgraphs[idx].schema().schema();
+                        p.get(schema).ok().cloned()
+                    } else {
+                        None
+                    }
+                });
                 self.merge_input(&sources, &io)?;
             }
         }
