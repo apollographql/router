@@ -2,6 +2,164 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.10.0] - 2025-12-11
+
+## 🚀 Features
+
+### Support Redis read replicas ([PR #8405](https://github.com/apollographql/router/pull/8405))
+
+Read-only queries are now sent to replica nodes when using clustered Redis. Previously, all commands were sent to the primary nodes.
+
+This change applies to all Redis caches, including the query plan cache and the response cache.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8405
+
+### Enable HTTP/2 header size limits for TCP and UDS ([PR #8673](https://github.com/apollographql/router/pull/8673))
+
+The router's HTTP/2 header size limit configuration option now applies to requests using TCP and UDS (Unix domain sockets). Previously, this setting only worked for TLS connections.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8673
+
+### Response caching is now Generally Available 🎉 ([PR #8678](https://github.com/apollographql/router/pull/8678))
+
+**Response caching is now Generally Available (GA)** and ready for production use!
+
+Response caching enables the router to cache subgraph query responses using Redis, improving query latency and reducing load on your underlying services. Unlike traditional HTTP caching solutions, response caching provides GraphQL-aware caching at the entity and root field level, making cached data reusable across different users and queries.
+
+For complete documentation, configuration options, and quickstart guide, see the [response caching documentation](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/overview).
+
+#### Key benefits
+
+- **Improved performance**: Cache origin responses and reuse them across queries to reduce latency
+- **Reduced subgraph load**: Minimize redundant requests to your subgraphs by serving cached data
+- **Entity-level caching**: Cache individual entity representations independently, enabling fine-grained control over data freshness
+- **Flexible cache control**: Set different TTLs for different types of data based on `@cacheControl` directives or `Cache-Control` response headers
+- **Privacy-aware**: Share cached data across users while maintaining privacy for personalized data
+- **Active cache invalidation**: Tag cached data with `@cacheTag` and invalidate specific cache entries via HTTP endpoint when data changes
+
+#### What's cached
+
+The router caches two kinds of data:
+- **Root query fields**: Cached as complete units (the entire response for these root fields)
+- **Entity representations**: Cached independently—each origin's contribution to an entity is cached separately and can be reused across different queries
+
+#### Additional features
+
+- **Cache debugger**: See exactly what's being cached during development
+- **Redis cluster support**: Scale your cache with Redis cluster deployments and read replicas
+- **Comprehensive metrics**: Monitor cache performance with detailed Redis-specific metrics
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8678
+
+## 🐛 Fixes
+
+### Enable invalidation endpoint when any subgraph has invalidation enabled ([PR #8680](https://github.com/apollographql/router/pull/8680))
+
+Previously, the response cache invalidation endpoint was only enabled when global invalidation was enabled via `response_cache.subgraph.all.invalidation.enabled`. If you enabled invalidation for only specific subgraphs without enabling it globally, the invalidation endpoint wouldn't start, preventing cache invalidation requests from being processed.
+
+The invalidation endpoint now starts if either:
+- Global invalidation is enabled (`response_cache.subgraph.all.invalidation.enabled: true`), OR
+- Any individual subgraph has invalidation enabled
+
+This enables more flexible configuration where you can enable invalidation selectively for specific subgraphs:
+
+```yaml
+response_cache:
+  enabled: true
+  invalidation:
+    listen: 127.0.0.1:4000
+    path: /invalidation
+  subgraph:
+    all:
+      enabled: true
+      # Global invalidation not enabled
+    subgraphs:
+      products:
+        invalidation:
+          enabled: true  # Endpoint now starts
+          shared_key: 
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8680
+
+### Require Redis configuration only when response caching is enabled ([PR #8684](https://github.com/apollographql/router/pull/8684))
+
+Previously, the router attempted to connect to Redis for response caching regardless of whether response caching was enabled or disabled. This caused unnecessary connection attempts and configuration errors even when the feature was explicitly disabled.
+
+The router now ignores Redis configuration if response caching is disabled. If response caching is configured to be _enabled_, Redis configuration is required, and missing Redis configuration raises an error on startup:
+
+> Error: you must have a redis configured either for all subgraphs or for subgraph "products"
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8684
+
+### Prevent deleted coprocessor context keys from reappearing in later stages ([PR #8679](https://github.com/apollographql/router/pull/8679))
+
+Coprocessor context keys deleted in a previous stage no longer reappear in later stages.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8679
+
+### Customize response caching behavior at the subgraph level ([PR #8652](https://github.com/apollographql/router/pull/8652))
+
+You can now customize cached responses using Rhai or coprocessors. You can also set a different [`private_id`](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization#configure-private_id) based on subgraph request headers.
+
+**Example Rhai script customizing `private_id`:**
+
+```rhai
+fn subgraph_service(service, subgraph) {
+    service.map_request(|request| {
+        if "private_id" in request.headers {
+            request.context["private_id"] = request.headers["private_id"];
+        }
+    });
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8652
+
+### Prevent glibc mismatch in DIY Docker images ([Issue #8450](https://github.com/apollographql/router/issues/8450))
+
+The DIY Dockerfile now pins the Rust builder to the Bookworm variant (for example, `rust:1.91.1-slim-bookworm`) so the builder and runtime share the same Debian base. This prevents the image from failing at startup with `/lib/x86_64-linux-gnu/libc.so.6: version 'GLIBC_2.39' not found`.
+
+This resolves a regression introduced when the `rust:1.90.0` bump used a generic Rust image without specifying a Debian variant. The upstream Rust image default advanced to a newer variant with glibc 2.39, although the DIY runtime remained on Bookworm, creating a version mismatch.
+
+By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/8629
+
+### Correct response cache fetch error metric ([PR #8711](https://github.com/apollographql/router/pull/8711))
+
+The `apollo.router.operations.response_cache.fetch.error` metric was out of sync with the `apollo.router.cache.redis.errors` metric because errors weren't being returned from the Redis client wrapper. The response caching plugin now increments the error metric as expected.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8711
+
+### Emit `http.client.request.body.size` metric correctly ([PR #8712](https://github.com/apollographql/router/pull/8712))
+
+The histogram for `http.client.request.body.size` was using the `SubgraphRequestHeader` selector, looking for `Content-Length` before it had been set in `on_request`, so `http.client.request.body.size` wasn't recorded. The router now uses the `on_response` handler and stores the body size in the request context extensions.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8712
+
+### Record `http.server.response.body.size` metric correctly ([PR #8697](https://github.com/apollographql/router/pull/8697))
+
+Previously, the `http.server.response.body.size` metric wasn't recorded because the router attempted to read from the `Content-Length` header before it had been set. The router now uses the `size_hint` of the body if it's exact.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8697
+
+### Treat interface objects as entities in response caching ([PR #8582](https://github.com/apollographql/router/pull/8582))
+
+Interface objects can be entities, but response caching wasn't treating them that way. Interface objects are now respected as entities so they can be used as cache keys.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8582
+
+## 🛠 Maintenance
+
+### Warn when Datadog propagator isn't exclusively active ([PR #8677](https://github.com/apollographql/router/pull/8677))
+
+The router now validates propagator configuration and emits a warning log if:
+- The Datadog propagator is enabled and any other propagators are enabled (except baggage)
+- Datadog tracing is enabled and other propagators are enabled (except baggage)
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8677
+
+
+
 # [2.9.0] - 2025-11-27
 
 ## 🚀 Features
