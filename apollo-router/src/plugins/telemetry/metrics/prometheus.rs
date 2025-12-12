@@ -4,7 +4,7 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use opentelemetry_prometheus::ResourceSelector;
-use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::{Aggregation, InstrumentKind};
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
 use prometheus::Encoder;
@@ -96,7 +96,7 @@ impl MetricsConfigurator for Config {
             .map(|v| v.name.clone())
             .collect::<Vec<_>>();
         let aggregation_view = move |i: &Instrument| {
-            if !custom_histogram_view_names.contains(&i.name().to_string()) {
+            if matches!(i.kind(), InstrumentKind::Histogram) && !custom_histogram_view_names.contains(&i.name().to_string()) {
                 Some(
                     Stream::builder()
                         .with_aggregation(Aggregation::ExplicitBucketHistogram {
