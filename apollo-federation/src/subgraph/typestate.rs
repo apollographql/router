@@ -11,7 +11,6 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::Type;
-use either::Either;
 use tracing::trace;
 
 use crate::LinkSpecDefinition;
@@ -392,40 +391,64 @@ impl Subgraph<Expanded> {
     }
 
     /// Normalizes root types if necessary.
-    /// - Returns either `Subgraph<Expanded>` (if unchanged) or `Subgraph<Upgraded>` (if changed).
-    pub fn normalize_root_types(
-        self,
-    ) -> Result<Either<Subgraph<Expanded>, Subgraph<Upgraded>>, SubgraphError> {
-        // Convert `ValidFederationSchema` to `FederationSchema`, so we can call
-        // `normalize_root_types`.
-        let mut schema: FederationSchema = self.state.schema.into();
-        let mut metadata = self.state.metadata;
-        let changed = normalize_root_types_in_subgraph_schema(&mut schema, &mut metadata)
-            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
-        if changed {
-            Ok(Either::Right(Subgraph {
-                name: self.name,
-                url: self.url,
-                state: Upgraded {
-                    schema,
-                    metadata,
-                    orphan_extension_types: self.state.orphan_extension_types,
-                },
-            }))
-        } else {
-            Ok(Either::Left(Subgraph {
-                name: self.name.clone(),
-                url: self.url,
-                state: Expanded {
-                    // Since schema was unchanged, it should still be valid.
-                    schema: schema
-                        .assume_valid()
-                        .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?,
-                    metadata,
-                    orphan_extension_types: self.state.orphan_extension_types,
-                },
-            }))
+    pub fn normalize_root_types(self) -> Result<Self, SubgraphError> {
+        let name = self.name.clone();
+        self.normalize_root_types_inner()
+            .map_err(|e| SubgraphError::new_without_locations(name, e))
+    }
+
+    fn normalize_root_types_inner(self) -> Result<Self, FederationError> {
+        let mut operation_types_to_rename = HashMap::new();
+        for (op_type, op_name) in self
+            .schema()
+            .schema()
+            .schema_definition
+            .iter_root_operations()
+        {
+            let default_name = default_operation_name(&op_type);
+            if op_name.name != default_name {
+                operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
+                if self.schema().try_get_type(default_name.clone()).is_some() {
+                    return Err(SingleFederationError::root_already_used(
+                        op_type,
+                        default_name,
+                        op_name.name.clone(),
+                    )
+                    .into());
+                }
+            }
         }
+        if operation_types_to_rename.is_empty() {
+            return Ok(self);
+        }
+        let Subgraph {
+            name,
+            url,
+            state:
+                Expanded {
+                    schema,
+                    orphan_extension_types,
+                    mut metadata,
+                },
+        } = self;
+        let mut schema: FederationSchema = schema.into();
+        for (current_name, new_name) in &operation_types_to_rename {
+            schema
+                .get_type(current_name.clone())?
+                .rename(&mut schema, new_name.clone())?;
+            // Update metadata to reflect the type rename
+            metadata.update_type_references(current_name, new_name);
+        }
+        let schema = validate_subgraph_schema(schema, &metadata)?;
+        Ok(Subgraph {
+            name,
+            url,
+            state: Expanded {
+                schema,
+                orphan_extension_types,
+                metadata,
+            },
+        })
     }
 
     /// Transitions from Expanded to Upgraded.

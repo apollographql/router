@@ -253,9 +253,7 @@ commands:
                 command: |
                   curl https://mise.jdx.dev/install.sh | sh
                   mise activate bash >> "$BASH_ENV"
-                  # --raw disables the terminal timer/progress bars, so if mise gets stuck,
-                  # it will not continue to produce output preventing CCI from timing it out
-                  mise install --yes --raw
+                  mise install --yes --quiet
       - when:
           condition:
             or:
@@ -271,9 +269,7 @@ commands:
                 name: Install mise
                 command: |
                   scoop install mise@${MISE_VERSION#v}
-                  # --raw disables the terminal timer/progress bars, so if mise gets stuck,
-                  # it will not continue to produce output preventing CCI from timing it out
-                  mise install --yes --raw
+                  mise install --yes --quiet
   fetch_dependencies:
     steps:
       - run:

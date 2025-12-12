@@ -1,4 +1,4 @@
-preview_response_cache:
+response_cache:
   enabled: true
   debug: true
   invalidation:
@@ -7,7 +7,7 @@ preview_response_cache:
   subgraph:
     all:
       redis:
-        urls: [ "redis://test" ]
+        urls: ["redis://test"]
         required_to_start: true
       enabled: true
       invalidation:

@@ -1929,6 +1929,10 @@ expression: "&schema"
       "type": "object"
     },
     "Config7": {
+      "description": "Configuration for the progressive override plugin",
+      "type": "object"
+    },
+    "Config8": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -1974,7 +1978,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config8": {
+    "Config9": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
@@ -2090,10 +2094,6 @@ expression: "&schema"
       "required": [
         "urls"
       ],
-      "type": "object"
-    },
-    "Config9": {
-      "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
     "ConnectorConfiguration": {
@@ -7366,9 +7366,12 @@ expression: "&schema"
           "type": "boolean"
         },
         "datadog": {
-          "default": false,
+          "default": null,
           "description": "Propagate Datadog",
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "jaeger": {
           "default": false,
@@ -8331,6 +8334,20 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "The size hint of the body.\nThis is used as the Content-Length header has not yet been populated\nwhen selectors are evaluated",
+          "properties": {
+            "response_size_hint": {
+              "description": "Extract response size hint in bytes",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "response_size_hint"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Router overhead duration (time not spent in subgraph requests)",
           "properties": {
             "router_overhead": {
@@ -9228,7 +9245,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Config8"
+              "$ref": "#/definitions/Config9"
             },
             {
               "type": "null"
@@ -9812,6 +9829,19 @@ expression: "&schema"
           },
           "required": [
             "subgraph_request_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "subgraph_request_body_size": {
+              "description": "The subgraph request body size.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_request_body_size"
           ],
           "type": "object"
         },
@@ -11917,8 +11947,8 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "^preview_response_cache$": {
-      "$ref": "#/definitions/Config7"
+    "^response_cache$": {
+      "$ref": "#/definitions/Config8"
     }
   },
   "properties": {
@@ -12114,7 +12144,7 @@ expression: "&schema"
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config9"
+      "$ref": "#/definitions/Config7"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"

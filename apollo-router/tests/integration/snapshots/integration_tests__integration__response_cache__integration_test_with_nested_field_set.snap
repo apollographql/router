@@ -21,7 +21,7 @@ expression: response
       "version": "1.0",
       "data": [
         {
-          "key": "version:1.0:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.1:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "rootFields": [
@@ -69,7 +69,7 @@ expression: response
           ]
         },
         {
-          "key": "version:1.0:subgraph:users:type:User:representation:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.1:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "typename": "User",

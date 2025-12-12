@@ -311,7 +311,7 @@ fn field_sharing_applies_shareable_on_type_only_to_fields_within_definition() {
         &result,
         &[(
             "INVALID_FIELD_SHARING",
-            r#"Non-shareable field "A.x" is resolved from multiple subgraphs"#,
+            r#"Non-shareable field "A.x" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in subgraph "subgraphB""#,
         )],
     );
 }
@@ -388,6 +388,122 @@ fn field_sharing_allows_shareable_on_type_definition_and_extensions() {
     // not considered shareable in `subgraphA`. So succeeding here shows both that @shareable is accepted in the 2 places
     // (definition and extension) but also that it's properly taking into account.
     let _supergraph = result.expect("Expected composition to succeed");
+}
+
+#[test]
+fn interface_object_field_requires_shareable() {
+    // Subgraph A: Defines the interface and a concrete type that implements it
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        interface Node @key(fields: "id") {
+            id: ID!
+        }
+        
+        type Entity implements Node @key(fields: "sku") @key(fields: "id") {
+            sku: ID!
+            id: ID!
+            name: String
+        }
+        
+        type Query {
+            entity(id: ID!): Entity
+        }
+        "#,
+    };
+
+    // Subgraph B: Uses @interfaceObject to add a field to the interface
+    // The sku field is NOT a key field on the interface object
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Node @key(fields: "id") @interfaceObject {
+            sku: ID!
+            id: ID!
+        }
+        
+        type RelatedData @key(fields: "node { id }") {
+            node: Node!
+            metadata: String
+        }
+        
+        type Query {
+            related(id: ID!): RelatedData
+        }
+        "#,
+    };
+
+    // Subgraph C: Another implementation that resolves sku
+    let subgraph_c = ServiceDefinition {
+        name: "subgraphC",
+        type_defs: r#"
+        type Entity @key(fields: "sku") {
+            sku: ID!
+            description: String
+        }
+        "#,
+    };
+
+    // This should fail because:
+    // 1. Entity.sku is resolved from subgraphA and subgraphC
+    // 2. Entity.sku is also accessible through the @interfaceObject in subgraphB
+    // 3. The sku field on the interface object is NOT a key field (key is "id")
+    // 4. Therefore, sku should be marked @shareable but it's not
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INVALID_FIELD_SHARING",
+            r#"Non-shareable field "Entity.sku" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA", "subgraphB (through @interfaceObject field "Node.sku")" and "subgraphC" and defined as non-shareable in subgraph "subgraphB (through @interfaceObject field "Node.sku")""#,
+        )],
+    );
+}
+
+#[test]
+fn interface_object_key_field_is_shareable() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        interface Node @key(fields: "id") {
+            id: ID!
+        }
+
+        type Entity implements Node @key(fields: "id") {
+            id: ID!
+            name: String
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Node @key(fields: "id") @interfaceObject {
+            id: ID!
+        }
+
+        type Query {
+            node(id: ID!): Node
+        }
+        "#,
+    };
+
+    let subgraph_c = ServiceDefinition {
+        name: "subgraphC",
+        type_defs: r#"
+        type Entity @key(fields: "id") {
+            id: ID!
+            description: String
+        }
+        "#,
+    };
+
+    // This should succeed because id is a key field on all types
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
+    assert!(
+        result.is_ok(),
+        "Expected composition to succeed when interface object key fields are shared"
+    );
 }
 
 // =============================================================================

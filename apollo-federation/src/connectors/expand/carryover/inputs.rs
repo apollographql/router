@@ -405,6 +405,14 @@ pub(super) fn replace_join_directive_graphs_argument(
         }
     }
 
+    // If the graphs list is empty after processing, don't carry over the directive.
+    // This filters out the buggy @join__directive(graphs: [], name: "link", ...)
+    // that was created by the license enforcement code before our fix.
+    // The correct directive with populated graphs will be created separately.
+    if new_graph_values.is_empty() {
+        return None;
+    }
+
     // Create a new directive with the updated graphs argument
     let mut new_directive = directive.clone();
     if let Some(graphs_arg) = new_directive
