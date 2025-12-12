@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::name;
@@ -10,6 +11,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use either::Either;
+use itertools::Itertools;
 use tracing::instrument;
 
 use super::FederationSchema;
@@ -17,6 +19,7 @@ use super::TypeDefinitionPosition;
 use super::field_set::collect_target_fields_from_field_set;
 use super::position::DirectiveDefinitionPosition;
 use super::position::FieldDefinitionPosition;
+use super::position::HasDescription;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
@@ -124,7 +127,7 @@ impl SchemaUpgrader {
         subgraph: Subgraph<Expanded>,
     ) -> Result<Subgraph<Upgraded>, FederationError> {
         // Run pre-upgrade validations to check for issues that would prevent upgrade
-        let upgrade_metadata = UpgradeMetadata {
+        let mut upgrade_metadata = UpgradeMetadata {
             subgraph_name: subgraph.name.clone(),
             key_directive_name: subgraph.key_directive_name()?.clone(),
             requires_directive_name: subgraph.requires_directive_name()?.clone(),
@@ -147,7 +150,7 @@ impl SchemaUpgrader {
         self.remove_external_on_object_types(&mut schema);
 
         // Note that we remove all external on type extensions first, so we don't have to care about it later in @key, @provides and @requires.
-        self.remove_external_on_type_extensions(&upgrade_metadata, &mut schema)?;
+        self.remove_external_on_type_extensions(&mut upgrade_metadata, &mut schema)?;
 
         self.fix_inactive_provides_and_requires(&mut schema)?;
 
@@ -156,7 +159,7 @@ impl SchemaUpgrader {
         self.remove_directives_on_interface(&upgrade_metadata, &mut schema)?;
 
         // Note that this rule rely on being after `remove_directives_on_interface` in practice (in that it doesn't check interfaces).
-        self.remove_provides_on_non_composite(&mut schema)?;
+        self.remove_provides_on_non_composite(&subgraph, &mut schema)?;
 
         // Note that this should come _after_ all the other changes that may remove/update federation directives, since those may create unused
         // externals. Which is why this is toward  the end.
@@ -211,13 +214,26 @@ impl SchemaUpgrader {
         //            the schema and valid.
 
         // Fed1 links and definitions are removed here, so we can add fed2 links below.
-        self.remove_fed1_links_and_definitions(&mut schema)?;
+        // Save descriptions from federation directive definitions before removal.
+        let saved_directives = self.remove_fed1_links_and_definitions(&mut schema)?;
 
         // Add link spec & federation 2 spec.
         let inner_schema = schema_as_fed2_subgraph(schema, false)?;
 
         // re-expand all federation directive definitions
-        expand_schema(inner_schema)
+        let mut schema = expand_schema(inner_schema)?;
+
+        // Restore descriptions on federation directives from the original Fed1 definitions.
+        for (directive_name, directive_def) in saved_directives {
+            let pos = DirectiveDefinitionPosition {
+                directive_name: directive_name.clone(),
+            };
+            if pos.try_get(schema.schema()).is_some() {
+                pos.set_description(&mut schema, directive_def.description.clone())?;
+            }
+        }
+
+        Ok(schema)
     }
 
     // integrates checkForExtensionWithNoBase from the JS code
@@ -335,7 +351,7 @@ impl SchemaUpgrader {
     fn remove_fed1_links_and_definitions(
         &self,
         schema: &mut FederationSchema,
-    ) -> Result<(), FederationError> {
+    ) -> Result<HashMap<Name, Node<DirectiveDefinition>>, FederationError> {
         let Some(metadata) = schema.metadata() else {
             bail!("Schema must have metadata to upgrade");
         };
@@ -356,14 +372,23 @@ impl SchemaUpgrader {
             name!("tag"),
         ];
 
+        // Save federation directives before removing them
+        let mut saved_directives: HashMap<Name, Node<DirectiveDefinition>> = HashMap::default();
+
         let definitions: Vec<DirectiveDefinitionPosition> =
             schema.get_directive_definitions().collect();
         for definition in &definitions {
             if directives_to_remove.contains(&definition.directive_name) {
-                schema
+                // Save the directive before removing it
+                if let Some(directive_def) = schema
                     .schema
                     .directive_definitions
-                    .shift_remove(&definition.directive_name);
+                    .shift_remove(&definition.directive_name)
+                    && directive_def.description.is_some()
+                {
+                    saved_directives
+                        .insert(definition.directive_name.clone(), directive_def.clone());
+                }
                 schema
                     .referencers
                     .directives
@@ -403,7 +428,7 @@ impl SchemaUpgrader {
         {
             union_obj.remove(schema)?;
         }
-        Ok(())
+        Ok(saved_directives)
     }
 
     fn remove_external_on_interface(&self, schema: &mut FederationSchema) {
@@ -468,7 +493,7 @@ impl SchemaUpgrader {
 
     fn remove_external_on_type_extensions(
         &self,
-        upgrade_metadata: &UpgradeMetadata,
+        upgrade_metadata: &mut UpgradeMetadata,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let Some(metadata) = &schema.subgraph_metadata else {
@@ -568,7 +593,9 @@ impl SchemaUpgrader {
 
         for (pos, directive) in &to_remove {
             pos.remove_directive(schema, directive);
+            upgrade_metadata.metadata.remove_external_field(pos);
         }
+
         Ok(())
     }
 
@@ -685,32 +712,33 @@ impl SchemaUpgrader {
 
     fn remove_provides_on_non_composite(
         &self,
+        subgraph: &Subgraph<Expanded>,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        let Some(metadata) = &schema.subgraph_metadata else {
+        let Some(provides_directive) = subgraph.provides_directive_name()? else {
             return Ok(());
         };
-
-        let provides_directive = metadata
-            .federation_spec_definition()
-            .provides_directive_definition(schema)?;
-
-        #[allow(clippy::iter_overeager_cloned)] // TODO: remove this
-        let references_to_remove: Vec<_> = schema
+        let Some(targets) = subgraph
+            .schema()
             .referencers()
-            .get_directive(provides_directive.name.as_str())?
-            .object_fields
-            .iter()
-            .cloned()
-            .filter(|ref_field| {
-                schema
-                    .get_type(ref_field.type_name.clone())
-                    .map(|t| !t.is_composite_type())
-                    .unwrap_or(false)
-            })
-            .collect();
-        for reference in &references_to_remove {
-            reference.remove(schema)?;
+            .directives
+            .get(&provides_directive)
+        else {
+            return Ok(());
+        };
+        for obj_field_pos in targets.object_fields.iter() {
+            let field = obj_field_pos.make_mut(&mut schema.schema)?;
+            let return_type = field.ty.inner_named_type();
+            if subgraph
+                .schema()
+                .try_get_type(return_type.clone())
+                .is_some_and(|t| !t.is_composite_type())
+            {
+                let field = field.make_mut();
+                field
+                    .directives
+                    .retain(|d| d.name != provides_directive.as_str());
+            }
         }
         Ok(())
     }
@@ -1018,37 +1046,23 @@ fn inner_upgrade_subgraphs_if_necessary(
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
+    let mut errors: Vec<CompositionError> = vec![];
+    let subgraphs = subgraphs
+        .into_iter()
+        .filter_map(|sg| match sg.normalize_root_types() {
+            Ok(s) => Some(s),
+            Err(e) => {
+                errors.extend(e.to_composition_errors());
+                None
+            }
+        })
+        .collect_vec();
+
     // Upgrade subgraphs (if necessary)
     let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
 
-    let mut errors: Vec<CompositionError> = vec![];
-
-    // Normalize root types (if necessary)
-    let normalized: Vec<_> = upgraded
-        .into_iter()
-        .filter_map(|subgraph| match subgraph {
-            Either::Left(s) => match s.normalize_root_types() {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    errors.extend(e.to_composition_errors());
-                    None
-                }
-            },
-            Either::Right(mut s) => {
-                match s.normalize_root_types() {
-                    Ok(()) => {}
-                    Err(e) => {
-                        errors.extend(e.to_composition_errors());
-                        return None;
-                    }
-                }
-                Some(Either::Right(s))
-            }
-        })
-        .collect();
-
     // Validate subgraphs (if either upgraded or normalized)
-    let validated: Vec<Subgraph<Validated>> = normalized
+    let validated: Vec<Subgraph<Validated>> = upgraded
         .into_iter()
         .filter_map(|subgraph| match subgraph {
             Either::Left(s) => {
@@ -1094,6 +1108,7 @@ fn is_interface_object_used(subgraph: &Subgraph<Expanded>) -> Result<bool, Feder
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::coord;
     use test_log::test;
 
     use super::*;
@@ -1739,8 +1754,7 @@ mod tests {
     }
 
     #[test]
-    fn ignore_error_for_provides_field_set_on_scalar_field() {
-        // This used to generate a wrong error.
+    fn removes_provides_on_non_composite_fields() {
         let subgraphs = vec![
             (
                 "subgraph1",
@@ -1775,11 +1789,14 @@ mod tests {
                     .expect("expands schema")
             })
             .collect::<Vec<_>>();
-        let errors = upgrade_subgraphs_if_necessary(expanded).expect_err("fails to upgrade schema");
-        assert_eq!(errors.len(), 1);
-        assert_eq!(
-            errors[0].to_string(),
-            r#"[subgraph1] Cannot have both @provides and @external on field "User.id""#
+        let upgraded = upgrade_subgraphs_if_necessary(expanded).expect("failed to upgrade schema");
+        let changed_schema = upgraded[0].schema().schema();
+        let id_field = coord!(User.id)
+            .lookup_field(changed_schema)
+            .expect("field exists");
+        assert!(
+            id_field.directives.get("provides").is_none(),
+            "User.id in subgraph1 should not have @provides"
         );
     }
 
@@ -1912,5 +1929,78 @@ mod tests {
           sdl: String
         }
         "###);
+    }
+
+    #[test]
+    fn removes_external_from_composite_key_fields_in_extension_without_key() {
+        let subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "",
+            r#"
+            type Query {
+                items: [Item!]!
+            }
+
+            type Item @key(fields: "id sku") {
+                id: ID!
+                sku: String!
+                name: String
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let subgraph2 = Subgraph::parse(
+            "subgraph2",
+            "",
+            r#"
+            # Extension without @key - fields should have @external removed
+            # because they're part of the key in subgraph1
+            extend type Item {
+                id: ID! @external
+                sku: String! @external
+                price: Float
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let [_s1, s2]: [Subgraph<_>; 2] =
+            upgrade_subgraphs_if_necessary(vec![subgraph1, subgraph2])
+                .expect("upgrades schema")
+                .try_into()
+                .expect("Expected 2 elements");
+
+        // Verify that subgraph2's Item type was upgraded successfully
+        // and doesn't have @external on the key fields
+        let s2_schema = s2.schema().schema();
+
+        let id_field = coord!(Item.id)
+            .lookup_field(s2_schema)
+            .expect("id field exists");
+        assert!(
+            !id_field.directives.has("external"),
+            "id should not have @external"
+        );
+
+        let sku_field = coord!(Item.sku)
+            .lookup_field(s2_schema)
+            .expect("sku field exists");
+        assert!(
+            !sku_field.directives.has("external"),
+            "sku should not have @external"
+        );
+
+        let price_field = coord!(Item.price)
+            .lookup_field(s2_schema)
+            .expect("price field exists");
+        assert!(
+            !price_field.directives.has("external"),
+            "price should not have @external"
+        );
     }
 }

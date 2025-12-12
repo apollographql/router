@@ -9,12 +9,30 @@ redirectFrom:
 import HelmShowOutput from '../../../../../shared/helm-show-router-output.mdx';
 import CoprocTypicalConfig from '../../../../../shared/coproc-typical-config.mdx';
 
+<Note>
+
+Apollo recommends using the [Apollo GraphOS Operator](/apollo-operator/) for production deployments and when managing multiple routers or complex architectures. The Operator provides declarative Kubernetes resources to manage routers, supergraphs, graph schemas, and subgraphs, making it easier to maintain consistency and automate deployments across your infrastructure.
+
+<br/><br/>
+
+Use the Operator when you need:
+- Production-grade deployments with declarative configuration management
+- Simplified management of multiple routers, supergraphs, and subgraphs
+- Support for complex architectures including single-cluster, multi-cluster, and hybrid configurations
+- Integration with existing CI/CD workflows through deploy-only patterns
+
+For more details, see the [Operator workflow patterns](/apollo-operator/workflows/).
+
+</Note>
+
+<ElasticNotice />
+
+This guide uses Helm charts to deploy a self-hosted router in Kubernetes. Using Helm is suitable for quick deployments, testing, or when you prefer direct Helm chart management.
+
 This guide shows how to:
 
 * Get the router Helm chart from the Apollo container repository.
 * Deploy a router with a basic Helm chart.
-
-<ElasticNotice />
 
 ## Prerequisites
 
@@ -124,12 +142,3 @@ For example, this command deploys with a `common_values.yaml` file applied first
 ```bash
 helm install <name_for_install> --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml  --values common_values.yaml --values prod_values.yaml
 ```
-
-## Consider using the Apollo GraphOS Operator
-
-The [Apollo GraphOS Operator](/apollo-operator/), which is in Preview, offers an alternative method to deploy the router and manage your schema and subgraphs. The Operator provides declarative Kubernetes resources for managing routers, supergraphs, graph schemas, and subgraphs. It can simplify complex multi-service architectures.
-
-The Operator offers different [workflow patterns](/apollo-operator/workflows/) depending on your infrastructure:
-- Single-cluster setups for simpler deployments
-- Multi-cluster and hybrid configurations for distributed services
-- Deploy-only patterns for existing CI/CD workflows

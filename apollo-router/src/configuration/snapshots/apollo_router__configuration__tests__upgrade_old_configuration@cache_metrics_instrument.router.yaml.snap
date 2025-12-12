@@ -1,0 +1,16 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+telemetry:
+  instrumentation:
+    instruments:
+      cache:
+        apollo.router.response.cache:
+          attributes:
+            graphql.type.name: true
+            subgraph.name:
+              subgraph_name: true
+            supergraph.operation.name:
+              supergraph_operation_name: string

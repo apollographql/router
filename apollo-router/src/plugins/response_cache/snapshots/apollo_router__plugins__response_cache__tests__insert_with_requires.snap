@@ -5,7 +5,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.0:subgraph:inventory:type:Product:representation:f5c848a693c089b1cf00731ef71f5f64962783185a4a7249022a3085a0dec979:hash:e17604a6faec59ed79157e1fadee7d2a3fed4b1dc871da2be114ffafdcdec02c:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.1:subgraph:inventory:type:Product:representation:fad83d6ff957f12a7829ec7f25a2160d4bd7530abbe47937f19fbed8996d10d9:hash:e17604a6faec59ed79157e1fadee7d2a3fed4b1dc871da2be114ffafdcdec02c:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "product",
       "product-1"
@@ -45,7 +45,7 @@ expression: cache_keys
     "warnings": []
   },
   {
-    "key": "version:1.0:subgraph:products:type:Query:hash:950d73004047e5e88793cb22c0c1d0dedc48244c0a1e0c0b41e2078584b4cb65:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.1:subgraph:products:type:Query:hash:950d73004047e5e88793cb22c0c1d0dedc48244c0a1e0c0b41e2078584b4cb65:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "topProducts",
       "topProducts-5"

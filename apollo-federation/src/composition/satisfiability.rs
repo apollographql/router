@@ -49,9 +49,10 @@ fn validate_satisfiability_inner(
     let supergraph_schema = supergraph.schema();
     let api_schema = api_schema::to_api_schema(supergraph_schema.clone(), Default::default())?;
 
-    trace!("Building query graphs");
+    trace!("Building API query graph");
     let api_schema_query_graph =
         build_supergraph_api_query_graph(supergraph_schema.clone(), api_schema.clone())?;
+    trace!("Building federated query graph");
     let federated_query_graph = build_federated_query_graph(
         supergraph_schema.clone(),
         api_schema.clone(),

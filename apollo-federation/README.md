@@ -25,7 +25,7 @@ Any version may have breaking API changes, as this API is expected to only be u
 Instead, the version number matches exactly that of the `apollo-router` crate version using it.
 
 This version number is **not** that of the Apollo Federation specification being implemented.
-See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
+See the [Apollo Federation Changelog](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/versions)
 for which Federation versions are supported by which Router versions.
 
 ## Contributing

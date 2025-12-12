@@ -16,6 +16,7 @@ use http::header;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::response::Parts;
+use http_body::Body;
 use hyper_rustls::ConfigBuilderExt;
 use itertools::Itertools;
 use mediatype::MediaType;
@@ -62,6 +63,7 @@ use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventResponse;
+use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -893,6 +895,15 @@ pub(crate) async fn call_single_http(
             attrs,
             &format!("Request to subgraph {service_name:?}"),
         );
+    }
+
+    // By this point, the selectors for on_request have already run, so we store
+    // the request body size in the context extensions so that any on_response selectors
+    // can access it.
+    if let Some(body_len) = request.size_hint().exact() {
+        context.extensions().with_lock(|lock| {
+            lock.insert::<SubgraphRequestBodySize>(SubgraphRequestBodySize(body_len));
+        });
     }
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
