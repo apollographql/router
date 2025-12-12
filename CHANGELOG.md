@@ -6,20 +6,6 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Support Redis read replicas ([PR #8405](https://github.com/apollographql/router/pull/8405))
-
-Read-only queries are now sent to replica nodes when using clustered Redis. Previously, all commands were sent to the primary nodes.
-
-This change applies to all Redis caches, including the query plan cache and the response cache.
-
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8405
-
-### Enable HTTP/2 header size limits for TCP and UDS ([PR #8673](https://github.com/apollographql/router/pull/8673))
-
-The router's HTTP/2 header size limit configuration option now applies to requests using TCP and UDS (Unix domain sockets). Previously, this setting only worked for TLS connections.
-
-By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8673
-
 ### Response caching is now Generally Available 🎉 ([PR #8678](https://github.com/apollographql/router/pull/8678))
 
 **Response caching is now Generally Available (GA)** and ready for production use!
@@ -50,6 +36,20 @@ The router caches two kinds of data:
 - **Comprehensive metrics**: Monitor cache performance with detailed Redis-specific metrics
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8678
+
+### Support Redis read replicas ([PR #8405](https://github.com/apollographql/router/pull/8405))
+
+Read-only queries are now sent to replica nodes when using clustered Redis. Previously, all commands were sent to the primary nodes.
+
+This change applies to all Redis caches, including the query plan cache and the response cache.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8405
+
+### Enable HTTP/2 header size limits for TCP and UDS ([PR #8673](https://github.com/apollographql/router/pull/8673))
+
+The router's HTTP/2 header size limit configuration option now applies to requests using TCP and UDS (Unix domain sockets). Previously, this setting only worked for TLS connections.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8673
 
 ## 🐛 Fixes
 
@@ -157,8 +157,6 @@ The router now validates propagator configuration and emits a warning log if:
 - Datadog tracing is enabled and other propagators are enabled (except baggage)
 
 By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8677
-
-
 
 # [2.9.0] - 2025-11-27
 
