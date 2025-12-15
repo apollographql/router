@@ -342,7 +342,7 @@ impl PluginPrivate for TrafficShaping {
                                     .extension_code("REQUEST_RATE_LIMITED")
                                     .build();
                                 Ok(RouterResponse::error_builder()
-                                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                    .status_code(StatusCode::TOO_MANY_REQUESTS)
                                     .error(error)
                                     .context(ctx)
                                     .build()
@@ -416,7 +416,7 @@ impl PluginPrivate for TrafficShaping {
                                         .extension_code("REQUEST_RATE_LIMITED")
                                         .build();
                                     Ok(SubgraphResponse::error_builder()
-                                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                        .status_code(StatusCode::TOO_MANY_REQUESTS)
                                         .subgraph_name(subgraph_name)
                                         .error(error)
                                         .context(ctx)
@@ -1066,7 +1066,7 @@ mod test {
             .await
             .expect("it responded");
 
-        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
+        assert_eq!(StatusCode::TOO_MANY_REQUESTS, response.response.status());
 
         tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -1197,7 +1197,7 @@ mod test {
             .call(RouterRequest::fake_builder().build().unwrap())
             .await
             .unwrap();
-        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
+        assert_eq!(StatusCode::TOO_MANY_REQUESTS, response.response.status());
         let j: serde_json::Value = serde_json::from_slice(
             &router::body::into_bytes(response.response)
                 .await
