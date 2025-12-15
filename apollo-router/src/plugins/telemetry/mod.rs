@@ -152,6 +152,7 @@ pub(crate) mod dynamic_attribute;
 mod endpoint;
 mod error_counter;
 mod error_handler;
+mod otel_layers;
 mod fmt_layer;
 pub(crate) mod formatters;
 mod logging;
@@ -165,6 +166,7 @@ pub(crate) mod span_ext;
 mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
+
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";

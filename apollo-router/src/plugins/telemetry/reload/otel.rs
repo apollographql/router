@@ -25,6 +25,7 @@
 //! The reload handles enable the activation phase to update telemetry without recreating the
 //! entire subscriber stack, which would require restarting the application.
 
+use std::fmt::Debug;
 use std::io::IsTerminal;
 
 use anyhow::anyhow;
@@ -49,13 +50,13 @@ use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
-use crate::plugins::telemetry::error_handler::OtelErrorLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
 use crate::plugins::telemetry::otel::PreSampledTracer;
+use crate::plugins::telemetry::otel_layers::{OtelErrorLayer, ReemitOtelEventsLayer};
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
 
@@ -84,19 +85,12 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
         ReloadTracer::new(opentelemetry_sdk::trace::SdkTracerProvider::default().tracer("noop"));
     let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
     // We choose json or plain based on tty.
-    // We filter out raw opentelemetry logs so we can modify and show them in the otel_error_layer
+    // We filter out raw opentelemetry logs inside FmtLayer::on_* functions so we can modify and
+    // show them in otel_layers.rs
     let fmt = if std::io::stdout().is_terminal() {
-        FmtLayer::new(Text::default(), std::io::stdout)
-            .with_filter(filter_fn(|meta| {
-                !meta.target().starts_with("opentelemetry") // TODO this should only filter out error/warn
-            }))
-            .boxed()
+        FmtLayer::new(Text::default(), std::io::stdout).boxed()
     } else {
-        FmtLayer::new(Json::default(), std::io::stdout)
-            .with_filter(filter_fn(|meta| {
-                !meta.target().starts_with("opentelemetry")
-            }))
-            .boxed()
+        FmtLayer::new(Json::default(), std::io::stdout).boxed()
     };
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
@@ -114,6 +108,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
                 .with(OtelErrorLayer::new())
+                .with(ReemitOtelEventsLayer)
                 .with(WarnLegacyMetricsLayer)
                 .with(EnvFilter::try_new(log_level)?)
                 .try_init()?;

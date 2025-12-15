@@ -72,6 +72,13 @@ struct NoOpLayer;
 
 impl Layer<LayeredTracer> for NoOpLayer {}
 
+fn is_otel_internal_target(target: &str) -> bool {
+    // These are handled by `otel_layers.rs`.
+    // We can't follow the preferred path of using with_filter() due to a reload bug in `tracing`
+    // https://github.com/tokio-rs/tracing/issues/1629
+    target.starts_with("opentelemetry")
+}
+
 pub(crate) struct FmtLayer<T, S, W> {
     fmt_event: T,
     excluded_attributes: HashSet<&'static str>,
@@ -107,6 +114,9 @@ where
         id: &tracing_core::span::Id,
         ctx: Context<'_, S>,
     ) {
+        if is_otel_internal_target(attrs.metadata().target()) {
+            return;
+        }
         if let Some(span) = ctx.span(id) {
             let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
             // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
@@ -132,6 +142,9 @@ where
 
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
         if let Some(span) = ctx.span(id) {
+            if is_otel_internal_target(span.metadata().target()) {
+                return;
+            }
             let mut extensions = span.extensions_mut();
             if let Some(fields) = extensions.get_mut::<LogAttributes>() {
                 let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
@@ -148,6 +161,9 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+        if is_otel_internal_target(event.metadata().target()) {
+            return;
+        }
         let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
         event.record(&mut visitor);
         if visitor.omit_from_logs {
