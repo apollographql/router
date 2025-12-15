@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use bytesize::ByteSize;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -19,6 +20,9 @@ pub(crate) struct CooperativeCancellation {
     #[schemars(with = "Option<String>")]
     /// Enable timeout for query planning.
     timeout: Option<Duration>,
+    /// Enable memory limit for query planning.
+    #[schemars(with = "Option<String>", default)]
+    memory_limit: Option<ByteSize>,
 }
 
 impl Default for CooperativeCancellation {
@@ -27,6 +31,7 @@ impl Default for CooperativeCancellation {
             enabled: true,
             mode: Mode::Measure,
             timeout: None,
+            memory_limit: None,
         }
     }
 }
@@ -37,6 +42,11 @@ impl CooperativeCancellation {
         self.timeout
     }
 
+    /// Returns the memory limit, if configured.
+    pub(crate) fn memory_limit(&self) -> Option<ByteSize> {
+        self.memory_limit
+    }
+
     #[cfg(test)]
     /// Create a new `CooperativeCancellation` config in enforcement mode.
     pub(crate) fn enabled() -> Self {
@@ -44,6 +54,7 @@ impl CooperativeCancellation {
             enabled: true,
             mode: Mode::Enforce,
             timeout: None,
+            memory_limit: None,
         }
     }
 
@@ -69,6 +80,7 @@ impl CooperativeCancellation {
             enabled: true,
             mode: Mode::Enforce,
             timeout: Some(timeout),
+            memory_limit: None,
         }
     }
 
@@ -79,6 +91,29 @@ impl CooperativeCancellation {
             enabled: true,
             mode: Mode::Measure,
             timeout: Some(timeout),
+            memory_limit: None,
+        }
+    }
+
+    #[cfg(test)]
+    /// Create a new `CooperativeCancellation` config in enforce mode with a memory limit.
+    pub(crate) fn enforce_with_memory_limit(memory_limit: ByteSize) -> Self {
+        Self {
+            enabled: true,
+            mode: Mode::Enforce,
+            timeout: None,
+            memory_limit: Some(memory_limit),
+        }
+    }
+
+    #[cfg(test)]
+    /// Create a new `CooperativeCancellation` config in measure mode with a memory limit.
+    pub(crate) fn measure_with_memory_limit(memory_limit: ByteSize) -> Self {
+        Self {
+            enabled: true,
+            mode: Mode::Measure,
+            timeout: None,
+            memory_limit: Some(memory_limit),
         }
     }
 }

@@ -8,6 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicUsize;
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 use std::sync::atomic::Ordering;
@@ -16,6 +17,17 @@ use std::task::Poll;
 
 #[cfg(feature = "dhat-heap")]
 use parking_lot::Mutex;
+
+pub(crate) struct AllocationLimit {
+    bytes: usize,
+    on_exceeded: Box<dyn Fn(usize) + Send + Sync>,
+}
+
+impl std::fmt::Debug for AllocationLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "AllocationLimit {{ bytes: {} }}", self.bytes)
+    }
+}
 
 /// Thread-local allocation statistics that can be shared across threads.
 ///
@@ -36,6 +48,7 @@ pub(crate) struct AllocationStats {
     bytes_deallocated: AtomicUsize,
     bytes_zeroed: AtomicUsize,
     bytes_reallocated: AtomicUsize,
+    allocation_limit: Arc<OnceLock<AllocationLimit>>,
 }
 
 impl AllocationStats {
@@ -48,11 +61,13 @@ impl AllocationStats {
             bytes_deallocated: AtomicUsize::new(0),
             bytes_zeroed: AtomicUsize::new(0),
             bytes_reallocated: AtomicUsize::new(0),
+            allocation_limit: Arc::new(OnceLock::new()),
         }
     }
 
     /// Create a new child allocation stats context that tracks to a parent.
     fn with_parent(name: &'static str, parent: Arc<AllocationStats>) -> Self {
+        let allocation_limit = parent.allocation_limit.clone();
         Self {
             name,
             parent: Some(parent),
@@ -60,6 +75,7 @@ impl AllocationStats {
             bytes_deallocated: AtomicUsize::new(0),
             bytes_zeroed: AtomicUsize::new(0),
             bytes_reallocated: AtomicUsize::new(0),
+            allocation_limit,
         }
     }
 
@@ -172,6 +188,16 @@ impl AllocationStats {
         let zeroed = self.bytes_zeroed();
         let deallocated = self.bytes_deallocated();
         allocated.saturating_add(zeroed).saturating_sub(deallocated)
+    }
+
+    pub(crate) fn set_allocation_limit(
+        &self,
+        bytes: usize,
+        on_exceeded: Box<dyn Fn(usize) + Send + Sync>,
+    ) {
+        let _ = self
+            .allocation_limit
+            .set(AllocationLimit { bytes, on_exceeded });
     }
 }
 
@@ -397,6 +423,12 @@ unsafe impl GlobalAlloc for CustomAllocator {
                 CURRENT_TASK_STATS.with(|cell| {
                     if let Some(stats_ptr) = cell.get() {
                         stats_ptr.as_ref().track_alloc(layout.size());
+                        if let Some(limit) = stats_ptr.as_ref().allocation_limit.get() {
+                            let bytes_allocated = stats_ptr.as_ref().bytes_allocated();
+                            if bytes_allocated > limit.bytes {
+                                (limit.on_exceeded)(bytes_allocated);
+                            }
+                        }
                     }
                 });
             }
