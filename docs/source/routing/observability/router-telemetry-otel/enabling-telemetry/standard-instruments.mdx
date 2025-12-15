@@ -187,18 +187,22 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 ### Graph Artifacts
 
-- `apollo.router.oci.manifest.count` - Number of requests made to get the manifest for a large Graph Artifact blob, attributes:
-  - `url`: The URL that was polled
+- `apollo.router.oci.manifest.count` - Number of requests made to get the manifest for a Graph Artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_manifest`, `head_manifest`)
   - `status`: (`success`, `failure`)
-- `apollo.router.oci.manifest.duration.seconds` - Duration of request to get OCI manifest of larger blob, attributes:
-    - `url`: The URL that was polled
-    - `kind`: (`got_manifest`, `oci_error`, `new`, `unchanged`)
-- `apollo.router.oci.blob.count` - Number of fetches made to get entire blob of a Graph Artifact, attributes:
+- `apollo.router.oci.manifest.duration.seconds` - Duration of request to get the manifest for a Graph Artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_manifest`, `head_manifest`)
   - `status`: (`success`, `failure`)
-  - `url`: The URL that was polled
-- `apollo.router.oci.manifest.blob.seconds` - Duration of requests to get entire Graph Artifact blob, attributes:
-  - `url`: The URL that was polled
-  - `kind`: (`oci_error`, `new`)
+- `apollo.router.oci.blob.count` - Number of fetches made to get the blob containing the supergraph from a Graph Artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_blob`)
+  - `status`: (`success`, `failure`)
+- `apollo.router.oci.blob.duration.seconds` - Duration of request to get the blob containing the supergraph from a Graph Artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_blob`)
+  - `status`: (`success`, `failure`)
 
 <Note>
 

@@ -206,7 +206,33 @@ async fn fetch_oci_manifest(
     reference: &Reference,
     oci_config: Option<&OciConfig>,
 ) -> Result<(oci_client::manifest::OciImageManifest, String), OciError> {
-    match client.pull_image_manifest(reference, auth).await {
+    let before_request = Instant::now();
+    let registry = reference.registry().to_string();
+
+    let result = client.pull_image_manifest(reference, auth).await;
+    let status = if result.is_ok() { "success" } else { "failure" };
+    let duration = before_request.elapsed().as_secs_f64();
+
+    u64_counter_with_unit!(
+        "apollo.router.oci.manifest.count",
+        "Number of requests to get Graph Artifact manifest",
+        "{count}",
+        1u64,
+        registry = registry.clone(),
+        kind = "get_manifest",
+        status = status
+    );
+    f64_histogram_with_unit!(
+        "apollo.router.oci.manifest.duration.seconds",
+        "Duration of request to get Graph Artifact manifest",
+        "s",
+        duration,
+        registry = registry,
+        kind = "get_manifest",
+        status = status
+    );
+
+    match result {
         Ok(result) => Ok(result),
         Err(err) => {
             // Log error with consistent message format when oci_config is provided
@@ -224,10 +250,37 @@ async fn fetch_oci_blob(
     reference: &Reference,
     schema_layer: &oci_client::manifest::OciDescriptor,
 ) -> Result<Vec<u8>, OciError> {
+    let before_request = Instant::now();
+    let registry = reference.registry().to_string();
+
     let mut blob_data = Vec::new();
-    client
+    let result = client
         .pull_blob(reference, schema_layer, &mut blob_data)
-        .await?;
+        .await;
+
+    let status = if result.is_ok() { "success" } else { "failure" };
+    let duration = before_request.elapsed().as_secs_f64();
+
+    u64_counter_with_unit!(
+        "apollo.router.oci.blob.count",
+        "Number of requests to get Graph Artifact blob",
+        "{count}",
+        1u64,
+        registry = registry.clone(),
+        kind = "get_blob",
+        status = status
+    );
+    f64_histogram_with_unit!(
+        "apollo.router.oci.blob.duration.seconds",
+        "Duration of request to get Graph Artifact blob",
+        "s",
+        duration,
+        registry = registry,
+        kind = "get_blob",
+        status = status
+    );
+
+    result?;
     Ok(blob_data)
 }
 
@@ -256,43 +309,33 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
         ..Default::default()
     });
     let before_request = Instant::now();
-    match client.fetch_manifest_digest(&reference, &auth).await {
-        Ok(digest) => {
-            u64_counter_with_unit!(
-                "apollo.router.oci.manifest.count",
-                "Number of requests to get Graph Artifact manifest",
-                "{count}",
-                1u64,
-                url = oci_config.reference.to_string(),
-                status = "success"
-            );
-            f64_histogram_with_unit!(
-                "apollo.router.oci.manifest.duration.seconds",
-                "Duration of request to get Graph Artifact manifest",
-                "s",
-                before_request.elapsed().as_secs_f64(),
-                url = oci_config.reference.to_string(),
-                kind = "got_manifest"
-            );
-            Ok(digest)
-        }
+    let registry = reference.registry().to_string();
+    let result = client.fetch_manifest_digest(&reference, &auth).await;
+    let status = if result.is_ok() { "success" } else { "failure" };
+    let duration = before_request.elapsed().as_secs_f64();
+
+    u64_counter_with_unit!(
+        "apollo.router.oci.manifest.count",
+        "Number of requests to get Graph Artifact manifest",
+        "{count}",
+        1u64,
+        registry = registry.clone(),
+        kind = "head_manifest",
+        status = status
+    );
+    f64_histogram_with_unit!(
+        "apollo.router.oci.manifest.duration.seconds",
+        "Duration of request to get Graph Artifact manifest",
+        "s",
+        duration,
+        registry = registry,
+        kind = "head_manifest",
+        status = status
+    );
+
+    match result {
+        Ok(digest) => Ok(digest),
         Err(err) => {
-            u64_counter_with_unit!(
-                "apollo.router.oci.manifest.count",
-                "Number of requests to get Graph Artifact manifest",
-                "{count}",
-                1u64,
-                status = "failure"
-            );
-            f64_histogram_with_unit!(
-                "apollo.router.oci.manifest.duration.seconds",
-                "Duration of request to get Graph Artifact manifest",
-                "s",
-                before_request.elapsed().as_secs_f64(),
-                url = oci_config.reference.to_string(),
-                kind = "oci_error",
-                error = "error response from OCI"
-            );
             tracing::error!("error fetching manifest digest from oci registry: {}", err);
             Err(err.into())
         }
@@ -319,7 +362,6 @@ pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciE
         1u64
     );
 
-    let before_request = Instant::now();
     match fetch_oci_from_reference(
         &mut Client::new(ClientConfig {
             protocol,
@@ -331,39 +373,8 @@ pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciE
     )
     .await
     {
-        Ok(content) => {
-            u64_counter_with_unit!(
-                "apollo.router.oci.blob.count",
-                "Number of requests to get Graph Artifact blob",
-                "{count}",
-                1u64,
-                status = "success"
-            );
-            f64_histogram_with_unit!(
-                "apollo.router.oci.blob.duration.seconds",
-                "Duration of request to get Graph Artifact blob",
-                "s",
-                before_request.elapsed().as_secs_f64(),
-                url = oci_config.reference.to_string(),
-                kind = "new"
-            );
-            Ok(content)
-        }
+        Ok(content) => Ok(content),
         Err(err) => {
-            u64_counter_with_unit!(
-                "apollo.router.oci.blob.count",
-                "Number of requests to get Graph Artifact blob",
-                "{count}",
-                1u64,
-                status = "failure"
-            );
-            f64_histogram!(
-                "apollo.router.oci.blob.duration.seconds",
-                "Duration of request to get Graph Artifact blob.",
-                before_request.elapsed().as_secs_f64(),
-                url = oci_config.reference.to_string(),
-                kind = "oci_error"
-            );
             tracing::error!("error fetching schema from oci registry: {}", err);
             Err(err)
         }
