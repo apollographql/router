@@ -262,12 +262,12 @@ mod tests {
 
     use super::*;
     use crate::plugins::cache::entity::Storage;
-    use crate::plugins::cache::tests::MockStore;
     use crate::redis;
+    use crate::redis::test::MockStorage;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+        let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
             .await
             .unwrap();
         let storage = Arc::new(Storage {
@@ -313,7 +313,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+        let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
             .await
             .unwrap();
         let storage = Arc::new(Storage {

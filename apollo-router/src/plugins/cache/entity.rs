@@ -1798,14 +1798,14 @@ mod tests {
     use serde_json_bytes::json;
 
     use super::*;
-    use crate::plugins::cache::tests::MockStore;
     use crate::plugins::cache::tests::SCHEMA;
     use crate::plugins::response_cache::plugin::matches_selection_set;
+    use crate::redis::test::MockStorage;
 
     #[tokio::test]
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+        let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
             .await
             .unwrap();
         let map = serde_json::json!({
@@ -1847,7 +1847,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let mut redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+        let mut redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
             .await
             .unwrap();
         let map = serde_json::json!({

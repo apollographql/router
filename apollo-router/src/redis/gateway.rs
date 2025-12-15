@@ -711,7 +711,10 @@ impl Gateway {
 }
 
 // Public API for Redis commands used in testing - function names should be strongly mapped to redis command names.
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 impl Gateway {
     pub(crate) async fn expiretime<K: KeyType>(&self, key: K) -> Result<Option<i64>, Error> {
         let key = self.make_key(key);
@@ -755,6 +758,16 @@ impl Gateway {
         let value = self.client().zscore(key, member).await?;
         Ok(value)
     }
+
+    // see if a sorted set member exists. returns Ok(false) if (a) the sorted set doesn't exist
+    // or (b) the member doesn't exist in the set
+    pub(crate) async fn zexists<K: KeyType, L: KeyType>(
+        &self,
+        key: K,
+        member: L,
+    ) -> Result<bool, Error> {
+        Ok(self.zscore(key, member).await?.is_some())
+    }
 }
 
 // Public API for abstractions on top of redis commands
@@ -770,7 +783,7 @@ impl Gateway {
         let mut deleted = 0;
         let mut scan_result_stream = self.scan(pattern, count);
         while let Some(scan_result) = scan_result_stream.next().await {
-            let mut scan_result: ScanResult = scan_result.map_err(|err| (deleted, err.into()))?;
+            let mut scan_result: ScanResult = scan_result.map_err(|err| (deleted, err))?;
             if let Some(keys) = scan_result.take_results()
                 && !keys.is_empty()
             {
@@ -783,7 +796,7 @@ impl Gateway {
                     .collect();
                 match self.delete_keys(keys).await {
                     Ok(count) => deleted += count,
-                    Err(err) => return Err((deleted, err.into())),
+                    Err(err) => return Err((deleted, err)),
                 }
             }
         }
@@ -792,8 +805,11 @@ impl Gateway {
     }
 }
 
-// Public API for abstractions on top of redis commands
-#[cfg(test)]
+// Public API for abstractions on top of redis commands for testing
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 impl Gateway {
     // TODO: real fn accepts a list of keys and returns the number of those that exist... but that's not
     //  needed at this time
@@ -832,20 +848,6 @@ impl Gateway {
         Ok(keys)
     }
 
-    // see if a sorted set member exists. returns Ok(false) if (a) the sorted set doesn't exist
-    // or (b) the member doesn't exist in the set
-    pub(crate) async fn zexists<K: KeyType, L: KeyType>(
-        &self,
-        key: K,
-        member: L,
-    ) -> Result<bool, Error> {
-        Ok(self.zscore(key, member).await?.is_some())
-    }
-}
-
-#[cfg(test)]
-// Other misc stuff
-impl Gateway {
     fn strip_namespace(&self, key: String) -> String {
         match &self.namespace {
             Some(namespace) => key

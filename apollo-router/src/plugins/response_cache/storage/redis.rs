@@ -311,7 +311,7 @@ impl CacheStorage for Storage {
         }
 
         while let Some(result) = join_set.join_next().await {
-            match super::flatten_storage_error(result).map_err(Into::into) {
+            match super::flatten_storage_error(result) {
                 Ok(()) => {}
                 Err(err) => {
                     tracing::info!("Caught error during cache tag update: {err:?}");
@@ -341,7 +341,7 @@ impl CacheStorage for Storage {
         }
 
         while let Some(result) = join_set.join_next().await {
-            match super::flatten_storage_error(result).map_err(Into::into) {
+            match super::flatten_storage_error(result) {
                 Ok(()) => {}
                 Err(err) => {
                     tracing::info!("Caught error during document insert: {err:?}");

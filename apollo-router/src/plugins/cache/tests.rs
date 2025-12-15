@@ -2,15 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::Schema;
-use bytes::Bytes;
-use fred::error::ErrorKind as RedisErrorKind;
-use fred::mocks::MockCommand;
-use fred::mocks::Mocks;
-use fred::prelude::Error as RedisError;
-use fred::prelude::Value as RedisValue;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
-use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use tower::Service;
 use tower::ServiceExt;
@@ -27,133 +20,13 @@ use crate::plugins::cache::entity::CacheKeysContext;
 use crate::plugins::cache::entity::Subgraph;
 use crate::plugins::cache::entity::hash_representation;
 use crate::redis;
+use crate::redis::test::MockStorage;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
 pub(super) const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph.graphql");
 const SCHEMA_NESTED_KEYS: &str = include_str!("../../testdata/supergraph_nested_fields.graphql");
-#[derive(Debug)]
-pub(crate) struct MockStore {
-    map: Arc<Mutex<HashMap<Bytes, Bytes>>>,
-}
-
-impl MockStore {
-    pub(crate) fn new() -> MockStore {
-        MockStore {
-            map: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-}
-
-impl Mocks for MockStore {
-    fn process_command(&self, command: MockCommand) -> Result<RedisValue, RedisError> {
-        println!("mock received redis command: {command:?}");
-
-        match &*command.cmd {
-            "GET" => {
-                if let Some(RedisValue::Bytes(b)) = command.args.first()
-                    && let Some(bytes) = self.map.lock().get(b)
-                {
-                    println!("-> returning {:?}", std::str::from_utf8(bytes));
-                    return Ok(RedisValue::Bytes(bytes.clone()));
-                }
-            }
-            "MGET" => {
-                let mut result: Vec<RedisValue> = Vec::new();
-
-                let mut args_it = command.args.iter();
-                while let Some(RedisValue::Bytes(key)) = args_it.next() {
-                    if let Some(bytes) = self.map.lock().get(key) {
-                        result.push(RedisValue::Bytes(bytes.clone()));
-                    } else {
-                        result.push(RedisValue::Null);
-                    }
-                }
-                return Ok(RedisValue::Array(result));
-            }
-            "SET" => {
-                if let (Some(RedisValue::Bytes(key)), Some(RedisValue::Bytes(value))) =
-                    (command.args.first(), command.args.get(1))
-                {
-                    self.map.lock().insert(key.clone(), value.clone());
-                    return Ok(RedisValue::Null);
-                }
-            }
-            "MSET" => {
-                let mut args_it = command.args.iter();
-                while let (Some(RedisValue::Bytes(key)), Some(RedisValue::Bytes(value))) =
-                    (args_it.next(), args_it.next())
-                {
-                    self.map.lock().insert(key.clone(), value.clone());
-                }
-                return Ok(RedisValue::Null);
-            }
-            //FIXME: this is not working because fred's mock never sends the response to SCAN to the client
-            /*"SCAN" => {
-                let mut args_it = command.args.iter();
-                if let (
-                    Some(RedisValue::String(cursor)),
-                    Some(RedisValue::String(_match)),
-                    Some(RedisValue::String(pattern)),
-                    Some(RedisValue::String(_count)),
-                    Some(RedisValue::Integer(max_count)),
-                ) = (
-                    args_it.next(),
-                    args_it.next(),
-                    args_it.next(),
-                    args_it.next(),
-                    args_it.next(),
-                ) {
-                    let cursor: usize = cursor.parse().unwrap();
-
-                    if cursor > self.map.lock().len() {
-                        let res = RedisValue::Array(vec![
-                            RedisValue::String(0.to_string().into()),
-                            RedisValue::Array(Vec::new()),
-                        ]);
-                        println!("result: {res:?}");
-
-                        return Ok(res);
-                    }
-
-                    let regex = Regex::new(pattern).unwrap();
-                    let mut count = 0;
-                    let res: Vec<_> = self
-                        .map
-                        .lock()
-                        .keys()
-                        .enumerate()
-                        .skip(cursor)
-                        .map(|(i, key)| {
-                            println!("seen key at index {i}");
-                            count = i + 1;
-                            key
-                        })
-                        .filter(|key| regex.is_match(&*key))
-                        .map(|key| RedisValue::Bytes(key.clone()))
-                        .take(*max_count as usize)
-                        .collect();
-
-                    println!("scan returns cursor {count}, for {} values", res.len());
-                    let res = RedisValue::Array(vec![
-                        RedisValue::String(count.to_string().into()),
-                        RedisValue::Array(res),
-                    ]);
-                    println!("result: {res:?}");
-
-                    return Ok(res);
-                } else {
-                    panic!()
-                }
-            }*/
-            _ => {
-                panic!("unrecoginzed command: {command:?}")
-            }
-        }
-        Err(RedisError::new(RedisErrorKind::NotFound, "mock not found"))
-    }
-}
 
 #[tokio::test]
 async fn insert() {
@@ -187,7 +60,7 @@ async fn insert() {
         },
     });
 
-    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
         .await
         .unwrap();
     let map = [
@@ -330,7 +203,7 @@ async fn insert_with_requires() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
         .await
         .unwrap();
     let map = [
@@ -462,7 +335,7 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
         .await
         .unwrap();
     let map = [
@@ -605,7 +478,7 @@ async fn no_cache_control() {
         ).build())
     ].into_iter().collect());
 
-    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
         .await
         .unwrap();
     let entity_cache =
@@ -699,7 +572,7 @@ async fn private() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("private")).build())
     ].into_iter().collect());
 
-    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
         .await
         .unwrap();
     let map = [
@@ -857,7 +730,7 @@ async fn no_data() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
         .await
         .unwrap();
     let map = [
@@ -1046,7 +919,7 @@ async fn missing_entities() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStore::new()))
+    let redis_cache = redis::Gateway::from_mocks(Arc::new(MockStorage::new()))
         .await
         .unwrap();
     let map = [

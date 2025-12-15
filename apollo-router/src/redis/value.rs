@@ -118,8 +118,7 @@ impl ValueType for () {
     }
 
     fn try_into_redis_value(self) -> FredResult<FredValue> {
-        FredValue::try_from(self)
-            .map_err(|_| RedisError::new(RedisErrorKind::Unknown, "infallible"))
+        Ok(FredValue::from(self))
     }
 }
 
@@ -129,8 +128,7 @@ impl ValueType for String {
     }
 
     fn try_into_redis_value(self) -> FredResult<FredValue> {
-        FredValue::try_from(self)
-            .map_err(|_| RedisError::new(RedisErrorKind::Unknown, "infallible"))
+        Ok(FredValue::from(self))
     }
 }
 

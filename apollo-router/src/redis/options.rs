@@ -1,24 +1,22 @@
-use std::time::Duration;
-
 pub(crate) mod expire {
     pub(crate) enum Options {
         // NX -- Set expiry only when the key has no expiry
         MissingOnly,
         // XX -- Set expiry only when the key has an existing expiry
-        ExistingOnly,
+        // ExistingOnly,
         // GT -- Set expiry only when the new expiry is greater than current one
         GreaterThan,
         // LT -- Set expiry only when the new expiry is less than current one
-        LessThan,
+        // LessThan,
     }
 
     impl From<Options> for fred::types::ExpireOptions {
         fn from(value: Options) -> Self {
             match value {
                 Options::MissingOnly => Self::NX,
-                Options::ExistingOnly => Self::XX,
+                // Options::ExistingOnly => Self::XX,
                 Options::GreaterThan => Self::GT,
-                Options::LessThan => Self::LT,
+                // Options::LessThan => Self::LT,
             }
         }
     }
@@ -27,7 +25,7 @@ pub(crate) mod expire {
 #[derive(Clone)]
 pub(crate) enum Expiration {
     // EX
-    After(Duration),
+    // After(Duration),
     // EXAT
     At(i64),
 }
@@ -35,7 +33,7 @@ pub(crate) enum Expiration {
 impl From<Expiration> for fred::types::Expiration {
     fn from(value: Expiration) -> Self {
         match value {
-            Expiration::After(duration) => Self::EX(duration.as_secs() as i64),
+            // Expiration::After(duration) => Self::EX(duration.as_secs() as i64),
             Expiration::At(epoch) => Self::EXAT(epoch),
         }
     }

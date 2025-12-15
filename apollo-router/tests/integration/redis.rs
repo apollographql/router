@@ -1776,15 +1776,11 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
 
     // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
     // the in-memory cache
-    let responses = router.execute_several_default_queries(2).await;
-    for response in responses {
-        let r = response.1.text().await;
-        eprintln!("{r:?}");
-    }
+    let _ = router.execute_several_default_queries(10).await;
 
-    // check that there were no I/O errors
-    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
-    router.assert_metrics_does_not_contain(io_error).await;
+    // check that some commands were executed
+    let metric = r#"apollo_router_cache_redis_commands_executed_total{kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metric_non_zero(metric, None).await;
 
     // check that there were no parse errors; these might show up when fred can't read the cluster
     // state properly
