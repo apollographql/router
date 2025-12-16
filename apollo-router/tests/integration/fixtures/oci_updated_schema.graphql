@@ -26,5 +26,4 @@ enum link__Purpose {
 
 type Query @join__type(graph: ACCOUNTS) {
   hello: String @join__field(graph: ACCOUNTS)
-  count: Int @join__field(graph: ACCOUNTS)
 }
