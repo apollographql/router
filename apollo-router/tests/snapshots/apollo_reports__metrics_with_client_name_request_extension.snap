@@ -16,7 +16,7 @@ traces_per_query:
     trace: []
     stats_with_context:
       - context:
-          client_name: my client
+          client_name: ""
           client_version: ""
           operation_type: query
           operation_subtype: ""
