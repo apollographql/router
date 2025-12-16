@@ -299,8 +299,6 @@ async fn setup_mock_oci_server_with_tag(
             let head_count = head_count.clone();
             let initial_digest = initial_manifest_digest.clone();
             let updated_digest = updated_manifest_digest.clone();
-            let tag_changes = tag_changes;
-            let return_404_after_first = return_404_after_first;
             move |_req: &wiremock::Request| {
                 let count = head_count.fetch_add(1, Ordering::SeqCst);
                 if return_404_after_first && count > 0 {
@@ -330,8 +328,6 @@ async fn setup_mock_oci_server_with_tag(
                 Arc::new(serde_json::to_vec(&initial_oci_manifest).unwrap());
             let updated_manifest_bytes =
                 Arc::new(serde_json::to_vec(&updated_oci_manifest).unwrap());
-            let tag_changes = tag_changes;
-            let return_404_after_first = return_404_after_first;
             move |_req: &wiremock::Request| {
                 let count = get_count.fetch_add(1, Ordering::SeqCst);
                 if return_404_after_first && count > 0 {
