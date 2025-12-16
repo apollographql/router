@@ -473,7 +473,8 @@ mod test {
     use opentelemetry_sdk::error::OTelSdkResult;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+    use opentelemetry_sdk::runtime;
     use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
@@ -654,7 +655,7 @@ mod test {
         PeriodicReader::builder(TestExporter {
             meter_provider: meter_provider.clone(),
             shutdown: shutdown.clone(),
-        })
+        }, runtime::Tokio)
         .with_interval(Duration::from_millis(10))
         .build()
     }

@@ -299,8 +299,8 @@ mod test {
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::PeriodicReader;
-
+    use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+    use opentelemetry_sdk::runtime;
     use crate::metrics::filter::FilterMeterProvider;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -308,7 +308,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered =
@@ -420,7 +420,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered =
@@ -454,7 +454,7 @@ mod test {
         test_public_metrics(
             exporter.clone(),
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         )
         .await;
@@ -465,7 +465,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         global::set_meter_provider(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         test_public_metrics(exporter.clone(), global::meter_provider()).await;
@@ -539,7 +539,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo_realtime(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered =
