@@ -647,42 +647,6 @@ async fn test_metrics_with_library_version_http_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_metrics_with_client_name_request_extension() {
-    let mut clients_map = serde_json_bytes::map::Map::new();
-    clients_map.insert("name", "my client".into());
-    let mut extensions_map = serde_json_bytes::map::Map::new();
-    extensions_map.insert("clientApp", clients_map.into());
-
-    let request = supergraph::Request::fake_builder()
-        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-        .extensions(extensions_map.clone())
-        .build()
-        .unwrap();
-    let req: router::Request = request.try_into().expect("could not convert request");
-    let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, false, false, None).await;
-    assert_report!(report);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_metrics_with_client_version_request_extension() {
-    let mut clients_map = serde_json_bytes::map::Map::new();
-    clients_map.insert("version", "my client version".into());
-    let mut extensions_map = serde_json_bytes::map::Map::new();
-    extensions_map.insert("clientApp", clients_map.into());
-
-    let request = supergraph::Request::fake_builder()
-        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-        .extensions(extensions_map.clone())
-        .build()
-        .unwrap();
-    let req: router::Request = request.try_into().expect("could not convert request");
-    let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, false, false, None).await;
-    assert_report!(report);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_with_library_name_request_extension() {
     let mut clients_map = serde_json_bytes::map::Map::new();
     clients_map.insert("name", "apollo library".into());

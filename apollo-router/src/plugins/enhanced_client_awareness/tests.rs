@@ -55,7 +55,7 @@ async fn given_client_library_metadata_adds_values_to_context() {
     let mut clients_map = serde_json_bytes::map::Map::new();
     clients_map.insert(
         CLIENT_LIBRARY_NAME_KEY,
-        "apollo-general-client-library".into()
+        "apollo-general-client-library".into(),
     );
     clients_map.insert(CLIENT_LIBRARY_VERSION_KEY, "0.1.0".into());
     let mut extensions_map = serde_json_bytes::map::Map::new();
