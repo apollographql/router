@@ -253,7 +253,7 @@ impl Opt {
             .and_then(|s| {
                 s.parse::<u64>()
                     .ok()
-                    .filter(|&val| val >= 1 && val <= 60)
+                    .filter(|&val| (1..=60).contains(&val))
                     .map(Duration::from_secs)
             })
             .unwrap_or(INITIAL_OCI_POLL_INTERVAL);
