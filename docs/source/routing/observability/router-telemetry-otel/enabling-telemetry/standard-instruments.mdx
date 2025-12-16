@@ -28,13 +28,13 @@ You can find the activity of a particular request in its trace spans. Spans have
   - <code>busy_ns</code> - time in which the span is actively executing
   - <code>idle_ns</code> - time in which the span is alive, but not actively executing
 
-These attributes represent how a span spends time (in nanoseconds) over its lifetime and how it contributes to the total request overhead. Your APM provider can likely use this trace data to generate synthetic metrics, which you can then create an approximation view of how particular spans affect the router performance.
+These attributes represent how a span spends time (in nanoseconds) over its lifetime and how it contributes to the total request overhead. Your APM provider can use this trace data to generate synthetic metrics, enabling you to approximate how particular spans affect router performance.
 
 ### Router overhead metric
 
 The `apollo.router.overhead` histogram provides a more direct measurement of router processing overhead. This metric tracks the time the router spends on tasks other than waiting for downstream HTTP requests—including:
 - GraphQL parsing
-- GraphQL Validation
+- GraphQL validation
 - Query planning
 - Response parsing and composition
 - Plugin execution, including Coprocessors and Rhai scripts
@@ -66,22 +66,22 @@ You can attach custom attributes using [router selectors](/router/configuration/
 
 - **CPU saturation**: High overhead values often indicate CPU saturation which may be caused by other parts of the system. When the router's CPU resources are exhausted, processing time, and therefore the overhead, increases significantly. Monitor CPU utilization alongside overhead metrics to identify resource constraints.
 
-- **Coprocessor requests:** Coprocessor request time is currently included in the overhead calculation. In a future release, coprocessor time might be excluded similar to subgraphs and connectors.
+- **Coprocessor requests**: Coprocessor request time is currently included in the overhead calculation. In a future release, coprocessor time might be excluded, similar to subgraphs and connectors.
 
-### Common Questions
+### Common questions
 
-- What should our target be for "optimal" router overhead?
-  - Apollo can provide all of the best practices to monitor your overhead, however, to many other factors determine what your overhead will be for a given supergraph, subgraphs, and its request traffic. Instead we reccomend tracking the delta or percentage change of the metric in your production deployment rather than a fixed number or specific variance.
-- What should our target be for "optimal" router CPU utilization?
-  - Using the various metrics, you can now have a better understanding of what goes into the CPU usage. What is optimal for your team will depend on your expected load, spikes in traffic, time to scale infrastructure, etc. We can not provide generalized recommendations but encourage the community to do their own validations and share their results with the [Community](https://community.apollographql.com/).
+- What should your target be for "optimal" router overhead?
+  - Apollo provides best practices for monitoring overhead, but many other factors determine overhead for a given supergraph, subgraphs, and request traffic. Instead, track the delta or percentage change of the metric in your production deployment rather than a fixed number or specific variance.
+- What should your target be for "optimal" router CPU utilization?
+  - Using the various metrics, you can better understand CPU usage. What is optimal for your team depends on your expected load, spikes in traffic, time to scale infrastructure, and other factors. Apollo cannot provide generalized recommendations but encourages you to perform your own validations and share your results with the [Apollo Community](https://community.apollographql.com/).
 - How is this different from `http.server.request.duration`?
   - The OTel standard instruments include the entire time, as seen by your clients, to process a request which will include the delays caused by subgraph response times.
-- How do we measure the subgraph response time?
-  - See the [docs for measuring instruments](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/instruments#opentelemetry-standard-instruments) for the subgraph service
+- How do I measure subgraph response time not included in the overhead metric?
+  - See the [docs for measuring instruments](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/instruments#opentelemetry-standard-instruments) for the subgraph service.
 - Why is there a difference from Router v1 `apollo_router_processing_time`?
   - Router v2 was refactored in how it processes requests through its internal pipelines. Changes to the underlying architecture are now reflected in the new metric. To track particular parts of the Router request pipeline, see the metrics below.
-- How do I find the overhead for a particular operation type (Query, Mutation, Subscriptions) or operation name?
-  - To filter overhead by specific operation type or even operation id, you will need to look at trace and span attributes and use your APM to create specific metric views for the `busy_ns` and `idle_ns`. Since the `apollo.router.overhead` is a histrogram metric, it is collected and joined together over all operations.
+- How do I find the overhead for a particular operation type (query, mutation, subscription) or operation name?
+  - To filter overhead by specific operation type or operation ID, look at trace and span attributes and use your APM to create specific metric views for `busy_ns` and `idle_ns`. Because `apollo.router.overhead` is a histogram metric, it is aggregated over all operations.
 
 ## GraphQL
 
@@ -106,7 +106,7 @@ All cache metrics listed above have the following attributes:
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
 - `storage`: The backend storage of the cache (`memory`, `redis`)
 
-## Redis Cache
+## Redis cache
 
 When using Redis as a cache backend, additional Redis-specific metrics are available:
 
