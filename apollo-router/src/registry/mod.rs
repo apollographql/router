@@ -262,9 +262,9 @@ async fn fetch_oci_blob(
     let duration = before_request.elapsed().as_secs_f64();
 
     u64_counter_with_unit!(
-        "apollo.router.oci.blob.count",
+        "apollo.router.oci.blob",
         "Number of requests to get Graph Artifact blob",
-        "{count}",
+        "{request}",
         1u64,
         registry = registry.clone(),
         kind = "get_blob",
