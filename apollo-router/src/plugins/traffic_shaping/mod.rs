@@ -262,29 +262,22 @@ impl PluginPrivate for TrafficShaping {
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        // NB: consider each triplet (map_future_with_request_data, load_shed, layer) as a unit of
+        //  behavior
         ServiceBuilder::new()
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
-                move |ctx, future| {
-                    async {
-                        let response: Result<RouterResponse, BoxError> = future.await;
-                        match response {
-                            Ok(ok) => Ok(ok),
-                            Err(err) if err.is::<Elapsed>() => {
-                                // TODO add metrics
-                                let error = graphql::Error::builder()
-                                    .message("Your request has been timed out")
-                                    .extension_code("GATEWAY_TIMEOUT")
-                                    .build();
-                                Ok(RouterResponse::error_builder()
-                                    .status_code(StatusCode::GATEWAY_TIMEOUT)
-                                    .error(error)
-                                    .context(ctx)
-                                    .build()
-                                    .expect("should build overloaded response"))
-                            }
-                            Err(err) => Err(err),
-                        }
+                move |ctx, future| async {
+                    let response: Result<RouterResponse, BoxError> = future.await;
+                    if matches!(response, Err(ref err) if err.is::<Elapsed>()) {
+                        Ok(RouterResponse::error_builder()
+                            .status_code(StatusCode::GATEWAY_TIMEOUT)
+                            .error(gateway_timeout_error())
+                            .context(ctx)
+                            .build()
+                            .expect("should build overloaded response"))
+                    } else {
+                        response
                     }
                 },
             )
@@ -298,26 +291,17 @@ impl PluginPrivate for TrafficShaping {
             ))
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
-                move |ctx, future| {
-                    async {
-                        let response: Result<RouterResponse, BoxError> = future.await;
-                        match response {
-                            Ok(ok) => Ok(ok),
-                            Err(err) if err.is::<Overloaded>() => {
-                                // TODO add metrics
-                                let error = graphql::Error::builder()
-                                    .message("Your request has been concurrency limited")
-                                    .extension_code("REQUEST_CONCURRENCY_LIMITED")
-                                    .build();
-                                Ok(RouterResponse::error_builder()
-                                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                                    .error(error)
-                                    .context(ctx)
-                                    .build()
-                                    .expect("should build overloaded response"))
-                            }
-                            Err(err) => Err(err),
-                        }
+                move |ctx, future| async {
+                    let response: Result<RouterResponse, BoxError> = future.await;
+                    if matches!(response, Err(ref err) if err.is::<Overloaded>()) {
+                        Ok(RouterResponse::error_builder()
+                            .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                            .error(concurrency_limit_error())
+                            .context(ctx)
+                            .build()
+                            .expect("should build overloaded response"))
+                    } else {
+                        response
                     }
                 },
             )
@@ -330,26 +314,17 @@ impl PluginPrivate for TrafficShaping {
             }))
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
-                move |ctx, future| {
-                    async {
-                        let response: Result<RouterResponse, BoxError> = future.await;
-                        match response {
-                            Ok(ok) => Ok(ok),
-                            Err(err) if err.is::<Overloaded>() => {
-                                // TODO add metrics
-                                let error = graphql::Error::builder()
-                                    .message("Your request has been rate limited")
-                                    .extension_code("REQUEST_RATE_LIMITED")
-                                    .build();
-                                Ok(RouterResponse::error_builder()
-                                    .status_code(StatusCode::TOO_MANY_REQUESTS)
-                                    .error(error)
-                                    .context(ctx)
-                                    .build()
-                                    .expect("should build overloaded response"))
-                            }
-                            Err(err) => Err(err),
-                        }
+                move |ctx, future| async {
+                    let response: Result<RouterResponse, BoxError> = future.await;
+                    if matches!(response, Err(ref err) if err.is::<Overloaded>()) {
+                        Ok(RouterResponse::error_builder()
+                            .status_code(StatusCode::TOO_MANY_REQUESTS)
+                            .error(rate_limit_error())
+                            .context(ctx)
+                            .build()
+                            .expect("should build overloaded response"))
+                    } else {
+                        response
                     }
                 },
             )
@@ -395,34 +370,25 @@ impl PluginPrivate for TrafficShaping {
                         async {
                             let response: Result<SubgraphResponse, BoxError> = future.await;
                             match response {
-                                Ok(ok) => Ok(ok),
                                 Err(err) if err.is::<Elapsed>() => {
                                     // TODO add metrics
-                                    let error = graphql::Error::builder()
-                                        .message("Your request has been timed out")
-                                        .extension_code("GATEWAY_TIMEOUT")
-                                        .build();
                                     Ok(SubgraphResponse::error_builder()
                                         .status_code(StatusCode::GATEWAY_TIMEOUT)
                                         .subgraph_name(subgraph_name)
-                                        .error(error)
+                                        .error(gateway_timeout_error())
                                         .context(ctx)
                                         .build())
                                 }
                                 Err(err) if err.is::<Overloaded>() => {
                                     // TODO add metrics
-                                    let error = graphql::Error::builder()
-                                        .message("Your request has been rate limited")
-                                        .extension_code("REQUEST_RATE_LIMITED")
-                                        .build();
                                     Ok(SubgraphResponse::error_builder()
                                         .status_code(StatusCode::TOO_MANY_REQUESTS)
                                         .subgraph_name(subgraph_name)
-                                        .error(error)
+                                        .error(rate_limit_error())
                                         .context(ctx)
                                         .build())
                                 }
-                                Err(err) => Err(err),
+                                _ => response
                             }
                         }
                     },
@@ -564,6 +530,27 @@ impl TrafficShaping {
             })
             .unwrap_or_default()
     }
+}
+
+fn concurrency_limit_error() -> graphql::Error {
+    graphql::Error::builder()
+        .message("Your request has been concurrency limited")
+        .extension_code("REQUEST_CONCURRENCY_LIMITED")
+        .build()
+}
+
+fn gateway_timeout_error() -> graphql::Error {
+    graphql::Error::builder()
+        .message("Your request has been timed out")
+        .extension_code("GATEWAY_TIMEOUT")
+        .build()
+}
+
+fn rate_limit_error() -> graphql::Error {
+    graphql::Error::builder()
+        .message("Your request has been rate limited")
+        .extension_code("REQUEST_RATE_LIMITED")
+        .build()
 }
 
 register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
