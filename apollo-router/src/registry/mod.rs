@@ -223,7 +223,7 @@ async fn fetch_oci_manifest(
         status = status
     );
     f64_histogram_with_unit!(
-        "apollo.router.oci.manifest.duration.seconds",
+        "apollo.router.oci.manifest.duration",
         "Duration of request to get Graph Artifact manifest",
         "s",
         duration,
@@ -271,7 +271,7 @@ async fn fetch_oci_blob(
         status = status
     );
     f64_histogram_with_unit!(
-        "apollo.router.oci.blob.duration.seconds",
+        "apollo.router.oci.blob.duration",
         "Duration of request to get Graph Artifact blob",
         "s",
         duration,
@@ -324,7 +324,7 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
         status = status
     );
     f64_histogram_with_unit!(
-        "apollo.router.oci.manifest.duration.seconds",
+        "apollo.router.oci.manifest.duration",
         "Duration of request to get Graph Artifact manifest",
         "s",
         duration,

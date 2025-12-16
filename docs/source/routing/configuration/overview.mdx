@@ -6,11 +6,13 @@ redirectFrom:
     - /router/configuration/overview 
 ---
 
-Running an Apollo Router instance involves some key steps:
-- Getting the schema of the federated supergraph that your router is running
+Running an Apollo Router instance involves two key steps:
 - Configuring runtime features declaratively in YAML
-- Deploying to different environments (dev, prod, etc.)
-- Providing configuration command-line options, YAML, and environment variables at startup
+- Getting the schema of the federated supergraph that your router is running
+
+## Configuring features in YAML
+
+Configuring the router's features happens primarily via a YAML configuration file. Named `router.yaml` by default, the router's YAML configuration file lets you configure all of a router's runtime features declaratively. 
 
 ## Getting supergraph schema
 
@@ -18,62 +20,50 @@ As the runtime for a federated graph, a router needs to know the schema of the g
 
 You need to configure the router at startup to know where to get its supergraph schema. The router supports several methods for loading a supergraph schema, each suited for different deployment scenarios.
 
-### From OCI Registry (Graph Artifacts)
+### OCI registry (graph artifacts)
 
-[Learn more →](/graphos/routing/configuration/schema-oci)
+[Learn about OCI registry support →](/graphos/routing/configuration/schema-oci)
 
-**Pros:**
 - ✅ Immutable, versioned schema references
 - ✅ Deterministic deployments (same digest = same schema)
 - ✅ Ideal for blue/green deployments
 - ✅ Reliable rollbacks to any previous version
 - ✅ Works with any infrastructure (Kubernetes, Docker, bare metal)
-
-**Cons:**
 - ❌ Requires manual schema version management
-- ❌ Network dependency for Apollo's registry (can use local registry for independence)
+- ❌ Network dependency for registry (can use local registry for independence)
 
 ### Apollo GraphOS Operator
 
-[Learn more →](https://www.apollographql.com/docs/apollo-operator)
+[Learn about Apollo's support for Kubernetes operators →](https://www.apollographql.com/docs/apollo-operator)
 
-**Pros:**
 - ✅ Kubernetes-native schema management
 - ✅ Easily manages complex deployment workflows
 - ✅ Automatic schema updates with configurable strategies
 - ✅ Built-in blue/green deployment support
 - ✅ Integration with Kubernetes monitoring and logging
-
-**Cons:**
 - ❌ Requires Kubernetes infrastructure
 
-### From local file
+### Local file
 
-[Learn more →](/graphos/routing/configuration/schema-file)
+Choose local schema files for local development, testing, or production deployments where you manage schema files directly (often combined with CI/CD pipelines).
 
-**Pros:**
+[Learn about local supergraph files →](/graphos/routing/configuration/schema-file)
+
 - ✅ Flexible for any infrastructure
 - ✅ Full control over schema version
 - ✅ Easy integration with CI/CD pipelines
 - ✅ Support for hot reloading in local development
-
-**Cons:**
 - ❌ Complexity of manual schema file management
 - ❌ Performance impact from hot reloading
 
-**Best for:** Local development, testing, or production deployments where you manage schema files directly (often combined with CI/CD pipelines).
+### GraphOS Uplink (managed federation)
 
-### Using GraphOS Uplink (managed federation)
+Choose managed federation when application teams don't have access to infrastructure.
 
-[Learn more →](/graphos/routing/uplink)
+[Learn about GraphOS Uplink and managed federation →](/graphos/routing/uplink)
 
-**Pros:**
 - ✅ Automatic schema updates
-
-**Cons:**
 - ❌ Performance impact from hot reloading
-- ❌ Network dependency for Apollo's Uplink
+- ❌ Network dependency for GraphOS Uplink
 - ❌ Less control over deployment timing
-
-**Best for:** Production deployments where application teams do not have access to infrastructure
 

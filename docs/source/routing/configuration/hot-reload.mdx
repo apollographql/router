@@ -4,31 +4,31 @@ subtitle: Zero-downtime schema updates
 description: Learn about hot reloading supergraph schemas, including support matrix, performance considerations, and production recommendations.
 ---
 
-Hot reloading enables the router to update its supergraph schema without restarting, providing zero-downtime schema updates. Hot reloading is not available for all schema loading methods, and causes performance degradation during reload.
+Hot reloading enables the router to update its supergraph schema without restarting, providing zero-downtime schema updates. Hot reloading is not available for all schema loading methods and causes performance degradation during reload.
 
 ## Hot reload support matrix
 
 | Schema Source | Hot Reload Support | Notes |
 |---------------|-------------------|-------|
-| **GraphOS Uplink** | ✅ Yes | Automatically polls every 10 seconds for updates |
-| **Local file** | ✅ Yes | Requires `--hot-reload` flag or `APOLLO_ROUTER_HOT_RELOAD=true` |
-| **Remote URLs** | ❌ No | Schema fetched once at startup |
+| GraphOS Uplink | 🟢 Yes | Automatically polls every 10 seconds for updates |
+| Local file | 🟢 Yes | Requires `--hot-reload` flag or `APOLLO_ROUTER_HOT_RELOAD=true` |
+| Remote URLs | ❌ No | Schema fetched once at startup |
 
 ## Performance considerations
 
 When using hot reloading for supergraph schemas, be aware of the following performance considerations:
 
-- **Schema reloading overhead:** Each schema reload requires parsing and validation, which temporarily increases CPU usage.
-- **Request handling:** During reload, new requests might experience slight latency increases while the new schema is being processed.
-- **Memory usage:** The router maintains both the old and new schema briefly during reload, temporarily increasing memory usage.
+- Schema reloading overhead: Each schema reload requires parsing and validation, which temporarily increases CPU usage.
+- Request handling: During reload, new requests might experience slight latency increases while the new schema is being processed.
+- Memory usage: The router maintains both the old and new schema briefly during reload, temporarily increasing memory usage.
 
 ## Production recommendations
 
 For production deployments with high traffic:
 
-- **Monitor during reloads:** If using hot reload, monitor CPU, memory, and latency metrics during schema updates.
-- **Schedule updates:** Plan schema updates during lower-traffic periods when using hot reload.
-- **Consider blue/green deployments:** For production deployments requiring schema updates, use [blue/green deployment strategies](/graphos/routing/configuration/deployment-strategies#blue-green-deployment) with OCI digest references.
+- Monitor during reloads: If using hot reload, monitor CPU, memory, and latency metrics during schema updates.
+- Schedule updates: Plan schema updates during lower-traffic periods when using hot reload.
+- Use blue/green deployments: For production deployments requiring schema updates, use [blue/green deployment strategies](/graphos/routing/configuration/deployment-strategies#blue-green-deployment) with OCI digest references.
 
 For more details on production deployment strategies, see [Deployment Strategies](/graphos/routing/configuration/deployment-strategies).
 

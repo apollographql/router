@@ -1,32 +1,28 @@
 ---
 title: Schema from Local File
-subtitle: Loading supergraph schemas from local files
+subtitle: Load supergraph schemas from local files
 description: Learn how to load supergraph schemas from local files
 ---
 
-# Overview
+## Overview
 
-Loading schemas from local files gives you complete control over which schema version is deployed, however you take on the burden of managing those files yourself.
+Load schemas from local files to give you complete control over which schema version is deployed. However, you must manage those files yourself.
 
-# Configuration
+## Configuration
 
-## Command line
-
-Use the `-s` or `--supergraph` option:
+### Command line
 
 ```bash
 router --supergraph ./supergraph.graphql
 ```
 
-## Environment variable
-
-Set the `APOLLO_ROUTER_SUPERGRAPH_PATH` environment variable:
+### Environment variable
 
 ```bash
 APOLLO_ROUTER_SUPERGRAPH_PATH=./supergraph.graphql router
 ```
 
-### Docker
+#### Docker
 
 Mount the schema file into the container:
 
@@ -44,7 +40,7 @@ COPY supergraph.graphql /app/supergraph.graphql
 CMD ["--supergraph", "/app/supergraph.graphql"]
 ```
 
-### Kubernetes ConfigMap
+#### Kubernetes ConfigMap
 
 Store the schema in a ConfigMap:
 
@@ -67,7 +63,7 @@ data:
     }
 ```
 
-Mount it in your deployment:
+Mount the schema in your deployment:
 
 ```yaml
 apiVersion: apps/v1
@@ -78,31 +74,31 @@ spec:
   template:
     spec:
       containers:
-      - name: router
-        image: ghcr.io/apollographql/router:latest
-        args: ["--supergraph", "/config/supergraph.graphql"]
-        volumeMounts:
-        - name: schema
-          mountPath: /config
+        - name: router
+          image: ghcr.io/apollographql/router:latest
+          args: ["--supergraph", "/config/supergraph.graphql"]
+          volumeMounts:
+          - name: schema
+            mountPath: /config
       volumes:
-      - name: schema
-        configMap:
-          name: supergraph-schema
+        - name: schema
+          configMap:
+            name: supergraph-schema
 ```
 
-# Hot reloading
+## Hot reloading
 
 Enable hot reloading to automatically reload the schema when the file changes.
 
-**Note:** Hot reloading has performance implications and might not be suitable for production environments. See [Hot Reload](/graphos/routing/configuration/hot-reload) for details.
+<Note>Hot reloading has performance implications and might not be suitable for production environments. See [Hot Reload](/graphos/routing/configuration/hot-reload) for details.</Note>
 
-## Command line
+### Command line
 
 ```bash
 router --supergraph ./supergraph.graphql --hot-reload
 ```
 
-## Environment variable
+### Environment variable
 
 ```bash
 APOLLO_ROUTER_SUPERGRAPH_PATH=./supergraph.graphql \
@@ -110,7 +106,7 @@ APOLLO_ROUTER_HOT_RELOAD=true \
 router
 ```
 
-## Development mode
+### Development mode
 
 Development mode automatically enables hot reloading:
 
@@ -119,16 +115,20 @@ router --supergraph ./supergraph.graphql --dev
 ```
 
 
-# Best practices
+## Best practices
 
-1. **Version control**: Store schema files in version control to track changes.
-2. **CI/CD integration**: Download schemas in CI/CD pipelines for reproducible deployments.
-3. **Use hot reload for development only**: Avoid hot reloading in production due to performance impact.
-4. **Validate schemas**: Validate schemas before deploying to catch errors early.
-5. **Use ConfigMaps for Kubernetes**: Store schemas in ConfigMaps for Kubernetes deployments.
+Follow these guidelines to ensure reliability:
+
+- Version control: Store schema files in version control to track changes.
+- CI/CD integration: Download schemas in CI/CD pipelines for reproducible deployments.
+- Use hot reload for development only: Avoid hot reloading in production due to performance impact.
+- Validate schemas: Validate schemas before deploying to catch errors early.
+- Use ConfigMaps for Kubernetes: Store schemas in ConfigMaps for Kubernetes deployments.
 
 
-# Related documentation
+## Related documentation
+
+For more information, see the following resources:
 
 - [Router Configuration Overview](/graphos/routing/configuration/overview) - Overview of all schema loading options
 - [Hot Reload](/graphos/routing/configuration/hot-reload) - Hot reloading details and performance considerations

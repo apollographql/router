@@ -1,21 +1,20 @@
 ---
 title: Schema from Graph Artifacts
-subtitle: Using OCI artifact references
+subtitle: Use OCI artifact references
 description: Learn how to use OCI artifact references to load supergraph schemas
 ---
 
 When you push your schema to GraphOS, Apollo stores an immutable artifact containing your composed supergraph in an OCI-compliant registry. You can reference these artifacts using SHA256 digest references for deterministic deployments.
 
-# Overview
+## Overview
 
 OCI (Open Container Initiative) artifact references provide immutable, versioned schema references that are ideal for production deployments. Each artifact is identified by a SHA256 digest, ensuring that the same reference always points to the exact same schema version.
 
-By default, OCI artifacts are stored in Apollo's registry (`artifact.api.apollographql.com`), which requires network connectivity. However, you can also run your own local OCI registry for complete independence from external services.
+By default, OCI artifacts are stored in Apollo's registry, which requires network connectivity. However, you can also run your own local OCI registry for complete independence from external services.
 
+## Find OCI artifact reference
 
-# Finding OCI artifact references
-
-To get the latest Graph Artifact for a supergraph, it is first important to map the identifiers used to reference the Graph Artifact. (Apollo allows characters for the Graph ID and Variant that are not allowed by the OCI Distribution Spec.) 
+To get the latest graph artifact for a supergraph, first map the graph identifiers to their OCI counterparts. Apollo allows characters in the graph id and variant name that are not allowed by the [OCI Distribution Spec](https://github.com/opencontainers/distribution-spec/blob/main/spec.md), so Apollo removes illegal characters and appends a hash to preserve uniqueness.
 
 Apollo provides a Platform API query to retrieve the mapping:
 
@@ -28,7 +27,7 @@ query GraphArtifactTagLocation($graphId: ID!, $variantName: String!) {
 }
 ```
 
-Or it can be calculated by stripping any non-alphanumeric characters besides dot, underscore and dash and then calculating the sha256 checksum. E.g. for the variant name "current":
+Or calculate it by stripping any non-alphanumeric characters besides dot, underscore and dash and then calculate the sha256 checksum. For example, the variant name "current" maps to:
 
 ```bash
 $ echo -n current | sha256sum | cut -c 1-16
@@ -48,19 +47,19 @@ query GetGraphArtifact($graphId: ID!, $tag: String!) {
 }
 ```
 
-Note the URI; it is a combination of the hashed Graph ID and Variant and can be used to directly launch a router against that supergraph.
+Note the URI; it is a combination of the hashed graph id and variant and can be used to directly launch a router using that supergraph.
 
 
-## Configuration
+### Configuration
 
-### Command line
+#### Command line
 
 ```bash
 router --graph-artifact-reference artifact.api.apollographql.com/my-graph-a50b9d546b298e5a@sha256:14409db3d8a8d74ff9e9a0b5712c0aa8d574bcacc3656e1bc0c55ecf97cd9264
 ```
 
 
-### Environment variables
+#### Environment variables
 
 Set the `APOLLO_GRAPH_ARTIFACT_REFERENCE` environment variable.
 
@@ -70,9 +69,9 @@ router
 ```
 
 
-# Local OCI registry
+## Local OCI registry
 
-For complete independence from external services, run your own local OCI registry. This is useful to:
+For complete independence from external services, run your own local OCI registry to:
 
 - Remove dependence on Apollo for deployments
 - Enhance security and compliance
@@ -80,15 +79,19 @@ For complete independence from external services, run your own local OCI registr
 - Maintain complete control over artifact storage
 
 
-# Best practices
+## Best practices
 
-- **Use digest references for production**: SHA256 digests ensure deterministic deployments.
-- **Automate reference retrieval**: Integrate Platform API queries into your CI/CD pipeline.
-- **Track deployment versions**: Track metrics on the schema changes in each environment.
-- **Use blue/green deployments**: Use immutable references for zero-downtime updates.
-- **Consider a local registry**: Balance your uptime considerations with the complexity of managing Graph Artifacts yourself.
+Follow these guidelines to ensure reliability:
+
+- Use digest references for production: SHA256 digests ensure deterministic deployments.
+- Automate reference retrieval: Integrate API queries into your CI/CD pipeline.
+- Track deployment versions: Track metrics on the schema changes in each environment.
+- Use blue/green deployments: Use immutable references for zero-downtime updates.
+- Consider a local registry: Balance your uptime considerations with the complexity of managing graph artifacts yourself.
 
 ## Related documentation
+
+For more information, see the following resources:
 
 - [Router Configuration Overview](/graphos/routing/configuration/overview) - Overview of all schema loading options
 - [Deployment Strategies](/graphos/routing/configuration/deployment-strategies) - Blue/green deployments using OCI artifacts
