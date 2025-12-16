@@ -372,7 +372,7 @@ impl RedisCacheStorage {
                 };
                 config.unresponsive = UnresponsiveConfig {
                     max_timeout: Some(DEFAULT_INTERNAL_REDIS_TIMEOUT),
-                    interval: Duration::from_secs(3),
+                    interval: Duration::from_secs(2),
                 };
 
                 // PR-8405: must not use lazy connections or else commands will queue rather than being sent
