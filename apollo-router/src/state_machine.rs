@@ -354,13 +354,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             LicenseState::LicensedWarn { limits } => {
                 if report.uses_restricted_features() {
                     tracing::error!(
-                        "License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        "License violation, the router is using features not available for your license:\n\n{}\n\nThe license warning period has started. The Router will stop serving requests after the license expires. See {LICENSE_EXPIRED_URL} for more information.",
                         report
                     );
-                    limits
+                    return Err(ApolloRouterError::LicenseViolation(
+                        report.restricted_features_in_use(),
+                    ));
                 } else {
-                    tracing::error!(
-                        "License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                    tracing::warn!(
+                        "License warning period has started. The Router will stop serving requests after the license expires. In order to continue using these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{:?}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
                         // The report does not contain any features because they are contained within the allowedFeatures claim,
                         // therefore we output all of the allowed features that the user's license enables them to use.
                         license.get_allowed_features()
