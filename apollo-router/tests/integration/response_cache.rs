@@ -103,24 +103,6 @@ fn config_with_subgraph_prometheus() -> Value {
               }
           }
         },
-        "include_subgraph_errors": {
-            "all": true,
-        },
-        "rhai": {
-            "scripts": "tests/integration/fixtures",
-            "main": "test_cache.rhai",
-        },
-        "headers": {
-            "all": {
-                "request": [
-                    {
-                        "propagate": {
-                            "named": "private_id"
-                        }
-                    }
-                ]
-            }
-        },
         "response_cache": {
             "enabled": true,
             "subgraph": {
@@ -132,10 +114,6 @@ fn config_with_subgraph_prometheus() -> Value {
                         "required_to_start": true,
                     },
                     "ttl": "10m",
-                    "invalidation": {
-                        "enabled": true,
-                        "shared_key": INVALIDATION_SHARED_KEY,
-                    },
                     "private_id": "private_id"
                 },
                 "subgraphs": {
@@ -144,11 +122,7 @@ fn config_with_subgraph_prometheus() -> Value {
                         "private_id": "user"
                     }
                 }
-            },
-            "invalidation": {
-                "listen": "127.0.0.1:4000",
-                "path": INVALIDATION_PATH,
-            },
+            }
         },
     })
 }
@@ -363,26 +337,12 @@ async fn dont_duplicate_redis_connections() {
     router.start().await;
     router.assert_started().await;
 
-    let metrics = router
-        .get_metrics_response()
-        .await
-        .expect("failed to fetch metrics")
-        .text()
-        .await
-        .unwrap();
-
-    check_metrics_contains(
-        &metrics,
-        r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 3"#,
-    );
-}
-
-#[track_caller]
-fn check_metrics_contains(metrics: &str, text: &str) {
-    assert!(
-        metrics.contains(text),
-        "'{text}' not detected in metrics\n{metrics}"
-    );
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 3"#,
+            None,
+        )
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

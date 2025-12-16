@@ -310,9 +310,8 @@ impl PluginPrivate for ResponseCache {
             if Self::static_subgraph_enabled(init.config.enabled, &init.config.subgraph, subgraph) {
                 match subgraph_config.redis.clone() {
                     Some(config) => {
-                        // We need to do this because with the SubgraphConfig struct when deserialization happens it automatically clone the config from all in all subgraphs config
-                        // So we shouldn't try to connect to a new redis if the config does just inherit from the all config
-                        // If it's different though it would require a new connection
+                        // We need to do this because the subgraph config automatically clones from the `all` config during deserialization.
+                        // We don't want to create a new connection pool if the subgraph just inherits from the `all` config.
                         if Some(&config) != init.config.subgraph.all.redis.as_ref() {
                             let storage = Arc::new(OnceLock::new());
                             storage_interface
