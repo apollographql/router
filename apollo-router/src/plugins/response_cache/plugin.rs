@@ -310,12 +310,21 @@ impl PluginPrivate for ResponseCache {
             if Self::static_subgraph_enabled(init.config.enabled, &init.config.subgraph, subgraph) {
                 match subgraph_config.redis.clone() {
                     Some(config) => {
-                        let storage = Arc::new(OnceLock::new());
-                        storage_interface
-                            .subgraphs
-                            .insert(subgraph.clone(), storage.clone());
-                        connect_or_spawn_reconnection_task(config, storage, drop_tx.subscribe())
+                        // We need to do this because with the SubgraphConfig struct when deserialization happens it automatically clone the config from all in all subgraphs config
+                        // So we shouldn't try to connect to a new redis if the config does just inherit from the all config
+                        // If it's different though it would require a new connection
+                        if Some(&config) != init.config.subgraph.all.redis.as_ref() {
+                            let storage = Arc::new(OnceLock::new());
+                            storage_interface
+                                .subgraphs
+                                .insert(subgraph.clone(), storage.clone());
+                            connect_or_spawn_reconnection_task(
+                                config,
+                                storage,
+                                drop_tx.subscribe(),
+                            )
                             .await?;
+                        }
                     }
                     None => {
                         if storage_interface.all.is_none() {

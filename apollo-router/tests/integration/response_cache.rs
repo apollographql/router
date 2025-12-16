@@ -25,6 +25,7 @@ use tower::BoxError;
 use tower::Service as _;
 use tower::ServiceExt as _;
 
+use crate::integration::IntegrationTest;
 use crate::integration::common::graph_os_enabled;
 
 const REDIS_URL: &str = "redis://127.0.0.1:6379";
@@ -80,6 +81,69 @@ fn base_config() -> Value {
                     },
                     "private_id": "private_id"
                 },
+            },
+            "invalidation": {
+                "listen": "127.0.0.1:4000",
+                "path": INVALIDATION_PATH,
+            },
+        },
+    })
+}
+
+fn config_with_subgraph_prometheus() -> Value {
+    json!({
+        "telemetry": {
+          "exporters": {
+              "metrics": {
+                  "prometheus": {
+                      "enabled": true,
+                      "listen": "127.0.0.1:9090",
+                      "path": "/metrics"
+                  }
+              }
+          }
+        },
+        "include_subgraph_errors": {
+            "all": true,
+        },
+        "rhai": {
+            "scripts": "tests/integration/fixtures",
+            "main": "test_cache.rhai",
+        },
+        "headers": {
+            "all": {
+                "request": [
+                    {
+                        "propagate": {
+                            "named": "private_id"
+                        }
+                    }
+                ]
+            }
+        },
+        "response_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "pool_size": 3,
+                        "namespace": namespace(),
+                        "required_to_start": true,
+                    },
+                    "ttl": "10m",
+                    "invalidation": {
+                        "enabled": true,
+                        "shared_key": INVALIDATION_SHARED_KEY,
+                    },
+                    "private_id": "private_id"
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": true,
+                        "private_id": "user"
+                    }
+                }
             },
             "invalidation": {
                 "listen": "127.0.0.1:4000",
@@ -283,6 +347,42 @@ where
         .collect();
     let body = response.into_body().collect().await.unwrap().to_bytes();
     (headers, serde_json::from_slice(&body).unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dont_duplicate_redis_connections() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config_with_subgraph_prometheus()).unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+
+    check_metrics_contains(
+        &metrics,
+        r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 3"#,
+    );
+}
+
+#[track_caller]
+fn check_metrics_contains(metrics: &str, text: &str) {
+    assert!(
+        metrics.contains(text),
+        "'{text}' not detected in metrics\n{metrics}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

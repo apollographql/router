@@ -84,7 +84,7 @@ async fn test_metrics_reloading() {
 }
 
 #[track_caller]
-fn check_metrics_contains(metrics: &str, text: &str) {
+pub(crate) fn check_metrics_contains(metrics: &str, text: &str) {
     assert!(
         metrics.contains(text),
         "'{text}' not detected in metrics\n{metrics}"
