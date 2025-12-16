@@ -315,9 +315,9 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
     let duration = before_request.elapsed().as_secs_f64();
 
     u64_counter_with_unit!(
-        "apollo.router.oci.manifest.count",
+        "apollo.router.oci.manifest",
         "Number of requests to get Graph Artifact manifest",
-        "{count}",
+        "{request}",
         1u64,
         registry = registry.clone(),
         kind = "head_manifest",
