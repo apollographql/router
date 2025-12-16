@@ -11,8 +11,8 @@ use crate::plugins::telemetry::CLIENT_LIBRARY_VERSION;
 use crate::services::supergraph;
 
 const CLIENT_LIBRARY_KEY: &str = "clientLibrary";
-const CLIENT_NAME_KEY: &str = "name";
-const CLIENT_VERSION_KEY: &str = "version";
+const CLIENT_LIBRARY_NAME_KEY: &str = "name";
+const CLIENT_LIBRARY_VERSION_KEY: &str = "version";
 
 /// The enhanced client-awareness plugin has no configuration.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -40,7 +40,7 @@ impl Plugin for EnhancedClientAwareness {
                     .get(CLIENT_LIBRARY_KEY)
                 {
                     if let Some(client_library_name) = client_library_metadata
-                        .get(CLIENT_NAME_KEY)
+                        .get(CLIENT_LIBRARY_NAME_KEY)
                         .and_then(|value| value.as_str())
                     {
                         let _ = request
@@ -49,7 +49,7 @@ impl Plugin for EnhancedClientAwareness {
                     };
 
                     if let Some(client_library_version) = client_library_metadata
-                        .get(CLIENT_VERSION_KEY)
+                        .get(CLIENT_LIBRARY_VERSION_KEY)
                         .and_then(|value| value.as_str())
                     {
                         let _ = request

@@ -6,8 +6,8 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::enhanced_client_awareness::CLIENT_LIBRARY_KEY;
-use crate::plugins::enhanced_client_awareness::CLIENT_NAME_KEY;
-use crate::plugins::enhanced_client_awareness::CLIENT_VERSION_KEY;
+use crate::plugins::enhanced_client_awareness::CLIENT_LIBRARY_NAME_KEY;
+use crate::plugins::enhanced_client_awareness::CLIENT_LIBRARY_VERSION_KEY;
 use crate::plugins::enhanced_client_awareness::Config;
 use crate::plugins::telemetry::CLIENT_LIBRARY_NAME;
 use crate::plugins::telemetry::CLIENT_LIBRARY_VERSION;
@@ -53,8 +53,11 @@ async fn given_client_library_metadata_adds_values_to_context() {
 
     // given
     let mut clients_map = serde_json_bytes::map::Map::new();
-    clients_map.insert(CLIENT_NAME_KEY, "apollo-general-client-library".into());
-    clients_map.insert(CLIENT_VERSION_KEY, "0.1.0".into());
+    clients_map.insert(
+        CLIENT_LIBRARY_NAME_KEY,
+        "apollo-general-client-library".into()
+    );
+    clients_map.insert(CLIENT_LIBRARY_VERSION_KEY, "0.1.0".into());
     let mut extensions_map = serde_json_bytes::map::Map::new();
     extensions_map.insert(CLIENT_LIBRARY_KEY, clients_map.into());
 
