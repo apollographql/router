@@ -52,7 +52,7 @@ pub(crate) static APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE: Mutex<Option<String>> 
 pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(false);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
-const INITIAL_OCI_POLL_INTERVAL: Duration = Duration::from_secs(10);
+const INITIAL_OCI_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Subcommands
 #[derive(Subcommand, Debug)]
@@ -246,6 +246,18 @@ impl Opt {
             .clone()
             .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
         let (validated_reference, _) = validate_oci_reference(&graph_artifact_reference)?;
+        
+        // Allow test-only override of poll interval via TEST_APOLLO_OCI_POLL_INTERVAL environment variable
+        let poll_interval = std::env::var("TEST_APOLLO_OCI_POLL_INTERVAL")
+            .ok()
+            .and_then(|s| {
+                s.parse::<u64>()
+                    .ok()
+                    .filter(|&val| val >= 1 && val <= 60)
+                    .map(Duration::from_secs)
+            })
+            .unwrap_or(INITIAL_OCI_POLL_INTERVAL);
+        
         Ok(OciConfig {
             apollo_key: self
                 .apollo_key
@@ -253,7 +265,7 @@ impl Opt {
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
             reference: validated_reference,
             hot_reload: self.hot_reload,
-            poll_interval: INITIAL_OCI_POLL_INTERVAL,
+            poll_interval,
         })
     }
 
