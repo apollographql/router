@@ -112,7 +112,7 @@ If set, a router runs in dev mode to help with local development.
 </td>
 <td>
 
-When you set this option, the router watches for changes to its configuration file and any supergraph file passed with `--supergraph`. It reloads them automatically without downtime. This setting only affects local files provided to the router. GraphOS automatically reloads supergraphs and configurations provided via Launches (delivered via Uplink), regardless of this setting.
+When you set this option, the router watches for changes to its configuration file and any supergraph file passed with `--supergraph`. It reloads them automatically without downtime. This setting only affects local files provided to the router. The router automatically reloads supergraphs and configurations from GraphOS (provided via Launches and delivered via Uplink), regardless of this setting.
 
 For details on hot reload support for different schema sources and performance considerations, see [Hot Reload](/graphos/routing/configuration/hot-reload).
 
