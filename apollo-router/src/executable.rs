@@ -246,7 +246,7 @@ impl Opt {
             .clone()
             .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
         let (validated_reference, _) = validate_oci_reference(&graph_artifact_reference)?;
-        
+
         // Allow test-only override of poll interval via TEST_APOLLO_OCI_POLL_INTERVAL environment variable
         let poll_interval = std::env::var("TEST_APOLLO_OCI_POLL_INTERVAL")
             .ok()
@@ -257,7 +257,7 @@ impl Opt {
                     .map(Duration::from_secs)
             })
             .unwrap_or(INITIAL_OCI_POLL_INTERVAL);
-        
+
         Ok(OciConfig {
             apollo_key: self
                 .apollo_key

@@ -22,8 +22,8 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 use crate::integration::IntegrationTest;
-use crate::integration::common::graph_os_enabled;
 use crate::integration::common::Query;
+use crate::integration::common::graph_os_enabled;
 
 /// Helper function to create a query for the count field
 fn query_count_field() -> Query {
@@ -326,8 +326,10 @@ async fn setup_mock_oci_server_with_tag(
             let get_count = get_count.clone();
             let initial_digest = initial_manifest_digest.clone();
             let updated_digest = updated_manifest_digest.clone();
-            let initial_manifest_bytes = Arc::new(serde_json::to_vec(&initial_oci_manifest).unwrap());
-            let updated_manifest_bytes = Arc::new(serde_json::to_vec(&updated_oci_manifest).unwrap());
+            let initial_manifest_bytes =
+                Arc::new(serde_json::to_vec(&initial_oci_manifest).unwrap());
+            let updated_manifest_bytes =
+                Arc::new(serde_json::to_vec(&updated_oci_manifest).unwrap());
             let tag_changes = tag_changes;
             let return_404_after_first = return_404_after_first;
             move |_req: &wiremock::Request| {
@@ -453,8 +455,10 @@ async fn test_router_oci_tag_hot_reload() -> Result<(), BoxError> {
         "Expected HTTP 200 or 400 for GraphQL validation error, got: {}",
         status
     );
-    let graphql_response: apollo_router::graphql::Response =
-        response.json().await.expect("Failed to parse GraphQL response");
+    let graphql_response: apollo_router::graphql::Response = response
+        .json()
+        .await
+        .expect("Failed to parse GraphQL response");
     assert!(
         !graphql_response.errors.is_empty(),
         "Expected query for count field to fail after hot reload"
