@@ -1148,8 +1148,10 @@ mod tests {
         #[case] config: Arc<Configuration>,
         #[case] allowed_features: Vec<AllowedFeature>,
     ) {
-        let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        // errors happen before this would be hit; so, 0, but we still need to pass _something_ to
+        // execute()
+        let router_factory = create_mock_router_configurator(0);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert_matches!(
             execute(
@@ -1168,9 +1170,11 @@ mod tests {
                 ])
             )
             .await,
-            Ok(())
+            // this is where the real test happens; we expect a license violation if we're using
+            // features that aren't being paid for
+            Err(ApolloRouterError::LicenseViolation(_))
         );
-        assert_eq!(shutdown_receivers.0.lock().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().len(), 0);
     }
 
     #[test(tokio::test)]
