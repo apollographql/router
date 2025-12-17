@@ -444,7 +444,9 @@ pub(crate) fn stream_from_oci(
                                 tracing::debug!("fetched schema from oci registry");
                                 let schema_state = SchemaState {
                                     sdl: oci_result.schema,
-                                    launch_id: None, //TODO: Add launch_id
+                                    // TODO: Add launch_id from graph artifact
+                                    // https://apollographql.atlassian.net/browse/REG-1634
+                                    launch_id: None,
                                 };
                                 if let Err(e) = sender.send(Ok(schema_state)).await {
                                     tracing::debug!(
