@@ -734,6 +734,14 @@ impl Executable {
             );
         }
 
+        // Warn users that OTEL_EXPORTER_OTLP_ENDPOINT takes precedence over default configurations
+        // and may override trace export to Apollo Studio
+        if std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
+            tracing::warn!(
+                "The OTEL_EXPORTER_OTLP_ENDPOINT environment variable is set. This takes precedence over default configurations and may override trace export to Apollo Studio."
+            );
+        }
+
         let router = RouterHttpServer::builder()
             .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
             .configuration(configuration)

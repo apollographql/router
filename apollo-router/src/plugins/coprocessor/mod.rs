@@ -545,6 +545,16 @@ fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
     );
 }
 
+fn record_coprocessor_operation(stage: PipelineStep, succeeded: bool) {
+    u64_counter!(
+        "apollo.router.operations.coprocessor",
+        "Total run operations with co-processors enabled",
+        1,
+        "coprocessor.stage" = stage.to_string(),
+        "coprocessor.succeeded" = succeeded
+    );
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub(super) struct RouterStage {
@@ -588,6 +598,7 @@ impl RouterStage {
 
                 async move {
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_router_request_stage(
                         http_client,
                         coprocessor_url,
@@ -595,6 +606,7 @@ impl RouterStage {
                         request,
                         request_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -602,13 +614,9 @@ impl RouterStage {
                         tracing::error!("coprocessor: router request stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::RouterRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::RouterRequest, succeeded);
+                    }
                     result
                 }
             })
@@ -625,8 +633,8 @@ impl RouterStage {
 
                 async move {
                     let response: router::Response = fut.await?;
-
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_router_response_stage(
                         http_client,
                         coprocessor_url,
@@ -634,6 +642,7 @@ impl RouterStage {
                         response,
                         response_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -641,13 +650,9 @@ impl RouterStage {
                         tracing::error!("coprocessor: router response stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::RouterResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::RouterResponse, succeeded);
+                    };
                     result
                 }
             })
@@ -726,6 +731,7 @@ impl SubgraphStage {
 
                 async move {
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_subgraph_request_stage(
                         http_client,
                         coprocessor_url,
@@ -733,6 +739,7 @@ impl SubgraphStage {
                         request,
                         request_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -740,13 +747,9 @@ impl SubgraphStage {
                         tracing::error!("coprocessor: subgraph request stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SubgraphRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::SubgraphRequest, succeeded);
+                    }
                     result
                 }
             })
@@ -766,6 +769,7 @@ impl SubgraphStage {
                     let response: subgraph::Response = fut.await?;
 
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_subgraph_response_stage(
                         http_client,
                         coprocessor_url,
@@ -773,6 +777,7 @@ impl SubgraphStage {
                         response,
                         response_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -780,13 +785,9 @@ impl SubgraphStage {
                         tracing::error!("coprocessor: subgraph response stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SubgraphResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::SubgraphResponse, succeeded);
+                    }
                     result
                 }
             })
@@ -813,6 +814,13 @@ impl SubgraphStage {
 }
 
 // -----------------------------------------------------------------------------------------
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_router_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -820,6 +828,7 @@ async fn process_router_request_stage<C>(
     mut request: router::Request,
     mut request_config: RouterRequestConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -875,6 +884,8 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::RouterRequest, duration);
 
@@ -972,6 +983,13 @@ where
     Ok(ControlFlow::Continue(request))
 }
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_router_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -979,6 +997,7 @@ async fn process_router_response_stage<C>(
     mut response: router::Response,
     response_config: RouterResponseConf,
     _response_validation: bool, // Router responses don't implement GraphQL validation - streaming responses bypass handle_graphql_response
+    executed: &mut bool,
 ) -> Result<router::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -1041,6 +1060,8 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::RouterResponse, duration);
 
@@ -1160,6 +1181,13 @@ where
 }
 // -----------------------------------------------------------------------------------------------------
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_subgraph_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -1167,6 +1195,7 @@ async fn process_subgraph_request_stage<C>(
     mut request: subgraph::Request,
     mut request_config: SubgraphRequestConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -1217,6 +1246,8 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::SubgraphRequest, duration);
 
@@ -1311,6 +1342,13 @@ where
     Ok(ControlFlow::Continue(request))
 }
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_subgraph_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -1318,6 +1356,7 @@ async fn process_subgraph_response_stage<C>(
     mut response: subgraph::Response,
     response_config: SubgraphResponseConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<subgraph::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -1367,6 +1406,8 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::SubgraphResponse, duration);
 
