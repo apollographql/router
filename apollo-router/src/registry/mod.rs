@@ -215,7 +215,7 @@ async fn fetch_oci_manifest(
 
     u64_counter_with_unit!(
         "apollo.router.oci.manifest.count",
-        "Number of requests to get Graph Artifact manifest",
+        "Number of requests to get graph artifact manifest",
         "{count}",
         1u64,
         registry = registry.clone(),
@@ -224,7 +224,7 @@ async fn fetch_oci_manifest(
     );
     f64_histogram_with_unit!(
         "apollo.router.oci.manifest.duration",
-        "Duration of request to get Graph Artifact manifest",
+        "Duration of request to get graph artifact manifest",
         "s",
         duration,
         registry = registry,
@@ -263,7 +263,7 @@ async fn fetch_oci_blob(
 
     u64_counter_with_unit!(
         "apollo.router.oci.blob",
-        "Number of requests to get Graph Artifact blob",
+        "Number of requests to get graph artifact blob",
         "{request}",
         1u64,
         registry = registry.clone(),
@@ -272,7 +272,7 @@ async fn fetch_oci_blob(
     );
     f64_histogram_with_unit!(
         "apollo.router.oci.blob.duration",
-        "Duration of request to get Graph Artifact blob",
+        "Duration of request to get graph artifact blob",
         "s",
         duration,
         registry = registry,
@@ -316,7 +316,7 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
 
     u64_counter_with_unit!(
         "apollo.router.oci.manifest",
-        "Number of requests to get Graph Artifact manifest",
+        "Number of requests to get graph artifact manifest",
         "{request}",
         1u64,
         registry = registry.clone(),
@@ -325,7 +325,7 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
     );
     f64_histogram_with_unit!(
         "apollo.router.oci.manifest.duration",
-        "Duration of request to get Graph Artifact manifest",
+        "Duration of request to get graph artifact manifest",
         "s",
         duration,
         registry = registry,
@@ -342,7 +342,7 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
     }
 }
 
-/// Fetch an OCI bundle by parsing the Graph Artifact reference, building auth,
+/// Fetch an OCI bundle by parsing the graph artifact reference, building auth,
 /// inferring the correct protocol, and calling the internal fetch function.
 pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
@@ -357,7 +357,7 @@ pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciE
 
     u64_counter_with_unit!(
         "apollo.router.oci.fullArtifact.count.total",
-        "Total number of requests to get full artifact for a Graph Artifact",
+        "Total number of requests to get full artifact for a graph artifact",
         "{count}",
         1u64
     );

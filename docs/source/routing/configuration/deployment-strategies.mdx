@@ -6,9 +6,9 @@ description: Learn about deployment patterns for Apollo Router, including blue/g
 
 ## Graph artifacts
 
-Graph Artifacts contain a supergraph created from a single build. Whereas graphs are referred to by their graph id and variant name, graph artifacts are instead referred to by their unique hash digest. Given that digest reference, a router can be configured to point to a single, immutable supergraph instead of the latest-built supergraph, giving you complete control over what is running in your production environment.
+Graph artifacts contain a supergraph created from a single build. Whereas graphs are referred to by their graph id and variant name, graph artifacts are instead referred to by their unique hash digest. Given that digest reference, a router can be configured to point to a single, immutable supergraph instead of the latest-built supergraph, giving you complete control over what is running in your production environment.
 
-Choose a deployment strategy with Graph Artifacts
+Choose a deployment strategy with graph artifacts
 
 | Strategy | Best For | Downtime | Rollback Speed | Complexity |
 |----------|----------|----------|----------------|------------|
@@ -16,7 +16,7 @@ Choose a deployment strategy with Graph Artifacts
 | Rolling | Lower-traffic or simpler setups | Minimal | Delayed | Low |
 
 
-## Retrieving a Graph Artifact digest
+## Retrieving a graph artifact digest
 
 See [Schema from graph artifacts](/graphos/routing/configuration/schema-oci) for information on how supergraph builds are mapped to OCI URIs and how to retrieve them.
 
