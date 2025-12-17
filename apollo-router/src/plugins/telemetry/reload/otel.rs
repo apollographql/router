@@ -42,7 +42,6 @@ use tower::BoxError;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
-use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::SpanRef;

@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
-
 use dashmap::DashMap;
 use tracing_core::field::Visit;
 use tracing_core::metadata::Level;
@@ -157,6 +156,8 @@ where
             return;
         };
         let full_message = format!("{}: {}", message_prefix, msg);
+        let otel_target = meta.target().to_string();
+        let name = meta.name().to_string();
 
         let metadata = match level {
             Level::ERROR => &OTEL_ERROR_METADATA_ERROR,
@@ -166,7 +167,15 @@ where
 
         let fields = metadata.fields();
         let message_field = fields.field("message").expect("message field must exist");
-        let values = [(&message_field, Some(&full_message as &dyn tracing::Value))];
+        let otel_target_field = fields
+            .field("otel.target")
+            .expect("otel.target field must exist");
+        let name_field = fields.field("name").expect("name field must exist");
+        let values = [
+            (&message_field, Some(&full_message as &dyn tracing::Value)),
+            (&otel_target_field, Some(&otel_target as &dyn tracing::Value)),
+            (&name_field, Some(&name as &dyn tracing::Value)),
+        ];
         let value_set = fields.value_set(&values);
 
         let new_event = Event::new(metadata, &value_set);
@@ -194,7 +203,7 @@ static OTEL_ERROR_METADATA_ERROR: tracing_core::Metadata = tracing_core::metadat
     name: "otel_internal",
     target: "apollo_router::otel_internal",
     level: Level::ERROR,
-    fields: &["message"],
+    fields: &["message","otel.target", "name"],
     callsite: &OTEL_ERROR_CALLSITE_ERROR,
     kind: tracing_core::metadata::Kind::EVENT,
 };
@@ -206,7 +215,7 @@ static OTEL_ERROR_METADATA_WARN: tracing_core::Metadata = tracing_core::metadata
     name: "otel_internal",
     target: "apollo_router::otel_internal",
     level: Level::WARN,
-    fields: &["message"],
+    fields: &["message","otel.target", "name"],
     callsite: &OTEL_ERROR_CALLSITE_WARN,
     kind: tracing_core::metadata::Kind::EVENT,
 };
@@ -217,7 +226,7 @@ static OTEL_REEMIT_METADATA_INFO: tracing_core::Metadata = tracing_core::metadat
     name: "otel_internal",
     target: "apollo_router::otel_internal",
     level: Level::INFO,
-    fields: &["message", "otel.target"],
+    fields: &["message", "otel.target", "name"],
     callsite: &OTEL_REEMIT_CALLSITE_INFO,
     kind: tracing_core::metadata::Kind::EVENT,
 };
@@ -228,7 +237,7 @@ static OTEL_REEMIT_METADATA_DEBUG: tracing_core::Metadata = tracing_core::metada
     name: "otel_internal",
     target: "apollo_router::otel_internal",
     level: Level::DEBUG,
-    fields: &["message", "otel.target"],
+    fields: &["message", "otel.target", "name"],
     callsite: &OTEL_REEMIT_CALLSITE_DEBUG,
     kind: tracing_core::metadata::Kind::EVENT,
 };
@@ -239,7 +248,7 @@ static OTEL_REEMIT_METADATA_TRACE: tracing_core::Metadata = tracing_core::metada
     name: "otel_internal",
     target: "apollo_router::otel_internal",
     level: Level::TRACE,
-    fields: &["message", "otel.target"],
+    fields: &["message", "otel.target", "name"],
     callsite: &OTEL_REEMIT_CALLSITE_TRACE,
     kind: tracing_core::metadata::Kind::EVENT,
 };
@@ -310,15 +319,18 @@ impl<S: Subscriber> Layer<S> for ReemitOtelEventsLayer {
         };
 
         let otel_target = meta.target().to_string();
+        let name = meta.name().to_string();
         let fields = metadata.fields();
 
         let message_field = fields.field("message").expect("message field must exist");
         let otel_target_field = fields
             .field("otel.target")
             .expect("otel.target field must exist");
+        let name_field = fields.field("name").expect("name field must exist");
         let values = [
             (&message_field, Some(&message as &dyn tracing::Value)),
             (&otel_target_field, Some(&otel_target as &dyn tracing::Value)),
+            (&name_field, Some(&name as &dyn tracing::Value)),
         ];
         let value_set = fields.value_set(&values);
 
