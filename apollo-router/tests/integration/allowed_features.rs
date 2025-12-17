@@ -186,11 +186,6 @@ async fn oss_feature_apq_enabled_when_allowed_features_empty() {
             r#"
             apq:
               enabled: true
-            telemetry:
-              exporters:
-                metrics:
-                  otlp:
-                    enabled: true
     "#,
         )
         .env(env)
