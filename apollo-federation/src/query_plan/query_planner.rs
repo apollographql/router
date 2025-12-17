@@ -179,13 +179,14 @@ pub struct QueryPlanningStatistics {
 }
 
 /// Deserialize helper for f64 that treats null as NaN.
-/// - This is needed because serde_json deserializes f64 NaN as null.
+/// - This is needed because serde_json serializes f64 NaN as null.
 fn deserialize_f64_nullable<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
     D: serde::de::Deserializer<'de>,
 {
     // First deserialize as Option<f64>
     let opt = Option::<f64>::deserialize(deserializer)?;
+    // Interpret None as NaN
     Ok(opt.unwrap_or(f64::NAN))
 }
 
