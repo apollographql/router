@@ -509,7 +509,7 @@ impl Executable {
         );
 
         // Schema source will be in order of precedence:
-        // 1. Cli --supergraph
+        // 1. CLI --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
         // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE (CLI/env only)
