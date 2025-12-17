@@ -311,8 +311,10 @@ impl PluginPrivate for ResponseCache {
                 match subgraph_config.redis.clone() {
                     Some(config) => {
                         // We need to do this because the subgraph config automatically clones from the `all` config during deserialization.
-                        // We don't want to create a new connection pool if the subgraph just inherits from the `all` config.
-                        if Some(&config) != init.config.subgraph.all.redis.as_ref() {
+                        // We don't want to create a new connection pool if the subgraph just inherits from the `all` config (only if all is enabled).
+                        if Some(&config) != init.config.subgraph.all.redis.as_ref()
+                            || storage_interface.all.is_none()
+                        {
                             let storage = Arc::new(OnceLock::new());
                             storage_interface
                                 .subgraphs
@@ -3043,7 +3045,7 @@ mod tests {
                 "Redis storage is set globally"
             );
         }
-        if subgraph_enabled {
+        if subgraph_enabled && !all_enabled {
             assert_eq!(
                 response_cache.storage.subgraphs.len(),
                 1,
