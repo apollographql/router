@@ -573,9 +573,10 @@ mod tests {
             parsed.message,
             "OpenTelemetry metric warning occurred: Warning: Maximum data points for metric stream exceeded."
         );
-        assert!(
-            !parsed.rest.contains_key("otel.target"),
-            "OtelErrorLayer output should not include otel.target"
+        assert_eq!(
+            parsed.rest.get("otel.target").and_then(|v| v.as_str()),
+            Some("opentelemetry::metrics"),
+            "OtelErrorLayer output should include the original OTel target"
         );
     }
 
@@ -607,7 +608,10 @@ mod tests {
 
         let parsed: LogLine = serde_json::from_str(&lines[0]).expect("valid JSON");
         assert_eq!(parsed.message, "OpenTelemetry trace error occurred: export failed");
-        assert!(!parsed.rest.contains_key("otel.target"));
+        assert_eq!(
+            parsed.rest.get("otel.target").and_then(|v| v.as_str()),
+            Some("opentelemetry_sdk::trace::span_processor")
+        );
     }
 
     #[test]
@@ -951,7 +955,10 @@ mod tests {
 
         let parsed: LogLine = serde_json::from_str(&lines[0]).expect("valid JSON");
         assert!(parsed.message.contains("OpenTelemetry") && parsed.message.contains("warning"));
-        assert!(!parsed.rest.contains_key("otel.target"));
+        assert_eq!(
+            parsed.rest.get("otel.target").and_then(|v| v.as_str()),
+            Some("opentelemetry::metrics")
+        );
     }
 
     #[test]

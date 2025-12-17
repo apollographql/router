@@ -201,12 +201,27 @@ async fn test_shutdown_with_idle_connection() -> Result<(), BoxError> {
     Ok(())
 }
 
+fn strip_noisy_otel_shutdown_logs(s: &str) -> String {
+    let had_trailing_newline = s.ends_with('\n');
+    let filtered = s
+        .lines()
+        .filter(|line| if line.trim().contains(r#""name":"MeterProvider.Drop""#) { false } else { true } )
+        .collect::<Vec<_>>()
+        .join("\n");
+    if had_trailing_newline && !filtered.is_empty() {
+        format!("{filtered}\n")
+    } else {
+        filtered
+    }
+}
+
 async fn command_output(command: &mut Command) -> String {
     let output = command.output().await.unwrap();
     let success = output.status.success();
     let exit_code = output.status.code();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout_raw = String::from_utf8_lossy(&output.stdout);
+    let stdout = strip_noisy_otel_shutdown_logs(&stdout_raw);
     format!(
         "Success: {success:?}\n\
         Exit code: {exit_code:?}\n\

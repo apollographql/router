@@ -11,7 +11,3 @@ stdout:
 List of all experimental configurations with related GitHub discussions:
 
 	- experimental_response_trace_id: https://github.com/apollographql/router/discussions/2147
-{"timestamp":"2025-12-17T14:45:31.012385000Z","level":"INFO","message":"Last reference of MeterProvider dropped, initiating shutdown.","otel.target":"opentelemetry_sdk","name":"MeterProvider.Drop","target":"apollo_router::otel_internal","resource":{}}
-{"timestamp":"2025-12-17T14:45:31.013019000Z","level":"INFO","message":"Last reference of MeterProvider dropped, initiating shutdown.","otel.target":"opentelemetry_sdk","name":"MeterProvider.Drop","target":"apollo_router::otel_internal","resource":{}}
-{"timestamp":"2025-12-17T14:45:31.013058000Z","level":"INFO","message":"Last reference of MeterProvider dropped, initiating shutdown.","otel.target":"opentelemetry_sdk","name":"MeterProvider.Drop","target":"apollo_router::otel_internal","resource":{}}
-{"timestamp":"2025-12-17T14:45:31.013088000Z","level":"INFO","message":"Last reference of MeterProvider dropped, initiating shutdown.","otel.target":"opentelemetry_sdk","name":"MeterProvider.Drop","target":"apollo_router::otel_internal","resource":{}}

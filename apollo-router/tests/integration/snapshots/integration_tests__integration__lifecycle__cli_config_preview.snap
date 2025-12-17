@@ -11,7 +11,3 @@ stdout:
 List of all preview configurations with related GitHub discussions:
 
 	- preview_entity_cache: https://github.com/apollographql/router/discussions/4592
-{"timestamp":"2025-12-16T18:36:27.837402000Z","level":"INFO","message":"Last reference of MeterProvider dropped, initiating shutdown.","otel.target":"opentelemetry_sdk","target":"apollo_router::otel_internal","resource":{}}
-{"timestamp":"2025-12-16T18:36:27.837528000Z","level":"INFO","message":"Last reference of MeterProvider dropped, initiating shutdown.","otel.target":"opentelemetry_sdk","target":"apollo_router::otel_internal","resource":{}}
-{"timestamp":"2025-12-16T18:36:27.837556000Z","level":"INFO","message":"Last reference of MeterProvider dropped, initiating shutdown.","otel.target":"opentelemetry_sdk","target":"apollo_router::otel_internal","resource":{}}
-{"timestamp":"2025-12-16T18:36:27.837582000Z","level":"INFO","message":"Last reference of MeterProvider dropped, initiating shutdown.","otel.target":"opentelemetry_sdk","target":"apollo_router::otel_internal","resource":{}}
