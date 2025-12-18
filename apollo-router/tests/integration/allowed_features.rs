@@ -653,6 +653,9 @@ async fn feature_violation_when_license_past_warn_at_but_not_expired_allowed_fea
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "5001");
     router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
 
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
+
     router.start().await;
     router
         .assert_error_log_contained(LICENSE_ALLOWED_FEATURES_DOES_NOT_INCLUDE_FEATURE_MSG)
