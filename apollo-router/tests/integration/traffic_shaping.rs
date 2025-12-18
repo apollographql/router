@@ -446,6 +446,142 @@ async fn test_custom_plugins_will_not_see_ratelimited_requests() -> Result<(), B
 }
 
 #[tokio::test]
+async fn test_custom_telemetry_will_see_ratelimited_requests() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            traffic_shaping:
+                router:
+                    global_rate_limit:
+                        capacity: 1
+                        interval: 10min
+            telemetry:
+                instrumentation:
+                    instruments:
+                        default_requirement_level: none
+                        router:
+                            golden_signal.total_client_errors:
+                                value:
+                                    response_errors: "$.[?(!(@.extensions.code in ['NOT_FOUND']))]"
+                                type: counter
+                                unit: "{error}"
+                                description: "error counter"
+                                condition:
+                                    eq:
+                                        - 200
+                                        - response_status: code
+                        supergraph: {}
+                exporters:
+                    metrics:
+                        prometheus:
+                            listen: 127.0.0.1:4000
+                            enabled: true
+                            path: /metrics
+            include_subgraph_errors:
+                all: true
+        "#,
+        )
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+
+    let (_, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    router.print_logs();
+
+    let metrics = router.get_metrics_response().await?.text().await?;
+    dbg!(&metrics);
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_custom_telemetry_will_see_timed_out_requests() -> Result<(), BoxError> {
+    // NB: steals timeout inducer (the responder) from `test_router_timeout_operation_name_in_tracing`
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            traffic_shaping:
+                router:
+                    timeout: 100ms
+            telemetry:
+                instrumentation:
+                    instruments:
+                        default_requirement_level: none
+                        router:
+                            golden_signal.total_server_errors:
+                                value:
+                                    unit
+                                    #response_errors: "$.[?(!(@.extensions.code in ['NOT_FOUND']))].length()"
+                                type: counter
+                                unit: "{error}"
+                                description: "error counter"
+                                attributes:
+                                    response_errors: "$.[0]"
+                                condition:
+                                    all:
+                                        - exists:
+                                            response_errors: "$"
+                                        - not:
+                                            eq:
+                                                - 200
+                                                - response_status: code
+                                        #- gt:
+                                        #    - response_errors: "$.[?(!(@.extensions.code in ['NOT_FOUND']))].length()"
+                                        #    - 0
+                exporters:
+                    metrics:
+                        common:
+                          # Use views to drop all standard Apollo metrics
+                            views:
+                                # Drop all apollo.router.* metrics
+                                - name: apollo.router.*
+                                  aggregation: drop
+                                - name: apollo_router_*
+                                  aggregation: drop
+                                # Drop OpenTelemetry HTTP metrics (if any slip through)
+                                - name: http.server.*
+                                  aggregation: drop
+                                - name: http.client.*
+                                  aggregation: drop
+                        prometheus:
+                            listen: 127.0.0.1:4000
+                            enabled: true
+                            path: /metrics
+            "#,
+        )
+        .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(250)))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+
+    let (_, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+
+    let metrics = router.get_metrics_response().await?.text().await?;
+    for l in metrics.split('\n') {
+        eprintln!("{l}");
+    }
+    // dbg!(&metrics);
+
+    // we sent two requests, which were both observed on the request side.
+    // but the timeout short-circuits custom plugins, so no responses were observed.
+    // assert_eq!(rhai_request_observed, 2);
+    // assert_eq!(rhai_response_observed, 0);
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_custom_plugins_will_not_see_timed_out_requests() -> Result<(), BoxError> {
     // NB: steals timeout inducer (the responder) from `test_router_timeout_operation_name_in_tracing`
     let mut router = IntegrationTest::builder()
