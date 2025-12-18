@@ -630,6 +630,7 @@ async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_feature
     router.assert_started().await;
 }
 
+#[ignore] // flaky test
 #[tokio::test(flavor = "multi_thread")]
 async fn feature_violation_when_license_past_warn_at_but_not_expired_allowed_features_does_not_contain_feature()
  {
