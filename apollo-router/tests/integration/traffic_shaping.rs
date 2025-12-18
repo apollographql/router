@@ -515,12 +515,13 @@ async fn test_custom_telemetry_will_see_timed_out_requests() -> Result<(), BoxEr
                             golden_signal.total_server_errors:
                                 value:
                                     unit
-                                    #response_errors: "$.[?(!(@.extensions.code in ['NOT_FOUND']))].length()"
+                                    #response_errors: "$.[].length()"
                                 type: counter
                                 unit: "{error}"
                                 description: "error counter"
                                 attributes:
-                                    response_errors: "$.[0]"
+                                    errors:
+                                        response_errors: "$.[?(!(@.extensions.code in ['NOT_FOUND']))]"
                                 condition:
                                     all:
                                         - exists:
