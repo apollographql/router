@@ -513,41 +513,28 @@ async fn test_custom_telemetry_will_see_timed_out_requests() -> Result<(), BoxEr
                         default_requirement_level: none
                         router:
                             golden_signal.total_server_errors:
-                                value:
-                                    unit
-                                    #response_errors: "$.[].length()"
+                                value: unit
                                 type: counter
                                 unit: "{error}"
-                                description: "error counter"
-                                attributes:
-                                    errors:
-                                        response_errors: "$.[?(!(@.extensions.code in ['NOT_FOUND']))]"
+                                description: "Count of router responses with errors that do not include `NOT_FOUND`, `INVALID_TYPE`"
                                 condition:
-                                    all:
-                                        - exists:
-                                            response_errors: "$"
-                                        - not:
-                                            eq:
-                                                - 200
-                                                - response_status: code
-                                        #- gt:
-                                        #    - response_errors: "$.[?(!(@.extensions.code in ['NOT_FOUND']))].length()"
-                                        #    - 0
+                                    not:
+                                        eq:
+                                            - response_errors: "$[?(!(@.extensions.code in ['NOT_FOUND', 'INVALID_TYPE']))]"
+                                            - []
+                            # NB: this is not the number of client errors, it is the number of router responses which include client errors
+                            golden_signal.total_client_errors:
+                                value: unit
+                                type: counter
+                                unit: "{error}"
+                                description: "Count of router responses with errors that include `NOT_FOUND`, `INVALID_TYPE`"
+                                condition:
+                                    not:
+                                        eq:
+                                            - response_errors: "$[?(@.extensions.code in ['NOT_FOUND', 'INVALID_TYPE'])]"
+                                            - []
                 exporters:
                     metrics:
-                        common:
-                          # Use views to drop all standard Apollo metrics
-                            views:
-                                # Drop all apollo.router.* metrics
-                                - name: apollo.router.*
-                                  aggregation: drop
-                                - name: apollo_router_*
-                                  aggregation: drop
-                                # Drop OpenTelemetry HTTP metrics (if any slip through)
-                                - name: http.server.*
-                                  aggregation: drop
-                                - name: http.client.*
-                                  aggregation: drop
                         prometheus:
                             listen: 127.0.0.1:4000
                             enabled: true
@@ -567,16 +554,19 @@ async fn test_custom_telemetry_will_see_timed_out_requests() -> Result<(), BoxEr
     let (_, response) = router.execute_default_query().await;
     assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
 
-    let metrics = router.get_metrics_response().await?.text().await?;
-    for l in metrics.split('\n') {
-        eprintln!("{l}");
-    }
-    // dbg!(&metrics);
+    router
+        .assert_metrics_contains(
+            "golden_signal_total_client_errors_total{otel_scope_name=<any>} 2",
+            None,
+        )
+        .await;
 
-    // we sent two requests, which were both observed on the request side.
-    // but the timeout short-circuits custom plugins, so no responses were observed.
-    // assert_eq!(rhai_request_observed, 2);
-    // assert_eq!(rhai_response_observed, 0);
+    router
+        .assert_metrics_contains(
+            "golden_signal_total_server_errors_total{otel_scope_name=<any>} 2",
+            None,
+        )
+        .await;
 
     router.graceful_shutdown().await;
     Ok(())
