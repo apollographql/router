@@ -9,7 +9,7 @@ use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::{Instrument, InstrumentKind, StreamBuilder};
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
@@ -160,10 +160,11 @@ pub(crate) struct MetricView {
 
 pub(crate) type OTelMetricView = Box<dyn Fn(&Instrument) -> Option<Stream> + Send + Sync>;
 
-impl TryInto<OTelMetricView> for MetricView {
-    type Error = String;
-
-    fn try_into(self) -> Result<OTelMetricView, Self::Error> {
+impl MetricView {
+    pub (crate) fn try_into_otel_metric_view_with<F>(self, configure_builder_hook: F) -> Result<OTelMetricView, String>
+    where
+        F: Fn(&Instrument, StreamBuilder) -> StreamBuilder + Send + Sync + 'static,
+    {
         let target_name = self.rename.clone().unwrap_or_else(|| self.name.clone());
 
         let otel_aggregation = self.aggregation.map(|aggregation| match aggregation {
@@ -187,14 +188,18 @@ impl TryInto<OTelMetricView> for MetricView {
 
             let mut builder = Stream::builder().with_name(target_name.clone());
 
+            builder = configure_builder_hook(i, builder);
+
             if let Some(desc) = &self.description {
                 builder = builder.with_description(desc.clone());
             }
             if let Some(unit) = &self.unit {
                 builder = builder.with_unit(unit.clone());
             }
-            if let Some(ref agg) = otel_aggregation {
-                builder = builder.with_aggregation(agg.clone());
+            if matches!(i.kind(), InstrumentKind::Histogram) {
+                if let Some(ref agg) = otel_aggregation {
+                    builder = builder.with_aggregation(agg.clone());
+                }
             }
             if let Some(ref keys) = allowed_keys {
                 builder = builder.with_allowed_attribute_keys(keys.clone());
@@ -202,6 +207,14 @@ impl TryInto<OTelMetricView> for MetricView {
 
             builder.build().ok()
         }))
+    }
+}
+
+impl TryInto<OTelMetricView> for MetricView {
+    type Error = String;
+
+    fn try_into(self) -> Result<OTelMetricView, Self::Error> {
+        self.try_into_otel_metric_view_with(|_, b| b)
     }
 }
 

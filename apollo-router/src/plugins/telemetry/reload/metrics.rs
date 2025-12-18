@@ -22,7 +22,7 @@
 
 use ahash::HashMap;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, InstrumentKind};
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::Stream;
@@ -33,7 +33,7 @@ use crate::_private::telemetry::ConfigResource;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
-use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::{Conf, MetricAggregation};
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::OTelMetricView;
 
@@ -181,8 +181,54 @@ impl<'a> MetricsBuilder<'a> {
         &mut self,
         meter_provider_type: MeterProviderType,
     ) -> Result<(), BoxError> {
+        // First apply a "common" view with buckets for those that don't have a custom view defined
+        let instrument_names_with_custom_views = self
+            .metrics_common()
+            .views
+            .iter()
+            .map(|v| v.name.clone())
+            .collect::<Vec<_>>();
+        let common_buckets = self.metrics_common().buckets.clone();
+        let common_view = move |i: &Instrument| {
+            if matches!(i.kind(), InstrumentKind::Histogram) && !instrument_names_with_custom_views.contains(&i.name().to_string()) {
+                Some(
+                    Stream::builder()
+                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                            boundaries: common_buckets.clone(),
+                            record_min_max: true,
+                        })
+                        .build()
+                        .unwrap(),
+                )
+            } else {
+                None
+            }
+        };
+        self.with_view(meter_provider_type, common_view);
+        // Next apply all custom views. If new buckets are not defined by the custom view, we add
+        // the common buckets to it.
         for metric_view in self.metrics_common().views.clone() {
-            let view: OTelMetricView = metric_view.clone().try_into()?;
+            // MetricView doesn't have access to metric_common, so we insert the default via hook
+            // here.
+            let view;
+            let common_buckets = self.metrics_common().buckets.clone();
+            if metric_view.aggregation.is_none() {
+                view = metric_view.try_into_otel_metric_view_with(move |i, builder| {
+                    if matches!(i.kind(), InstrumentKind::Histogram) {
+                        builder.with_aggregation(
+                            Aggregation::ExplicitBucketHistogram {
+                                boundaries: common_buckets.clone(),
+                                record_min_max: true,
+                            }
+                        )
+                    } else {
+                        builder
+                    }
+                })?;
+            } else {
+                view = metric_view.try_into()?;
+            }
+
             self.with_view(meter_provider_type, view);
         }
         Ok(())

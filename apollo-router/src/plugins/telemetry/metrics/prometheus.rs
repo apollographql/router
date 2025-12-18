@@ -4,9 +4,7 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use opentelemetry_prometheus::ResourceSelector;
-use opentelemetry_sdk::metrics::{Aggregation, InstrumentKind};
-use opentelemetry_sdk::metrics::Instrument;
-use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::InstrumentKind;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -18,7 +16,6 @@ use tower_service::Service;
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::config::MetricAggregation;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::services::router;
@@ -85,36 +82,9 @@ impl MetricsConfigurator for Config {
             .with_registry(registry.clone())
             .build()?;
 
-        // Only apply the global buckets view to instruments that don't have custom histogram views
-        // configured.
-        let common_buckets = builder.metrics_common().buckets.clone();
-        let custom_histogram_view_names = builder
-            .metrics_common()
-            .views
-            .iter()
-            .filter(|v| matches!(v.aggregation, Some(MetricAggregation::Histogram { .. })))
-            .map(|v| v.name.clone())
-            .collect::<Vec<_>>();
-        let aggregation_view = move |i: &Instrument| {
-            if matches!(i.kind(), InstrumentKind::Histogram) && !custom_histogram_view_names.contains(&i.name().to_string()) {
-                Some(
-                    Stream::builder()
-                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                            boundaries: common_buckets.clone(),
-                            record_min_max: true,
-                        })
-                        .build()
-                        .unwrap(),
-                )
-            } else {
-                None
-            }
-        };
-
         builder
             .with_reader(MeterProviderType::Public, exporter)
-            .with_view(MeterProviderType::Public, aggregation_view);
-        builder.with_prometheus_registry(registry);
+            .with_prometheus_registry(registry);
         Ok(())
     }
 }
