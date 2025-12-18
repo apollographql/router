@@ -26,11 +26,11 @@ See [Schema from graph artifacts](/graphos/routing/configuration/schema-oci) for
 
 In a [blue/green deployment](https://en.wikipedia.org/wiki/Blue%E2%80%93green_deployment), you pin two separate fleets of routers to different schemas.
 
-1. Launch the **blue** fleet with the initial URI.
+1. Launch the blue fleet with the initial URI.
 2. Make a change to a subgraph and let it build.
-3. Launch the **green** fleet with the updated URI.
-4. Validate the **green** fleet and shift traffic from **blue** to **Green**.
-5. Monitor for errors, and if necessary, shift traffic back to **Blue**.
+3. Launch the green fleet with the updated URI.
+4. Validate the green fleet and shift traffic from blue to green.
+5. Monitor for errors, and if necessary, shift traffic back to blue.
 
 
 #### 1. Launch the blue router fleet
