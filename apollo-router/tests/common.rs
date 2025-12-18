@@ -1215,6 +1215,11 @@ impl IntegrationTest {
         logs
     }
 
+    pub fn logs(&mut self) -> Vec<String> {
+        self.read_logs();
+        self.logs.clone()
+    }
+
     #[allow(dead_code)]
     pub fn assert_log_contained(&self, msg: &str) {
         for line in &self.logs {

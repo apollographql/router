@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use http::StatusCode;
 use insta::assert_yaml_snapshot;
 use serde_json::json;
 use tower::BoxError;
@@ -391,6 +392,104 @@ async fn test_connector_rate_limit() -> Result<(), BoxError> {
     assert_yaml_snapshot!(response);
 
     router.assert_metrics_contains(r#"apollo_router_graphql_error_total{code="REQUEST_RATE_LIMITED",otel_scope_name="apollo/router"} 1"#, None).await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_custom_plugins_will_not_see_ratelimited_requests() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            traffic_shaping:
+                router:
+                    global_rate_limit:
+                        capacity: 1
+                        interval: 10min
+            rhai:
+                scripts: "tests/integration/fixtures"
+                main: "stage_logger.rhai"
+            "#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let (_, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    let rhai_request_observed = router
+        .logs()
+        .iter()
+        .filter(|line| line.contains("rhai router request"))
+        .count();
+
+    let rhai_response_observed = router
+        .logs()
+        .iter()
+        .filter(|line| line.contains("rhai router response"))
+        .count();
+
+    // we sent two requests, but one was rejected immediately due to rate-limiting - so only one reaches
+    // the rhai plugin
+    assert_eq!(rhai_request_observed, 1);
+    assert_eq!(rhai_response_observed, 1);
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_custom_plugins_will_not_see_timed_out_requests() -> Result<(), BoxError> {
+    // NB: steals timeout inducer (the responder) from `test_router_timeout_operation_name_in_tracing`
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            traffic_shaping:
+                router:
+                    timeout: 100ms
+            rhai:
+                scripts: "tests/integration/fixtures"
+                main: "stage_logger.rhai"
+            "#,
+        )
+        .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(250)))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+
+    let (_, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+
+    let rhai_request_observed = router
+        .logs()
+        .iter()
+        .filter(|line| line.contains("rhai router request"))
+        .count();
+
+    let rhai_response_observed = router
+        .logs()
+        .iter()
+        .filter(|line| line.contains("rhai router response"))
+        .count();
+
+    router.print_logs();
+
+    // we sent two requests, which were both observed on the request side.
+    // but the timeout short-circuits custom plugins, so no responses were observed.
+    assert_eq!(rhai_request_observed, 2);
+    assert_eq!(rhai_response_observed, 0);
 
     router.graceful_shutdown().await;
     Ok(())
