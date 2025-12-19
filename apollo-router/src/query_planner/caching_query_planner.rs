@@ -1754,7 +1754,8 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_cooperative_cancellation_measure_mode_both_timeout_and_memory_limit_timeout_first() {
+    async fn test_cooperative_cancellation_measure_mode_both_timeout_and_memory_limit_timeout_first()
+     {
         let (layer, _guard) = setup_tracing();
 
         let configuration = Configuration::builder()
@@ -1831,7 +1832,8 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_cooperative_cancellation_measure_mode_both_timeout_and_memory_limit_memory_first() {
+    async fn test_cooperative_cancellation_measure_mode_both_timeout_and_memory_limit_memory_first()
+    {
         let (layer, _guard) = setup_tracing();
 
         let configuration = Configuration::builder()
