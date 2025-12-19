@@ -25,6 +25,7 @@ use tower::BoxError;
 use tower::Service as _;
 use tower::ServiceExt as _;
 
+use crate::integration::IntegrationTest;
 use crate::integration::common::graph_os_enabled;
 
 const REDIS_URL: &str = "redis://127.0.0.1:6379";
@@ -85,6 +86,43 @@ fn base_config() -> Value {
                 "listen": "127.0.0.1:4000",
                 "path": INVALIDATION_PATH,
             },
+        },
+    })
+}
+
+fn config_with_subgraph_prometheus() -> Value {
+    json!({
+        "telemetry": {
+          "exporters": {
+              "metrics": {
+                  "prometheus": {
+                      "enabled": true,
+                      "listen": "127.0.0.1:9090",
+                      "path": "/metrics"
+                  }
+              }
+          }
+        },
+        "response_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "pool_size": 3,
+                        "namespace": namespace(),
+                        "required_to_start": true,
+                    },
+                    "ttl": "10m",
+                    "private_id": "private_id"
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": true,
+                        "private_id": "user"
+                    }
+                }
+            }
         },
     })
 }
@@ -283,6 +321,28 @@ where
         .collect();
     let body = response.into_body().collect().await.unwrap().to_bytes();
     (headers, serde_json::from_slice(&body).unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dont_duplicate_redis_connections() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config_with_subgraph_prometheus()).unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 3"#,
+            None,
+        )
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -9,7 +9,7 @@ use crate::configuration::TlsClient;
 use crate::configuration::default_metrics_interval;
 use crate::configuration::default_required_to_start;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct Config {
