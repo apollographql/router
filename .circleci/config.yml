@@ -87,6 +87,7 @@ executors:
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
+      CARGO_BUILD_JOBS: 4
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
@@ -94,6 +95,7 @@ executors:
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
+      CARGO_BUILD_JOBS: 4
 
 # We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
 parameters:
