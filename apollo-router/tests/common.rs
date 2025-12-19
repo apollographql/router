@@ -225,7 +225,7 @@ pub struct IntegrationTest {
 }
 
 impl IntegrationTest {
-    pub(crate) fn bind_address(&self) -> SocketAddr {
+    pub fn bind_address(&self) -> SocketAddr {
         self.bind_address
             .lock()
             .expect("no bind address set, router must be started first.")
@@ -1188,6 +1188,12 @@ impl IntegrationTest {
             "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
             logs = self.logs.join("\n")
         );
+    }
+
+    #[allow(dead_code)]
+    pub fn logs(&mut self) -> Vec<String> {
+        self.read_logs();
+        self.logs.clone()
     }
 
     #[allow(dead_code)]

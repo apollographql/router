@@ -106,3 +106,14 @@ pub(crate) enum CacheControlSelector {
     /// Value of s-maxage or max-age in cache-control
     MaxAge,
 }
+
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum DurationUnit {
+    /// Duration in milliseconds (integer)
+    Milliseconds,
+    /// Duration in seconds (floating point)
+    Seconds,
+    /// Duration in nanoseconds (integer)
+    Nanoseconds,
+}
