@@ -100,7 +100,12 @@ impl<'a> Builder<'a> {
             let mut builder = MetricsBuilder::new(self.config);
             builder.configure(&self.config.exporters.metrics.prometheus)?;
             builder.configure(&self.config.exporters.metrics.otlp)?;
-            builder.configure_views(MeterProviderType::Public)?;
+            // Only configure views if the customer enabled an exporter. Otherwise,
+            // `configure_public_views()` would create a Public MeterProvider with nowhere to export
+            // the metrics
+            if self.config.exporters.metrics.prometheus.enabled || self.config.exporters.metrics.otlp.enabled {
+                builder.configure_public_views()?;
+            }
 
             let (prometheus_registry, meter_providers, _) = builder.build();
             self.activation

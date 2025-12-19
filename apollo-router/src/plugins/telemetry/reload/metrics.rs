@@ -33,9 +33,8 @@ use crate::_private::telemetry::ConfigResource;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
-use crate::plugins::telemetry::config::{Conf, MetricAggregation};
+use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::config::OTelMetricView;
 
 /// Trait for metric exporters to contribute to meter provider construction
 pub(crate) trait MetricsConfigurator {
@@ -177,10 +176,7 @@ impl<'a> MetricsBuilder<'a> {
             })
     }
 
-    pub(crate) fn configure_views(
-        &mut self,
-        meter_provider_type: MeterProviderType,
-    ) -> Result<(), BoxError> {
+    pub(crate) fn configure_public_views(&mut self) -> Result<(), BoxError> {
         // First apply a "common" view with buckets for those that don't have a custom view defined
         let instrument_names_with_custom_views = self
             .metrics_common()
@@ -204,7 +200,7 @@ impl<'a> MetricsBuilder<'a> {
                 None
             }
         };
-        self.with_view(meter_provider_type, common_view);
+        self.with_view(MeterProviderType::Public, common_view);
         // Next apply all custom views. If new buckets are not defined by the custom view, we add
         // the common buckets to it.
         for metric_view in self.metrics_common().views.clone() {
@@ -229,7 +225,7 @@ impl<'a> MetricsBuilder<'a> {
                 view = metric_view.try_into()?;
             }
 
-            self.with_view(meter_provider_type, view);
+            self.with_view(MeterProviderType::Public, view);
         }
         Ok(())
     }
