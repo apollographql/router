@@ -26,10 +26,10 @@ impl<T> Operator<T> {
             Self::ArrayLength(_) => match value {
                 Value::Bool(_) | Value::I64(_) | Value::F64(_) | Value::String(_) => None,
                 Value::Array(arr) => match arr {
-                    Array::Bool(arr) => Some(arr.len().into()),
-                    Array::I64(arr) => Some(arr.len().into()),
-                    Array::F64(arr) => Some(arr.len().into()),
-                    Array::String(arr) => Some(arr.len().into()),
+                    Array::Bool(arr) => Some((arr.len() as i64).into()),
+                    Array::I64(arr) => Some((arr.len() as i64).into()),
+                    Array::F64(arr) => Some((arr.len() as i64).into()),
+                    Array::String(arr) => Some((arr.len() as i64).into()),
                 },
             },
         }

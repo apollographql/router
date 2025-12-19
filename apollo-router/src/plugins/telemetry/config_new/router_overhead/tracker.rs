@@ -70,6 +70,11 @@ impl RouterOverheadTracker {
         SubgraphRequestGuard::new(self.inner.clone())
     }
 
+    /// Returns the total elapsed time since the request started.
+    pub(crate) fn total_duration(&self) -> Duration {
+        self.request_start.elapsed()
+    }
+
     /// Calculates the router overhead.
     /// This should be called at the end of the request.
     ///
