@@ -86,7 +86,7 @@ Follow these guidelines to ensure reliability:
 - Use digest references for production: SHA256 digests ensure deterministic deployments.
 - Automate reference retrieval: Integrate API queries into your CI/CD pipeline.
 - Track deployment versions: Track metrics on the schema changes in each environment.
-- Use blue/green deployments: Use immutable references for zero-downtime updates.
+- Use blue/green deployments: Use immutable deployments of references for zero-downtime updates and fast rollbacks.
 - Consider a local registry: Balance your uptime considerations with the complexity of managing graph artifacts yourself.
 
 ## Related documentation
