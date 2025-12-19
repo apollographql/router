@@ -1573,15 +1573,16 @@ impl FederatedQueryGraphBuilder {
             edge_to_conditions: &mut IndexMap<EdgeIndex, OverrideCondition>,
         ) -> Result<(), FederationError> {
             let target_field = FieldDefinitionPosition::Object(target_field.clone());
-            let subgraph_nodes = query_graph
-                .types_to_nodes_by_source
-                .get(target_graph)
-                .unwrap();
-            let parent_node = subgraph_nodes
+            let Some(subgraph_nodes) = query_graph.types_to_nodes_by_source.get(target_graph)
+            else {
+                return Ok(());
+            };
+            let Some(parent_node) = subgraph_nodes
                 .get(target_field.type_name())
-                .unwrap()
-                .first()
-                .unwrap();
+                .and_then(|nodes| nodes.first())
+            else {
+                return Ok(());
+            };
             for edge in query_graph.out_edges(*parent_node) {
                 let edge_weight = query_graph.edge_weight(edge.id())?;
                 let QueryGraphEdgeTransition::FieldCollection {
