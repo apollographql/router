@@ -450,6 +450,8 @@ async fn test_custom_telemetry_will_see_ratelimited_requests() -> Result<(), Box
     let mut router = IntegrationTest::builder()
         .config(
             r#"
+            include_subgraph_errors:
+                all: true
             traffic_shaping:
                 router:
                     global_rate_limit:
@@ -477,6 +479,24 @@ async fn test_custom_telemetry_will_see_ratelimited_requests() -> Result<(), Box
                                 condition:
                                     exists:
                                         response_errors: "$[?(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE')]"
+
+                            golden_signal.total_server_errors_indiv:
+                                value:
+                                    operator:
+                                        array_length:
+                                            response_errors: "$[?(!(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE'))]"
+                                type: counter
+                                unit: "{error}"
+                                description: "Count of router responses with errors that do not include `NOT_FOUND`, `INVALID_TYPE`"
+
+                            golden_signal.total_client_errors_indiv:
+                                value:
+                                    operator:
+                                        array_length:
+                                            response_errors: "$[?(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE')]"
+                                type: counter
+                                unit: "{error}"
+                                description: "Count of router responses with errors that include `NOT_FOUND`, `INVALID_TYPE`"
                 exporters:
                     metrics:
                         prometheus:
@@ -510,6 +530,20 @@ async fn test_custom_telemetry_will_see_ratelimited_requests() -> Result<(), Box
         )
         .await;
 
+    // there should be zero client errors and one server error
+    router
+        .assert_metrics_does_not_contain(
+            "golden_signal_total_client_errors_indiv_total{otel_scope_name=<any>}",
+        )
+        .await;
+
+    router
+        .assert_metrics_contains(
+            "golden_signal_total_server_errors_indiv_total{otel_scope_name=<any>} 1",
+            None,
+        )
+        .await;
+
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -520,6 +554,8 @@ async fn test_custom_telemetry_will_see_timed_out_requests() -> Result<(), BoxEr
     let mut router = IntegrationTest::builder()
         .config(
             r#"
+            include_subgraph_errors:
+                all: true
             traffic_shaping:
                 router:
                     timeout: 100ms
@@ -661,5 +697,103 @@ async fn test_custom_plugins_will_not_see_timed_out_requests() -> Result<(), Box
     assert_eq!(rhai_response_observed, 0);
 
     router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_custom_telemetry_will_capture_multiple_errors() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            include_subgraph_errors:
+                all: true
+            telemetry:
+                instrumentation:
+                    instruments:
+                        default_requirement_level: none
+                        router:
+                            golden_signal.total_server_errors:
+                                value: unit
+                                type: counter
+                                unit: "{error}"
+                                description: "Count of router responses with errors that do not include `NOT_FOUND`, `INVALID_TYPE`"
+                                condition:
+                                    exists:
+                                        response_errors: "$[?(!(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE'))]"
+                            # NB: this is not the number of client errors, it is the number of router responses which include client errors
+                            golden_signal.total_client_errors:
+                                value: unit
+                                type: counter
+                                unit: "{error}"
+                                description: "Count of router responses with errors that include `NOT_FOUND`, `INVALID_TYPE`"
+                                condition:
+                                    exists:
+                                        response_errors: "$[?(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE')]"
+
+                            golden_signal.total_server_errors_indiv:
+                                value:
+                                    operator:
+                                        array_length:
+                                            response_errors: "$[?(!(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE'))]"
+                                type: counter
+                                unit: "{error}"
+                                description: "Count of router responses with errors that do not include `NOT_FOUND`, `INVALID_TYPE`"
+
+                            golden_signal.total_client_errors_indiv:
+                                value:
+                                    operator:
+                                        array_length:
+                                            response_errors: "$[?(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE')]"
+                                type: counter
+                                unit: "{error}"
+                                description: "Count of router responses with errors that include `NOT_FOUND`, `INVALID_TYPE`"
+                exporters:
+                    metrics:
+                        prometheus:
+                            listen: 127.0.0.1:4000
+                            enabled: true
+                            path: /metrics
+            "#,
+        )
+        .responder(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {},
+            "errors": [{"message": "", "extensions": {"code": "NOT_FOUND"}}, {"message": "", "extensions": {"code": "NOT_FOUND"}}, {"message": "", "extensions": {"code": "NOT_FOUND"}}]
+        })))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    dbg!(response.text().await?);
+
+    router
+        .assert_metrics_contains(
+            "golden_signal_total_client_errors_total{otel_scope_name=<any>} 1",
+            None,
+        )
+        .await;
+
+    router
+        .assert_metrics_does_not_contain(
+            "golden_signal_total_server_errors_total{otel_scope_name=<any>}",
+        )
+        .await;
+
+    router
+        .assert_metrics_does_not_contain(
+            "golden_signal_total_server_errors_indiv_total{otel_scope_name=<any>}",
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            "golden_signal_total_client_errors_indiv_total{otel_scope_name=<any>} 3",
+            None,
+        )
+        .await;
+
     Ok(())
 }
