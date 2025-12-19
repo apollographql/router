@@ -1,10 +1,13 @@
 //! Configuration for datadog tracing.
+
+mod agent_sampling;
 mod span_processor;
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::time::Duration;
 
+pub(crate) use agent_sampling::DatadogAgentSampling;
 use ahash::HashMap;
 use ahash::HashMapExt;
 use http::Uri;

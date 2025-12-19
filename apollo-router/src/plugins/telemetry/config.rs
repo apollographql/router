@@ -22,6 +22,7 @@ use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
+use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -722,7 +723,17 @@ impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
         }
-        common.sampler = Box::new(sampler);
+
+        if config.preview_datadog_agent_sampling.unwrap_or_default() {
+            common.sampler = Box::new(
+                DatadogAgentSampling::new(
+                    sampler,
+                    config.parent_based_sampler,
+                )
+            );
+        } else {
+            common.sampler = Box::new(sampler);
+        }
 
         common.span_limits.max_events_per_span = config.max_events_per_span;
         common.span_limits.max_attributes_per_span = config.max_attributes_per_span;
