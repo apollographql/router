@@ -36,6 +36,8 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
+const SCHEMA_CACHE_TAG: &str =
+    include_str!("../../testdata/orga_supergraph_cache_key_cache_tag.graphql");
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
@@ -3095,6 +3097,117 @@ async fn invalidate_by_cache_tag() {
         }
         "#);
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 3u64, "subgraph.name" = "orga");
+    }.with_metrics().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn complex_cache_tag() {
+    async move {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA_CACHE_TAG, "test.graphql").unwrap());
+        let query = "query { currentUser { activeOrganization { ... on Organization { id creatorUser { __typename id } } } } }";
+        let subgraphs = serde_json::json!({
+            "user": {
+                "query": {
+                    "currentUser": {
+                        "activeOrganization": {
+                            "__typename": "Organization",
+                            "id": "1",
+                        }
+                    }
+                },
+                "headers": {"cache-control": "public"},
+            },
+            "orga": {
+                "entities": [
+                    {
+                        "__typename": "Organization",
+                        "id": "1",
+                        "creatorUser": {
+                            "__typename": "User",
+                            "id": 2
+                        }
+                    }
+                ],
+                "headers": {"cache-control": "public"},
+            },
+        });
+
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"test_complex_cache_tag"), drop_rx)
+            .await
+            .unwrap();
+        let map = [
+            (
+                "user".to_string(),
+                Subgraph {
+                    redis: None,
+                    private_id: Some("sub".to_string()),
+                    enabled: true.into(),
+                    ttl: None,
+                    ..Default::default()
+                },
+            ),
+            (
+                "orga".to_string(),
+                Subgraph {
+                    redis: None,
+                    private_id: Some("sub".to_string()),
+                    enabled: true.into(),
+                    ttl: None,
+                    ..Default::default()
+                },
+            ),
+        ]
+            .into_iter()
+            .collect();
+        let subgraphs_conf = create_subgraph_conf(map);
+        let response_cache =
+            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx)
+                .await
+                .unwrap();
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache.clone())
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .context(Context::new())
+            .header(
+                HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                HeaderValue::from_static("true"),
+            )
+            .build()
+            .unwrap();
+        let mut response = service.oneshot(request).await.unwrap();
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+        insta::assert_json_snapshot!(cache_keys);
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
+        let mut response = response.next_response().await.unwrap();
+        assert!(remove_debug_extensions_key(&mut response));
+
+        insta::assert_json_snapshot!(response, @r#"
+        {
+          "data": {
+            "currentUser": {
+              "activeOrganization": {
+                "id": "1",
+                "creatorUser": {
+                  "__typename": "User",
+                  "id": 2
+                }
+              }
+            }
+          }
+        }
+        "#);
     }.with_metrics().await;
 }
 
