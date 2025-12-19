@@ -116,4 +116,32 @@ impl CooperativeCancellation {
             memory_limit: Some(memory_limit),
         }
     }
+
+    #[cfg(test)]
+    /// Create a new `CooperativeCancellation` config in enforcement mode with both timeout and memory limit.
+    pub(crate) fn enforce_with_timeout_and_memory_limit(
+        timeout: Duration,
+        memory_limit: ByteSize,
+    ) -> Self {
+        Self {
+            enabled: true,
+            mode: Mode::Enforce,
+            timeout: Some(timeout),
+            memory_limit: Some(memory_limit),
+        }
+    }
+
+    #[cfg(test)]
+    /// Create a new `CooperativeCancellation` config in measure mode with both timeout and memory limit.
+    pub(crate) fn measure_with_timeout_and_memory_limit(
+        timeout: Duration,
+        memory_limit: ByteSize,
+    ) -> Self {
+        Self {
+            enabled: true,
+            mode: Mode::Measure,
+            timeout: Some(timeout),
+            memory_limit: Some(memory_limit),
+        }
+    }
 }

@@ -995,6 +995,78 @@ mod tests {
         (layer, guard)
     }
 
+    // Unified SlowQueryPlanner that can work in both enforce and measure modes
+    #[derive(Clone)]
+    struct SlowQueryPlanner {
+        enforce: bool,
+    }
+
+    impl Service<QueryPlannerRequest> for SlowQueryPlanner {
+        type Response = QueryPlannerResponse;
+        type Error = MaybeBackPressureError<QueryPlannerError>;
+        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(
+            &mut self,
+            _cx: &mut task::Context<'_>,
+        ) -> task::Poll<Result<(), Self::Error>> {
+            task::Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
+            let enforce = self.enforce;
+            Box::pin(async move {
+                // Sleep for a long time - this should trigger timeout
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                if enforce {
+                    panic!("This query planner should not be called, as it is expected to timeout");
+                } else {
+                    // In measurement mode, this should complete successfully even after timeout
+                    let plan = Arc::new(QueryPlan::fake_new(None, None));
+                    Ok(QueryPlannerResponse::builder()
+                        .content(QueryPlannerContent::Plan { plan })
+                        .build())
+                }
+            })
+        }
+    }
+
+    // Unified ExcessiveMemoryQueryPlanner that can work in both enforce and measure modes
+    #[derive(Clone)]
+    struct ExcessiveMemoryQueryPlanner {
+        enforce: bool,
+    }
+
+    impl Service<QueryPlannerRequest> for ExcessiveMemoryQueryPlanner {
+        type Response = QueryPlannerResponse;
+        type Error = MaybeBackPressureError<QueryPlannerError>;
+        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(
+            &mut self,
+            _cx: &mut task::Context<'_>,
+        ) -> task::Poll<Result<(), Self::Error>> {
+            task::Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
+            let enforce = self.enforce;
+            Box::pin(async move {
+                // Allocate 10MB of memory
+                let _ = Vec::<u8>::with_capacity(10_000_000);
+                if enforce {
+                    futures::future::pending().await
+                } else {
+                    // In measurement mode, this should complete successfully even after exceeding the memory limit
+                    let plan = Arc::new(QueryPlan::fake_new(None, None));
+                    Ok(QueryPlannerResponse::builder()
+                        .content(QueryPlannerContent::Plan { plan })
+                        .build())
+                }
+            })
+        }
+    }
+
     mock! {
         #[derive(Debug)]
         MyQueryPlanner {
@@ -1111,29 +1183,6 @@ mod tests {
     async fn test_cooperative_cancellation_timeout() {
         let (layer, _guard) = setup_tracing();
 
-        #[derive(Clone)]
-        struct SlowQueryPlanner;
-
-        impl Service<QueryPlannerRequest> for SlowQueryPlanner {
-            type Response = QueryPlannerResponse;
-            type Error = MaybeBackPressureError<QueryPlannerError>;
-            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-            fn poll_ready(
-                &mut self,
-                _cx: &mut task::Context<'_>,
-            ) -> task::Poll<Result<(), Self::Error>> {
-                task::Poll::Ready(Ok(()))
-            }
-
-            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
-                Box::pin(async move {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    panic!("This query planner should not be called, as it is expected to timeout");
-                })
-            }
-        }
-
         let configuration = Configuration::builder()
             .and_supergraph(Some(
                 Supergraph::builder()
@@ -1154,7 +1203,7 @@ mod tests {
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::new(
-            SlowQueryPlanner,
+            SlowQueryPlanner { enforce: true },
             schema.clone(),
             Default::default(),
             &configuration,
@@ -1208,30 +1257,6 @@ mod tests {
     async fn test_cooperative_cancellation_memory_limit() {
         let (layer, _guard) = setup_tracing();
 
-        #[derive(Clone)]
-        struct ExcessiveMemoryQueryPlanner;
-
-        impl Service<QueryPlannerRequest> for ExcessiveMemoryQueryPlanner {
-            type Response = QueryPlannerResponse;
-            type Error = MaybeBackPressureError<QueryPlannerError>;
-            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-            fn poll_ready(
-                &mut self,
-                _cx: &mut task::Context<'_>,
-            ) -> task::Poll<Result<(), Self::Error>> {
-                task::Poll::Ready(Ok(()))
-            }
-
-            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
-                Box::pin(async move {
-                    // Allocate 10MB of memory
-                    let _ = Vec::<u8>::with_capacity(10_000_000);
-                    futures::future::pending().await
-                })
-            }
-        }
-
         let configuration = Configuration::builder()
             .and_supergraph(Some(
                 Supergraph::builder()
@@ -1252,7 +1277,7 @@ mod tests {
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::new(
-            ExcessiveMemoryQueryPlanner,
+            ExcessiveMemoryQueryPlanner { enforce: true },
             schema.clone(),
             Default::default(),
             &configuration,
@@ -1429,34 +1454,6 @@ mod tests {
     async fn test_cooperative_cancellation_measurement_mode_timeout() {
         let (layer, _guard) = setup_tracing();
 
-        #[derive(Clone)]
-        struct SlowQueryPlanner;
-
-        impl Service<QueryPlannerRequest> for SlowQueryPlanner {
-            type Response = QueryPlannerResponse;
-            type Error = MaybeBackPressureError<QueryPlannerError>;
-            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-            fn poll_ready(
-                &mut self,
-                _cx: &mut task::Context<'_>,
-            ) -> task::Poll<Result<(), Self::Error>> {
-                task::Poll::Ready(Ok(()))
-            }
-
-            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
-                Box::pin(async move {
-                    // Sleep for a long time - this should trigger timeout in measurement mode
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    // In measurement mode, this should complete successfully even after timeout
-                    let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
-                })
-            }
-        }
-
         let configuration = Configuration::builder()
             .and_supergraph(Some(
                 Supergraph::builder()
@@ -1477,7 +1474,7 @@ mod tests {
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::new(
-            SlowQueryPlanner,
+            SlowQueryPlanner { enforce: false },
             schema.clone(),
             Default::default(),
             &configuration,
@@ -1532,34 +1529,6 @@ mod tests {
     async fn test_cooperative_cancellation_measurement_mode_memory_limit() {
         let (layer, _guard) = setup_tracing();
 
-        #[derive(Clone)]
-        struct ExcessiveMemoryQueryPlanner;
-
-        impl Service<QueryPlannerRequest> for ExcessiveMemoryQueryPlanner {
-            type Response = QueryPlannerResponse;
-            type Error = MaybeBackPressureError<QueryPlannerError>;
-            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-            fn poll_ready(
-                &mut self,
-                _cx: &mut task::Context<'_>,
-            ) -> task::Poll<Result<(), Self::Error>> {
-                task::Poll::Ready(Ok(()))
-            }
-
-            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
-                Box::pin(async move {
-                    // Allocate 10MB of memory
-                    let _ = Vec::<u8>::with_capacity(10_000_000);
-                    // In measurement mode, this should complete successfully even after exceeding the memory limit
-                    let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
-                })
-            }
-        }
-
         let configuration = Configuration::builder()
             .and_supergraph(Some(
                 Supergraph::builder()
@@ -1580,7 +1549,7 @@ mod tests {
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::new(
-            ExcessiveMemoryQueryPlanner,
+            ExcessiveMemoryQueryPlanner { enforce: false },
             schema.clone(),
             Default::default(),
             &configuration,
@@ -1629,6 +1598,312 @@ mod tests {
 
         // Verify that the span recorded the timeout outcome (not success)
         // In measurement mode, we should record timeout and not overwrite it with success
+        assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
+    }
+
+    #[test(tokio::test)]
+    async fn test_cooperative_cancellation_both_timeout_and_memory_limit_timeout_first() {
+        let (layer, _guard) = setup_tracing();
+
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::enforce_with_timeout_and_memory_limit(
+                                    std::time::Duration::from_millis(100),
+                                    ByteSize::mb(100),
+                                ),
+                            )
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            SlowQueryPlanner { enforce: true },
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query Me { me { name { first } } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
+        let result = planner
+            .call(query_planner::CachingRequest::new(
+                "query Me { me { name { first } } }".to_string(),
+                Some("".into()),
+                context.clone(),
+            ))
+            .with_memory_tracking("planning_task")
+            .await;
+
+        match result {
+            Ok(_) => panic!("Expected an error, but got a response"),
+            Err(e) => {
+                assert!(matches!(e, CacheResolverError::RetrievalError(_)));
+                assert!(e.to_string().contains("timed out"));
+            }
+        }
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the timeout outcome (timeout should trigger first)
+        assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
+    }
+
+    #[test(tokio::test)]
+    async fn test_cooperative_cancellation_both_timeout_and_memory_limit_memory_first() {
+        let (layer, _guard) = setup_tracing();
+
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::enforce_with_timeout_and_memory_limit(
+                                    std::time::Duration::from_secs(10),
+                                    ByteSize::mb(10),
+                                ),
+                            )
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            ExcessiveMemoryQueryPlanner { enforce: true },
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query Me { me { name { first } } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
+        let result = planner
+            .call(query_planner::CachingRequest::new(
+                "query Me { me { name { first } } }".to_string(),
+                Some("".into()),
+                context.clone(),
+            ))
+            .with_memory_tracking("planning_task")
+            .await;
+
+        match result {
+            Ok(_) => panic!("Expected an error, but got a response"),
+            Err(e) => {
+                assert!(matches!(e, CacheResolverError::RetrievalError(_)));
+                assert!(e.to_string().contains("memory limit exceeded"));
+            }
+        }
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the cancelled outcome (memory limit should trigger first)
+        assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
+    }
+
+    #[test(tokio::test)]
+    async fn test_cooperative_cancellation_measure_mode_both_timeout_and_memory_limit_timeout_first() {
+        let (layer, _guard) = setup_tracing();
+
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::measure_with_timeout_and_memory_limit(
+                                    std::time::Duration::from_millis(100),
+                                    ByteSize::mb(100),
+                                ),
+                            )
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            SlowQueryPlanner { enforce: false },
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query Me { me { name { first } } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
+        // In measurement mode, the request should complete successfully even though it times out
+        // The timeout should be recorded as an outcome, but the request should not fail
+        let result = planner
+            .call(query_planner::CachingRequest::new(
+                "query Me { me { name { first } } }".to_string(),
+                Some("".into()),
+                context.clone(),
+            ))
+            .with_memory_tracking("planning_task")
+            .await;
+
+        // In measurement mode, the request should succeed even though it times out
+        assert!(
+            result.is_ok(),
+            "Expected success in measurement mode, got error"
+        );
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the timeout outcome (not success)
+        // In measurement mode, we should record timeout and not overwrite it with success
+        assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
+    }
+
+    #[test(tokio::test)]
+    async fn test_cooperative_cancellation_measure_mode_both_timeout_and_memory_limit_memory_first() {
+        let (layer, _guard) = setup_tracing();
+
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::measure_with_timeout_and_memory_limit(
+                                    std::time::Duration::from_secs(10),
+                                    ByteSize::mb(10),
+                                ),
+                            )
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            ExcessiveMemoryQueryPlanner { enforce: false },
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query Me { me { name { first } } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
+        // In measurement mode, the request should complete successfully even though it exceeds memory limit
+        // The memory limit should be recorded as an outcome, but the request should not fail
+        let result = planner
+            .call(query_planner::CachingRequest::new(
+                "query Me { me { name { first } } }".to_string(),
+                Some("".into()),
+                context.clone(),
+            ))
+            .with_memory_tracking("planning_task")
+            .await;
+
+        // In measurement mode, the request should succeed even though it exceeds memory limit
+        assert!(
+            result.is_ok(),
+            "Expected success in measurement mode, got error"
+        );
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the cancelled outcome (not success)
+        // In measurement mode, we should record cancelled and not overwrite it with success
         assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
     }
 
