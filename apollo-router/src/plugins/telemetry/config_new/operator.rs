@@ -24,7 +24,13 @@ impl<T> Operator<T> {
     fn operate(&self, value: Value) -> Option<Value> {
         match self {
             Self::ArrayLength(_) => match value {
-                Value::Bool(_) | Value::I64(_) | Value::F64(_) | Value::String(_) => None,
+                Value::Bool(_) | Value::I64(_) | Value::F64(_) => None,
+                Value::String(_) => {
+                    // FIXME(@carodewig) HACK!!
+                    // jsonpath-rust pops the element if there is only one. so a string is possibly
+                    // really a single-element list
+                    Some(1.into())
+                }
                 Value::Array(arr) => match arr {
                     Array::Bool(arr) => Some((arr.len() as i64).into()),
                     Array::I64(arr) => Some((arr.len() as i64).into()),
@@ -36,12 +42,13 @@ impl<T> Operator<T> {
     }
 }
 
-impl<T: Selector> Selector for Operator<T> {
+impl<T: Selector> Selector for Operator<Box<T>> {
     type Request = T::Request;
     type Response = T::Response;
     type EventResponse = T::EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Option<Value> {
+        tracing::trace!("operator on_request");
         let value = match self {
             Self::ArrayLength(selector) => selector.on_request(request),
         }?;
@@ -50,12 +57,17 @@ impl<T: Selector> Selector for Operator<T> {
 
     fn on_response(&self, response: &Self::Response) -> Option<Value> {
         let value = match self {
-            Self::ArrayLength(selector) => selector.on_response(response),
+            Self::ArrayLength(selector) => {
+                let resp = selector.on_response(response);
+                tracing::trace!(resp = ?resp, selector = ?selector, "operator on_response");
+                resp
+            }
         }?;
         self.operate(value)
     }
 
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) -> Option<Value> {
+        tracing::trace!("operator on_response_event");
         let value = match self {
             Self::ArrayLength(selector) => selector.on_response_event(response, ctx),
         }?;
@@ -63,6 +75,7 @@ impl<T: Selector> Selector for Operator<T> {
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<Value> {
+        tracing::trace!("operator on_error");
         let value = match self {
             Self::ArrayLength(selector) => selector.on_error(error, ctx),
         }?;

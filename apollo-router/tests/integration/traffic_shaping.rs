@@ -545,27 +545,24 @@ async fn test_custom_telemetry_will_see_timed_out_requests() -> Result<(), BoxEr
                                 condition:
                                     exists:
                                         response_errors: "$[?(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE')]"
+
                             golden_signal.total_server_errors_indiv:
                                 value:
-                                    array_length:
-                                        response_errors: "$[?(!(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE'))]"
+                                    operator:
+                                        array_length:
+                                            response_errors: "$[?(!(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE'))]"
                                 type: counter
                                 unit: "{error}"
                                 description: "Count of router responses with errors that do not include `NOT_FOUND`, `INVALID_TYPE`"
-                                condition:
-                                    exists:
-                                        response_errors: "$[?(!(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE'))]"
-                            # NB: this is not the number of client errors, it is the number of router responses which include client errors
+
                             golden_signal.total_client_errors_indiv:
                                 value:
-                                    array_length:
-                                        response_errors: "$[?(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE')]"
+                                    operator:
+                                        array_length:
+                                            response_errors: "$[?(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE')]"
                                 type: counter
                                 unit: "{error}"
                                 description: "Count of router responses with errors that include `NOT_FOUND`, `INVALID_TYPE`"
-                                condition:
-                                    exists:
-                                        response_errors: "$[?(@.extensions.code == 'NOT_FOUND' || @.extensions.code == 'INVALID_TYPE')]"
                 exporters:
                     metrics:
                         prometheus:
@@ -598,6 +595,18 @@ async fn test_custom_telemetry_will_see_timed_out_requests() -> Result<(), BoxEr
         .assert_metrics_contains(
             "golden_signal_total_server_errors_total{otel_scope_name=<any>} 2",
             None,
+        )
+        .await;
+
+    router
+        .assert_metrics_contains(
+            "golden_signal_total_server_errors_indiv_total{otel_scope_name=<any>} 2",
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_does_not_contain(
+            "golden_signal_total_client_errors_indiv_total{otel_scope_name=<any>}",
         )
         .await;
 

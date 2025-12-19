@@ -52,7 +52,7 @@ pub(crate) enum SelectorOrValue<T> {
     /// A constant value.
     Value(AttributeValue),
     /// Operator to modify an extracted value
-    Operator(Operator<T>),
+    Operator(Operator<Box<T>>),
     /// Selector to extract a value from the pipeline.
     Selector(T),
 }

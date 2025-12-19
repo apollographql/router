@@ -19,6 +19,7 @@ use crate::plugins::telemetry::config_new::ToOtelValue;
 use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
+use crate::plugins::telemetry::config_new::operator::Operator;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
 use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadTracker;
 use crate::plugins::telemetry::config_new::selectors::ActiveSubgraphRequests;
@@ -193,6 +194,9 @@ pub(crate) enum RouterSelector {
         /// The format of the trace ID.
         trace_id: TraceIdFormat,
     },
+    Operator {
+        operator: Operator<Box<RouterSelector>>,
+    },
 }
 
 impl Selector for RouterSelector {
@@ -264,6 +268,7 @@ impl Selector for RouterSelector {
                 insert_display_router_response(request);
                 None
             }
+            RouterSelector::Operator { operator } => operator.on_request(request),
             // Related to Response
             _ => None,
         }
@@ -291,10 +296,13 @@ impl Selector for RouterSelector {
                         .and_then(|body_json| {
                             let errors = body_json.get("errors");
 
+                            tracing::trace!("got errors: {errors:?}");
+
                             let data: serde_json_bytes::Value =
                                 serde_json_bytes::to_value(errors).ok()?;
 
                             let val = response_errors.find(&data);
+                            tracing::trace!("val: {val:?}");
 
                             val.maybe_to_otel_value()
                         })
@@ -399,6 +407,7 @@ impl Selector for RouterSelector {
                 .ok()
                 .flatten()
                 .map(opentelemetry::Value::from),
+            RouterSelector::Operator { operator } => operator.on_response(response),
             _ => None,
         }
     }
@@ -434,6 +443,7 @@ impl Selector for RouterSelector {
                 }
                 .map(opentelemetry::Value::from)
             }
+            RouterSelector::Operator { operator } => operator.on_error(error, ctx),
             _ => None,
         }
     }
@@ -442,6 +452,7 @@ impl Selector for RouterSelector {
         match self {
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::Operator { operator } => operator.on_drop(),
             _ => None,
         }
     }
@@ -460,6 +471,7 @@ impl Selector for RouterSelector {
                         | RouterSelector::Static(_)
                         | RouterSelector::Env { .. }
                         | RouterSelector::StaticField { .. }
+                        | RouterSelector::Operator { .. }
                 )
             }
             Stage::Response | Stage::ResponseEvent => matches!(
@@ -478,6 +490,7 @@ impl Selector for RouterSelector {
                     | RouterSelector::RouterOverhead { .. }
                     | RouterSelector::ActiveSubgraphRequests { .. }
                     | RouterSelector::OnGraphQLError { .. }
+                    | RouterSelector::Operator { .. }
             ),
             Stage::ResponseField => false,
             Stage::Error => matches!(
@@ -491,10 +504,13 @@ impl Selector for RouterSelector {
                     | RouterSelector::StaticField { .. }
                     | RouterSelector::ResponseContext { .. }
                     | RouterSelector::Error { .. }
+                    | RouterSelector::Operator { .. }
             ),
             Stage::Drop => matches!(
                 self,
-                RouterSelector::Static(_) | RouterSelector::StaticField { .. }
+                RouterSelector::Static(_)
+                    | RouterSelector::StaticField { .. }
+                    | RouterSelector::Operator { .. }
             ),
         }
     }
