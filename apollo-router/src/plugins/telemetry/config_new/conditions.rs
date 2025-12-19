@@ -7,6 +7,7 @@ use super::Stage;
 use crate::Context;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::operator::Operator;
 
 /// Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.
 ///
@@ -50,6 +51,8 @@ impl Condition<()> {
 pub(crate) enum SelectorOrValue<T> {
     /// A constant value.
     Value(AttributeValue),
+    /// Operator to modify an extracted value
+    Operator(Operator<T>),
     /// Selector to extract a value from the pipeline.
     Selector(T),
 }
@@ -62,13 +65,8 @@ where
     pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
         match self {
             Condition::Eq(arr) | Condition::Gt(arr) | Condition::Lt(arr) => {
-                match (&arr[0], &arr[1]) {
-                    (SelectorOrValue::Value(val1), SelectorOrValue::Value(val2)) => Err(format!(
-                        "trying to compare 2 values ('{val1}' and '{val2}'), usually it's a syntax error because you want to use a specific selector and a value in a condition"
-                    )),
-                    (SelectorOrValue::Value(_), SelectorOrValue::Selector(sel))
-                    | (SelectorOrValue::Selector(sel), SelectorOrValue::Value(_)) => {
-                        // Special condition for events
+                for elem in arr {
+                    if let SelectorOrValue::Selector(sel) = elem {
                         if let Some(Stage::Request) = &restricted_stage
                             && !sel.is_active(Stage::Request)
                         {
@@ -76,25 +74,27 @@ where
                                 "selector {sel:?} is only valid for request stage, this log event will never trigger"
                             ));
                         }
-                        Ok(())
                     }
-                    (SelectorOrValue::Selector(sel1), SelectorOrValue::Selector(sel2)) => {
-                        // Special condition for events
-                        if let Some(Stage::Request) = &restricted_stage {
-                            if !sel1.is_active(Stage::Request) {
-                                return Err(format!(
-                                    "selector {sel1:?} is only valid for request stage, this log event will never trigger"
-                                ));
-                            }
-                            if !sel2.is_active(Stage::Request) {
-                                return Err(format!(
-                                    "selector {sel2:?} is only valid for request stage, this log event will never trigger"
-                                ));
-                            }
+                    if let SelectorOrValue::Operator(op) = elem {
+                        if let Some(Stage::Request) = &restricted_stage
+                            && !op.is_active(Stage::Request)
+                        {
+                            return Err(format!(
+                                "operator {op:?} is only valid for request stage, this log event will never trigger"
+                            ));
                         }
-                        Ok(())
                     }
                 }
+
+                if let SelectorOrValue::Value(val1) = &arr[0]
+                    && let SelectorOrValue::Value(val2) = &arr[1]
+                {
+                    return Err(format!(
+                        "trying to compare 2 values ('{val1}' and '{val2}'), usually it's a syntax error because you want to use a specific selector/operator and a value in a condition"
+                    ));
+                }
+
+                Ok(())
             }
             Condition::Exists(sel) => match restricted_stage {
                 Some(stage) => {
@@ -523,6 +523,7 @@ where
     fn on_request(&self, request: &T::Request) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Operator(operator) => operator.on_request(request),
             SelectorOrValue::Selector(selector) => selector.on_request(request),
         }
     }
@@ -530,6 +531,7 @@ where
     fn on_response(&self, response: &T::Response) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Operator(operator) => operator.on_response(response),
             SelectorOrValue::Selector(selector) => selector.on_response(response),
         }
     }
@@ -537,6 +539,7 @@ where
     fn on_response_event(&self, response: &T::EventResponse, ctx: &Context) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Operator(operator) => operator.on_response_event(response, ctx),
             SelectorOrValue::Selector(selector) => selector.on_response_event(response, ctx),
         }
     }
@@ -544,6 +547,7 @@ where
     fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Operator(operator) => operator.on_error(error, ctx),
             SelectorOrValue::Selector(selector) => selector.on_error(error, ctx),
         }
     }
@@ -557,6 +561,9 @@ where
     ) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Operator(operator) => {
+                operator.on_response_field(ty, field, value, ctx)
+            }
             SelectorOrValue::Selector(selector) => {
                 selector.on_response_field(ty, field, value, ctx)
             }
@@ -566,6 +573,7 @@ where
     fn on_drop(&self) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Operator(operator) => operator.on_drop(),
             SelectorOrValue::Selector(selector) => selector.on_drop(),
         }
     }
@@ -573,6 +581,7 @@ where
     fn is_active(&self, stage: super::Stage) -> bool {
         match self {
             SelectorOrValue::Value(_) => true,
+            SelectorOrValue::Operator(operator) => operator.is_active(stage),
             SelectorOrValue::Selector(selector) => selector.is_active(stage),
         }
     }
