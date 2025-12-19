@@ -411,11 +411,34 @@ pub(super) fn serve_router_on_listen_addr(
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     },
-                                    NetworkStream::Tls(stream) => {
+                                    NetworkStream::Tls { stream, acceptor } => {
+                                        // Perform TLS handshake with a timeout to prevent DoS attacks.
+                                        // If a client connects with plain TCP and doesn't initiate TLS,
+                                        // the handshake will timeout and the connection will be closed.
+                                        let tls_handshake_timeout = header_read_timeout;
+
+                                        let tls_stream = match tokio::time::timeout(tls_handshake_timeout, acceptor.accept(stream)).await {
+                                            Ok(Ok(tls_stream)) => tls_stream,
+                                            Ok(Err(e)) => {
+                                                tracing::debug!(
+                                                    error = %e,
+                                                    "TLS handshake failed, closing connection"
+                                                );
+                                                return;
+                                            }
+                                            Err(_) => {
+                                                tracing::debug!(
+                                                    timeout = ?tls_handshake_timeout,
+                                                    "TLS handshake timed out, closing connection"
+                                                );
+                                                return;
+                                            }
+                                        };
+
                                         let received_first_request = Arc::new(AtomicBool::new(false));
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
 
-                                        stream.get_ref().0
+                                        tls_stream.get_ref().0
                                             .set_nodelay(true)
                                             .expect(
                                                 "this should not fail unless the socket is invalid",
@@ -425,7 +448,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             app.clone().call(request)
                                         });
 
-                                        let tokio_stream = TokioIo::new(stream);
+                                        let tokio_stream = TokioIo::new(tls_stream);
 
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
@@ -433,7 +456,6 @@ pub(super) fn serve_router_on_listen_addr(
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
 
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
-
                                     }
                                 }
                             });
