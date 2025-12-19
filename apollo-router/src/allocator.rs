@@ -20,6 +20,7 @@ use parking_lot::Mutex;
 
 pub(crate) struct AllocationLimit {
     bytes: usize,
+    #[allow(dead_code)] // only used if feature global-allocator is enabled
     on_exceeded: Box<dyn Fn(usize) + Send + Sync>,
 }
 
@@ -190,6 +191,7 @@ impl AllocationStats {
         allocated.saturating_add(zeroed).saturating_sub(deallocated)
     }
 
+    /// Set the allocation limit for this allocation stats context.
     pub(crate) fn set_allocation_limit(
         &self,
         bytes: usize,
@@ -423,6 +425,8 @@ unsafe impl GlobalAlloc for CustomAllocator {
                 CURRENT_TASK_STATS.with(|cell| {
                     if let Some(stats_ptr) = cell.get() {
                         stats_ptr.as_ref().track_alloc(layout.size());
+
+                        #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
                         if let Some(limit) = stats_ptr.as_ref().allocation_limit.get() {
                             let bytes_allocated = stats_ptr.as_ref().bytes_allocated();
                             if bytes_allocated > limit.bytes {
