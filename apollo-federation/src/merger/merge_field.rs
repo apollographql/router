@@ -942,12 +942,10 @@ impl Merger {
             let used_overridden = merge_context.is_used_overridden(idx);
             let unused_overridden = merge_context.is_unused_overridden(idx);
             let override_label = merge_context.override_label(idx);
-            let has_unknown_target = merge_context.has_override_with_unknown_target(idx);
 
             match source_opt {
                 None => None,
                 Some(_) if unused_overridden && override_label.is_none() => None,
-                Some(_) if has_unknown_target => None,
                 Some(source) => Some((idx, source, used_overridden, override_label)),
             }
         });
@@ -1028,10 +1026,15 @@ impl Merger {
                 subgraph.provides_directive_name().ok().flatten().as_ref(),
             );
 
-            let override_from = self.get_override_from(
-                &field_def,
-                subgraph.override_directive_name().ok().flatten().as_ref(),
-            );
+            let has_unknown_target = merge_context.has_override_with_unknown_target(idx);
+            let override_from = if has_unknown_target {
+                None
+            } else {
+                self.get_override_from(
+                    &field_def,
+                    subgraph.override_directive_name().ok().flatten().as_ref(),
+                )
+            };
 
             let context_arguments = self.extract_context_arguments(idx, &field_def)?;
 
