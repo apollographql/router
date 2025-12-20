@@ -123,7 +123,7 @@ enum Command {
     },
     /// Compose a supergraph schema from multiple subgraph schemas
     Compose {
-        /// Path(s) to subgraph schemas.
+        /// Path(s) to subgraph schemas or a Rover supergraph config YAML file.
         schemas: Vec<PathBuf>,
         /// Path to a Rover supergraph config YAML file.
         #[arg(long, conflicts_with = "schemas")]
@@ -622,6 +622,19 @@ fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
 }
 
 fn cmd_compose(file_paths: &[PathBuf], config_path: Option<&PathBuf>) -> Result<(), AnyError> {
+    let config_path = if let Some((first, rest)) = file_paths.split_first()
+        && rest.is_empty()
+        && (first.extension().is_some_and(|ext| ext == "yaml")
+            || first == std::path::Path::new("-"))
+    {
+        assert!(
+            config_path.is_none(),
+            "Error: cannot provide both --config and a single YAML schema file."
+        );
+        Some(first)
+    } else {
+        config_path
+    };
     let supergraph = if let Some(config) = config_path {
         compose_from_config(config)?
     } else if !file_paths.is_empty() {
