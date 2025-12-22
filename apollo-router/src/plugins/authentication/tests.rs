@@ -1977,14 +1977,9 @@ mod issuer_validation {
     }
 
     #[rstest::rstest]
-    #[case::multiple_iss(&["hello", "world"], serde_json::json!(["hello", "world"]))]
-    #[case::multiple_with_array_accepted(&["hello", "world", "goodbye"], serde_json::json!(["hello"]))]
     #[case::multiple_with_str_accepted(&["hello", "world"], serde_json::json!("hello"))]
     #[case::multiple_with_str_accepted(&["hello", "world"], serde_json::json!("world"))]
-    #[case::single_with_array_accepted_any_of(&["hello"], serde_json::json!(["hello", "world"]))]
-    #[case::single_with_array_accepted(&["hello"], serde_json::json!(["hello"]))]
     #[case::single_iss(&["hello"], serde_json::json!("hello"))]
-    #[case::multiple_with_single_intersection(&["hello", "world", "goodbye"], serde_json::json!(["hola", "bonjour", "hello"]))]
     #[case::null_mgr_iss_with_token_iss(&[], serde_json::json!("hello"))]
     #[case::null_mgr_iss_with_empty_token_iss(&[], serde_json::Value::Null)]
     #[case::empty_token_iss(&["hello", "world"], serde_json::Value::Null)]
@@ -2001,6 +1996,10 @@ mod issuer_validation {
     }
 
     #[rstest::rstest]
+    #[case::multiple_iss(&["hello", "world"], serde_json::json!(["hello", "world"]))]
+    #[case::multiple_with_array_accepted(&["hello", "world", "goodbye"], serde_json::json!(["hello"]))]
+    #[case::single_with_array_accepted_any_of(&["hello"], serde_json::json!(["hello", "world"]))]
+    #[case::single_with_array_accepted(&["hello"], serde_json::json!(["hello"]))]
     #[case::missing_token_iss(&["hello", "world"], serde_json::json!(""))]
     #[case::mismatched_single_iss(&["hello"], serde_json::json!("world"))]
     #[case::mismatched_single_iss_array(&["hello"], serde_json::json!(["world"]))]

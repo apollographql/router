@@ -659,7 +659,7 @@ fn authenticate(
 
 fn validate_issuers(
     configured_issuers: &Issuers,
-    token_issuers: Option<&serde_json::Value>,
+    token_issuer: Option<&serde_json::Value>,
 ) -> Result<(), AuthenticationError> {
     let issuer_error = |actual: String| {
         // Standardize issuer - sort it and join the elements with a comma
@@ -678,18 +678,13 @@ fn validate_issuers(
         return Ok(());
     }
 
-    let Some(token_issuers) = token_issuers else {
-        // No issuers in token; allow this as well
-        return Ok(());
-    };
-
-    match token_issuers {
-        Value::Null => {
-            // No issuers in token; allow this as well
+    match token_issuer {
+        None | Some(Value::Null) => {
+            // No issuer in token; allow this as well
             Ok(())
         }
 
-        Value::String(token_issuer) => {
+        Some(Value::String(token_issuer)) => {
             // Check if this issuer is in our list
             if configured_issuers.contains(token_issuer) {
                 Ok(())
@@ -698,14 +693,8 @@ fn validate_issuers(
             }
         }
 
-        Value::Array(token_issuers_arr) => {
-            // TODO: Check if any of these issuers is in our list
-            // No matches, so return an error
-            issuer_error(token_issuers.to_string())
-        }
-
-        unexpected_value => {
-            // If the token has incorrectly configured issuers, we cannot validate it against
+        Some(unexpected_value) => {
+            // If the token has an incorrectly configured issuer, we cannot validate it against
             // the configured issuers.
             issuer_error(unexpected_value.to_string())
         }
