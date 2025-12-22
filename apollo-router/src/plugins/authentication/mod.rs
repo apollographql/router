@@ -703,7 +703,13 @@ fn validate_audiences(
         }
 
         Value::Array(token_audiences_arr) => {
-            // TODO: Check if any of these audiences is in our list
+            // Check if any of these audiences is in our list
+            for token_audience in token_audiences_arr.iter().filter_map(|aud| aud.as_str()) {
+                if configured_audiences.contains(token_audience) {
+                    return Ok(());
+                }
+            }
+
             // No matches, so return an error
             audience_error(token_audiences.to_string())
         }
