@@ -581,30 +581,17 @@ fn authenticate(
             }
         };
 
-        if let Some(configured_issuers) = issuers
-            && let Some(token_issuer) = token_data
-                .claims
-                .as_object()
-                .and_then(|o| o.get("iss"))
-                .and_then(|value| value.as_str())
-            && !configured_issuers.contains(token_issuer)
-        {
-            let mut issuers_for_error: Vec<String> = configured_issuers.into_iter().collect();
-            issuers_for_error.sort(); // done to maintain consistent ordering in error message
-            return failure_message(
-                request,
-                config,
-                AuthenticationError::InvalidIssuer {
-                    expected: issuers_for_error
-                        .iter()
-                        .map(|issuer| issuer.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    token: token_issuer.to_string(),
-                },
-                StatusCode::INTERNAL_SERVER_ERROR,
-                source_of_extracted_jwt,
-            );
+        if let Some(configured_issuers) = issuers {
+            let maybe_token_issuers = token_data.claims.as_object().and_then(|o| o.get("iss"));
+            if let Err(err) = validate_issuers(&configured_issuers, maybe_token_issuers) {
+                return failure_message(
+                    request,
+                    config,
+                    err,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    source_of_extracted_jwt,
+                );
+            }
         }
 
         if let Some(configured_audiences) = audiences {
@@ -668,6 +655,61 @@ fn authenticate(
         StatusCode::UNAUTHORIZED,
         source_of_extracted_jwt,
     )
+}
+
+fn validate_issuers(
+    configured_issuers: &Issuers,
+    token_issuers: Option<&serde_json::Value>,
+) -> Result<(), AuthenticationError> {
+    let issuer_error = |actual: String| {
+        // Standardize issuer - sort it and join the elements with a comma
+        let mut issuers: Vec<String> = configured_issuers.iter().cloned().collect();
+        issuers.sort();
+
+        let expected = issuers.join(", ");
+        Err(AuthenticationError::InvalidIssuer {
+            expected,
+            token: actual,
+        })
+    };
+
+    if configured_issuers.is_empty() {
+        // No issuers to compare against
+        return Ok(());
+    }
+
+    let Some(token_issuers) = token_issuers else {
+        // No issuers in token; allow this as well
+        return Ok(());
+    };
+
+    match token_issuers {
+        Value::Null => {
+            // No issuers in token; allow this as well
+            Ok(())
+        }
+
+        Value::String(token_issuer) => {
+            // Check if this issuer is in our list
+            if configured_issuers.contains(token_issuer) {
+                Ok(())
+            } else {
+                issuer_error(token_issuer.to_string())
+            }
+        }
+
+        Value::Array(token_issuers_arr) => {
+            // TODO: Check if any of these issuers is in our list
+            // No matches, so return an error
+            issuer_error(token_issuers.to_string())
+        }
+
+        unexpected_value => {
+            // If the token has incorrectly configured issuers, we cannot validate it against
+            // the configured issuers.
+            issuer_error(unexpected_value.to_string())
+        }
+    }
 }
 
 fn validate_audiences(
