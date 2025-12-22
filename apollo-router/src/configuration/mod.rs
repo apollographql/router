@@ -1291,7 +1291,7 @@ pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
 }
 
 /// Configuration options pertaining to the subgraph server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct TlsClient {
@@ -1322,7 +1322,7 @@ impl Default for TlsClient {
 }
 
 /// TLS client authentication
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TlsClientAuth {
     /// list of certificates in PEM format
