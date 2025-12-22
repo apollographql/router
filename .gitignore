@@ -43,3 +43,5 @@ dhat-heap.json
 fuzz/crash-*
 fuzz/slow-unit-*
 fuzz/timeout-*
+
+.config/mise/mise.local.toml

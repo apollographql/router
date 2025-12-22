@@ -102,6 +102,7 @@ impl SupergraphStage {
 
                 async move {
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_supergraph_request_stage(
                         http_client,
                         coprocessor_url,
@@ -109,6 +110,7 @@ impl SupergraphStage {
                         request,
                         request_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -116,13 +118,9 @@ impl SupergraphStage {
                         tracing::error!("coprocessor: supergraph request stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SupergraphRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::SupergraphRequest, succeeded);
+                    }
                     result
                 }
             })
@@ -142,6 +140,7 @@ impl SupergraphStage {
                     let response: supergraph::Response = fut.await?;
 
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_supergraph_response_stage(
                         http_client,
                         coprocessor_url,
@@ -149,6 +148,7 @@ impl SupergraphStage {
                         response,
                         response_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -156,13 +156,9 @@ impl SupergraphStage {
                         tracing::error!("coprocessor: supergraph response stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SupergraphResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::SupergraphResponse, succeeded);
+                    }
                     result
                 }
             })
@@ -188,6 +184,13 @@ impl SupergraphStage {
     }
 }
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_supergraph_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -195,6 +198,7 @@ async fn process_supergraph_request_stage<C>(
     mut request: supergraph::Request,
     mut request_config: SupergraphRequestConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -240,6 +244,8 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::SupergraphRequest, duration);
 
@@ -325,6 +331,13 @@ where
     Ok(ControlFlow::Continue(request))
 }
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_supergraph_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -332,6 +345,7 @@ async fn process_supergraph_response_stage<C>(
     response: supergraph::Response,
     response_config: SupergraphResponseConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<supergraph::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -385,6 +399,8 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
 
@@ -413,16 +429,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                &response_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
-            response
-                .context
-                .upsert_json_value(key, move |_current| value);
-        }
+        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -499,14 +506,11 @@ where
                 )?;
 
                 if let Some(context) = co_processor_output.context {
-                    for (mut key, value) in context.try_into_iter()? {
-                        if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                            &response_config_context
-                        {
-                            key = context_key_from_deprecated(key);
-                        }
-                        generator_map_context.upsert_json_value(key, move |_current| value);
-                    }
+                    update_context_from_coprocessor(
+                        &generator_map_context,
+                        context,
+                        &response_config_context,
+                    )?;
                 }
 
                 // We return the deferred_response into our stream of response chunks

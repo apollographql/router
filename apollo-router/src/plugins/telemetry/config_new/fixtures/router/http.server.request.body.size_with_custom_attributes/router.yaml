@@ -5,3 +5,4 @@ telemetry:
         http.server.active_requests: false
         http.server.request.duration: false
         http.server.request.body.size: true
+        http.server.response.body.size: false

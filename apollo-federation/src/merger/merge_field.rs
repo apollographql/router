@@ -129,7 +129,25 @@ impl Merger {
 
         trace!("Gathering fields to add for type {}", obj_or_itf);
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            // Check interfaces in the subgraph's schema first
             let Ok(interfaces) = obj_or_itf.implemented_interfaces(subgraph.schema()) else {
+                // If the type doesn't exist in this subgraph, check if any of the interfaces
+                // it implements in the merged schema are interface objects in this subgraph
+                if let Ok(merged_interfaces) = obj_or_itf.implemented_interfaces(&self.merged) {
+                    for itf in merged_interfaces {
+                        if subgraph
+                            .schema()
+                            .get_type(itf.name.clone())
+                            .as_ref()
+                            .is_ok_and(|ty| subgraph.is_interface_object_type(ty))
+                        {
+                            // This marks the subgraph as having a relevant @interfaceObject,
+                            // even though we do not actively add that type's fields.
+                            extra_sources.insert(idx, None);
+                            break; // Only need to mark once per subgraph
+                        }
+                    }
+                }
                 continue;
             };
             for itf in interfaces {
@@ -512,7 +530,7 @@ impl Merger {
 
         // Phase 2: Reporting - report errors in groups, matching JS version order
         if has_invalid_types {
-            self.error_reporter.report_mismatch_error::<FieldDefinition, FieldDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<FieldDefinition, FieldDefinitionPosition>(
                 CompositionError::ExternalTypeMismatch {
                     message: format!(
                         "Type of field \"{dest}\" is incompatible across subgraphs (where marked @external): it has ",
@@ -526,15 +544,24 @@ impl Merger {
         }
 
         for arg_name in &invalid_args_presence {
-            // TODO: We need a more complete port of this on `ErrorReporter`
-            self.report_mismatch_error_with_specifics(
+            let argument_pos = ObjectFieldArgumentDefinitionPosition {
+                type_name: dest.type_name().clone(),
+                field_name: dest.field_name().clone(),
+                argument_name: arg_name.clone(),
+            };
+            self.error_reporter.report_mismatch_error_with_specifics::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition>(
                 CompositionError::ExternalArgumentMissing {
                     message: format!(
-                        "Field \"{dest}\" is missing argument \"{arg_name}\" in some subgraphs where it is marked @external: "
+                        "Field \"{dest}\" is missing argument \"{argument_pos}\" in some subgraphs where it is marked @external: "
                     ),
                 },
+                &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source| source.as_ref().map_or("", |_| ""),
+                |_| Some("present".to_string()),
+                |_, _idx| Some("present".to_string()),
+                |_, names| format!("argument \"{argument_pos}\" is declared in {} ", names.unwrap_or("undefined".to_string())),
+                |_, names| format!("but not in {names} (where \"{dest}\" is @external)."),
+                true,
             );
         }
 
@@ -544,7 +571,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition>(
                 CompositionError::ExternalArgumentTypeMismatch {
                     message: format!(
                         "Type of argument \"{argument_pos}\" is incompatible across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -563,7 +590,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition>(
                 CompositionError::ExternalArgumentDefaultMismatch {
                     message: format!(
                         "Argument \"{argument_pos}\" has incompatible defaults across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -593,7 +620,7 @@ impl Merger {
         sources: &Sources<FieldDefinitionPosition>,
         dest_arg_name: &Name,
     ) -> Result<Sources<ObjectFieldArgumentDefinitionPosition>, FederationError> {
-        let mut arg_sources = Sources::default();
+        let mut arg_sources = IndexMap::with_capacity_and_hasher(sources.len(), Default::default());
 
         for (source_idx, source_field_pos) in sources.iter() {
             let arg_position = if let Some(field_pos) = source_field_pos {
@@ -631,9 +658,9 @@ impl Merger {
         dest: &ObjectOrInterfaceFieldDefinitionPosition,
         merge_context: &FieldMergeContext,
     ) -> Result<(), FederationError> {
-        let mut shareable_sources: Vec<SubgraphWithIndex> = Vec::new();
-        let mut non_shareable_sources: Vec<SubgraphWithIndex> = Vec::new();
-        let mut all_resolving: Vec<SubgraphField> = Vec::new();
+        let mut shareable_sources: Vec<SubgraphWithIndex> = Vec::with_capacity(sources.len());
+        let mut non_shareable_sources: Vec<SubgraphWithIndex> = Vec::with_capacity(sources.len());
+        let mut all_resolving: Vec<SubgraphField> = Vec::with_capacity(sources.len());
 
         // Helper function to categorize a field
         let mut categorize_field =
@@ -668,14 +695,25 @@ impl Merger {
                     categorize_field(*idx, subgraph, dest);
                 }
             } else {
-                let itf_object_fields =
-                    self.fields_in_source_if_abstracted_by_interface_object(dest, *idx)?;
-                for field in itf_object_fields {
-                    let subgraph_str = format!(
-                        "{} (through @interfaceObject field \"{}.{}\")",
-                        self.names[*idx], field.type_name, field.field_name
-                    );
-                    categorize_field(*idx, subgraph_str, &field.into());
+                // Skip interface object fields if this subgraph is involved in overrides
+                // (either as the source or target of an override)
+                if !merge_context.is_used_overridden(*idx)
+                    && !merge_context.is_unused_overridden(*idx)
+                {
+                    let itf_object_fields =
+                        self.fields_in_source_if_abstracted_by_interface_object(dest, *idx)?;
+                    for field in itf_object_fields {
+                        // Also skip if the interface object field itself has @override
+                        let has_override = self.fields_with_override.object_fields.contains(&field);
+
+                        if !has_override {
+                            let subgraph_str = format!(
+                                "{} (through @interfaceObject field \"{}.{}\")",
+                                self.names[*idx], field.type_name, field.field_name
+                            );
+                            categorize_field(*idx, subgraph_str, &field.into());
+                        }
+                    }
                 }
             }
         }
@@ -988,10 +1026,15 @@ impl Merger {
                 subgraph.provides_directive_name().ok().flatten().as_ref(),
             );
 
-            let override_from = self.get_override_from(
-                &field_def,
-                subgraph.override_directive_name().ok().flatten().as_ref(),
-            );
+            let has_unknown_target = merge_context.has_override_with_unknown_target(idx);
+            let override_from = if has_unknown_target {
+                None
+            } else {
+                self.get_override_from(
+                    &field_def,
+                    subgraph.override_directive_name().ok().flatten().as_ref(),
+                )
+            };
 
             let context_arguments = self.extract_context_arguments(idx, &field_def)?;
 

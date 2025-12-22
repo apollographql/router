@@ -1,4 +1,5 @@
 use apollo_compiler::coord;
+use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Subgraph;
@@ -331,5 +332,138 @@ fn inaccessible_uses_security_core_purpose_in_supergraph() {
     assert!(
         matches!(inaccessible_purpose.as_ref(), apollo_compiler::ast::Value::Enum(enum_name) if enum_name == "SECURITY"),
         "Expected a @link with for: SECURITY in the supergraph schema",
+    );
+}
+
+#[test]
+fn namespaced_inaccessible_composes_correctly() {
+    // This subgraph uses the namespaced form @federation__inaccessible because it does not
+    // explicitly import @inaccessible in the @link directive
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "http://subgraphA",
+        r#"
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.0")
+
+        type Query {
+          publicField: String!
+          privateField: String! @federation__inaccessible
+        }
+
+        type User @federation__key(fields: "id") {
+          id: ID!
+          name: String!
+          internalId: ID! @federation__inaccessible
+        }
+        "#,
+    )
+    .unwrap();
+
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "http://subgraphB",
+        r#"
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.0")
+
+        type User @federation__key(fields: "id") {
+          id: ID!
+          email: String!
+          secretToken: String! @federation__inaccessible
+        }
+
+        type InternalType @federation__inaccessible {
+          data: String!
+        }
+        "#,
+    )
+    .unwrap();
+
+    let result = compose(vec![subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed with namespaced @inaccessible");
+
+    let schema = supergraph.schema().schema();
+
+    // 1. Check that the @inaccessible directive is defined in the supergraph with the
+    //    federation__inaccessible name (since it was used in namespaced form)
+    assert!(
+        schema
+            .directive_definitions
+            .contains_key(&name!("federation__inaccessible")),
+        "Expected federation__inaccessible directive definition in supergraph schema"
+    );
+
+    // 2. Check that there's a @link to the inaccessible spec with the correct import alias
+    let inaccessible_link = schema
+        .schema_definition
+        .directives
+        .iter()
+        .find(|d| {
+            d.name == "link"
+                && d.specified_argument_by_name("url").is_some_and(|url| {
+                    url.to_string()
+                        .contains("https://specs.apollo.dev/inaccessible")
+                })
+        })
+        .expect("Link to inaccessible spec should be present in supergraph schema");
+
+    // The import should include the alias federation__inaccessible
+    let import_arg = inaccessible_link
+        .specified_argument_by_name("import")
+        .expect("Link to inaccessible spec should have an import argument");
+    let import_str = import_arg.to_string();
+    assert!(
+        import_str.contains("federation__inaccessible"),
+        "Expected import to include federation__inaccessible alias, got: {import_str}"
+    );
+
+    // 3. Check that @federation__inaccessible is applied to Query.privateField
+    let private_field = coord!(Query.privateField)
+        .lookup_field(schema)
+        .expect("Query.privateField should exist");
+    assert!(
+        private_field
+            .directives
+            .iter()
+            .any(|d| d.name == "federation__inaccessible"),
+        "Expected @federation__inaccessible directive on Query.privateField"
+    );
+
+    // 4. Check that @federation__inaccessible is applied to User.internalId
+    let internal_id_field = coord!(User.internalId)
+        .lookup_field(schema)
+        .expect("User.internalId should exist");
+    assert!(
+        internal_id_field
+            .directives
+            .iter()
+            .any(|d| d.name == "federation__inaccessible"),
+        "Expected @federation__inaccessible directive on User.internalId"
+    );
+
+    // 5. Check that @federation__inaccessible is applied to User.secretToken
+    let secret_token_field = coord!(User.secretToken)
+        .lookup_field(schema)
+        .expect("User.secretToken should exist");
+    assert!(
+        secret_token_field
+            .directives
+            .iter()
+            .any(|d| d.name == "federation__inaccessible"),
+        "Expected @federation__inaccessible directive on User.secretToken"
+    );
+
+    // 6. Check that @federation__inaccessible is applied to InternalType
+    let internal_type = schema
+        .types
+        .get("InternalType")
+        .expect("InternalType should exist");
+    assert!(
+        internal_type
+            .directives()
+            .iter()
+            .any(|d| d.name == "federation__inaccessible"),
+        "Expected @federation__inaccessible directive on InternalType"
     );
 }

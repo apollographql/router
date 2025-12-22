@@ -9,7 +9,7 @@ use crate::configuration::TlsClient;
 use crate::configuration::default_metrics_interval;
 use crate::configuration::default_required_to_start;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct Config {
@@ -136,7 +136,7 @@ impl Config {
             "redis://127.0.0.1:6379"
         };
 
-        serde_json::from_value(serde_json::json!({
+        serde_json_bytes::from_value(serde_json_bytes::json!({
             "urls": [url],
             "namespace": namespace,
             "pool_size": 1,

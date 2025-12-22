@@ -271,7 +271,7 @@ impl Invalidation {
 pub(super) type InvalidationKind = &'static str;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum InvalidationRequest {
     Subgraph {
         subgraph: String,

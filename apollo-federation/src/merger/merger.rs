@@ -38,6 +38,7 @@ use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::join_spec_definition::JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -65,6 +66,7 @@ use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::HasDescription;
+use crate::schema::position::HasMutableDirectives;
 use crate::schema::position::HasType;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
@@ -501,6 +503,10 @@ impl Merger {
         trace!("Adding missing interface object fields to implementations");
         self.add_missing_interface_object_fields_to_implementations()?;
 
+        // Remove redundant @join__field directives (after backfilling interface object fields)
+        trace!("Removing redundant @join__field directives");
+        self.remove_redundant_join_fields()?;
+
         // Return result
         let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
         if !errors.is_empty() {
@@ -763,9 +769,8 @@ impl Merger {
                 };
             Some(type_kind_description)
         };
-        // TODO: Third type param is supposed to be representation of AST nodes
         self.error_reporter
-            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition, ()>(
+            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition>(
                 CompositionError::TypeKindMismatch {
                     message: format!(
                         "Type \"{}\" has mismatched kind: it is defined as ",
@@ -995,6 +1000,16 @@ impl Merger {
         let is_subscription = self.merged.is_subscription_root_type(&obj.type_name);
 
         let added = self.add_fields_shallow(obj.clone())?;
+        let mut subgraph_types =
+            IndexMap::with_capacity_and_hasher(self.subgraphs.len(), Default::default());
+        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> = subgraph
+                .schema()
+                .get_type(obj.type_name.clone())
+                .ok()
+                .and_then(|ty| ty.try_into().ok());
+            subgraph_types.insert(idx, maybe_ty);
+        }
 
         if added.is_empty() {
             trace!("Object has no fields to merge, removing from schema");
@@ -1002,20 +1017,6 @@ impl Merger {
         } else {
             for (field, subgraph_fields) in added {
                 if is_value_type {
-                    let subgraph_types = self
-                        .subgraphs
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, subgraph)| {
-                            let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> =
-                                subgraph
-                                    .schema()
-                                    .get_type(obj.type_name.clone())
-                                    .ok()
-                                    .and_then(|ty| ty.try_into().ok());
-                            (idx, maybe_ty)
-                        })
-                        .collect();
                     self.hint_on_inconsistent_value_type_field(
                         &subgraph_types,
                         &ObjectOrInterfaceTypeDefinitionPosition::Object(obj.clone()),
@@ -1082,7 +1083,13 @@ impl Merger {
 
         // First, process all subgraphs to check for @interfaceObject fields
         for idx in 0..self.subgraphs.len() {
-            if !sources.contains_key(&idx) {
+            // Check for interface objects if the subgraph either:
+            // 1. Is not in sources at all, OR
+            // 2. Is in sources with a None value (meaning it has interface objects but not the concrete type)
+            let should_check_interface_objects =
+                !sources.contains_key(&idx) || sources.get(&idx).is_some_and(|v| v.is_none());
+
+            if should_check_interface_objects {
                 // Check if the field is abstracted by @interfaceObject
                 // This checks if the parent implements interfaces that are @interfaceObject
                 let mut interface_object_abstracting_fields =
@@ -1293,6 +1300,13 @@ impl Merger {
                 continue;
             }
 
+            // Get the source subgraph index
+            let from_idx = self
+                .names
+                .iter()
+                .position(|n| n == &source_subgraph_name)
+                .unwrap();
+
             // Check if field is abstracted by @interfaceObject in source
             let source_mapped = subgraph_map.get(&source_subgraph_name).unwrap();
             if !source_mapped.interface_object_abstracting_fields.is_empty() {
@@ -1302,15 +1316,12 @@ impl Merger {
                         dest, subgraph_name, source_subgraph_name, dest
                     ),
                 });
+                // Mark the source as overridden so field sharing validation skips it
+                result.set_used_overridden(from_idx);
                 continue;
             }
 
             // Check for conflicts with other directives
-            let from_idx = self
-                .names
-                .iter()
-                .position(|n| n == &source_subgraph_name)
-                .unwrap();
             if let Some((conflicting_directive_name, conflicting_subgraph_name)) =
                 self.override_conflicts_with_other_directive(idx, from_idx, dest)?
             {
@@ -1609,8 +1620,7 @@ impl Merger {
             {
                 self.error_reporter.report_mismatch_hint::<
                     ObjectOrInterfaceTypeDefinitionPosition,
-                    ObjectOrInterfaceTypeDefinitionPosition,
-                    ()>(
+                    ObjectOrInterfaceTypeDefinitionPosition>(
                         hint_id.clone(),
 format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\": ",
                             type_description,
@@ -1657,7 +1667,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             }
         }
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize, ()>(
+            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize>(
                 HintCode::InconsistentEntity,
                 format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
                     &obj.type_name,
@@ -1954,7 +1964,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 }
             };
 
-            self.error_reporter.report_mismatch_error::<Type, T, ()>(
+            self.error_reporter.report_mismatch_error::<Type, T>(
                 error,
                 &ty,
                 sources,
@@ -1987,7 +1997,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 "subtype"
             };
 
-            self.error_reporter.report_mismatch_hint::<Type, T, ()>(
+            self.error_reporter.report_mismatch_hint::<Type, T>(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs: ",
@@ -2242,7 +2252,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 } else {
                     format!("Element \"{dest}\"")
                 };
-                self.error_reporter.report_mismatch_hint::<T, T, ()>(
+                self.error_reporter.report_mismatch_hint::<T, T>(
                     HintCode::InconsistentDescription,
                     format!("{name} has inconsistent descriptions across subgraphs. "),
                     dest,
@@ -2438,55 +2448,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         sources.iter().any(|(idx, source)| predicate(source, *idx))
     }
 
-    // TODO: These error reporting functions are not yet fully implemented
-    pub(crate) fn report_mismatch_error_with_specifics<T>(
-        &mut self,
-        error: CompositionError,
-        sources: &Sources<T>,
-        accessor: impl Fn(&Option<T>) -> &str,
-    ) {
-        // Build a detailed error message by showing which subgraphs have/don't have the element
-        let mut details = Vec::new();
-        let mut has_subgraphs = Vec::new();
-        let mut missing_subgraphs = Vec::new();
-
-        for (&idx, source) in sources.iter() {
-            let subgraph_name = if idx < self.names.len() {
-                &self.names[idx]
-            } else {
-                "unknown"
-            };
-
-            let result = accessor(source);
-            if result == "yes" {
-                has_subgraphs.push(subgraph_name);
-            } else {
-                missing_subgraphs.push(subgraph_name);
-            }
-        }
-
-        // Format the subgraph lists
-        if !has_subgraphs.is_empty() {
-            details.push(format!("defined in {}", has_subgraphs.join(", ")));
-        }
-        if !missing_subgraphs.is_empty() {
-            details.push(format!("but not in {}", missing_subgraphs.join(", ")));
-        }
-
-        // Create the enhanced error with details
-        let enhanced_error = match error {
-            CompositionError::EnumValueMismatch { message } => {
-                CompositionError::EnumValueMismatch {
-                    message: format!("{}{}", message, details.join(" ")),
-                }
-            }
-            // Add other error types as needed
-            other => other,
-        };
-
-        self.error_reporter.add_error(enhanced_error);
-    }
-
     pub(crate) fn source_locations<T>(&self, sources: &Sources<Node<T>>) -> Vec<SubgraphLocation> {
         let mut result = Vec::new();
         for (subgraph_id, node) in sources {
@@ -2509,6 +2470,95 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         }
         result
     }
+
+    /// Remove redundant @join__field directives after the merge phase.
+    /// A @join__field directive is considered redundant if:
+    /// 1. The field has a @join__field for each graph in the schema
+    /// 2. Each @join__field has only the `graph` argument (no other arguments like requires, provides, etc.)
+    pub(crate) fn remove_redundant_join_fields(&mut self) -> Result<(), FederationError> {
+        let Some(join_field_directive_name) = self
+            .join_spec_definition
+            .directive_name_in_schema(&self.merged, &JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            return Ok(());
+        };
+
+        let graph_enum = self
+            .join_spec_definition
+            .graph_enum_definition(&self.merged)?;
+        let graph_enum_values: Vec<Name> = graph_enum.values.keys().cloned().collect();
+
+        let referencers = self.merged.referencers();
+        let field_positions = referencers.get_directive(&join_field_directive_name)?;
+        let positions_to_process: Vec<DirectiveTargetPosition> = field_positions.iter().collect();
+
+        for pos in positions_to_process {
+            match &pos {
+                DirectiveTargetPosition::ObjectField(field) => self
+                    .remove_redundant_join_fields_from_position(
+                        field,
+                        &join_field_directive_name,
+                        &graph_enum_values,
+                    )?,
+                DirectiveTargetPosition::InterfaceField(field) => self
+                    .remove_redundant_join_fields_from_position(
+                        field,
+                        &join_field_directive_name,
+                        &graph_enum_values,
+                    )?,
+                DirectiveTargetPosition::InputObjectField(field) => self
+                    .remove_redundant_join_fields_from_position(
+                        field,
+                        &join_field_directive_name,
+                        &graph_enum_values,
+                    )?,
+                _ => bail!("Found @join__field application at unexpected location: {pos}"),
+            }
+        }
+
+        Ok(())
+    }
+
+    fn remove_redundant_join_fields_from_position<T>(
+        &mut self,
+        field_pos: &T,
+        join_field_directive_name: &Name,
+        graph_enum_values: &[Name],
+    ) -> Result<(), FederationError>
+    where
+        T: HasMutableDirectives,
+    {
+        let directives = field_pos.directives_mut(self.merged.schema_mut())?;
+
+        let mut join_field_graph_values: HashSet<Name> = HashSet::new();
+        let mut has_non_graph_argument = false;
+
+        for join_field_directive in directives.get_all(join_field_directive_name) {
+            if let Some(Value::Enum(graph_name)) = join_field_directive
+                .specified_argument_by_name(&JOIN_GRAPH_ARGUMENT_NAME)
+                .map(|v| v.as_ref())
+            {
+                join_field_graph_values.insert(graph_name.clone());
+            }
+            if join_field_directive
+                .arguments
+                .iter()
+                .any(|arg| arg.name != JOIN_GRAPH_ARGUMENT_NAME)
+            {
+                has_non_graph_argument = true;
+            }
+        }
+
+        if !has_non_graph_argument
+            && graph_enum_values
+                .iter()
+                .all(|g| join_field_graph_values.contains(g))
+        {
+            directives.retain(|d| &d.name != join_field_directive_name);
+        }
+
+        Ok(())
+    }
 }
 
 /// Map over sources, applying a function to each element
@@ -2521,4 +2571,19 @@ where
         .iter()
         .map(|(idx, source)| (*idx, f(source)))
         .collect()
+}
+
+pub(in crate::merger) fn map_sources_with_index<T, U, F>(
+    sources: Sources<T>,
+    mut f: F,
+) -> Sources<U>
+where
+    F: FnMut(usize, Option<T>) -> Option<U>,
+{
+    let mut mapped_sources: Sources<U> =
+        IndexMap::with_capacity_and_hasher(sources.len(), Default::default());
+    for (idx, source) in sources.into_iter() {
+        mapped_sources.insert(idx, f(idx, source));
+    }
+    mapped_sources
 }

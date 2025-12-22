@@ -586,12 +586,12 @@ impl Configuration {
         }
 
         // response & entity caching
-        if self.apollo_plugin_enabled("preview_response_cache")
+        if self.apollo_plugin_enabled("response_cache")
             && self.apollo_plugin_enabled("preview_entity_cache")
         {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "entity cache and response cache features are mutually exclusive",
-                error: "either set preview_response_cache.enabled: false or preview_entity_cache.enabled: false in your router yaml configuration".into(),
+                error: "either set response_cache.enabled: false or preview_entity_cache.enabled: false in your router yaml configuration".into(),
             });
         }
 
@@ -1291,7 +1291,7 @@ pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
 }
 
 /// Configuration options pertaining to the subgraph server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct TlsClient {
@@ -1322,7 +1322,7 @@ impl Default for TlsClient {
 }
 
 /// TLS client authentication
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TlsClientAuth {
     /// list of certificates in PEM format

@@ -149,11 +149,15 @@ impl TransitionGraphPath {
                     let Selection::Field(field) = field else {
                         return None;
                     };
-                    if !field
+                    // Check if the field definition in the schema has @external
+                    // We need to look up the actual field definition because the parsed
+                    // field set doesn't include directives from the schema
+                    let field_def = field
                         .field
-                        .directives
-                        .has(external_directive_definition_name)
-                    {
+                        .field_position
+                        .get(subgraph_schema.schema())
+                        .ok()?;
+                    if !field_def.directives.has(external_directive_definition_name) {
                         return None;
                     }
                     Some(field.field.name().clone())
