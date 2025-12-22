@@ -699,13 +699,7 @@ fn validate_issuers(
         }
 
         Value::Array(token_issuers_arr) => {
-            // Check if any of these issuers is in our list
-            for token_issuer in token_issuers_arr.iter().filter_map(|iss| iss.as_str()) {
-                if configured_issuers.contains(token_issuer) {
-                    return Ok(());
-                }
-            }
-
+            // TODO: Check if any of these issuers is in our list
             // No matches, so return an error
             issuer_error(token_issuers.to_string())
         }
