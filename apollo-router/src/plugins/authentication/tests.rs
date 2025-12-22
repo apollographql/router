@@ -1778,16 +1778,12 @@ async fn jwks_send_headers() {
     assert!(got_header.load(Ordering::Acquire));
 }
 
-mod audience_validation {
-    use std::ops::ControlFlow;
-
+mod common {
     use base64::Engine as _;
     use base64::prelude::BASE64_URL_SAFE_NO_PAD;
-    use http::StatusCode;
     use jsonwebtoken::Algorithm;
     use jsonwebtoken::EncodingKey;
     use jsonwebtoken::encode;
-    use jsonwebtoken::get_current_timestamp;
     use jsonwebtoken::jwk::AlgorithmParameters;
     use jsonwebtoken::jwk::CommonParameters;
     use jsonwebtoken::jwk::EllipticCurve;
@@ -1798,19 +1794,16 @@ mod audience_validation {
     use jsonwebtoken::jwk::KeyOperations;
     use jsonwebtoken::jwk::PublicKeyUse;
     use p256::ecdsa::SigningKey;
-    use p256::ecdsa::signature::rand_core::OsRng;
     use p256::pkcs8::EncodePrivateKey;
 
     use crate::plugins::authentication::JWTConf;
     use crate::plugins::authentication::Source;
-    use crate::plugins::authentication::authenticate;
     use crate::plugins::authentication::default_header_name;
     use crate::plugins::authentication::default_header_value_prefix;
-    use crate::plugins::authentication::tests::make_manager;
     use crate::services::router;
     use crate::services::supergraph;
 
-    fn jwk(signing_key: &SigningKey) -> Jwk {
+    pub(super) fn jwk(signing_key: &SigningKey) -> Jwk {
         let verifying_key = signing_key.verifying_key();
         let point = verifying_key.to_encoded_point(false);
         Jwk {
@@ -1834,7 +1827,7 @@ mod audience_validation {
         EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes())
     }
 
-    fn jwt_conf_with_header_source() -> JWTConf {
+    pub(super) fn jwt_conf_with_header_source() -> JWTConf {
         let mut config = JWTConf::default();
         config.sources.push(Source::Header {
             name: default_header_name(),
@@ -1843,12 +1836,46 @@ mod audience_validation {
         config
     }
 
+    pub(super) fn build_request_with_header_token(
+        signing_key: SigningKey,
+        token_claims: serde_json::Value,
+    ) -> router::Request {
+        let token = encode(
+            &jsonwebtoken::Header::new(Algorithm::ES256),
+            &token_claims,
+            &encoding_key(&signing_key),
+        )
+        .unwrap();
+
+        supergraph::Request::canned_builder()
+            .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+}
+
+mod audience_validation {
+    use std::ops::ControlFlow;
+
+    use http::StatusCode;
+    use jsonwebtoken::get_current_timestamp;
+    use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::rand_core::OsRng;
+
+    use super::common::build_request_with_header_token;
+    use super::common::jwk;
+    use super::common::jwt_conf_with_header_source;
+    use super::make_manager;
+    use crate::plugins::authentication::authenticate;
+    use crate::services::router;
+
     fn authenticate_request(
         manager_aud: &[&str],
         token_aud: serde_json::Value,
     ) -> ControlFlow<router::Response, router::Request> {
         let signing_key = SigningKey::random(&mut OsRng);
-
         let manager_audiences = if manager_aud.is_empty() {
             None
         } else {
@@ -1861,19 +1888,8 @@ mod audience_validation {
             "exp": get_current_timestamp(),
             "aud": token_aud
         });
-        let token = encode(
-            &jsonwebtoken::Header::new(Algorithm::ES256),
-            &token_claims,
-            &encoding_key(&signing_key),
-        )
-        .unwrap();
 
-        let request: router::Request = supergraph::Request::canned_builder()
-            .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
-            .build()
-            .unwrap()
-            .try_into()
-            .unwrap();
+        let request = build_request_with_header_token(signing_key, token_claims);
         authenticate(&jwt_conf_with_header_source(), &manager, request)
     }
 
@@ -1886,8 +1902,8 @@ mod audience_validation {
     #[case::single_with_array_accepted(&["hello"], serde_json::json!(["hello"]))]
     #[case::single_aud(&["hello"], serde_json::json!("hello"))]
     #[case::multiple_with_single_intersection(&["hello", "world", "goodbye"], serde_json::json!(["hola", "bonjour", "hello"]))]
-    #[case::empty_mgr_aud(&[], serde_json::Value::Null)]
-    #[case::empty_mgr_aud_with_token_aud(&[], serde_json::json!("hello"))]
+    #[case::null_mgr_aud(&[], serde_json::Value::Null)]
+    #[case::null_mgr_aud_with_token_aud(&[], serde_json::json!("hello"))]
     fn it_accepts_jwt(#[case] manager_aud: &[&str], #[case] token_aud: serde_json::Value) {
         match authenticate_request(manager_aud, token_aud.clone()) {
             ControlFlow::Continue(_) => {}
@@ -1907,7 +1923,9 @@ mod audience_validation {
     fn it_rejects_jwt(#[case] manager_aud: &[&str], #[case] token_aud: serde_json::Value) {
         match authenticate_request(manager_aud, token_aud.clone()) {
             ControlFlow::Continue(_) => {
-                panic!("Request should be rejected");
+                panic!(
+                    "Request should be rejected: manager_aud = {manager_aud:?}, token_aud = {token_aud}"
+                );
             }
             ControlFlow::Break(response) => {
                 assert_eq!(
