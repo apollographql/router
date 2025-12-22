@@ -676,7 +676,7 @@ fn validate_audiences(
 ) -> Result<(), AuthenticationError> {
     let audience_error = |actual: String| {
         // Standardize audience - sort it and join the elements with a comma
-        let mut audiences: Vec<String> = configured_audiences.into_iter().cloned().collect();
+        let mut audiences: Vec<String> = configured_audiences.iter().cloned().collect();
         audiences.sort();
 
         let expected = audiences.join(", ");
