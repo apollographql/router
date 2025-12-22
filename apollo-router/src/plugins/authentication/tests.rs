@@ -1937,3 +1937,89 @@ mod audience_validation {
         }
     }
 }
+
+mod issuer_validation {
+    use std::ops::ControlFlow;
+
+    use http::StatusCode;
+    use jsonwebtoken::get_current_timestamp;
+    use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::rand_core::OsRng;
+
+    use super::common::build_request_with_header_token;
+    use super::common::jwk;
+    use super::common::jwt_conf_with_header_source;
+    use super::make_manager;
+    use crate::plugins::authentication::authenticate;
+    use crate::services::router;
+
+    fn authenticate_request(
+        manager_iss: &[&str],
+        token_iss: serde_json::Value,
+    ) -> ControlFlow<router::Response, router::Request> {
+        let signing_key = SigningKey::random(&mut OsRng);
+
+        let manager_issuers = if manager_iss.is_empty() {
+            None
+        } else {
+            Some(manager_iss.iter().map(ToString::to_string).collect())
+        };
+        let manager = make_manager(&jwk(&signing_key), manager_issuers, None);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+            "iss": token_iss
+        });
+
+        let request = build_request_with_header_token(signing_key, token_claims);
+        authenticate(&jwt_conf_with_header_source(), &manager, request)
+    }
+
+    #[rstest::rstest]
+    #[case::multiple_iss(&["hello", "world"], serde_json::json!(["hello", "world"]))]
+    #[case::multiple_with_array_accepted(&["hello", "world", "goodbye"], serde_json::json!(["hello"]))]
+    #[case::multiple_with_str_accepted(&["hello", "world"], serde_json::json!("hello"))]
+    #[case::multiple_with_str_accepted(&["hello", "world"], serde_json::json!("world"))]
+    #[case::single_with_array_accepted_any_of(&["hello"], serde_json::json!(["hello", "world"]))]
+    #[case::single_with_array_accepted(&["hello"], serde_json::json!(["hello"]))]
+    #[case::single_iss(&["hello"], serde_json::json!("hello"))]
+    #[case::multiple_with_single_intersection(&["hello", "world", "goodbye"], serde_json::json!(["hola", "bonjour", "hello"]))]
+    #[case::null_mgr_iss_with_token_iss(&[], serde_json::json!("hello"))]
+    #[case::null_mgr_iss_with_empty_token_iss(&[], serde_json::Value::Null)]
+    #[case::empty_token_iss(&["hello", "world"], serde_json::Value::Null)]
+    #[case::empty_token_iss(&["hello"], serde_json::Value::Null)]
+    fn it_accepts_jwt(#[case] manager_iss: &[&str], #[case] token_iss: serde_json::Value) {
+        match authenticate_request(manager_iss, token_iss.clone()) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(response) => {
+                panic!(
+                    "Request should be permitted: manager_iss = {manager_iss:?}, token_iss = {token_iss}, response = {response:?}"
+                );
+            }
+        }
+    }
+
+    #[rstest::rstest]
+    #[case::missing_token_iss(&["hello", "world"], serde_json::json!(""))]
+    #[case::mismatched_single_iss(&["hello"], serde_json::json!("world"))]
+    #[case::mismatched_single_iss_array(&["hello"], serde_json::json!(["world"]))]
+    #[case::mismatched_single_iss_array(&["hello"], serde_json::json!(["world", "planet"]))]
+    #[case::mismatched_multiple_iss(&["hello", "world"], serde_json::json!(["goodbye", "planet"]))]
+    fn it_rejects_jwt(#[case] manager_iss: &[&str], #[case] token_iss: serde_json::Value) {
+        match authenticate_request(manager_iss, token_iss.clone()) {
+            ControlFlow::Continue(_) => {
+                panic!(
+                    "Request should be rejected: manager_iss = {manager_iss:?}, token_iss = {token_iss}"
+                );
+            }
+            ControlFlow::Break(response) => {
+                assert_eq!(
+                    response.response.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "manager_iss = {manager_iss:?}, token_iss = {token_iss}, response = {response:?}"
+                );
+            }
+        }
+    }
+}
