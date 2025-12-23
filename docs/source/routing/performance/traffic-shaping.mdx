@@ -178,9 +178,9 @@ When you configure compression for subgraph traffic, the router automatically ma
 - **`content-encoding` header**: When compression is enabled via `traffic_shaping.all.compression` or `traffic_shaping.subgraphs.<name>.compression`, the router sets this header on outgoing requests to subgraphs. This header indicates that the router has compressed the request body using the specified algorithm (e.g., `content-encoding: gzip`).
 
 - **`accept-encoding` header**: The router automatically sets this header on all subgraph requests to indicate it accepts compressed responses. The router always accepts responses compressed with `gzip`, `br`, or `deflate`, regardless of whether you configure outgoing compression.
-```
 
-In other words, the router always tells subgraphs "I can handle compressed responses" (via `accept-encoding`), but only compresses its own request bodies when you explicitly configure the `compression` option (indicated via `content-encoding`).
+
+The router always indicates it accepts compressed responses via the `accept-encoding` header, but it only compresses its own request bodies when you explicitly configure the `compression` option.
 
 <Note>
 
