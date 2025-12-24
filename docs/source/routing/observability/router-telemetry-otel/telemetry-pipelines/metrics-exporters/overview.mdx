@@ -98,7 +98,27 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### `buckets`
 
-You can customize bucket boundaries for all generated histograms by setting `telemetry.exporters.metrics.common.buckets` in [`router.yaml`](/router/configuration/overview/#yaml-config-file). For example:
+Histogram metrics (such as `http.server.request.duration`) use bucket boundaries to group measurement values. Understanding and configuring these buckets is important for accurately monitoring request durations and timeout behavior.
+
+#### Default buckets
+
+By default, the router uses the following bucket boundaries (in seconds):
+
+```
+0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0
+```
+
+These defaults work well for most applications where the majority of requests complete in under 10 seconds.
+
+#### Why buckets matter for timeout settings
+
+Histogram metrics cap values at the highest bucket boundary. With the default buckets, any request taking longer than 10 seconds will be counted in the `10.0+` bucket. This can make it appear that timeouts aren't being respected in your metrics, especially if you have configured timeouts greater than 10 seconds.
+
+If your application has longer timeouts or slower operations, you should customize your histogram buckets to include higher values that match your timeout configuration.
+
+#### Customizing buckets
+
+You can customize bucket boundaries for all generated histograms by setting `telemetry.exporters.metrics.common.buckets` in [`router.yaml`](/router/configuration/overview/#yaml-config-file):
 
 ```yaml title="router.yaml"
 telemetry:
@@ -106,16 +126,27 @@ telemetry:
     metrics:
       common:
         buckets:
+          - 0.001
+          - 0.005
+          - 0.015
           - 0.05
-          - 0.10
-          - 0.25
-          - 0.50
-          - 1.00
-          - 2.50
-          - 5.00
-          - 10.00
-          - 20.00
+          - 0.1
+          - 0.2
+          - 0.3
+          - 0.4
+          - 0.5
+          - 1.0
+          - 5.0
+          - 10.0
+          - 30.0  # Add higher buckets if you have longer timeouts
+          - 60.0
 ```
+
+<Note>
+
+When customizing buckets, ensure your highest bucket value is greater than or equal to your configured timeout values. This ensures accurate representation of timeout behavior in your metrics.
+
+</Note>
 
 ### `views`
 
