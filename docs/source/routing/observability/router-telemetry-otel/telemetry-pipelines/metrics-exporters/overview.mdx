@@ -98,23 +98,23 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### `buckets`
 
-Histogram metrics (such as `http.server.request.duration`) use bucket boundaries to group measurement values. Understanding and configuring these buckets is important for accurately monitoring request durations and timeout behavior.
+Histogram metrics (such as `http.server.request.duration`) use bucket boundaries to group measurement values. Configure these buckets to accurately monitor request durations and timeout behavior.
 
 #### Default buckets
 
 By default, the router uses the following bucket boundaries (in seconds):
 
-```
+```text
 0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0
 ```
 
-These defaults work well for most applications where the majority of requests complete in under 10 seconds.
+These defaults work well for most applications where the majority of requests complete in under ten seconds.
 
 #### Why buckets matter for timeout settings
 
-Histogram metrics cap values at the highest bucket boundary. With the default buckets, any request taking longer than 10 seconds will be counted in the `10.0+` bucket. This can make it appear that timeouts aren't being respected in your metrics, especially if you have configured timeouts greater than 10 seconds.
+Histogram metrics cap values at the highest bucket boundary. With the default buckets, any request taking longer than ten seconds is counted in the `10.0+` bucket. This can make it appear that timeouts aren't being respected in your metrics, especially if you have configured timeouts greater than ten seconds.
 
-If your application has longer timeouts or slower operations, you should customize your histogram buckets to include higher values that match your timeout configuration.
+If your application has longer timeouts or slower operations, customize your histogram buckets to include higher values that match your timeout configuration.
 
 #### Customizing buckets
 
@@ -126,20 +126,15 @@ telemetry:
     metrics:
       common:
         buckets:
-          - 0.001
-          - 0.005
-          - 0.015
           - 0.05
-          - 0.1
-          - 0.2
-          - 0.3
-          - 0.4
-          - 0.5
-          - 1.0
-          - 5.0
-          - 10.0
-          - 30.0  # Add higher buckets if you have longer timeouts
-          - 60.0
+          - 0.10
+          - 0.25
+          - 0.50
+          - 1.00
+          - 2.50
+          - 5.00
+          - 10.00
+          - 20.00
 ```
 
 <Note>
