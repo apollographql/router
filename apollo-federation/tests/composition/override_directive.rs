@@ -1,3 +1,5 @@
+use apollo_compiler::coord;
+
 use crate::composition::ServiceDefinition;
 use crate::composition::assert_composition_errors;
 use crate::composition::compose_as_fed2_subgraphs;
@@ -1220,4 +1222,118 @@ mod progressive_override {
             "#);
         }
     }
+}
+
+#[test]
+fn override_with_nonexistent_target_does_not_add_join_field() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+            type Query {
+                product: Product
+            }
+            type Product @shareable {
+                id: ID
+                name: String @override(from: "NonExistentSubgraph")
+                price: Int @override(from: "NonExistentSubgraph")
+            }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph1]);
+    let supergraph = result.expect("composition should succeed with hints");
+
+    let product = coord!(Product)
+        .lookup(supergraph.schema().schema())
+        .unwrap();
+    // The name and price fields should not have join__field applications because the override had an
+    // invalid target.
+    insta::assert_snapshot!(product, @r#"
+    type Product @join__type(graph: SUBGRAPH1) {
+      id: ID
+      name: String
+      price: Int
+    }
+    "#);
+}
+
+#[test]
+fn override_with_unknown_target_still_adds_join_field() {
+    let subgraph_a = ServiceDefinition {
+        name: "SubgraphA",
+        type_defs: r#"
+            type Query {
+                product: Product
+            }
+
+            type Product @key(fields: "id") {
+                id: ID!
+                category: Category! @override(from: "NonExistentSubgraph")
+            }
+
+            enum Category {
+                ELECTRONICS
+                CLOTHING
+            }
+        "#,
+    };
+    let subgraph_b = ServiceDefinition {
+        name: "SubgraphB",
+        type_defs: r#"
+            type Product @key(fields: "id") {
+                id: ID!
+                description: String
+            }
+        "#,
+    };
+
+    // Composition should succeed even though @override references a non-existent subgraph
+    let supergraph =
+        compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]).expect("composition should succeed");
+
+    // The Product type should have @join__field directives that correctly indicate
+    // which subgraphs have which fields
+    let product_type = supergraph
+        .schema()
+        .schema()
+        .types
+        .get("Product")
+        .expect("Product type exists");
+
+    let product_str = product_type.to_string();
+
+    // Verify that category field has a @join__field directive for SubgraphA
+    // (even though the @override target is invalid)
+    assert!(
+        product_str.contains("category: Category! @join__field(graph: SUBGRAPHA"),
+        "category should have @join__field for SubgraphA"
+    );
+
+    // Verify that the @override information is omitted since the target is unknown
+    assert!(
+        !product_str.contains("override:"),
+        "override argument should be omitted when target is unknown"
+    );
+
+    // Most importantly, verify that we can convert to API schema without errors
+    // This would fail before the fix because SubgraphB would incorrectly include
+    // the category field even though Category enum doesn't exist there
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("should convert to valid API schema");
+
+    // Verify the API schema is correct
+    let api_product = api_schema
+        .schema()
+        .types
+        .get("Product")
+        .expect("Product exists in API schema");
+
+    insta::assert_snapshot!(api_product.to_string(), @r#"
+    type Product {
+      id: ID!
+      category: Category!
+      description: String
+    }
+    "#);
 }

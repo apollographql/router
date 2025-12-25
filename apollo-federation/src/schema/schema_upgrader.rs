@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::name;
@@ -18,6 +19,7 @@ use super::TypeDefinitionPosition;
 use super::field_set::collect_target_fields_from_field_set;
 use super::position::DirectiveDefinitionPosition;
 use super::position::FieldDefinitionPosition;
+use super::position::HasDescription;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
@@ -157,7 +159,7 @@ impl SchemaUpgrader {
         self.remove_directives_on_interface(&upgrade_metadata, &mut schema)?;
 
         // Note that this rule rely on being after `remove_directives_on_interface` in practice (in that it doesn't check interfaces).
-        self.remove_provides_on_non_composite(&mut schema)?;
+        self.remove_provides_on_non_composite(&subgraph, &mut schema)?;
 
         // Note that this should come _after_ all the other changes that may remove/update federation directives, since those may create unused
         // externals. Which is why this is toward  the end.
@@ -212,13 +214,26 @@ impl SchemaUpgrader {
         //            the schema and valid.
 
         // Fed1 links and definitions are removed here, so we can add fed2 links below.
-        self.remove_fed1_links_and_definitions(&mut schema)?;
+        // Save descriptions from federation directive definitions before removal.
+        let saved_directives = self.remove_fed1_links_and_definitions(&mut schema)?;
 
         // Add link spec & federation 2 spec.
         let inner_schema = schema_as_fed2_subgraph(schema, false)?;
 
         // re-expand all federation directive definitions
-        expand_schema(inner_schema)
+        let mut schema = expand_schema(inner_schema)?;
+
+        // Restore descriptions on federation directives from the original Fed1 definitions.
+        for (directive_name, directive_def) in saved_directives {
+            let pos = DirectiveDefinitionPosition {
+                directive_name: directive_name.clone(),
+            };
+            if pos.try_get(schema.schema()).is_some() {
+                pos.set_description(&mut schema, directive_def.description.clone())?;
+            }
+        }
+
+        Ok(schema)
     }
 
     // integrates checkForExtensionWithNoBase from the JS code
@@ -336,7 +351,7 @@ impl SchemaUpgrader {
     fn remove_fed1_links_and_definitions(
         &self,
         schema: &mut FederationSchema,
-    ) -> Result<(), FederationError> {
+    ) -> Result<HashMap<Name, Node<DirectiveDefinition>>, FederationError> {
         let Some(metadata) = schema.metadata() else {
             bail!("Schema must have metadata to upgrade");
         };
@@ -357,14 +372,23 @@ impl SchemaUpgrader {
             name!("tag"),
         ];
 
+        // Save federation directives before removing them
+        let mut saved_directives: HashMap<Name, Node<DirectiveDefinition>> = HashMap::default();
+
         let definitions: Vec<DirectiveDefinitionPosition> =
             schema.get_directive_definitions().collect();
         for definition in &definitions {
             if directives_to_remove.contains(&definition.directive_name) {
-                schema
+                // Save the directive before removing it
+                if let Some(directive_def) = schema
                     .schema
                     .directive_definitions
-                    .shift_remove(&definition.directive_name);
+                    .shift_remove(&definition.directive_name)
+                    && directive_def.description.is_some()
+                {
+                    saved_directives
+                        .insert(definition.directive_name.clone(), directive_def.clone());
+                }
                 schema
                     .referencers
                     .directives
@@ -404,7 +428,7 @@ impl SchemaUpgrader {
         {
             union_obj.remove(schema)?;
         }
-        Ok(())
+        Ok(saved_directives)
     }
 
     fn remove_external_on_interface(&self, schema: &mut FederationSchema) {
@@ -688,32 +712,33 @@ impl SchemaUpgrader {
 
     fn remove_provides_on_non_composite(
         &self,
+        subgraph: &Subgraph<Expanded>,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        let Some(metadata) = &schema.subgraph_metadata else {
+        let Some(provides_directive) = subgraph.provides_directive_name()? else {
             return Ok(());
         };
-
-        let provides_directive = metadata
-            .federation_spec_definition()
-            .provides_directive_definition(schema)?;
-
-        #[allow(clippy::iter_overeager_cloned)] // TODO: remove this
-        let references_to_remove: Vec<_> = schema
+        let Some(targets) = subgraph
+            .schema()
             .referencers()
-            .get_directive(provides_directive.name.as_str())?
-            .object_fields
-            .iter()
-            .cloned()
-            .filter(|ref_field| {
-                schema
-                    .get_type(ref_field.type_name.clone())
-                    .map(|t| !t.is_composite_type())
-                    .unwrap_or(false)
-            })
-            .collect();
-        for reference in &references_to_remove {
-            reference.remove(schema)?;
+            .directives
+            .get(&provides_directive)
+        else {
+            return Ok(());
+        };
+        for obj_field_pos in targets.object_fields.iter() {
+            let field = obj_field_pos.make_mut(&mut schema.schema)?;
+            let return_type = field.ty.inner_named_type();
+            if subgraph
+                .schema()
+                .try_get_type(return_type.clone())
+                .is_some_and(|t| !t.is_composite_type())
+            {
+                let field = field.make_mut();
+                field
+                    .directives
+                    .retain(|d| d.name != provides_directive.as_str());
+            }
         }
         Ok(())
     }
@@ -1729,8 +1754,7 @@ mod tests {
     }
 
     #[test]
-    fn ignore_error_for_provides_field_set_on_scalar_field() {
-        // This used to generate a wrong error.
+    fn removes_provides_on_non_composite_fields() {
         let subgraphs = vec![
             (
                 "subgraph1",
@@ -1765,11 +1789,14 @@ mod tests {
                     .expect("expands schema")
             })
             .collect::<Vec<_>>();
-        let errors = upgrade_subgraphs_if_necessary(expanded).expect_err("fails to upgrade schema");
-        assert_eq!(errors.len(), 1);
-        assert_eq!(
-            errors[0].to_string(),
-            r#"[subgraph1] Cannot have both @provides and @external on field "User.id""#
+        let upgraded = upgrade_subgraphs_if_necessary(expanded).expect("failed to upgrade schema");
+        let changed_schema = upgraded[0].schema().schema();
+        let id_field = coord!(User.id)
+            .lookup_field(changed_schema)
+            .expect("field exists");
+        assert!(
+            id_field.directives.get("provides").is_none(),
+            "User.id in subgraph1 should not have @provides"
         );
     }
 
