@@ -33,6 +33,7 @@ import ResponseCache from '../../../shared/config/response_cache.mdx';
 import PreviewFileUploads from '../../../shared/config/preview_file_uploads.mdx';
 import Rhai from '../../../shared/config/rhai.mdx';
 import Sandbox from '../../../shared/config/sandbox.mdx';
+import Server from '../../../shared/config/server.mdx';
 import Subscription from '../../../shared/config/subscription.mdx';
 import Supergraph from '../../../shared/config/supergraph.mdx';
 import Telemetry from '../../../shared/config/telemetry.mdx';
@@ -306,6 +307,16 @@ homepage:
 </Caution>
 
 Learn more in [Apollo Sandbox](/graphos/platform/sandbox).
+
+---
+
+<Server />
+
+#### Header Read Timeout
+
+The header read timeout is the amount of time the Router will wait to receive the complete request headers from a client before timing out. It applies both when the connection is fully idle and when a request has been started but sending the headers has not been completed.
+
+By default, the header read timeout is set to 10 seconds. A longer timeout can be configured using the `server.http.header_read_timeout` configuration option.
 
 ---
 
