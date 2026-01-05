@@ -214,9 +214,9 @@ async fn fetch_oci_manifest(
     let duration = before_request.elapsed().as_secs_f64();
 
     u64_counter_with_unit!(
-        "apollo.router.oci.manifest.count",
+        "apollo.router.oci.manifest",
         "Number of requests to get graph artifact manifest",
-        "{count}",
+        "{request}",
         1u64,
         registry = registry.clone(),
         kind = "get_manifest",
@@ -353,13 +353,6 @@ pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciE
         "prepared to fetch schema from oci over {:?}, auth anonymous? {:?}",
         protocol,
         auth == RegistryAuth::Anonymous
-    );
-
-    u64_counter_with_unit!(
-        "apollo.router.oci.fullArtifact.count.total",
-        "Total number of requests to get full artifact for a graph artifact",
-        "{count}",
-        1u64
     );
 
     match fetch_oci_from_reference(
