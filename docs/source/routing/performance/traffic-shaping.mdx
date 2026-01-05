@@ -179,6 +179,17 @@ Brotli (`br`) compression is not supported by Apollo Server, due to its underlyi
 
 </Note>
 
+You can use the `identity` keyword to disable compression for a specific subgraph.
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    compression: gzip # Enable gzip compression for all subgraphs.
+  subgraphs:
+    products:
+      compression: identity # Disable compression for `products` subgraph.
+```
+
 ### Rate limiting
 
 Subgraph request rate limiting uses the same configuration as client rate limiting, and is calculated per subgraph, not per backend host.
