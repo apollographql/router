@@ -29,6 +29,7 @@ use tower::util::Either;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
+use tracing::Span;
 
 use super::HttpRequest;
 use super::HttpResponse;
@@ -38,6 +39,7 @@ use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::HttpClientAttributes;
+use crate::plugins::telemetry::config_new::Selectors as _;
 use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
@@ -356,22 +358,55 @@ impl tower::Service<HttpRequest> for HttpClientService {
             .extensions()
             .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
 
-        Box::pin(async move {
-            let http_request = if let Some(signing_params) = signing_params {
-                signing_params.sign(http_request, &service_name).await?
-            } else {
-                http_request
-            };
+        let telemetry_config = context.extensions().with_lock(|lock| {
+            lock.get::<Arc<crate::plugins::telemetry::config::Conf>>()
+                .cloned()
+        });
 
-            let http_response = do_fetch(client, &service_name, http_request)
-                .instrument(http_req_span)
-                .await?;
+        Box::pin(
+            async move {
+                let span = Span::current();
+                let http_request = if let Some(signing_params) = signing_params {
+                    signing_params.sign(http_request, &service_name).await?
+                } else {
+                    http_request
+                };
 
-            Ok(HttpResponse {
-                http_response,
-                context,
-            })
-        })
+                match do_fetch(client, &service_name, http_request).await {
+                    Ok(response) => {
+                        let http_response = HttpResponse {
+                            http_response: response,
+                            context,
+                        };
+                        if let Some(config) = telemetry_config {
+                            let attributes = config
+                                .instrumentation
+                                .spans
+                                .http_client
+                                .attributes
+                                .on_response(&http_response);
+
+                            span.set_span_dyn_attributes(attributes);
+                        }
+                        Ok(http_response)
+                    }
+                    Err(err) => {
+                        let error = err.into();
+                        if let Some(config) = telemetry_config {
+                            let attributes = config
+                                .instrumentation
+                                .spans
+                                .http_client
+                                .attributes
+                                .on_error(&error, &context);
+                            span.set_span_dyn_attributes(attributes);
+                        }
+                        Err(error)
+                    }
+                }
+            }
+            .instrument(http_req_span),
+        )
     }
 }
 
