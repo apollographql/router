@@ -201,6 +201,31 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 </Note>
 
+### Graph artifacts
+
+- `apollo.router.oci.manifest.requests` - Number of requests made to get the manifest for a graph artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_manifest`, `head_manifest`)
+  - `status`: (`success`, `failure`)
+- `apollo.router.oci.manifest.duration` - Duration of request to get the manifest for a graph artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_manifest`, `head_manifest`)
+  - `status`: (`success`, `failure`)
+- `apollo.router.oci.blob.requests` - Number of fetches made to get the blob containing the supergraph from a graph artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_blob`)
+  - `status`: (`success`, `failure`)
+- `apollo.router.oci.blob.duration` - Duration of request to get the blob containing the supergraph from a graph artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_blob`)
+  - `status`: (`success`, `failure`)
+
+<Note>
+
+Similar to the initial call to Uplink, the router does not record metrics for calls to the graph artifacts endpoint during startup.
+
+</Note>
+
 ### Subscriptions
 
 <Tip>
