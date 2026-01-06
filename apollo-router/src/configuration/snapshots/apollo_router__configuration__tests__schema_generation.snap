@@ -8596,6 +8596,10 @@ expression: "&schema"
             "header_read_timeout": {
               "nanos": 0,
               "secs": 10
+            },
+            "tls_handshake_timeout": {
+              "nanos": 0,
+              "secs": 10
             }
           },
           "description": "The server http configuration"
@@ -8613,6 +8617,14 @@ expression: "&schema"
             "secs": 10
           },
           "description": "Header read timeout in human-readable format; defaults to 10s",
+          "type": "string"
+        },
+        "tls_handshake_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "TLS handshake timeout in human-readable format; defaults to 10s",
           "type": "string"
         }
       },
@@ -12185,6 +12197,10 @@ expression: "&schema"
       "default": {
         "http": {
           "header_read_timeout": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "tls_handshake_timeout": {
             "nanos": 0,
             "secs": 10
           }
