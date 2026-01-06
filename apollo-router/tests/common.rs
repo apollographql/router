@@ -444,22 +444,53 @@ impl Telemetry {
 
         match self {
             Telemetry::Datadog => {
-                // Get the existing PSR header if it exists. This is because the existing telemetry propagator doesn't support PSR properly yet.
-                // In testing we are manually setting the PSR header, and we don't want to override it.
-                let psr = request
+                // Preserve an explicitly set PSR header (tests often set this manually).
+                let explicit_psr = request
                     .headers()
                     .get("x-datadog-sampling-priority")
                     .cloned();
+
+
+                // We now have `opentelemetry-datadog`'s `agent-sampling` feature enabled. This causes
+                // context injection to derive Priority Sampling Rate (PSR) from the `trace_state.psr`
+                // flag instead of the sampled bit. Our test client spans typically don't set
+                // `trace_state.psr`, so without intervention the propagator would default PSR to
+                // AutoReject (0), a behavior change we don't intend for tests. To prevent this
+                // behavior change, we now manually derive a boolean PSR from the sampled bit when
+                // `trace_state.psr` is absent.
+                let ctx = tracing::span::Span::current().context();
+                let span = ctx.span();
+                let span_context = span.span_context();
+                let trace_state_has_psr = span_context
+                    .trace_state()
+                    .get("psr")
+                    .is_some();
+
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 );
 
-                if let Some(psr) = psr {
+                // If PSR was explicitly set by the test, restore that value by overriding the
+                // propagator's injected value.
+                if let Some(psr) = explicit_psr {
                     request
                         .headers_mut()
                         .insert("x-datadog-sampling-priority", psr);
+                } else if !trace_state_has_psr {
+                    // Otherwise, only set the PSR when the span has no `tracestate.psr` set.
+                    if request
+                        .headers()
+                        .contains_key("x-datadog-sampling-priority")
+                        && span_context.is_valid()
+                    {
+                        let psr = if span_context.is_sampled() { "1" } else {"0"};
+                        request.headers_mut().insert(
+                            "x-datadog-sampling-priority",
+                            psr.parse().expect("x-datadog-sampling-priority must be a valid header value"),
+                        );
+                    }
                 }
             }
             Telemetry::Otlp { .. } => {
