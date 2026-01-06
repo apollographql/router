@@ -1238,7 +1238,10 @@ fn it_includes_default_tls_handshake_timeout_when_server_config_omitted() {
 
     let config: Configuration = serde_json::from_value(json_config).unwrap();
 
-    assert_eq!(config.server.http.tls_handshake_timeout, Duration::from_secs(10));
+    assert_eq!(
+        config.server.http.tls_handshake_timeout,
+        Duration::from_secs(10)
+    );
 }
 
 #[test]
