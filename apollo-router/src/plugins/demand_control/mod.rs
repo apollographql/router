@@ -27,6 +27,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::Context;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::error::Error;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
@@ -73,6 +74,8 @@ pub(crate) enum StrategyConfig {
         list_size: u32,
         /// The maximum cost of a query
         max: f64,
+        /// Per-subgraph cost control
+        subgraphs: SubgraphConfiguration<SubgraphStrategyLimit>,
     },
 
     #[cfg(test)]
@@ -80,6 +83,15 @@ pub(crate) enum StrategyConfig {
         stage: test::TestStage,
         error: test::TestError,
     },
+}
+
+#[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
+pub(crate) struct SubgraphStrategyLimit {
+    /// The assumed length of lists returned by the operation for this subgraph.
+    list_size: Option<u32>,
+
+    /// The maximum query cost routed to this subgraph.
+    max: Option<f64>,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, Eq, PartialEq)]

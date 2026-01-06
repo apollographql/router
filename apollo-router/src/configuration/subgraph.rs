@@ -96,6 +96,21 @@ where
     pub(crate) fn get(&self, subgraph_name: &str) -> &T {
         self.subgraphs.get(subgraph_name).unwrap_or(&self.all)
     }
+
+    // Create a new `SubgraphConfiguration<V>` by extracting a value `V` from `T`
+    pub(crate) fn extract<V: Default + Serialize + JsonSchema>(
+        &self,
+        extract_fn: fn(&T) -> V,
+    ) -> SubgraphConfiguration<V> {
+        SubgraphConfiguration {
+            all: extract_fn(&self.all),
+            subgraphs: self
+                .subgraphs
+                .iter()
+                .map(|(k, v)| (k.clone(), extract_fn(v)))
+                .collect(),
+        }
+    }
 }
 
 impl<T> Debug for SubgraphConfiguration<T>

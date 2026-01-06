@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use apollo_compiler::ExecutableDocument;
 
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
@@ -11,7 +14,14 @@ use crate::services::subgraph;
 pub(crate) struct StaticEstimated {
     // The estimated value of the demand
     pub(crate) max: f64,
+    pub(crate) subgraph_maxes: Arc<SubgraphConfiguration<Option<f64>>>,
     pub(crate) cost_calculator: StaticCostCalculator,
+}
+
+impl StaticEstimated {
+    fn subgraph_max(&self, subgraph_name: &str) -> Option<f64> {
+        *self.subgraph_maxes.get(subgraph_name)
+    }
 }
 
 impl StrategyImpl for StaticEstimated {
