@@ -85,3 +85,75 @@ impl StrategyImpl for StaticEstimated {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tower::BoxError;
+
+    use super::StaticEstimated;
+    use crate::plugins::demand_control::DemandControl;
+    use crate::plugins::demand_control::StrategyConfig;
+    use crate::plugins::test::PluginTestHarness;
+
+    async fn load_config_and_extract_strategy(
+        config: &'static str,
+    ) -> Result<StaticEstimated, BoxError> {
+        let schema_str =
+            include_str!("../cost_calculator/fixtures/basic_supergraph_schema.graphql");
+        let plugin = PluginTestHarness::<DemandControl>::builder()
+            .config(config)
+            .schema(schema_str)
+            .build()
+            .await?;
+
+        let StrategyConfig::StaticEstimated {
+            list_size,
+            max,
+            ref subgraphs,
+        } = plugin.config.strategy
+        else {
+            panic!("must provide static_estimated config");
+        };
+        let strategy = plugin
+            .strategy_factory
+            .create_static_estimated_strategy(list_size, max, &subgraphs);
+        Ok(strategy)
+    }
+
+    #[tokio::test]
+    async fn test_per_subgraph_configuration_inheritance() {
+        let config = include_str!("../fixtures/per_subgraph_inheritance.yaml");
+
+        let strategy = load_config_and_extract_strategy(config).await.unwrap();
+        assert_eq!(strategy.subgraph_max("reviews").unwrap(), 2.0);
+        assert_eq!(strategy.subgraph_max("products").unwrap(), 5.0);
+        assert_eq!(strategy.subgraph_max("users").unwrap(), 5.0);
+    }
+
+    #[tokio::test]
+    async fn test_per_subgraph_configuration_no_inheritance() {
+        let config = include_str!("../fixtures/per_subgraph_no_inheritance.yaml");
+
+        let strategy = load_config_and_extract_strategy(config).await.unwrap();
+        assert_eq!(strategy.subgraph_max("reviews").unwrap(), 2.0);
+        assert!(strategy.subgraph_max("products").is_none());
+        assert!(strategy.subgraph_max("users").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_invalid_per_subgraph_configuration() {
+        let config = include_str!("../fixtures/invalid_per_subgraph.yaml");
+        let strategy_result = load_config_and_extract_strategy(config).await;
+
+        match strategy_result {
+            Ok(strategy) => {
+                eprintln!("{:?}", strategy.subgraph_maxes);
+                panic!("Expected error")
+            }
+            Err(err) => assert_eq!(
+                &err.to_string(),
+                "Maximum per-subgraph query cost for `products` is negative"
+            ),
+        };
+    }
+}
