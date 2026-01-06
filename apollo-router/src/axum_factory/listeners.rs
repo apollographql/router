@@ -320,6 +320,7 @@ pub(super) fn serve_router_on_listen_addr(
     let opt_max_http2_headers_list_bytes = configuration.limits.http2_max_headers_list_bytes;
     let connection_shutdown_timeout = configuration.supergraph.connection_shutdown_timeout;
     let header_read_timeout = configuration.server.http.header_read_timeout;
+    let tls_handshake_timeout = configuration.server.http.tls_handshake_timeout;
 
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
     // this server reproduces most of hyper::server::Server's behaviour
@@ -415,8 +416,6 @@ pub(super) fn serve_router_on_listen_addr(
                                         // Perform TLS handshake with a timeout to prevent DoS attacks.
                                         // If a client connects with plain TCP and doesn't initiate TLS,
                                         // the handshake will timeout and the connection will be closed.
-                                        let tls_handshake_timeout = header_read_timeout;
-
                                         let tls_stream = match tokio::time::timeout(tls_handshake_timeout, acceptor.accept(stream)).await {
                                             Ok(Ok(tls_stream)) => tls_stream,
                                             Ok(Err(e)) => {
