@@ -1,6 +1,8 @@
 //! Demand control plugin.
 //! This plugin will use the cost calculation algorithm to determine if a query should be allowed to execute.
 //! On the request path it will use estimated
+
+use std::collections::HashSet;
 use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -92,6 +94,41 @@ pub(crate) struct SubgraphStrategyLimit {
 
     /// The maximum query cost routed to this subgraph.
     max: Option<f64>,
+}
+
+impl StrategyConfig {
+    fn validate(&self, subgraph_names: HashSet<&String>) -> Result<(), BoxError> {
+        #[derive(thiserror::Error, Debug)]
+        enum Error {
+            #[error("Maximum per-subgraph query cost for `{0}` is negative")]
+            NegativeQueryCost(String),
+        }
+
+        #[allow(irrefutable_let_patterns)]
+        // need to destructure StrategyConfig and ignore StrategyConfig::Test
+        let StrategyConfig::StaticEstimated { subgraphs, .. } = self else {
+            return Ok(());
+        };
+
+        if subgraphs.all.max.is_some_and(|s| s < 0.0) {
+            return Err(Error::NegativeQueryCost("all".to_string()).into());
+        }
+
+        for (subgraph_name, subgraph_config) in subgraphs.subgraphs.iter() {
+            if !subgraph_names.contains(subgraph_name) {
+                tracing::warn!(
+                    "Subgraph `{subgraph_name}` missing from schema but was specified in per-subgraph demand cost; it will be ignored"
+                );
+                continue;
+            }
+
+            if subgraph_config.max.is_some_and(|s| s < 0.0) {
+                return Err(Error::NegativeQueryCost(subgraph_name.to_string()).into());
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, Eq, PartialEq)]
@@ -359,6 +396,10 @@ impl Plugin for DemandControl {
             demand_controlled_subgraph_schemas
                 .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
         }
+
+        // validate that per-subgraph maxes are all non-negative
+        let subgraph_names = init.subgraph_schemas.keys().collect();
+        init.config.strategy.validate(subgraph_names)?;
 
         Ok(DemandControl {
             strategy_factory: StrategyFactory::new(
