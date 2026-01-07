@@ -206,7 +206,12 @@ pub(crate) enum NetworkStream {
     Tcp(tokio::net::TcpStream),
     #[cfg(unix)]
     Unix(tokio::net::UnixStream),
-    Tls(tokio_rustls::server::TlsStream<tokio::net::TcpStream>),
+    /// A TCP stream that needs TLS handshake. This variant is used to prevent blocking
+    /// the accept loop during TLS handshake, which could be exploited for DoS attacks.
+    Tls {
+        stream: tokio::net::TcpStream,
+        acceptor: tokio_rustls::TlsAcceptor,
+    },
 }
 
 impl Listener {
@@ -262,7 +267,13 @@ impl Listener {
             Listener::Tls { listener, acceptor } => {
                 let (stream, _) = listener.accept().await?;
 
-                Ok(NetworkStream::Tls(acceptor.accept(stream).await?))
+                // Return the TCP stream immediately with the acceptor, so the TLS handshake
+                // can be performed in a spawned task with a timeout. This prevents blocking
+                // the accept loop, which could be exploited for DoS attacks.
+                Ok(NetworkStream::Tls {
+                    stream,
+                    acceptor: acceptor.clone(),
+                })
             }
         }
     }
@@ -272,11 +283,18 @@ impl Listener {
 mod tests {
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::time::Duration;
 
     use futures::channel::oneshot;
+    use rustls::ServerConfig;
     use test_log::test;
+    use tokio::net::TcpStream;
+    use tokio::time::timeout;
+    use tokio_rustls::TlsAcceptor;
 
     use super::*;
+    use crate::configuration::load_certs;
+    use crate::configuration::load_key;
 
     #[test(tokio::test)]
     // TODO [igni]: add a check with extra endpoints
@@ -338,5 +356,59 @@ mod tests {
         extra_shutdown_receiver
             .await
             .expect("Should have sent notification to shutdown");
+    }
+
+    #[tokio::test]
+    async fn tls_handshake_timeout_does_not_block_accept_loop() {
+        // Load test certificates
+        let certificate_pem = include_str!("services/http/testdata/server_self_signed.crt");
+        let key_pem = include_str!("services/http/testdata/server.key");
+
+        let certificates = load_certs(certificate_pem).unwrap();
+        let key = load_key(key_pem).unwrap();
+
+        // Create TLS listener
+        let tcp_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = tcp_listener.local_addr().unwrap();
+
+        let mut tls_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certificates, key)
+            .expect("built our tls config");
+        tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        let tls_config = std::sync::Arc::new(tls_config);
+        let acceptor = TlsAcceptor::from(tls_config);
+
+        let mut listener = Listener::Tls {
+            listener: tcp_listener,
+            acceptor,
+        };
+
+        //  Connect with plain TCP (simulating `nc`) - should timeout and not block
+        let _plain_tcp_stream = TcpStream::connect(socket_addr).await.unwrap();
+
+        // Accept the connection - this should return immediately with NetworkStream::Tls
+        let network_stream = listener.accept().await.unwrap();
+
+        match network_stream {
+            NetworkStream::Tls { stream, .. } => {
+                // The stream should be accepted immediately, handshake happens later
+                // Just verify we got a valid stream (can get local/peer addresses)
+                assert!(stream.local_addr().is_ok());
+                assert!(stream.peer_addr().is_ok());
+            }
+            _ => panic!("Expected NetworkStream::Tls variant"),
+        }
+
+        // Verify we can still accept new connections (accept loop not blocked)
+        let accept_future = listener.accept();
+        let accept_result = timeout(Duration::from_millis(100), accept_future).await;
+
+        // The accept should timeout because no new connection was made,
+        // but importantly it should NOT hang indefinitely
+        assert!(
+            accept_result.is_err(),
+            "Accept should timeout when no connection is made"
+        );
     }
 }
