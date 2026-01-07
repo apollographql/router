@@ -620,7 +620,7 @@ impl Merger {
         sources: &Sources<FieldDefinitionPosition>,
         dest_arg_name: &Name,
     ) -> Result<Sources<ObjectFieldArgumentDefinitionPosition>, FederationError> {
-        let mut arg_sources = Sources::default();
+        let mut arg_sources = IndexMap::with_capacity_and_hasher(sources.len(), Default::default());
 
         for (source_idx, source_field_pos) in sources.iter() {
             let arg_position = if let Some(field_pos) = source_field_pos {
@@ -658,9 +658,9 @@ impl Merger {
         dest: &ObjectOrInterfaceFieldDefinitionPosition,
         merge_context: &FieldMergeContext,
     ) -> Result<(), FederationError> {
-        let mut shareable_sources: Vec<SubgraphWithIndex> = Vec::new();
-        let mut non_shareable_sources: Vec<SubgraphWithIndex> = Vec::new();
-        let mut all_resolving: Vec<SubgraphField> = Vec::new();
+        let mut shareable_sources: Vec<SubgraphWithIndex> = Vec::with_capacity(sources.len());
+        let mut non_shareable_sources: Vec<SubgraphWithIndex> = Vec::with_capacity(sources.len());
+        let mut all_resolving: Vec<SubgraphField> = Vec::with_capacity(sources.len());
 
         // Helper function to categorize a field
         let mut categorize_field =
@@ -1026,10 +1026,15 @@ impl Merger {
                 subgraph.provides_directive_name().ok().flatten().as_ref(),
             );
 
-            let override_from = self.get_override_from(
-                &field_def,
-                subgraph.override_directive_name().ok().flatten().as_ref(),
-            );
+            let has_unknown_target = merge_context.has_override_with_unknown_target(idx);
+            let override_from = if has_unknown_target {
+                None
+            } else {
+                self.get_override_from(
+                    &field_def,
+                    subgraph.override_directive_name().ok().flatten().as_ref(),
+                )
+            };
 
             let context_arguments = self.extract_context_arguments(idx, &field_def)?;
 
