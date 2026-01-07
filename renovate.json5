@@ -138,5 +138,12 @@
       groupName: null,
       groupSlug: null,
     },
+    // Add a note to the Rhai update PR to add a changeset
+    {
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^rhai$/'],
+      automerge: false,
+      prBodyNotes: [":warning: make sure to add a `feature` changeset to alert users of the upgrade!"]
+    },
   ],
 }

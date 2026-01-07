@@ -14,7 +14,8 @@ use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use apollo_federation::bail;
 use apollo_federation::composition;
-use apollo_federation::composition::validate_satisfiability;
+use apollo_federation::composition::compose_with_connectors;
+use apollo_federation::composition::validate_satisfiability_with_connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::error::CompositionError;
@@ -122,7 +123,7 @@ enum Command {
     },
     /// Compose a supergraph schema from multiple subgraph schemas
     Compose {
-        /// Path(s) to subgraph schemas.
+        /// Path(s) to subgraph schemas or a Rover supergraph config YAML file.
         schemas: Vec<PathBuf>,
         /// Path to a Rover supergraph config YAML file.
         #[arg(long, conflicts_with = "schemas")]
@@ -296,7 +297,7 @@ fn compose_files_inner(
         return Err(composition_errors);
     }
 
-    composition::compose(subgraphs)
+    compose_with_connectors(subgraphs)
 }
 
 /// Compose a supergraph from a Rover config YAML file.
@@ -362,7 +363,7 @@ fn compose_from_config_inner(
         return Err(composition_errors);
     }
 
-    composition::compose(subgraphs)
+    compose_with_connectors(subgraphs)
 }
 
 /// Compose a supergraph from multiple subgraph files.
@@ -582,11 +583,36 @@ fn print_locations(locations: &[Range<LineColumn>]) {
 fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
     let doc_str = read_input(file_path);
     let supergraph = new_supergraph::Supergraph::parse(&doc_str).unwrap();
-    _ = validate_satisfiability(supergraph).expect("Supergraph should be satisfiable");
-    Ok(())
+    match validate_satisfiability_with_connectors(supergraph) {
+        Ok(_) => {
+            println!("[SUCCESS]");
+            Ok(())
+        }
+        Err(errors) => {
+            // Print composition errors
+            print_composition_errors(&errors);
+            let num_errors = errors.len();
+            Err(anyhow!(
+                "Error: found {num_errors} satisfiability error(s)."
+            ))
+        }
+    }
 }
 
 fn cmd_compose(file_paths: &[PathBuf], config_path: Option<&PathBuf>) -> Result<(), AnyError> {
+    let config_path = if let Some((first, rest)) = file_paths.split_first()
+        && rest.is_empty()
+        && (first.extension().is_some_and(|ext| ext == "yaml")
+            || first == std::path::Path::new("-"))
+    {
+        assert!(
+            config_path.is_none(),
+            "Error: cannot provide both --config and a single YAML schema file."
+        );
+        Some(first)
+    } else {
+        config_path
+    };
     let supergraph = if let Some(config) = config_path {
         compose_from_config(config)?
     } else if !file_paths.is_empty() {

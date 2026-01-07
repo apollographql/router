@@ -1,0 +1,27 @@
+response_cache:
+  enabled: true
+  debug: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls:
+          - redis://127.0.0.1:6379
+        required_to_start: false
+        pool_size: 2
+    subgraphs:
+      products:
+        enabled: true
+        ttl: 60s
+
+coprocessor:
+  url: "<replace>"
+  supergraph:
+    response:
+      body: true
+      context:
+        selective:
+          - "apollo::response_cache::debug_cached_keys"
+
+include_subgraph_errors:
+  all: true
