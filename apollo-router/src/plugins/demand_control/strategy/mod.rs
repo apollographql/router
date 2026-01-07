@@ -52,10 +52,14 @@ impl Strategy {
 
     pub(crate) fn on_subgraph_response(
         &self,
+        subgraph_name: String,
         request: &ExecutableDocument,
         response: &subgraph::Response,
     ) -> Result<(), DemandControlError> {
-        match self.inner.on_subgraph_response(request, response) {
+        match self
+            .inner
+            .on_subgraph_response(subgraph_name, request, response)
+        {
             Err(e) if self.mode == Mode::Enforce => Err(e),
             _ => Ok(()),
         }
@@ -142,6 +146,7 @@ pub(crate) trait StrategyImpl: Send + Sync {
 
     fn on_subgraph_response(
         &self,
+        subgraph_name: String,
         request: &ExecutableDocument,
         response: &subgraph::Response,
     ) -> Result<(), DemandControlError>;

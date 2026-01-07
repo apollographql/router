@@ -57,6 +57,8 @@ pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
 
 pub(crate) const COST_BY_SUBGRAPH_ESTIMATED_KEY: &str =
     "apollo::demand_control::estimated_cost_by_subgraph";
+pub(crate) const COST_BY_SUBGRAPH_ACTUAL_KEY: &str =
+    "apollo::demand_control::actual_cost_by_subgraph";
 pub(crate) const COST_BY_SUBGRAPH_RESULT_KEY: &str = "apollo::demand_control::result_by_subgraph";
 
 /// Algorithm for calculating the cost of an incoming query.
@@ -82,6 +84,7 @@ pub(crate) enum StrategyConfig {
         /// The maximum cost of a query
         max: f64,
         /// Cost control by subgraph
+        #[serde(default)]
         subgraphs: SubgraphConfiguration<SubgraphStrategyLimit>,
     },
 
@@ -372,6 +375,29 @@ impl Context {
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
     }
 
+    pub(crate) fn update_actual_cost_by_subgraph(
+        &self,
+        cost: CostBySubgraph,
+    ) -> Result<(), DemandControlError> {
+        // combine this cost with the cost that already exists in the context
+        self.upsert(
+            COST_BY_SUBGRAPH_ACTUAL_KEY,
+            |mut existing_cost: CostBySubgraph| {
+                existing_cost += cost;
+                existing_cost
+            },
+        )
+        .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_actual_cost_by_subgraph(
+        &self,
+    ) -> Result<Option<CostBySubgraph>, DemandControlError> {
+        self.get::<&str, CostBySubgraph>(COST_BY_SUBGRAPH_ACTUAL_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
     pub(crate) fn get_cost_delta(&self) -> Result<Option<f64>, DemandControlError> {
         let estimated = self.get_estimated_cost()?;
         let actual = self.get_actual_cost()?;
@@ -630,7 +656,7 @@ impl Plugin for DemandControl {
                     |(subgraph_name, req): (String, Arc<Valid<ExecutableDocument>>), fut| async move {
                         let resp: subgraph::Response = fut.await?;
                         let strategy = resp.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
-                        Ok(match strategy.on_subgraph_response(req.as_ref(), &resp) {
+                        Ok(match strategy.on_subgraph_response(subgraph_name.clone(), req.as_ref(), &resp) {
                             Ok(_) => resp,
                             Err(err) => subgraph::Response::builder()
                                 .errors(

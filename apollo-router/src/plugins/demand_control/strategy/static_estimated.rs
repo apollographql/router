@@ -5,6 +5,7 @@ use apollo_compiler::ExecutableDocument;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::plugins::demand_control::DemandControlError;
+use crate::plugins::demand_control::cost_calculator::static_cost::CostBySubgraph;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::StrategyImpl;
 use crate::services::execution;
@@ -57,6 +58,7 @@ impl StrategyImpl for StaticEstimated {
             })
     }
 
+    /// Reject subgraph requests when the total subgraph cost exceeds the subgraph max.
     fn on_subgraph_request(&self, request: &subgraph::Request) -> Result<(), DemandControlError> {
         let subgraph_name = request.subgraph_name.clone();
         let subgraph_cost = request
@@ -84,11 +86,35 @@ impl StrategyImpl for StaticEstimated {
         }
     }
 
+    /// Parse response to measure actual cost for subgraph.
+    ///
+    /// TODO: make this configurable; don't want to incur penalty if we don't want to
     fn on_subgraph_response(
         &self,
-        _request: &ExecutableDocument,
-        _response: &subgraph::Response,
+        subgraph_name: String,
+        request: &ExecutableDocument,
+        response: &subgraph::Response,
     ) -> Result<(), DemandControlError> {
+        if let Some(graphql_response) = response
+            .response
+            .body()
+            .data
+            .as_ref()
+            .and_then(|v| graphql::Response::from_value(v.clone()).ok())
+        {
+            let cost = self.cost_calculator.actual(
+                request,
+                &graphql_response,
+                &response
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get().cloned())
+                    .unwrap_or_default(),
+            )?;
+            response
+                .context
+                .update_actual_cost_by_subgraph(CostBySubgraph::new(subgraph_name, cost))?;
+        }
         Ok(())
     }
 

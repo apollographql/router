@@ -52,6 +52,7 @@ impl StrategyImpl for Test {
 
     fn on_subgraph_response(
         &self,
+        _subgraph_name: String,
         _request: &ExecutableDocument,
         response: &Response,
     ) -> Result<(), DemandControlError> {
