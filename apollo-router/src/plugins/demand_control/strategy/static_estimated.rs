@@ -65,7 +65,7 @@ impl StrategyImpl for StaticEstimated {
                     .insert_estimated_cost_by_subgraph(cost_by_subgraph)?;
 
                 if !errors.is_empty() {
-                    let error = DemandControlError::MultipleCostsTooExpensive(Box::new(errors));
+                    let error = DemandControlError::MultipleCostsTooExpensive(errors);
                     request
                         .context
                         .insert_cost_result(error.code().to_string())?;
@@ -140,7 +140,7 @@ mod tests {
         };
         let strategy = plugin
             .strategy_factory
-            .create_static_estimated_strategy(list_size, max, &subgraphs);
+            .create_static_estimated_strategy(list_size, max, subgraphs);
         Ok(strategy)
     }
 

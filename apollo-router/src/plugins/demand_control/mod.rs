@@ -191,7 +191,7 @@ pub(crate) enum DemandControlError {
     /// {0}
     FederationError(FederationError),
     /// multiple query costs exceeded
-    MultipleCostsTooExpensive(Box<Vec<DemandControlError>>),
+    MultipleCostsTooExpensive(Vec<DemandControlError>),
 }
 
 impl IntoGraphQLErrors for DemandControlError {
