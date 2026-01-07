@@ -38,6 +38,9 @@ impl StrategyImpl for StaticEstimated {
                     .insert_cost_strategy("static_estimated".to_string())?;
                 request.context.insert_cost_result("COST_OK".to_string())?;
                 request.context.insert_estimated_cost(cost)?;
+                request
+                    .context
+                    .insert_estimated_cost_by_subgraph(cost_by_subgraph)?;
 
                 if cost > self.max {
                     let error = DemandControlError::EstimatedCostTooExpensive {

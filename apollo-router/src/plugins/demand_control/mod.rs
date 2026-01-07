@@ -38,6 +38,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
+use crate::plugins::demand_control::cost_calculator::static_cost::CostBySubgraph;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
@@ -53,6 +54,9 @@ pub(crate) const COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_c
 pub(crate) const COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
 pub(crate) const COST_RESULT_KEY: &str = "apollo::demand_control::result";
 pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
+
+pub(crate) const COST_BY_SUBGRAPH_ESTIMATED_KEY: &str =
+    "apollo::demand_control::estimated_cost_by_subgraph";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -298,6 +302,15 @@ impl Context {
     pub(crate) fn get_estimated_cost(&self) -> Result<Option<f64>, DemandControlError> {
         self.get::<&str, f64>(COST_ESTIMATED_KEY)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_estimated_cost_by_subgraph(
+        &self,
+        cost: CostBySubgraph,
+    ) -> Result<(), DemandControlError> {
+        self.insert(COST_BY_SUBGRAPH_ESTIMATED_KEY, cost)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
     }
 
     pub(crate) fn insert_actual_cost(&self, cost: f64) -> Result<(), DemandControlError> {

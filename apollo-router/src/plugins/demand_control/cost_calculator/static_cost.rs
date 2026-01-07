@@ -13,6 +13,8 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::Value;
 
 use super::DemandControlError;
@@ -31,7 +33,7 @@ use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
 use crate::spec::TYPENAME;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub(crate) struct CostBySubgraph(HashMap<String, f64>);
 impl CostBySubgraph {
     fn new(subgraph: String, value: f64) -> Self {
