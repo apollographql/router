@@ -165,6 +165,15 @@ pub(crate) enum DemandControlError {
         /// The maximum cost of the query
         max_cost: f64,
     },
+    /// subgraph {subgraph} query estimated cost {estimated_cost} exceeded configured maximum {max_cost}
+    EstimatedSubgraphCostTooExpensive {
+        /// The subgraph in question
+        subgraph: String,
+        /// The estimated cost of the query
+        estimated_cost: f64,
+        /// The maximum cost of the query
+        max_cost: f64,
+    },
     /// auery actual cost {actual_cost} exceeded configured maximum {max_cost}
     #[allow(dead_code)]
     ActualCostTooExpensive {
@@ -181,6 +190,8 @@ pub(crate) enum DemandControlError {
     ContextSerializationError(String),
     /// {0}
     FederationError(FederationError),
+    /// multiple query costs exceeded
+    MultipleCostsTooExpensive(Box<Vec<DemandControlError>>),
 }
 
 impl IntoGraphQLErrors for DemandControlError {
@@ -193,6 +204,24 @@ impl IntoGraphQLErrors for DemandControlError {
                 let mut extensions = Object::new();
                 extensions.insert("cost.estimated", estimated_cost.into());
                 extensions.insert("cost.max", max_cost.into());
+                Ok(vec![
+                    graphql::Error::builder()
+                        .extension_code(self.code())
+                        .extensions(extensions)
+                        .message(self.to_string())
+                        .build(),
+                ])
+            }
+            DemandControlError::EstimatedSubgraphCostTooExpensive {
+                ref subgraph,
+                estimated_cost,
+                max_cost,
+            } => {
+                let mut extensions = Object::new();
+                // TODO: better extensions names?
+                extensions.insert("cost.subgraph", subgraph.clone().into());
+                extensions.insert("cost.subgraph.estimated", estimated_cost.into());
+                extensions.insert("cost.subgraph.max", max_cost.into());
                 Ok(vec![
                     graphql::Error::builder()
                         .extension_code(self.code())
@@ -240,6 +269,13 @@ impl IntoGraphQLErrors for DemandControlError {
                     .message(self.to_string())
                     .build(),
             ]),
+            DemandControlError::MultipleCostsTooExpensive(errors) => {
+                let mut graphql_errors = Vec::with_capacity(errors.len());
+                for error in errors.into_iter() {
+                    graphql_errors.extend(error.into_graphql_errors()?);
+                }
+                Ok(graphql_errors)
+            }
         }
     }
 }
@@ -248,6 +284,9 @@ impl DemandControlError {
     fn code(&self) -> &'static str {
         match self {
             DemandControlError::EstimatedCostTooExpensive { .. } => "COST_ESTIMATED_TOO_EXPENSIVE",
+            DemandControlError::EstimatedSubgraphCostTooExpensive { .. } => {
+                "SUBGRAPH_COST_ESTIMATED_TOO_EXPENSIVE"
+            }
             DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
             DemandControlError::SubgraphOperationNotInitialized(_) => {
@@ -255,6 +294,12 @@ impl DemandControlError {
             }
             DemandControlError::ContextSerializationError(_) => "COST_CONTEXT_SERIALIZATION_ERROR",
             DemandControlError::FederationError(_) => "FEDERATION_ERROR",
+            DemandControlError::MultipleCostsTooExpensive(errors) => {
+                errors.first().map(|err| err.code()).unwrap_or(
+                    // should be unreachable, but provide this as a fallback
+                    "COST_ESTIMATED_TOO_EXPENSIVE",
+                )
+            }
         }
     }
 }

@@ -32,26 +32,46 @@ impl StrategyImpl for StaticEstimated {
                 &request.supergraph_request.body().variables,
             )
             .and_then(|cost_by_subgraph| {
+                let mut errors = vec![];
+
                 let cost = cost_by_subgraph.total();
+
+                if cost > self.max {
+                    errors.push(DemandControlError::EstimatedCostTooExpensive {
+                        estimated_cost: cost,
+                        max_cost: self.max,
+                    });
+                }
+
+                // see if any individual subgraph exceeded its limit
+                for (subgraph, subgraph_cost) in cost_by_subgraph.iter() {
+                    if let Some(max) = self.subgraph_max(subgraph)
+                        && *subgraph_cost > max
+                    {
+                        errors.push(DemandControlError::EstimatedSubgraphCostTooExpensive {
+                            subgraph: subgraph.clone(),
+                            estimated_cost: *subgraph_cost,
+                            max_cost: max,
+                        });
+                    }
+                }
+
                 request
                     .context
                     .insert_cost_strategy("static_estimated".to_string())?;
-                request.context.insert_cost_result("COST_OK".to_string())?;
                 request.context.insert_estimated_cost(cost)?;
                 request
                     .context
                     .insert_estimated_cost_by_subgraph(cost_by_subgraph)?;
 
-                if cost > self.max {
-                    let error = DemandControlError::EstimatedCostTooExpensive {
-                        estimated_cost: cost,
-                        max_cost: self.max,
-                    };
+                if !errors.is_empty() {
+                    let error = DemandControlError::MultipleCostsTooExpensive(Box::new(errors));
                     request
                         .context
                         .insert_cost_result(error.code().to_string())?;
                     Err(error)
                 } else {
+                    request.context.insert_cost_result("COST_OK".to_string())?;
                     Ok(())
                 }
             })

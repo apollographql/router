@@ -64,6 +64,10 @@ impl CostBySubgraph {
         }
         self
     }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &f64)> + '_ {
+        self.0.iter()
+    }
 }
 
 impl AddAssign for CostBySubgraph {
