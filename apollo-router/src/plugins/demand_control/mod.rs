@@ -76,7 +76,7 @@ pub(crate) enum StrategyConfig {
         list_size: u32,
         /// The maximum cost of a query
         max: f64,
-        /// Per-subgraph cost control
+        /// Cost control by subgraph
         subgraphs: SubgraphConfiguration<SubgraphStrategyLimit>,
     },
 

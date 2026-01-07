@@ -31,7 +31,8 @@ impl StrategyImpl for StaticEstimated {
                 &request.query_plan,
                 &request.supergraph_request.body().variables,
             )
-            .and_then(|cost| {
+            .and_then(|cost_by_subgraph| {
+                let cost = cost_by_subgraph.total();
                 request
                     .context
                     .insert_cost_strategy("static_estimated".to_string())?;
