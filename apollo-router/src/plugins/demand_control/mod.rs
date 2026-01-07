@@ -57,6 +57,7 @@ pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
 
 pub(crate) const COST_BY_SUBGRAPH_ESTIMATED_KEY: &str =
     "apollo::demand_control::estimated_cost_by_subgraph";
+pub(crate) const COST_BY_SUBGRAPH_RESULT_KEY: &str = "apollo::demand_control::result_by_subgraph";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -190,8 +191,6 @@ pub(crate) enum DemandControlError {
     ContextSerializationError(String),
     /// {0}
     FederationError(FederationError),
-    /// multiple query costs exceeded
-    MultipleCostsTooExpensive(Vec<DemandControlError>),
 }
 
 impl IntoGraphQLErrors for DemandControlError {
@@ -269,13 +268,6 @@ impl IntoGraphQLErrors for DemandControlError {
                     .message(self.to_string())
                     .build(),
             ]),
-            DemandControlError::MultipleCostsTooExpensive(errors) => {
-                let mut graphql_errors = Vec::with_capacity(errors.len());
-                for error in errors.into_iter() {
-                    graphql_errors.extend(error.into_graphql_errors()?);
-                }
-                Ok(graphql_errors)
-            }
         }
     }
 }
@@ -294,12 +286,6 @@ impl DemandControlError {
             }
             DemandControlError::ContextSerializationError(_) => "COST_CONTEXT_SERIALIZATION_ERROR",
             DemandControlError::FederationError(_) => "FEDERATION_ERROR",
-            DemandControlError::MultipleCostsTooExpensive(errors) => {
-                errors.first().map(|err| err.code()).unwrap_or(
-                    // should be unreachable, but provide this as a fallback
-                    "COST_ESTIMATED_TOO_EXPENSIVE",
-                )
-            }
         }
     }
 }
@@ -365,6 +351,16 @@ impl Context {
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
     }
 
+    pub(crate) fn get_estimated_cost_for_subgraph(
+        &self,
+        subgraph: &str,
+    ) -> Result<Option<f64>, DemandControlError> {
+        let cost_by_subgraph_opt = self
+            .get::<&str, CostBySubgraph>(COST_BY_SUBGRAPH_ESTIMATED_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(cost_by_subgraph_opt.and_then(|cost_by_subgraph| cost_by_subgraph.get(subgraph)))
+    }
+
     pub(crate) fn insert_actual_cost(&self, cost: f64) -> Result<(), DemandControlError> {
         self.insert(COST_ACTUAL_KEY, cost)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
@@ -391,6 +387,21 @@ impl Context {
     pub(crate) fn get_cost_result(&self) -> Result<Option<String>, DemandControlError> {
         self.get::<&str, String>(COST_RESULT_KEY)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_cost_by_subgraph_result(
+        &self,
+        subgraph: String,
+        result: String,
+    ) -> Result<(), DemandControlError> {
+        self.upsert(
+            COST_BY_SUBGRAPH_RESULT_KEY,
+            |mut map: HashMap<String, String>| {
+                map.insert(subgraph, result);
+                map
+            },
+        )
+        .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
     }
 
     pub(crate) fn insert_cost_strategy(&self, strategy: String) -> Result<(), DemandControlError> {

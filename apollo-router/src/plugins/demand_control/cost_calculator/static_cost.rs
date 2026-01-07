@@ -42,7 +42,7 @@ impl CostBySubgraph {
         cost
     }
 
-    fn get(&self, subgraph: &str) -> Option<f64> {
+    pub(crate) fn get(&self, subgraph: &str) -> Option<f64> {
         self.0.get(subgraph).copied()
     }
 
@@ -63,10 +63,6 @@ impl CostBySubgraph {
             }
         }
         self
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &f64)> + '_ {
-        self.0.iter()
     }
 }
 

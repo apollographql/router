@@ -32,30 +32,7 @@ impl StrategyImpl for StaticEstimated {
                 &request.supergraph_request.body().variables,
             )
             .and_then(|cost_by_subgraph| {
-                let mut errors = vec![];
-
                 let cost = cost_by_subgraph.total();
-
-                if cost > self.max {
-                    errors.push(DemandControlError::EstimatedCostTooExpensive {
-                        estimated_cost: cost,
-                        max_cost: self.max,
-                    });
-                }
-
-                // see if any individual subgraph exceeded its limit
-                for (subgraph, subgraph_cost) in cost_by_subgraph.iter() {
-                    if let Some(max) = self.subgraph_max(subgraph)
-                        && *subgraph_cost > max
-                    {
-                        errors.push(DemandControlError::EstimatedSubgraphCostTooExpensive {
-                            subgraph: subgraph.clone(),
-                            estimated_cost: *subgraph_cost,
-                            max_cost: max,
-                        });
-                    }
-                }
-
                 request
                     .context
                     .insert_cost_strategy("static_estimated".to_string())?;
@@ -64,8 +41,11 @@ impl StrategyImpl for StaticEstimated {
                     .context
                     .insert_estimated_cost_by_subgraph(cost_by_subgraph)?;
 
-                if !errors.is_empty() {
-                    let error = DemandControlError::MultipleCostsTooExpensive(errors);
+                if cost > self.max {
+                    let error = DemandControlError::EstimatedCostTooExpensive {
+                        estimated_cost: cost,
+                        max_cost: self.max,
+                    };
                     request
                         .context
                         .insert_cost_result(error.code().to_string())?;
@@ -77,8 +57,31 @@ impl StrategyImpl for StaticEstimated {
             })
     }
 
-    fn on_subgraph_request(&self, _request: &subgraph::Request) -> Result<(), DemandControlError> {
-        Ok(())
+    fn on_subgraph_request(&self, request: &subgraph::Request) -> Result<(), DemandControlError> {
+        let subgraph_name = request.subgraph_name.clone();
+        let subgraph_cost = request
+            .context
+            .get_estimated_cost_for_subgraph(&subgraph_name)?;
+
+        if let Some(subgraph_cost) = subgraph_cost
+            && let Some(subgraph_max) = self.subgraph_max(&subgraph_name)
+            && subgraph_cost > subgraph_max
+        {
+            let error = DemandControlError::EstimatedSubgraphCostTooExpensive {
+                subgraph: subgraph_name.clone(),
+                estimated_cost: subgraph_cost,
+                max_cost: subgraph_max,
+            };
+            request
+                .context
+                .insert_cost_by_subgraph_result(subgraph_name, error.code().to_string())?;
+            Err(error)
+        } else {
+            request
+                .context
+                .insert_cost_by_subgraph_result(subgraph_name, "COST_OK".to_string())?;
+            Ok(())
+        }
     }
 
     fn on_subgraph_response(
