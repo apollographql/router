@@ -33,10 +33,10 @@ use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
 use crate::spec::TYPENAME;
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub(crate) struct CostBySubgraph(HashMap<String, f64>);
 impl CostBySubgraph {
-    fn new(subgraph: String, value: f64) -> Self {
+    pub(crate) fn new(subgraph: String, value: f64) -> Self {
         let mut cost = Self::default();
         cost.insert(subgraph, value);
         cost

@@ -11,6 +11,7 @@ use super::histogram::ListLengthHistogram;
 use crate::apollo_studio_interop::AggregatedExtendedReferenceStats;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
+use crate::plugins::demand_control::cost_calculator::static_cost::CostBySubgraph;
 use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::EnumStats;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::InputFieldStats;
@@ -373,6 +374,7 @@ impl From<SingleLimitsStats> for LimitsStats {
 pub(crate) struct SingleLimitsStats {
     pub(crate) strategy: Option<String>,
     pub(crate) cost_estimated: Option<f64>,
+    pub(crate) cost_by_subgraph_estimated: Option<CostBySubgraph>,
     pub(crate) cost_actual: Option<f64>,
     pub(crate) depth: u64,
     pub(crate) height: u64,
@@ -621,6 +623,10 @@ mod test {
                         limits_stats: SingleLimitsStats {
                             strategy: Some("test".to_string()),
                             cost_estimated: Some(10.0),
+                            cost_by_subgraph_estimated: Some(CostBySubgraph::new(
+                                "products".to_string(),
+                                10.0,
+                            )),
                             cost_actual: Some(7.0),
                             depth: 2,
                             height: 4,

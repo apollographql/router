@@ -358,6 +358,13 @@ impl Context {
         Ok(())
     }
 
+    pub(crate) fn get_estimated_cost_by_subgraph(
+        &self,
+    ) -> Result<Option<CostBySubgraph>, DemandControlError> {
+        self.get::<&str, CostBySubgraph>(COST_BY_SUBGRAPH_ESTIMATED_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
     pub(crate) fn insert_actual_cost(&self, cost: f64) -> Result<(), DemandControlError> {
         self.insert(COST_ACTUAL_KEY, cost)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;

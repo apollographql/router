@@ -1474,6 +1474,10 @@ impl Telemetry {
                         strategy: strategy.and_then(|s| serde_json::to_string(&s.mode).ok()),
                         cost_estimated: context.get_estimated_cost().ok().flatten(),
                         cost_actual: context.get_actual_cost().ok().flatten(),
+                        cost_by_subgraph_estimated: context
+                            .get_estimated_cost_by_subgraph()
+                            .ok()
+                            .flatten(),
 
                         // These limits are related to the Traffic Shaping feature, unrelated to the Demand Control plugin
                         depth: query_limits.map_or(0, |ql| ql.depth as u64),
