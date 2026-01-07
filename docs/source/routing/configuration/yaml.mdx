@@ -318,11 +318,11 @@ The header read timeout is the amount of time the Router will wait to receive th
 
 By default, the header read timeout is set to 10 seconds. A longer timeout can be configured using the `server.http.header_read_timeout` configuration option.
 
-#### TLS Handshake Timeout
+#### TLS handshake timeout 
 
-The TLS handshake timeout is the amount of time the Router will wait to complete the TLS handshake with a client before timing out.
+The TLS handshake timeout determines how long the router waits to complete a TLS handshake with a client. 
 
-By default, the TLS handshake timeout is set to 10 seconds. A longer timeout can be configured using the `server.http.tls_handshake_timeout` configuration option.
+The default timeout is ten seconds. You can configure the `server.http.tls_handshake_timeout` option to change this duration. 
 
 ---
 
