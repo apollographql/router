@@ -189,6 +189,10 @@ impl Supergraph<Satisfiable> {
     pub fn hints(&self) -> &Vec<CompositionHint> {
         &self.state.hints
     }
+
+    pub fn hints_mut(&mut self) -> &mut Vec<CompositionHint> {
+        &mut self.state.hints
+    }
 }
 
 #[derive(Clone, Debug)]

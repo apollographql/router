@@ -406,7 +406,10 @@ resourceSpans:
             kind: 3
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
-            attributes: []
+            attributes:
+              - key: http.response.status_code
+                value:
+                  intValue: "200"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
