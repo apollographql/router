@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::name;
@@ -18,6 +19,7 @@ use super::TypeDefinitionPosition;
 use super::field_set::collect_target_fields_from_field_set;
 use super::position::DirectiveDefinitionPosition;
 use super::position::FieldDefinitionPosition;
+use super::position::HasDescription;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
@@ -212,13 +214,26 @@ impl SchemaUpgrader {
         //            the schema and valid.
 
         // Fed1 links and definitions are removed here, so we can add fed2 links below.
-        self.remove_fed1_links_and_definitions(&mut schema)?;
+        // Save descriptions from federation directive definitions before removal.
+        let saved_directives = self.remove_fed1_links_and_definitions(&mut schema)?;
 
         // Add link spec & federation 2 spec.
         let inner_schema = schema_as_fed2_subgraph(schema, false)?;
 
         // re-expand all federation directive definitions
-        expand_schema(inner_schema)
+        let mut schema = expand_schema(inner_schema)?;
+
+        // Restore descriptions on federation directives from the original Fed1 definitions.
+        for (directive_name, directive_def) in saved_directives {
+            let pos = DirectiveDefinitionPosition {
+                directive_name: directive_name.clone(),
+            };
+            if pos.try_get(schema.schema()).is_some() {
+                pos.set_description(&mut schema, directive_def.description.clone())?;
+            }
+        }
+
+        Ok(schema)
     }
 
     // integrates checkForExtensionWithNoBase from the JS code
@@ -336,7 +351,7 @@ impl SchemaUpgrader {
     fn remove_fed1_links_and_definitions(
         &self,
         schema: &mut FederationSchema,
-    ) -> Result<(), FederationError> {
+    ) -> Result<HashMap<Name, Node<DirectiveDefinition>>, FederationError> {
         let Some(metadata) = schema.metadata() else {
             bail!("Schema must have metadata to upgrade");
         };
@@ -357,14 +372,23 @@ impl SchemaUpgrader {
             name!("tag"),
         ];
 
+        // Save federation directives before removing them
+        let mut saved_directives: HashMap<Name, Node<DirectiveDefinition>> = HashMap::default();
+
         let definitions: Vec<DirectiveDefinitionPosition> =
             schema.get_directive_definitions().collect();
         for definition in &definitions {
             if directives_to_remove.contains(&definition.directive_name) {
-                schema
+                // Save the directive before removing it
+                if let Some(directive_def) = schema
                     .schema
                     .directive_definitions
-                    .shift_remove(&definition.directive_name);
+                    .shift_remove(&definition.directive_name)
+                    && directive_def.description.is_some()
+                {
+                    saved_directives
+                        .insert(definition.directive_name.clone(), directive_def.clone());
+                }
                 schema
                     .referencers
                     .directives
@@ -404,7 +428,7 @@ impl SchemaUpgrader {
         {
             union_obj.remove(schema)?;
         }
-        Ok(())
+        Ok(saved_directives)
     }
 
     fn remove_external_on_interface(&self, schema: &mut FederationSchema) {

@@ -8,7 +8,7 @@ redirectFrom:
   - /graphos/routing/observability/telemetry/instrumentation/standard-instruments
 ---
 
-## Standard metric instruments
+# Standard Metric Instruments
 
 GraphOS Router and Apollo Router Core provide a set of standard router instruments that expose detailed information about the router's request lifecycle. You can consume the metrics they capture by configuring a [metrics exporter](/router/configuration/telemetry/exporters/metrics/overview).
 
@@ -20,35 +20,26 @@ Standard router instruments are different than OpenTelemetry (OTel) instruments 
 
 The rest of this reference lists the available standard router instruments.
 
-### Measuring router overhead
+## Measuring router overhead
 
-Measuring overhead in the router can be challenging because it consists of multiple components, each executing tasks in parallel. Subgraph latency, cache performance, and plugins influence performance and have the potential to cause back pressure. Limitations to CPU, memory, and network bandwidth can all create bottlenecks that hinder request processing. External factors such as request rate and operation complexity heavily affect the router’s overall load.
+Measuring overhead in the router can be challenging because it consists of multiple components, each executing tasks in parallel. Subgraph latency, cache performance, and customization plugins influence performance and have the potential to cause back pressure. Limitations to CPU, memory, and network bandwidth can all create bottlenecks that hinder request processing. External factors such as request rate, operation complexity, and response sizes all heavily affect the router’s overall load.
 
 You can find the activity of a particular request in its trace spans. Spans have the following attributes:
   - <code>busy_ns</code> - time in which the span is actively executing
   - <code>idle_ns</code> - time in which the span is alive, but not actively executing
 
-These attributes represent how a span spends time (in nanoseconds) over its lifetime. Your APM provider can likely use this trace data to generate synthetic metrics which you can then create an approximation of.
+These attributes represent how a span spends time (in nanoseconds) over its lifetime and how it contributes to the total request overhead. Your APM provider can use this trace data to generate synthetic metrics, enabling you to approximate how particular spans affect router performance.
 
-#### Router overhead metric
+### Router overhead metric
 
-The `apollo.router.overhead` histogram provides a more direct measurement of router processing overhead. This metric tracks the time the router spends on tasks other than waiting for downstream HTTP requests—including GraphQL parsing, validation, query planning, response composition, and plugin execution.
+The `apollo.router.overhead` histogram provides a more direct measurement of router processing overhead. This metric tracks the time the router spends on tasks other than waiting for downstream HTTP requests—including:
+- GraphQL parsing
+- GraphQL validation
+- Query planning
+- Response parsing and composition
+- Plugin execution, including Coprocessors and Rhai scripts
 
 The overhead calculation excludes time spent waiting for downstream HTTP services (subgraphs and connectors), giving you visibility into the router's actual processing time versus downstream latency. This metric helps identify when the router itself is a bottleneck versus when delays are caused by downstream services.
-
-<Note>
-
-Important considerations for router overhead metrics:
-
-- **Version variability**: Router overhead might vary between router versions. For example, a correctness fix or security improvement might result in higher overhead. Always compare overhead measurements within the same router version.
-
-- **Configuration requirements**: For meaningful overhead measurements, configure [operation limits](/router/configuration/operation-limits) and [traffic shaping](/router/configuration/traffic-shaping). Without these controls, unbounded request complexity or traffic spikes can skew overhead measurements.
-
-- **CPU saturation**: High overhead values often indicate CPU saturation. When the router's CPU resources are exhausted, processing time increases significantly. Monitor CPU utilization alongside overhead metrics to identify resource constraints.
-
-- **Coprocessor requests:** Coprocessor request time is currently included in the overhead calculation. In a future release, coprocessor time might be excluded similar to subgraphs and connectors.
-
-</Note>
 
 Default attributes:
 - `subgraph.active_requests`: A boolean indicating whether any subgraph requests were active at the time the overhead was calculated. This attribute is critical for filtering meaningful overhead measurements.
@@ -67,16 +58,41 @@ telemetry:
 
 You can attach custom attributes using [router selectors](/router/configuration/telemetry/instrumentation/selectors#router).
 
-### GraphQL
+### Important considerations
+
+- **Version variability**: Router overhead might vary between router versions. For example, a correctness fix or security improvement might result in higher or lower overhead. Always compare overhead measurements within the same router version, using the metric as a trend indicator.
+
+- **Configuration requirements**: To provide meaningful and consistent overhead measurements, configure [operation limits](/router/configuration/operation-limits) and [traffic shaping](/router/configuration/traffic-shaping). Without these controls, unbounded request complexity or traffic spikes can skew overhead measurements.
+
+- **CPU saturation**: High overhead values often indicate CPU saturation which may be caused by other parts of the system. When the router's CPU resources are exhausted, processing time, and therefore the overhead, increases significantly. Monitor CPU utilization alongside overhead metrics to identify resource constraints.
+
+- **Coprocessor requests**: Coprocessor request time is currently included in the overhead calculation. In a future release, coprocessor time might be excluded, similar to subgraphs and connectors.
+
+### Common questions
+
+- What should your target be for "optimal" router overhead?
+  - Apollo provides best practices for monitoring overhead, but many other factors determine overhead for a given supergraph, subgraphs, and request traffic. Instead, track the delta or percentage change of the metric in your production deployment rather than a fixed number or specific variance.
+- What should your target be for "optimal" router CPU utilization?
+  - Using the various metrics, you can better understand CPU usage. What is optimal for your team depends on your expected load, spikes in traffic, time to scale infrastructure, and other factors. Apollo cannot provide generalized recommendations but encourages you to perform your own validations and share your results with the [Apollo Community](https://community.apollographql.com/).
+- How is this different from `http.server.request.duration`?
+  - The OTel standard instruments include the entire time, as seen by your clients, to process a request which will include the delays caused by subgraph response times.
+- How do I measure subgraph response time not included in the overhead metric?
+  - See the [docs for measuring instruments](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/instruments#opentelemetry-standard-instruments) for the subgraph service.
+- Why is there a difference from Router v1 `apollo_router_processing_time`?
+  - Router v2 was refactored in how it processes requests through its internal pipelines. Changes to the underlying architecture are now reflected in the new metric. To track particular parts of the Router request pipeline, see the metrics below.
+- How do I find the overhead for a particular operation type (query, mutation, subscription) or operation name?
+  - To filter overhead by specific operation type or operation ID, look at trace and span attributes and use your APM to create specific metric views for `busy_ns` and `idle_ns`. Because `apollo.router.overhead` is a histogram metric, it is aggregated over all operations.
+
+## GraphQL
 
 - `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation phase, which are represented in client responses as `extensions.valueCompletion` instead of actual GraphQL errors. Attributes:
   - `code`: error code, including `RESPONSE_VALIDATION_FAILED` in the case of a value completion error.
 
-### Session
+## Session
 
 - `apollo.router.session.count.active` - Number of in-flight GraphQL requests
 
-### Cache
+## Cache
 
 - `apollo.router.cache.size` — Number of entries in the cache
 - `apollo.router.cache.hit.time` - Time to hit the cache in seconds
@@ -90,7 +106,7 @@ All cache metrics listed above have the following attributes:
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
 - `storage`: The backend storage of the cache (`memory`, `redis`)
 
-### Redis Cache
+## Redis cache
 
 When using Redis as a cache backend, additional Redis-specific metrics are available:
 
@@ -127,7 +143,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `sentinel` - Redis Sentinel errors
 - `backpressure` - Backpressure/overload errors
 
-### Coprocessor
+## Coprocessor
 
 - `apollo.router.operations.coprocessor` - Total operations with coprocessors enabled.
   - `coprocessor.succeeded`: bool
@@ -136,14 +152,14 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.operations.coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
   - `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
 
-### Performance
+## Performance
 
 - `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
 - `apollo.router.request.memory` - Histogram of memory allocated during request processing, in bytes. Tracks memory allocation patterns for the entire request lifecycle, including GraphQL parsing, validation, query planning, response composition, and plugin execution. Attributes:
   - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
   - `context`: The context name where the allocation occurred (e.g., `router.request`)
 
-### Query planning
+## Query planning
 
 - `apollo.router.query_planning.warmup.duration` - Time spent warming up the query planner queries in seconds.
 - `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
@@ -153,7 +169,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
   - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
   - `context`: The context name where the allocation occurred (e.g., `query_planning`)
 
-### Compute jobs
+## Compute jobs
 
 - `apollo.router.compute_jobs.queued` - A gauge of the number of jobs queued for the thread pool dedicated to CPU-heavy components like GraphQL parsing and validation, and the query planner.
 - `apollo.router.compute_jobs.queue_is_full` - A counter of requests rejected because the queue was full.
@@ -167,7 +183,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.compute_jobs.active_jobs` - A gauge of the number of compute jobs being processed in parallel.
   - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
 
-### Uplink
+## Uplink
 
 <Tip>
 
@@ -191,6 +207,31 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 </Note>
 
+### Graph artifacts
+
+- `apollo.router.oci.manifest.requests` - Number of requests made to get the manifest for a graph artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_manifest`, `head_manifest`)
+  - `status`: (`success`, `failure`)
+- `apollo.router.oci.manifest.duration` - Duration of request to get the manifest for a graph artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_manifest`, `head_manifest`)
+  - `status`: (`success`, `failure`)
+- `apollo.router.oci.blob.requests` - Number of fetches made to get the blob containing the supergraph from a graph artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_blob`)
+  - `status`: (`success`, `failure`)
+- `apollo.router.oci.blob.duration` - Duration of request to get the blob containing the supergraph from a graph artifact, attributes:
+  - `registry`: The hostname of the OCI registry
+  - `kind`: (`get_blob`)
+  - `status`: (`success`, `failure`)
+
+<Note>
+
+Similar to the initial call to Uplink, the router does not record metrics for calls to the graph artifacts endpoint during startup.
+
+</Note>
+
 ### Subscriptions
 
 <Tip>
@@ -202,18 +243,18 @@ The initial call to Uplink during router startup is not reflected in metrics.
 - `apollo.router.opened.subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated). This metric contains `graphql.operation.name` label to know exactly which subscription is still opened.
 - `apollo.router.skipped.event.count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
 
-### Batching
+## Batching
 
 - `apollo.router.operations.batching` - A counter of the number of query batches received by the router.
 - `apollo.router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
 
-### GraphOS Studio
+## GraphOS Studio
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the router.
   - `report.type`: The type of report submitted: "traces" or "metrics"
   - `report.protocol`: Either "apollo" or "otlp", depending on the otlp_tracing_sampler configuration.
 
-### Telemetry
+## Telemetry
 
 - `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
   - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
@@ -221,14 +262,14 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 - `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit otel's hard cardinality limit.
 
-### Internals
+## Internals
 
 - `apollo.router.pipelines` - The number of request pipelines active in the router
   - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
   - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
   - `config.hash` - The hash of the configuration
 
-### Server
+## Server
 
 - `apollo.router.open_connections` - The number of open connections to the Router.
   - `schema.id` - The Apollo Studio schema hash associated with the pipeline.

@@ -20,13 +20,13 @@ pub mod serializable_document;
 
 pub type QueryPlanCost = f64;
 
-#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct QueryPlan {
     pub node: Option<TopLevelPlanNode>,
     pub statistics: QueryPlanningStatistics,
 }
 
-#[derive(Debug, PartialEq, derive_more::From, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, derive_more::From, Serialize, Deserialize)]
 pub enum TopLevelPlanNode {
     Subscription(SubscriptionNode),
     #[from(FetchNode, Box<FetchNode>)]
