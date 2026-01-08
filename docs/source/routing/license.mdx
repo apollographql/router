@@ -49,6 +49,12 @@ These steps work both for running the router executable directly (`./router`) an
 2. Create a [graph API key](/graphos/platform/access-management/api-keys#graph-api-keys) for your supergraph and assign it the __Contributor__ role.
     - We recommend creating a separate graph API key for _each team member_ that will run the router locally.
 
+<Tip>
+
+When running Apollo Router locally with a schema fetched from Uplink, the API key must have at least the Observer role; keys with lower privileges cannot retrieve the schema.
+
+</Tip>
+
 3. When you start up your local router with your usual command, set the `APOLLO_GRAPH_REF` and `APOLLO_KEY` environment variables for that command:
 
     ```bash
