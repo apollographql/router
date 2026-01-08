@@ -110,8 +110,6 @@ By default, the router uses the following bucket boundaries (in seconds):
 
 These defaults work well for most applications where the majority of requests complete in under ten seconds.
 
-#### Why buckets matter for timeout settings
-
 Histogram metrics cap values at the highest bucket boundary. With the default buckets, any request taking longer than ten seconds is counted in the `10.0+` bucket. This can make it appear that timeouts aren't being respected in your metrics, especially if you have configured timeouts greater than ten seconds.
 
 If your application has longer timeouts or slower operations, customize your histogram buckets to include higher values that match your timeout configuration.
