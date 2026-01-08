@@ -2807,13 +2807,12 @@ type Product
         // Get all edges with override conditions
         let mut override_edges: Vec<String> = Vec::new();
         for node_idx in query_graph.graph.node_indices() {
-            for edge_ref in query_graph.graph.edges_directed(node_idx, Direction::Outgoing) {
+            for edge_ref in query_graph
+                .graph
+                .edges_directed(node_idx, Direction::Outgoing)
+            {
                 if let Some(condition) = &edge_ref.weight().override_condition {
-                    override_edges.push(format!(
-                        "{} = {}",
-                        condition.label,
-                        condition.condition
-                    ));
+                    override_edges.push(format!("{} = {}", condition.label, condition.condition));
                 }
             }
         }
@@ -2822,10 +2821,7 @@ type Product
         // Should have override conditions for both true and false on the "name" field
         assert_eq!(
             override_edges,
-            vec![
-                "percent(50) = false",
-                "percent(50) = true",
-            ]
+            vec!["percent(50) = false", "percent(50) = true",]
         );
     }
 
@@ -2895,8 +2891,7 @@ type Product
         "#;
         let supergraph = crate::Supergraph::new_with_router_specs(supergraph_sdl).unwrap();
         let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
-        let result =
-            build_federated_query_graph(supergraph.schema.clone(), api_schema, None, None);
+        let result = build_federated_query_graph(supergraph.schema.clone(), api_schema, None, None);
 
         // Should fail with an internal error about missing parent node
         let err = result.expect_err("Expected an error due to missing parent node");
