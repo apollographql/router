@@ -1581,7 +1581,14 @@ impl FederatedQueryGraphBuilder {
                 .get(target_field.type_name())
                 .and_then(|nodes| nodes.first())
             else {
-                return Ok(());
+                return Err(SingleFederationError::Internal {
+                    message: format!(
+                        "Unexpectedly missing parent node for type \"{}\" in subgraph \"{}\"",
+                        target_field.type_name(),
+                        target_graph,
+                    ),
+                }
+                .into());
             };
             for edge in query_graph.out_edges(*parent_node) {
                 let edge_weight = query_graph.edge_weight(edge.id())?;
@@ -2732,6 +2739,183 @@ mod tests {
         )?;
 
         Ok(())
+    }
+
+    #[test]
+    fn test_federated_query_graph_progressive_override() {
+        // Test that progressive overrides are correctly applied to federated query graph edges
+        let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+enum join__Graph {
+  SUBGRAPH_A @join__graph(name: "subgraphA", url: "http://localhost:4001")
+  SUBGRAPH_B @join__graph(name: "subgraphB", url: "http://localhost:4002")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SUBGRAPH_A)
+  @join__type(graph: SUBGRAPH_B)
+{
+  product: Product @join__field(graph: SUBGRAPH_A)
+}
+
+type Product
+  @join__type(graph: SUBGRAPH_A, key: "id")
+  @join__type(graph: SUBGRAPH_B, key: "id")
+{
+  id: ID!
+  name: String! @join__field(graph: SUBGRAPH_A, override: "subgraphB", overrideLabel: "percent(50)") @join__field(graph: SUBGRAPH_B, overrideLabel: "percent(50)")
+}
+        "#;
+        let supergraph = crate::Supergraph::new_with_router_specs(supergraph_sdl).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let query_graph =
+            build_federated_query_graph(supergraph.schema.clone(), api_schema, None, None).unwrap();
+
+        // Get all edges with override conditions
+        let mut override_edges: Vec<String> = Vec::new();
+        for node_idx in query_graph.graph.node_indices() {
+            for edge_ref in query_graph.graph.edges_directed(node_idx, Direction::Outgoing) {
+                if let Some(condition) = &edge_ref.weight().override_condition {
+                    override_edges.push(format!(
+                        "{} = {}",
+                        condition.label,
+                        condition.condition
+                    ));
+                }
+            }
+        }
+        override_edges.sort();
+
+        // Should have override conditions for both true and false on the "name" field
+        assert_eq!(
+            override_edges,
+            vec![
+                "percent(50) = false",
+                "percent(50) = true",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_federated_query_graph_progressive_override_missing_parent_node_error() {
+        // Test that we get an internal error when the parent type for an override
+        // doesn't exist in the "from" subgraph. This tests the error path in
+        // collect_edge_condition when the parent node is unexpectedly missing.
+        //
+        // This creates a supergraph where:
+        // - subgraphA has Product.name with @override(from: "subgraphB")
+        // - But Product type is NOT present in subgraphB
+        let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+enum join__Graph {
+  SUBGRAPH_A @join__graph(name: "subgraphA", url: "http://localhost:4001")
+  SUBGRAPH_B @join__graph(name: "subgraphB", url: "http://localhost:4002")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SUBGRAPH_A)
+  @join__type(graph: SUBGRAPH_B)
+{
+  product: Product @join__field(graph: SUBGRAPH_A)
+  other: String @join__field(graph: SUBGRAPH_B)
+}
+
+type Product
+  @join__type(graph: SUBGRAPH_A, key: "id")
+{
+  id: ID!
+  name: String! @join__field(graph: SUBGRAPH_A, override: "subgraphB", overrideLabel: "percent(50)")
+}
+        "#;
+        let supergraph = crate::Supergraph::new_with_router_specs(supergraph_sdl).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let result =
+            build_federated_query_graph(supergraph.schema.clone(), api_schema, None, None);
+
+        // Should fail with an internal error about missing parent node
+        let err = result.expect_err("Expected an error due to missing parent node");
+        let err_string = err.to_string();
+        assert!(
+            err_string.contains("Unexpectedly missing parent node"),
+            "Expected error about missing parent node, got: {}",
+            err_string
+        );
+        assert!(
+            err_string.contains("Product"),
+            "Expected error to mention type 'Product', got: {}",
+            err_string
+        );
+        assert!(
+            err_string.contains("subgraphB"),
+            "Expected error to mention subgraph 'subgraphB', got: {}",
+            err_string
+        );
     }
 
     #[test]
