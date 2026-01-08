@@ -140,6 +140,18 @@ impl PluginPrivate for MockSubgraphsPlugin {
                         .build()
                 };
                 let response = response.body(body).unwrap();
+                request
+                    .context
+                    .upsert(
+                        "apollo::experimental_mock_subgraphs::subgraph_call_count",
+                        |mut v: HashMap<String, u64>| {
+                            let subgraph_value =
+                                v.entry(request.subgraph_name.clone()).or_default();
+                            *subgraph_value += 1;
+                            v
+                        },
+                    )
+                    .unwrap();
                 Ok(subgraph::Response::new_from_response(
                     response,
                     request.context,

@@ -95,26 +95,22 @@ impl StrategyImpl for StaticEstimated {
         request: &ExecutableDocument,
         response: &subgraph::Response,
     ) -> Result<(), DemandControlError> {
-        if let Some(graphql_response) = response
-            .response
-            .body()
-            .data
-            .as_ref()
-            .and_then(|v| graphql::Response::from_value(v.clone()).ok())
-        {
-            let cost = self.cost_calculator.actual(
-                request,
-                &graphql_response,
-                &response
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.get().cloned())
-                    .unwrap_or_default(),
-            )?;
-            response
+        let subgraph_response_body = response.response.body();
+        // TODO: cost calculator cannot currently calculate the cost of an entities fetch
+        let cost = self.cost_calculator.actual(
+            request,
+            subgraph_response_body,
+            &response
                 .context
-                .update_actual_cost_by_subgraph(CostBySubgraph::new(subgraph_name, cost))?;
-        }
+                .extensions()
+                .with_lock(|lock| lock.get().cloned())
+                .unwrap_or_default(),
+        )?;
+
+        response
+            .context
+            .update_actual_cost_by_subgraph(CostBySubgraph::new(subgraph_name, cost))?;
+
         Ok(())
     }
 
