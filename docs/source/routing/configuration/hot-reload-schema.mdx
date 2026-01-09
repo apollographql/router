@@ -6,13 +6,13 @@ redirectFrom:
   - /graphos/routing/configuration/hot-reload
 ---
 
-Hot reloading enables the router to update its supergraph schema without restarting, providing zero-downtime schema updates. Hot reloading is not available for all schema loading methods and causes performance degradation during reload.
+Hot reloading enables the router to update its supergraph schema without restarting, providing zero-downtime schema updates.
 
 ## Hot reload support matrix
 
 | Schema Source | Hot Reload Support | Notes |
 |---------------|-------------------|-------|
-| GraphOS Uplink | 🟢 Yes | Automatically polls every 10 seconds for updates |
+| Apollo Uplink | 🟢 Yes | Automatically polls every 10 seconds for updates |
 | Local file | 🟢 Yes | Requires `--hot-reload` flag or `APOLLO_ROUTER_HOT_RELOAD=true` |
 | Remote URLs | ❌ No | Schema fetched once at startup |
 
@@ -31,10 +31,3 @@ For production deployments with high traffic:
 - Monitor during reloads: If using hot reload, monitor CPU, memory, and latency metrics during schema updates.
 - Schedule updates: Plan schema updates during lower-traffic periods when using hot reload.
 - Use blue/green deployments: For production deployments requiring schema updates, use [blue/green deployment strategies](/graphos/platform/production-readiness/deployment-best-practices#blue-green-with-graph-artifacts) with OCI digest references.
-
-For more details on production deployment strategies, see [Deployment Best Practices](/graphos/platform/production-readiness/deployment-best-practices).
-
-## Related documentation
-
-- [Router Configuration Overview](/graphos/routing/configuration/overview) - Overview of all schema loading options
-- [Deployment Best Practices](/graphos/platform/production-readiness/deployment-best-practices) - Deployment strategies with immutable artifacts
