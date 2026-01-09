@@ -1580,7 +1580,10 @@ impl FederatedQueryGraphBuilder {
                 }
                 .into());
             };
-            let Some(nodes) = subgraph_nodes.get(target_field.type_name()) else {
+            let Some(parent_node) = subgraph_nodes
+                .get(target_field.type_name())
+                .and_then(|nodes| if nodes.len() == 1 { nodes.first() } else { None })
+            else {
                 return Err(SingleFederationError::Internal {
                     message: format!(
                         "Subgraph {} should have exactly one vertex for type {}",
@@ -1590,17 +1593,6 @@ impl FederatedQueryGraphBuilder {
                 }
                 .into());
             };
-            if nodes.len() != 1 {
-                return Err(SingleFederationError::Internal {
-                    message: format!(
-                        "Subgraph {} should have exactly one vertex for type {}",
-                        target_graph,
-                        target_field.type_name()
-                    ),
-                }
-                .into());
-            }
-            let parent_node = nodes.first().expect("checked above");
             for edge in query_graph.out_edges(*parent_node) {
                 let edge_weight = query_graph.edge_weight(edge.id())?;
                 let QueryGraphEdgeTransition::FieldCollection {
