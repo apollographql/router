@@ -1,7 +1,6 @@
 ---
 source: apollo-router/tests/apollo_reports.rs
 expression: report
-snapshot_kind: text
 ---
 header:
   graph_ref: test

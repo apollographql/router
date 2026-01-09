@@ -119,7 +119,12 @@ where
     }
 }
 
-pub(crate) struct SubscriptionTaskParams {
+// WARN: you might be tempted to change this to pub(crate) because its fields are pub(crate) and
+// there's no actual use in having it marked pub _apart_ from it being used in the
+// execution::Request builder and, more importantly, the fake_builder we get from BuildStructor.
+// Customers use that in unit tests for their plugins, and they'll fail to compile if we mark this
+// pub(crate)
+pub struct SubscriptionTaskParams {
     pub(crate) client_sender: tokio::sync::mpsc::Sender<Response>,
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,

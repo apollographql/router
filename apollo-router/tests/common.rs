@@ -222,6 +222,7 @@ pub struct IntegrationTest {
     port_replacements: HashMap<String, u16>,
     jwt: Option<String>,
     env: Option<HashMap<String, OsString>>,
+    hot_reload: bool,
 }
 
 impl IntegrationTest {
@@ -565,6 +566,7 @@ impl IntegrationTest {
         jwt: Option<String>,
         env: Option<HashMap<String, OsString>>,
         redis_namespace: Option<String>,
+        hot_reload: Option<bool>,
     ) -> Self {
         let redis_namespace = redis_namespace.unwrap_or_else(|| Uuid::new_v4().to_string());
         let telemetry = telemetry.unwrap_or_default();
@@ -710,6 +712,7 @@ impl IntegrationTest {
             port_replacements: HashMap::new(),
             jwt,
             env,
+            hot_reload: hot_reload.unwrap_or(true),
         }
     }
 
@@ -776,7 +779,10 @@ impl IntegrationTest {
 
         // Build arguments conditionally based on APOLLO_GRAPH_ARTIFACT_REGISTRY
         let config_path = self.test_config_location.to_string_lossy();
-        let mut args = vec!["--hr", "--config", &config_path, "--log", &self.log];
+        let mut args = vec!["--config", &config_path, "--log", &self.log];
+        if self.hot_reload {
+            args.insert(0, "--hr");
+        }
 
         // Add --supergraph if launch env vars are not set
         let schema_path = self.test_schema_location.to_string_lossy();

@@ -1,6 +1,7 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::task;
@@ -644,7 +645,10 @@ where
             // When cooperative cancellation is enabled, we want to cancel the query planner
             // task if the request is canceled.
             if self.cooperative_cancellation.is_enabled() {
-                let planning_task = tokio::task::spawn(planning_task);
+                let cancelled = Arc::new(AtomicBool::new(false));
+                let cancellable_planning_task =
+                    crate::compute_job::CANCEL_JOB.scope(Some(cancelled.clone()), planning_task);
+                let planning_task = tokio::task::spawn(cancellable_planning_task);
                 let outcome_recorded_for_abort = outcome_recorded.clone();
                 let enforce_mode = self.cooperative_cancellation.is_enforce_mode();
                 let measure_mode = self.cooperative_cancellation.is_measure_mode();
@@ -673,6 +677,7 @@ where
                             let res = planning_task_with_timeout.await;
                             // If timeout occurred, record outcome (if not already recorded)
                             if res.is_err() {
+                                cancelled.store(true, Ordering::Relaxed);
                                 record_outcome_if_none(
                                     &outcome_recorded_for_timeout,
                                     Outcome::Timeout,

@@ -45,8 +45,9 @@ impl Merger {
         T: Clone + Into<DirectiveTargetPosition>,
     {
         let inaccessible_name = self.inaccessible_directive_name_in_supergraph.clone();
-        let mut directive_sources: Sources<DirectiveTargetPosition> = Sources::default();
-        let mut names = IndexSet::new();
+        let mut directive_sources: Sources<DirectiveTargetPosition> =
+            IndexMap::with_capacity_and_hasher(sources.len(), Default::default());
+        let mut names = IndexSet::with_capacity(sources.len());
 
         // This loop corresponds to `gatherAppliedDirectivesToMerge` in the JS implementation.
         for (idx, source) in sources {
