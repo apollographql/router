@@ -1575,21 +1575,32 @@ impl FederatedQueryGraphBuilder {
             let target_field = FieldDefinitionPosition::Object(target_field.clone());
             let Some(subgraph_nodes) = query_graph.types_to_nodes_by_source.get(target_graph)
             else {
-                return Ok(());
+                return Err(SingleFederationError::Internal {
+                    message: format!("Subgraph {} not found", target_graph),
+                }
+                .into());
             };
-            let Some(parent_node) = subgraph_nodes
-                .get(target_field.type_name())
-                .and_then(|nodes| nodes.first())
-            else {
+            let Some(nodes) = subgraph_nodes.get(target_field.type_name()) else {
                 return Err(SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly missing parent node for type \"{}\" in subgraph \"{}\"",
-                        target_field.type_name(),
+                        "Subgraph {} should have exactly one vertex for type {}",
                         target_graph,
+                        target_field.type_name()
                     ),
                 }
                 .into());
             };
+            if nodes.len() != 1 {
+                return Err(SingleFederationError::Internal {
+                    message: format!(
+                        "Subgraph {} should have exactly one vertex for type {}",
+                        target_graph,
+                        target_field.type_name()
+                    ),
+                }
+                .into());
+            }
+            let parent_node = nodes.first().expect("checked above");
             for edge in query_graph.out_edges(*parent_node) {
                 let edge_weight = query_graph.edge_weight(edge.id())?;
                 let QueryGraphEdgeTransition::FieldCollection {
@@ -2893,12 +2904,12 @@ type Product
         let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
         let result = build_federated_query_graph(supergraph.schema.clone(), api_schema, None, None);
 
-        // Should fail with an internal error about missing parent node
+        // Should fail with an internal error about missing/invalid vertex count
         let err = result.expect_err("Expected an error due to missing parent node");
         let err_string = err.to_string();
         assert!(
-            err_string.contains("Unexpectedly missing parent node"),
-            "Expected error about missing parent node, got: {}",
+            err_string.contains("should have exactly one vertex for type"),
+            "Expected error about vertex count, got: {}",
             err_string
         );
         assert!(
