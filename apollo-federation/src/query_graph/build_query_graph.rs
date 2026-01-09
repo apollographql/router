@@ -1580,9 +1580,16 @@ impl FederatedQueryGraphBuilder {
                 }
                 .into());
             };
-            let Some(parent_node) = subgraph_nodes
-                .get(target_field.type_name())
-                .and_then(|nodes| if nodes.len() == 1 { nodes.first() } else { None })
+            let Some(parent_node) =
+                subgraph_nodes
+                    .get(target_field.type_name())
+                    .and_then(|nodes| {
+                        if nodes.len() == 1 {
+                            nodes.first()
+                        } else {
+                            None
+                        }
+                    })
             else {
                 return Err(SingleFederationError::Internal {
                     message: format!(
