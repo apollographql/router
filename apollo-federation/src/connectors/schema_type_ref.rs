@@ -1,4 +1,5 @@
 use apollo_compiler::Name;
+#[cfg(test)]
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
@@ -7,6 +8,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
+#[cfg(test)]
 use apollo_compiler::schema::ObjectType;
 use shape::Shape;
 
@@ -42,12 +44,8 @@ impl<'schema> SchemaTypeRef<'schema> {
         SchemaTypeRef::new(schema, node.name.as_str())
     }
 
-    pub(super) fn as_object_node(&self) -> Option<&'schema Node<ObjectType>> {
-        if let ExtendedType::Object(obj) = self.ext {
-            Some(obj)
-        } else {
-            None
-        }
+    pub(super) fn shape(&self) -> Shape {
+        self.shape_with_visited(&mut IndexSet::default(), false)
     }
 
     #[allow(dead_code)]
@@ -86,7 +84,15 @@ impl<'schema> SchemaTypeRef<'schema> {
 
                 Shape::record(fields, [])
             }
-            ExtendedType::Scalar(_) => Shape::unknown([]),
+            ExtendedType::Scalar(s) => match s.name.as_str() {
+                "String" => Shape::string([]),
+                "Int" => Shape::int([]),
+                "Float" => Shape::float([]),
+                "Boolean" => Shape::bool(None),
+                "ID" => Shape::one([Shape::string([]), Shape::int([])], []),
+                // All other custom scalars (including JSON)
+                _ => Shape::unknown([]),
+            },
 
             ExtendedType::Enum(e) => {
                 // Enums are unions of their string values
