@@ -110,7 +110,7 @@ By default, the router uses the following bucket boundaries (in seconds):
 
 These defaults work well for most applications where the majority of requests complete in under ten seconds.
 
-Histogram metrics cap values at the highest bucket boundary. With the default buckets, any request taking longer than ten seconds appears in the `10.0+` bucket. This makes it appear as though timeouts are not respected in your metrics if you configure timeouts greater than ten seconds.
+Histogram buckets are represented as "less than or equal to" their specified boundaries. With the default buckets, any request taking longer than ten seconds goes into the `+Inf` (infinity) bucket. When you configure timeouts greater than ten seconds, you lose granularity in your metrics because all requests above ten seconds are grouped together.
 
 If your application has longer timeouts or slower operations, customize your histogram buckets to include higher values that match your timeout configuration.
 
