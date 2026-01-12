@@ -51,6 +51,7 @@ use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SchemaHash;
 use crate::spec::SpecError;
+use crate::spec::operation_limits::OperationLimits;
 
 #[repr(u8)]
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -123,6 +124,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     enable_authorization_directives: bool,
     config_mode_hash: Arc<ConfigModeHash>,
     cooperative_cancellation: CooperativeCancellation,
+    configuration: Arc<Configuration>,
 }
 
 fn init_query_plan_from_redis(
@@ -185,6 +187,7 @@ where
             enable_authorization_directives,
             cooperative_cancellation,
             config_mode_hash,
+            configuration: Arc::new(configuration.clone()),
         })
     }
 
@@ -542,6 +545,7 @@ where
                 init_query_plan_from_redis(&self.subgraph_schemas, v)
             })
             .await;
+
         if entry.is_first() {
             let query_planner::CachingRequest {
                 query,
@@ -749,6 +753,22 @@ where
                         context.extensions().with_lock(|lock| {
                             lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                         });
+
+                        // Log warning if limits were exceeded, even for cached results
+                        let config_limits = &self.configuration.limits;
+                        let max = OperationLimits {
+                            depth: config_limits.max_depth,
+                            height: config_limits.max_height,
+                            root_fields: config_limits.max_root_fields,
+                            aliases: config_limits.max_aliases,
+                        };
+                        // The function will check internally if limits are exceeded before logging
+                        crate::spec::operation_limits::log_operation_limits_warning(
+                            &caching_key.query,
+                            caching_key.operation.as_deref(),
+                            &max,
+                            plan.query_metrics,
+                        );
                     }
 
                     Ok(QueryPlannerResponse::builder().content(content).build())

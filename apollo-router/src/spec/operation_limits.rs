@@ -55,6 +55,40 @@ impl OperationLimits<bool> {
     }
 }
 
+/// Log a warning if the query metrics indicate that limits were exceeded.
+/// This is a public function so it can be called when returning cached results
+/// to ensure warnings are logged every time, not just on the first request.
+pub(crate) fn log_operation_limits_warning(
+    query: &str,
+    operation_name: Option<&str>,
+    max: &OperationLimits<Option<u32>>,
+    measured: OperationLimits<u32>,
+) {
+    let exceeded = max.combine(measured, |_, config, measured| {
+        if let Some(limit) = config {
+            measured > limit
+        } else {
+            false
+        }
+    });
+
+    if exceeded.any() {
+        let mut messages = Vec::new();
+        max.combine(measured, |ident, max, measured| {
+            if let Some(max) = max
+                && measured > max
+            {
+                messages.push(format!("{ident}: {measured}, max_{ident}: {max}"))
+            }
+        });
+        let message = messages.join(", ");
+        tracing::warn!(
+            "request exceeded complexity limits: {message}, \
+            query: {query:?}, operation name: {operation_name:?}"
+        );
+    }
+}
+
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) fn check(
     query_metrics_in: &mut OperationLimits<u32>,
@@ -97,19 +131,7 @@ pub(crate) fn check(
         }
     });
     if exceeded.any() {
-        let mut messages = Vec::new();
-        max.combine(measured, |ident, max, measured| {
-            if let Some(max) = max
-                && measured > max
-            {
-                messages.push(format!("{ident}: {measured}, max_{ident}: {max}"))
-            }
-        });
-        let message = messages.join(", ");
-        tracing::warn!(
-            "request exceeded complexity limits: {message}, \
-            query: {query:?}, operation name: {operation_name:?}"
-        );
+        log_operation_limits_warning(query, operation_name, &max, measured);
         if !config_limits.warn_only {
             return Err(exceeded);
         }
