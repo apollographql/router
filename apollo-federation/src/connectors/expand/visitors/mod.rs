@@ -4,7 +4,7 @@
 //! adding needed types to a mutable schema.
 
 pub(crate) mod input;
-mod selection;
+pub(crate) mod selection;
 
 use std::collections::VecDeque;
 
