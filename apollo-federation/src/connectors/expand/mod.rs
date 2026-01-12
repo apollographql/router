@@ -168,7 +168,7 @@ fn split_subgraph(
 ) -> Result<Vec<(Connector, ValidSubgraph)>, FederationError> {
     let connector_map = Connector::from_schema(subgraph.schema.schema(), &subgraph.name)?;
 
-    let expander = helpers::Expander::new(link, &subgraph);
+    let expander = helpers::LegacyExpander::new(link, &subgraph);
     connector_map
         .into_iter()
         .map(|connector| {
@@ -248,7 +248,7 @@ mod helpers {
     use crate::supergraph::new_empty_fed_2_subgraph_schema;
 
     /// A helper struct for expanding a subgraph into one per connect directive.
-    pub(super) struct Expander<'a> {
+    pub(super) struct LegacyExpander<'a> {
         /// The name of the @key directive, as known in the subgraph
         key_name: Name,
 
@@ -263,7 +263,7 @@ mod helpers {
         directive_deny_list: IndexSet<Name>,
     }
 
-    impl<'a> Expander<'a> {
+    impl<'a> LegacyExpander<'a> {
         pub(super) fn new(link: &ConnectLink, subgraph: &'a ValidFederationSubgraph) -> Self {
             // When we go to expand all output types, we'll need to make sure that we don't carry over
             // any connect-related directives. The following directives are also special because they
