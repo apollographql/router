@@ -35,6 +35,7 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::limits;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::QueryPlannerService;
@@ -123,6 +124,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     enable_authorization_directives: bool,
     config_mode_hash: Arc<ConfigModeHash>,
     cooperative_cancellation: CooperativeCancellation,
+    config_limits: limits::Config,
 }
 
 fn init_query_plan_from_redis(
@@ -185,6 +187,7 @@ where
             enable_authorization_directives,
             cooperative_cancellation,
             config_mode_hash,
+            config_limits: configuration.limits.clone(),
         })
     }
 
@@ -542,6 +545,7 @@ where
                 init_query_plan_from_redis(&self.subgraph_schemas, v)
             })
             .await;
+
         if entry.is_first() {
             let query_planner::CachingRequest {
                 query,
@@ -749,6 +753,15 @@ where
                         context.extensions().with_lock(|lock| {
                             lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                         });
+
+                        crate::spec::operation_limits::check(
+                            &mut plan.query_metrics.clone(),
+                            &self.config_limits,
+                            &caching_key.query,
+                            &doc.executable.clone(),
+                            caching_key.operation.as_deref(),
+                        )
+                        .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e.into())))?;
                     }
 
                     Ok(QueryPlannerResponse::builder().content(content).build())
