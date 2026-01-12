@@ -168,35 +168,73 @@ fn split_subgraph(
 ) -> Result<Vec<(Connector, ValidSubgraph)>, FederationError> {
     let connector_map = Connector::from_schema(subgraph.schema.schema(), &subgraph.name)?;
 
-    let expander = helpers::LegacyExpander::new(link, &subgraph);
-    connector_map
-        .into_iter()
-        .map(|connector| {
-            // Build a subgraph using only the necessary fields from the directive
-            let schema = expander.expand(&connector)?;
-            let subgraph = Subgraph::new(
-                connector.id.synthetic_name().as_str(),
-                &subgraph.url,
-                &schema.schema().serialize().to_string(),
-            )?;
+    // Fork based on ConnectSpec version:
+    // - v0.1/v0.2/v0.3: Use legacy visitor-based expansion (frozen for compatibility)
+    // - v0.4+: Use shape-driven expansion (actively maintained)
+    if link.spec < ConnectSpec::V0_4 {
+        // Legacy path for v0.1/v0.2/v0.3 compatibility
+        let expander = helpers::LegacyExpander::new(link, &subgraph);
+        connector_map
+            .into_iter()
+            .map(|connector| {
+                // Build a subgraph using only the necessary fields from the directive
+                let schema = expander.expand(&connector)?;
+                let subgraph = Subgraph::new(
+                    connector.id.synthetic_name().as_str(),
+                    &subgraph.url,
+                    &schema.schema().serialize().to_string(),
+                )?;
 
-            // We only validate during debug builds since we should realistically only generate valid schemas
-            // for these subgraphs.
-            #[cfg(debug_assertions)]
-            let schema = subgraph.schema.validate()?;
-            #[cfg(not(debug_assertions))]
-            let schema = Valid::assume_valid(subgraph.schema);
+                // We only validate during debug builds since we should realistically only generate valid schemas
+                // for these subgraphs.
+                #[cfg(debug_assertions)]
+                let schema = subgraph.schema.validate()?;
+                #[cfg(not(debug_assertions))]
+                let schema = Valid::assume_valid(subgraph.schema);
 
-            Ok((
-                connector,
-                ValidSubgraph {
-                    name: subgraph.name,
-                    url: subgraph.url,
-                    schema,
-                },
-            ))
-        })
-        .try_collect()
+                Ok((
+                    connector,
+                    ValidSubgraph {
+                        name: subgraph.name,
+                        url: subgraph.url,
+                        schema,
+                    },
+                ))
+            })
+            .try_collect()
+    } else {
+        // Modern path for v0.4+: shape-driven expansion
+        // TODO: Use new Expander once implemented
+        let expander = helpers::LegacyExpander::new(link, &subgraph);
+        connector_map
+            .into_iter()
+            .map(|connector| {
+                // Build a subgraph using only the necessary fields from the directive
+                let schema = expander.expand(&connector)?;
+                let subgraph = Subgraph::new(
+                    connector.id.synthetic_name().as_str(),
+                    &subgraph.url,
+                    &schema.schema().serialize().to_string(),
+                )?;
+
+                // We only validate during debug builds since we should realistically only generate valid schemas
+                // for these subgraphs.
+                #[cfg(debug_assertions)]
+                let schema = subgraph.schema.validate()?;
+                #[cfg(not(debug_assertions))]
+                let schema = Valid::assume_valid(subgraph.schema);
+
+                Ok((
+                    connector,
+                    ValidSubgraph {
+                        name: subgraph.name,
+                        url: subgraph.url,
+                        schema,
+                    },
+                ))
+            })
+            .try_collect()
+    }
 }
 
 mod helpers {
