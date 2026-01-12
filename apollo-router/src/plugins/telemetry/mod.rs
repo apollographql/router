@@ -1133,7 +1133,6 @@ impl PluginPrivate for Telemetry {
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         let req_fn_config = self.config.clone();
-        let res_fn_config = self.config.clone();
 
         ServiceBuilder::new()
             .layer(router_overhead::OverheadLayer::new())
@@ -1151,7 +1150,7 @@ impl PluginPrivate for Telemetry {
                 };
                 request.context.extensions().with_lock(|lock| {
                     lock.insert(client_attributes);
-                    lock.insert(res_fn_config.clone());
+                    lock.insert(req_fn_config.clone());
                 });
 
                 request
