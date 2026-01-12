@@ -99,6 +99,7 @@ where
             async move {
                 let result = fut.await;
 
+                #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
                 if let Some(stats) = crate::allocator::current() {
                     record_metrics(&stats);
                 }
@@ -111,6 +112,7 @@ where
 }
 
 /// Record allocation metrics for a specific context.
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 fn record_metrics(stats: &AllocationStats) {
     let bytes_allocated = stats.bytes_allocated() as u64;
     let bytes_deallocated = stats.bytes_deallocated() as u64;
@@ -159,8 +161,11 @@ fn record_metrics(stats: &AllocationStats) {
     );
 }
 
-#[cfg(test)]
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use tower::ServiceExt;
 
     use super::*;
@@ -170,11 +175,27 @@ mod tests {
     #[tokio::test]
     async fn test_allocation_metrics_layer() {
         async {
+            let allocated_bytes = Arc::new(AtomicU64::new(0));
+            let allocated_bytes_clone = allocated_bytes.clone();
+
             // Create a simple service that allocates memory
-            let service = tower::service_fn(|_req: router::Request| async {
-                // Allocate some memory during request processing
-                let _v = Vec::<u8>::with_capacity(10000);
-                Ok::<_, tower::BoxError>(router::Response::fake_builder().build().unwrap())
+            let service = tower::service_fn(move |_req: router::Request| {
+                let allocated_bytes_clone = allocated_bytes_clone.clone();
+                async move {
+                    // Allocate some memory during request processing
+                    let _v = Vec::<u8>::with_capacity(10000);
+                    let result =
+                        Ok::<_, tower::BoxError>(router::Response::fake_builder().build().unwrap());
+
+                    allocated_bytes_clone.as_ref().store(
+                        crate::allocator::current()
+                            .expect("stats should be set")
+                            .bytes_allocated() as u64,
+                        Ordering::Relaxed,
+                    );
+
+                    result
+                }
             });
 
             // Wrap with allocation metrics layer
@@ -185,11 +206,13 @@ mod tests {
             let request = router::Request::fake_builder().build().unwrap();
             let _response = service.ready().await.unwrap().call(request).await.unwrap();
 
+            assert!(allocated_bytes.load(Ordering::Relaxed) > 10000);
+
             // Verify metrics were recorded
             assert_histogram_sum!(
                 "apollo.router.request.memory",
-                // Includes the 10k from the vec and response overhead
-                18762,
+                // Varies depending on platform
+                allocated_bytes.load(Ordering::Relaxed),
                 "allocation.type" = "allocated",
                 "context" = "router.request"
             );

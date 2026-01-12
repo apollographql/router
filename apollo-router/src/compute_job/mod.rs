@@ -205,6 +205,11 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                                     stats,
                                     || {
                                         (job.job_fn)();
+                                        #[cfg(all(
+                                            feature = "global-allocator",
+                                            not(feature = "dhat-heap"),
+                                            unix
+                                        ))]
                                         if let Some(allocation_stats) = current() {
                                             record_metrics(&allocation_stats);
                                         }
@@ -228,6 +233,7 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
     })
 }
 
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 fn record_metrics(stats: &crate::allocator::AllocationStats) {
     let bytes_allocated = stats.bytes_allocated() as u64;
     let bytes_deallocated = stats.bytes_deallocated() as u64;
