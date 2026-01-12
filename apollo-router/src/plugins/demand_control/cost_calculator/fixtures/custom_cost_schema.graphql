@@ -137,6 +137,19 @@ type Query
       sizedFields: ["items"]
       requireOneSlicingArgument: true
     )
+  itemsByIds(ids: [ID!]!): [A]
+    @join__field(graph: SUBGRAPHWITHLISTSIZE)
+    @listSize(
+      slicingArguments: ["ids"]
+      requireOneSlicingArgument: true
+    )
+  itemsByIdsWithAssumedSize(ids: [ID!]): [A]
+    @join__field(graph: SUBGRAPHWITHLISTSIZE)
+    @listSize(
+      slicingArguments: ["ids"]
+      assumedSize: 50
+      requireOneSlicingArgument: false
+    )
 }
 
 type SizedField @join__type(graph: SUBGRAPHWITHLISTSIZE) {

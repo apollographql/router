@@ -1255,4 +1255,45 @@ mod tests {
         assert_eq!(planned_cost_js(schema, query, variables).await, 1.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 1.0);
     }
+
+    /// Tests for array-based slicing arguments in @listSize directive
+    mod array_slicing_argument_tests {
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
+
+        #[rstest::rstest]
+        #[case::inline_array_of_3(
+            r#"query { itemsByIds(ids: ["a", "b", "c"]) { id } }"#,
+            "{}",
+            3.0
+        )]
+        #[case::empty_inline_array(r#"query { itemsByIds(ids: []) { id } }"#, "{}", 0.0)]
+        #[case::variable_array_of_5(
+            r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
+            r#"{"ids": ["a", "b", "c", "d", "e"]}"#,
+            5.0
+        )]
+        #[case::variable_empty_array(
+            r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
+            r#"{"ids": []}"#,
+            0.0
+        )]
+        fn array_length_determines_list_size(
+            #[case] query: &str,
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+
+        #[rstest::rstest]
+        #[case::null_variable(r#"{"ids": null}"#)]
+        #[case::missing_variable("{}")]
+        fn null_or_missing_array_falls_back_to_assumed_size(#[case] variables: &str) {
+            let query = r#"query Q($ids: [ID!]) { itemsByIdsWithAssumedSize(ids: $ids) { id } }"#;
+            // assumedSize is 50 in the schema
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 50.0);
+        }
+    }
 }
