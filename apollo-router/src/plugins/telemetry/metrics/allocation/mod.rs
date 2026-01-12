@@ -12,7 +12,6 @@ use opentelemetry_sdk::metrics::Stream;
 use tower::Layer;
 use tower::Service;
 
-use crate::allocator::AllocationStats;
 use crate::allocator::WithMemoryTracking;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
@@ -113,7 +112,7 @@ where
 
 /// Record allocation metrics for a specific context.
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-fn record_metrics(stats: &AllocationStats) {
+fn record_metrics(stats: &crate::allocator::AllocationStats) {
     let bytes_allocated = stats.bytes_allocated() as u64;
     let bytes_deallocated = stats.bytes_deallocated() as u64;
     let bytes_zeroed = stats.bytes_zeroed() as u64;

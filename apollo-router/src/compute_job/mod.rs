@@ -25,7 +25,6 @@ use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
-use crate::allocator::current;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_SPAN_NAME;
@@ -210,7 +209,8 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                                             not(feature = "dhat-heap"),
                                             unix
                                         ))]
-                                        if let Some(allocation_stats) = current() {
+                                        if let Some(allocation_stats) = crate::allocator::current()
+                                        {
                                             record_metrics(&allocation_stats);
                                         }
                                     },

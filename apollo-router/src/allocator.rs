@@ -9,6 +9,7 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 use std::sync::atomic::Ordering;
 use std::task::Context;
 use std::task::Poll;
@@ -26,11 +27,11 @@ use parking_lot::Mutex;
 /// that share the same Arc<AllocationStats>. This is critical for performance in the global
 /// allocator hot path where even an uncontended Mutex would add significant overhead.
 #[derive(Debug)]
+#[allow(dead_code)] // bytes_* fields are only read if feature global-allocator is enabled
 pub(crate) struct AllocationStats {
     /// Context name used for metric labeling
     name: &'static str,
     /// Parent context for nested tracking (None for root)
-    #[allow(dead_code)] // Only read if feature global-allocator is enabled
     parent: Option<Arc<AllocationStats>>,
     bytes_allocated: AtomicUsize,
     bytes_deallocated: AtomicUsize,
@@ -65,6 +66,7 @@ impl AllocationStats {
 
     /// Get the context name for this allocation stats.
     #[inline]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     pub(crate) fn name(&self) -> &'static str {
         self.name
     }
@@ -119,24 +121,28 @@ impl AllocationStats {
 
     /// Get the current number of bytes allocated.
     #[inline]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     pub(crate) fn bytes_allocated(&self) -> usize {
         self.bytes_allocated.load(Ordering::Relaxed)
     }
 
     /// Get the current number of bytes deallocated.
     #[inline]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     pub(crate) fn bytes_deallocated(&self) -> usize {
         self.bytes_deallocated.load(Ordering::Relaxed)
     }
 
     /// Get the current number of bytes allocated with zeroing.
     #[inline]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     pub(crate) fn bytes_zeroed(&self) -> usize {
         self.bytes_zeroed.load(Ordering::Relaxed)
     }
 
     /// Get the current number of bytes reallocated.
     #[inline]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     pub(crate) fn bytes_reallocated(&self) -> usize {
         self.bytes_reallocated.load(Ordering::Relaxed)
     }
