@@ -34,6 +34,12 @@ Response caching helps you:
 
 The router provides a GraphQL-aware cache with advantages over a generic CDN. It caches at the entity and root field level—GraphQL-native and reusable across users and requests.
 
+<Tip>
+
+For globally distributed deployments with multiple regions, see the [Multi-Region Edge Cache Architecture](/graphos/routing/performance/caching/edge-cache-architecture) guide.
+
+</Tip>
+
 ### The GraphQL caching challenge
 
 GraphQL responses present unique caching challenges that traditional HTTP caching doesn't address well. A typical GraphQL response combines data from multiple sources with varying freshness requirements and visibility constraints:
