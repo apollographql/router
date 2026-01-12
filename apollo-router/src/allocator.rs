@@ -30,6 +30,7 @@ pub(crate) struct AllocationStats {
     /// Context name used for metric labeling
     name: &'static str,
     /// Parent context for nested tracking (None for root)
+    #[allow(dead_code)] // Only read if feature global-allocator is enabled
     parent: Option<Arc<AllocationStats>>,
     bytes_allocated: AtomicUsize,
     bytes_deallocated: AtomicUsize,
@@ -68,29 +69,10 @@ impl AllocationStats {
         self.name
     }
 
-    /// Get the parent context, if any.
-    #[inline]
-    #[allow(dead_code)]
-    pub(crate) fn parent(&self) -> Option<&Arc<AllocationStats>> {
-        self.parent.as_ref()
-    }
-
-    /// Get the root context by traversing up the parent chain.
-    /// Returns self if this is already a root context.
-    #[inline]
-    #[allow(dead_code)]
-    pub(crate) fn root(&self) -> &Self {
-        let mut current = self;
-        while let Some(parent) = &current.parent {
-            current = parent.as_ref();
-        }
-        current
-    }
-
     /// Track allocation in this context and all parent contexts.
     /// Uses loop unwrapping instead of recursion for performance.
     #[inline]
-    #[allow(dead_code)] // only used if feature global-allocator is enabled
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     fn track_alloc(&self, size: usize) {
         let mut current = Some(self);
         while let Some(stats) = current {
@@ -102,7 +84,7 @@ impl AllocationStats {
     /// Track deallocation in this context and all parent contexts.
     /// Uses loop unwrapping instead of recursion for performance.
     #[inline]
-    #[allow(dead_code)] // only used if feature global-allocator is enabled
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     fn track_dealloc(&self, size: usize) {
         let mut current = Some(self);
         while let Some(stats) = current {
@@ -114,7 +96,7 @@ impl AllocationStats {
     /// Track zeroed allocation in this context and all parent contexts.
     /// Uses loop unwrapping instead of recursion for performance.
     #[inline]
-    #[allow(dead_code)] // only used if feature global-allocator is enabled
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     fn track_zeroed(&self, size: usize) {
         let mut current = Some(self);
         while let Some(stats) = current {
@@ -126,7 +108,7 @@ impl AllocationStats {
     /// Track reallocation in this context and all parent contexts.
     /// Uses loop unwrapping instead of recursion for performance.
     #[inline]
-    #[allow(dead_code)] // only used if feature global-allocator is enabled
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     fn track_realloc(&self, size: usize) {
         let mut current = Some(self);
         while let Some(stats) = current {
@@ -161,7 +143,7 @@ impl AllocationStats {
 
     /// Get the current net allocated bytes (allocated + zeroed - deallocated).
     #[inline]
-    #[allow(dead_code)]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
     pub(crate) fn net_allocated(&self) -> usize {
         let allocated = self.bytes_allocated();
         let zeroed = self.bytes_zeroed();
@@ -257,8 +239,9 @@ pub(crate) fn current() -> Option<Arc<AllocationStats>> {
 /// Run a synchronous closure with memory tracking.
 /// If a parent context exists, creates a child context that tracks to the parent.
 /// If no parent exists, creates a new root context with the given name.
-/// This is useful for tracking allocations in synchronous code or threads.
-#[allow(dead_code)]
+/// This is useful for tracking allocations in synchronous code or threads
+/// Note: This function is currently only used in a test
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
 pub(crate) fn with_memory_tracking<F, R>(name: &'static str, f: F) -> R
 where
     F: FnOnce() -> R,
@@ -364,7 +347,6 @@ struct CustomAllocator {
 
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 impl CustomAllocator {
-    #[allow(dead_code)] // only used if feature global-allocator is enabled
     const fn new() -> Self {
         Self {
             inner: tikv_jemallocator::Jemalloc,
