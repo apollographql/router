@@ -164,7 +164,8 @@ fn record_metrics(stats: &AllocationStats) {
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering;
 
     use tower::ServiceExt;
 
