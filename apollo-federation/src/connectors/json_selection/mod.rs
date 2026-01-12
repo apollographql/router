@@ -51,7 +51,7 @@ mod test {
         #[case] selection: &str,
         #[case] expected: Option<Value>,
         #[case] minimum_version: &str,
-        #[values(ConnectSpec::V0_2, ConnectSpec::V0_3)] version: ConnectSpec,
+        #[values(ConnectSpec::V0_2, ConnectSpec::V0_3, ConnectSpec::V0_4)] version: ConnectSpec,
     ) {
         // We're effectively skipping the test but it will be reported as passed because Rust has no runtime "mark as skipped" capability
         if version.as_str() < minimum_version {

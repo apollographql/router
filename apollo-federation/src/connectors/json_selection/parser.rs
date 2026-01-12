@@ -2291,6 +2291,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_path_selection(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
@@ -2554,6 +2555,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_path_selection_vars(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
@@ -2947,6 +2949,22 @@ mod tests {
     fn test_error_snapshots_v0_3() {
         let spec = ConnectSpec::V0_3;
 
+        // The .data shorthand is no longer allowed, since it can be mistakenly
+        // parsed as a continuation of a previous selection. Instead, use $.data
+        // to achieve the same effect without ambiguity.
+        assert_debug_snapshot!(JSONSelection::parse_with_spec(".data", spec));
+
+        // If you want to mix a path selection with other named selections, the
+        // path selection must have a trailing subselection, to enforce that it
+        // returns an object with statically known keys, or be inlined/spread
+        // with a ... token.
+        assert_debug_snapshot!(JSONSelection::parse_with_spec("id $.object", spec));
+    }
+
+    #[test]
+    fn test_error_snapshots_v0_4() {
+        let spec = ConnectSpec::V0_4;
+
         // When this assertion fails, don't panic, but it's time to decide how
         // the next-next version should behave in these error cases (possibly
         // exactly the same).
@@ -2967,6 +2985,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_path_selection_at(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
@@ -3025,6 +3044,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_expr_path_selections(#[case] spec: ConnectSpec) {
         fn check_simple_lit_expr(spec: ConnectSpec, input: &str, expected: LitExpr) {
             check_path_selection(
@@ -3127,6 +3147,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_path_methods(#[case] spec: ConnectSpec) {
         check_path_selection(
             spec,
