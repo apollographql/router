@@ -186,8 +186,34 @@ mod tests {
             let _response = service.ready().await.unwrap().call(request).await.unwrap();
 
             // Verify metrics were recorded
-            // Note: We can't easily assert on histogram values, but the test verifies
-            // the layer compiles and runs without errors
+            assert_histogram_sum!(
+                "apollo.router.request.memory",
+                // Includes the 10k from the vec and response overhead
+                18762,
+                "allocation.type" = "allocated",
+                "context" = "router.request"
+            );
+
+            assert_histogram_sum!(
+                "apollo.router.request.memory",
+                10000,
+                "allocation.type" = "deallocated",
+                "context" = "router.request"
+            );
+
+            assert_histogram_sum!(
+                "apollo.router.request.memory",
+                0,
+                "allocation.type" = "zeroed",
+                "context" = "router.request"
+            );
+
+            assert_histogram_sum!(
+                "apollo.router.request.memory",
+                0,
+                "allocation.type" = "reallocated",
+                "context" = "router.request"
+            );
         }
         .with_metrics()
         .await;
