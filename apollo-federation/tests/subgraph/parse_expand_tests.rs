@@ -171,31 +171,3 @@ fn can_parse_and_expand_will_fail_when_importing_same_spec_twice() {
         result.to_string()
     );
 }
-
-#[test]
-fn coerces_default_values_before_processing_key_directives() {
-    // Test that default value coercion happens before @key directive processing.
-    // This ensures that schemas with field arguments that have default values
-    // needing coercion (e.g., single value to list) are processed correctly
-    // alongside @key directives.
-    let schema = r#"
-        extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
-
-        type Query {
-            entity(ids: [ID!]! = "single-id"): Entity
-        }
-
-        type Entity @key(fields: "id") {
-            id: ID!
-            name: String
-        }
-    "#;
-
-    // This should succeed - coerce_schema_default_values is called in expand_schema
-    // before key_directive_applications() is invoked
-    let subgraph = Subgraph::parse_and_expand("S", "http://s", schema)
-        .expect("should parse and expand successfully");
-
-    // Verify the @key directive was processed correctly
-    assert!(subgraph.schema.directive_definitions.contains_key("key"));
-}

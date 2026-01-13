@@ -16,7 +16,7 @@ use tracing::trace;
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
-use crate::compat::coerce_schema_default_values;
+use crate::compat::coerce_schema_values;
 use crate::ensure;
 use crate::error::FederationError;
 use crate::error::Locations;
@@ -917,7 +917,7 @@ pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<Schema, Federat
 
 /// Expands schema with all imported federation definitions.
 pub(crate) fn expand_schema(mut schema: Schema) -> Result<FederationSchema, FederationError> {
-    coerce_schema_default_values(&mut schema);
+    coerce_schema_values(&mut schema);
     let mut schema = new_federation_subgraph_schema(schema)?;
 
     // If there's a use of `@link` and we successfully added its definition, add the bootstrap directive
@@ -1881,5 +1881,4 @@ mod tests {
             "[S] Error: an input object field cannot be named `__typename` as names starting with two underscores are reserved\n   ╭─[ S:4:17 ]\n   │\n 4 │                 __typename: String\n   │                 ─────┬────  \n   │                      ╰────── Pick a different name here\n───╯\n"
         );
     }
-
 }
