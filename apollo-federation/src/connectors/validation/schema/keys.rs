@@ -252,16 +252,48 @@ fn extract_concrete_typenames_into(shape: &Shape, in_typename: bool, result: &mu
             }
             // Do NOT recurse into nested fields - we only care about root-level __typename
         }
-        // One (and All) pass through the in_typename context, so
-        // __typename: One<"A", "B"> shapes are allowed.
+        // One passes through the in_typename context, so
+        // __typename: One<"A", "B"> shapes are allowed (union of possible types).
         ShapeCase::One(shapes) => {
             for shape in shapes.iter() {
                 extract_concrete_typenames_into(shape, in_typename, result);
             }
         }
+        // All (intersection) needs special handling for __typename:
+        // - __typename: All<"A", "A"> (same literal) -> extract "A"
+        // - __typename: All<"A", "B"> (different literals) -> INVALID, extract nothing
+        // An object can only have one concrete __typename at runtime.
         ShapeCase::All(shapes) => {
-            for shape in shapes.iter() {
-                extract_concrete_typenames_into(shape, in_typename, result);
+            if in_typename {
+                // Check if all string literals in the intersection are the same
+                let mut seen_literal: Option<&str> = None;
+                let mut is_satisfiable = true;
+                for shape in shapes.iter() {
+                    if let ShapeCase::String(Some(s)) = shape.case() {
+                        if let Some(prev) = seen_literal {
+                            if prev != s.as_str() {
+                                // Different string literals - conflicting __typename!
+                                is_satisfiable = false;
+                                break;
+                            }
+                        } else {
+                            seen_literal = Some(s.as_str());
+                        }
+                    }
+                }
+                // Only extract if the intersection is satisfiable
+                if is_satisfiable {
+                    for shape in shapes.iter() {
+                        extract_concrete_typenames_into(shape, in_typename, result);
+                    }
+                }
+                // If not satisfiable, we intentionally don't extract any typenames
+                // from this conflicting intersection
+            } else {
+                // Not examining __typename, just recurse normally
+                for shape in shapes.iter() {
+                    extract_concrete_typenames_into(shape, in_typename, result);
+                }
             }
         }
         // We traverse arrays because they are automatically mapped in
@@ -436,5 +468,106 @@ mod tests {
 
         // Should NOT extract "User" from the nested author.__typename
         assert!(concrete_types.is_empty());
+    }
+
+    /// Test case: Conflicting __typename intersection should NOT be extracted
+    ///
+    /// When multiple spreads set __typename, the intersection creates
+    /// All<"TypeA", "TypeB"> which is unsatisfiable - an object can't
+    /// have two different concrete types at once.
+    #[test]
+    fn test_does_not_extract_conflicting_typename_intersection() {
+        use shape::Shape;
+
+        // Build shape: { __typename: All<"Cat", "Dog">, id: String }
+        // This represents an impossible object with conflicting typenames
+        let conflicting_typename = Shape::all(
+            [
+                Shape::string_value("Cat", []),
+                Shape::string_value("Dog", []),
+            ],
+            [],
+        );
+        let shape = Shape::record(
+            [
+                ("__typename".to_string(), conflicting_typename),
+                ("id".to_string(), Shape::string([])),
+            ]
+            .into(),
+            [],
+        );
+
+        eprintln!("Shape: {}", shape.pretty_print());
+
+        let concrete_types = super::extract_concrete_typenames(&shape);
+        eprintln!("Concrete types: {:?}", concrete_types);
+
+        // Should NOT extract any types from conflicting intersection
+        assert!(
+            concrete_types.is_empty(),
+            "Conflicting __typename intersection should not extract any types"
+        );
+    }
+
+    /// Test case: Mixed One<> with some valid and some conflicting __typename shapes
+    ///
+    /// A union where some objects have valid __typename and some have
+    /// conflicting intersections - only the valid ones should be extracted.
+    #[test]
+    fn test_extracts_only_valid_typename_from_mixed_union() {
+        use shape::Shape;
+
+        // Valid object: { __typename: "Cat", id: String }
+        let valid_cat = Shape::record(
+            [
+                ("__typename".to_string(), Shape::string_value("Cat", [])),
+                ("id".to_string(), Shape::string([])),
+            ]
+            .into(),
+            [],
+        );
+
+        // Invalid object: { __typename: All<"Cat", "Dog">, id: String }
+        let conflicting = Shape::record(
+            [
+                (
+                    "__typename".to_string(),
+                    Shape::all(
+                        [
+                            Shape::string_value("Cat", []),
+                            Shape::string_value("Dog", []),
+                        ],
+                        [],
+                    ),
+                ),
+                ("id".to_string(), Shape::string([])),
+            ]
+            .into(),
+            [],
+        );
+
+        // Valid object: { __typename: "Bird", id: String }
+        let valid_bird = Shape::record(
+            [
+                ("__typename".to_string(), Shape::string_value("Bird", [])),
+                ("id".to_string(), Shape::string([])),
+            ]
+            .into(),
+            [],
+        );
+
+        // Union of all three
+        let shape = Shape::one([valid_cat, conflicting, valid_bird], []);
+
+        eprintln!("Shape: {}", shape.pretty_print());
+
+        let concrete_types = super::extract_concrete_typenames(&shape);
+        eprintln!("Concrete types: {:?}", concrete_types);
+
+        // Should extract "Cat" and "Bird" but NOT "Dog" (from the conflicting intersection)
+        assert!(concrete_types.contains(&name!(Cat)));
+        assert!(concrete_types.contains(&name!(Bird)));
+        assert!(!concrete_types.contains(&name!(Dog)));
+        assert_eq!(concrete_types.len(), 2);
     }
 }

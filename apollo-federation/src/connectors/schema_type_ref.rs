@@ -88,7 +88,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                 "String" => Shape::string([]),
                 "Int" => Shape::int([]),
                 "Float" => Shape::float([]),
-                "Boolean" => Shape::bool(None),
+                "Boolean" => Shape::bool([]),
                 "ID" => Shape::one([Shape::string([]), Shape::int([])], []),
                 // All other custom scalars (including JSON)
                 _ => Shape::unknown([]),
