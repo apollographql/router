@@ -110,7 +110,6 @@ pub(crate) trait VarPaths {
 
     /// Returns all locally bound variable names in the selection, without
     /// regard for which ones are available where.
-    #[allow(dead_code)]
     fn local_var_names(&self) -> IndexSet<String> {
         self.var_paths()
             .into_iter()
@@ -993,7 +992,6 @@ pub(crate) enum PathList {
 }
 
 impl PathList {
-    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         matches!(self, PathList::Empty)
     }
