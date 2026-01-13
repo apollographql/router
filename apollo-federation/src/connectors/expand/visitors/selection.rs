@@ -796,7 +796,9 @@ impl<'a> TypeShapeWalker<'a> {
     fn walk_scalar(
         &mut self,
         scalar: &ScalarTypeDefinitionPosition,
-        _shape: &Shape, // TODO
+        // TODO: For built-in scalars (Int/Float/String/Boolean), could validate
+        // shape primitives match. Custom scalars can represent any JSON value.
+        _shape: &Shape,
     ) -> Result<(), FederationError> {
         let def = scalar.get(self.original_schema.schema())?;
         let def = ScalarType {
@@ -812,7 +814,9 @@ impl<'a> TypeShapeWalker<'a> {
     fn walk_enum(
         &mut self,
         enum_type_pos: &EnumTypeDefinitionPosition,
-        _shape: &Shape, // TODO
+        // TODO: Could validate shape is String-compatible, and if
+        // ShapeCase::String(Some(literal)), verify literal is a valid enum value.
+        _shape: &Shape,
     ) -> Result<(), FederationError> {
         let def = enum_type_pos.get(self.original_schema.schema())?;
         let def = EnumType {
@@ -829,5 +833,245 @@ impl<'a> TypeShapeWalker<'a> {
 
 #[cfg(test)]
 mod tests {
-    // TODO: Write these tests
+    use apollo_compiler::Schema;
+    use apollo_compiler::name;
+    use indexmap::IndexMap;
+    use indexmap::IndexSet;
+    use insta::assert_snapshot;
+    use shape::Shape;
+
+    use super::walk_type_with_shape;
+    use crate::connectors::ConnectSpec;
+    use crate::schema::FederationSchema;
+    use crate::schema::ValidFederationSchema;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
+    use crate::schema::position::TypeDefinitionPosition;
+
+    fn test_schema() -> &'static str {
+        r#"
+        type Query {
+            product: Product
+            products: [Product]
+            node: Node
+            pet: Pet
+        }
+
+        type Product {
+            id: ID!
+            name: String!
+            price: Float
+            category: Category
+        }
+
+        type User implements Node {
+            id: ID!
+            name: String!
+            email: String
+        }
+
+        type Admin implements Node {
+            id: ID!
+            name: String!
+            role: String!
+        }
+
+        interface Node {
+            id: ID!
+            name: String!
+        }
+
+        union Pet = Cat | Dog
+
+        type Cat {
+            id: ID!
+            meow: Boolean
+        }
+
+        type Dog {
+            id: ID!
+            bark: Boolean
+        }
+
+        enum Category {
+            ELECTRONICS
+            CLOTHING
+            FOOD
+        }
+
+        scalar CustomJSON
+        "#
+    }
+
+    fn setup_schemas() -> (ValidFederationSchema, FederationSchema) {
+        let schema = Schema::parse(test_schema(), "test.graphql").expect("parse failed");
+        let fed_schema = FederationSchema::new(schema).expect("federation schema");
+        let original = ValidFederationSchema::new_assume_valid(fed_schema).expect("valid schema");
+        // Start with empty target schema so we can see what gets walked/added
+        let target = FederationSchema::new(Schema::new()).expect("empty schema");
+        (original, target)
+    }
+
+    fn make_object_shape(fields: impl IntoIterator<Item = (&'static str, Shape)>) -> Shape {
+        let mut map: IndexMap<String, Shape> = IndexMap::new();
+        for (k, v) in fields {
+            map.insert(k.to_string(), v);
+        }
+        Shape::object(map, Shape::none(), [])
+    }
+
+    #[test]
+    fn walk_object_with_simple_shape() {
+        let (original, mut target) = setup_schemas();
+        let product_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!(Product),
+        });
+
+        // Shape with id and name fields
+        let shape = make_object_shape([("id", Shape::string([])), ("name", Shape::string([]))]);
+
+        walk_type_with_shape(
+            &product_pos,
+            &shape,
+            &original,
+            &mut target,
+            &IndexSet::default(),
+            ConnectSpec::V0_4,
+        )
+        .expect("walk should succeed");
+
+        assert_snapshot!(target.schema().serialize().to_string());
+    }
+
+    #[test]
+    fn walk_object_with_nested_shape() {
+        let (original, mut target) = setup_schemas();
+        let query_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!(Query),
+        });
+
+        // Shape with product field containing nested fields including enum
+        let product_shape = make_object_shape([
+            ("id", Shape::string([])),
+            ("name", Shape::string([])),
+            ("category", Shape::string([])),
+        ]);
+        let shape = make_object_shape([("product", product_shape)]);
+
+        walk_type_with_shape(
+            &query_pos,
+            &shape,
+            &original,
+            &mut target,
+            &IndexSet::default(),
+            ConnectSpec::V0_4,
+        )
+        .expect("walk should succeed");
+
+        assert_snapshot!(target.schema().serialize().to_string());
+    }
+
+    #[test]
+    fn walk_object_with_array_shape() {
+        let (original, mut target) = setup_schemas();
+        let query_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!(Query),
+        });
+
+        // Shape representing an array of products
+        let product_shape =
+            make_object_shape([("id", Shape::string([])), ("name", Shape::string([]))]);
+        let array_shape = Shape::list(product_shape, []);
+        let shape = make_object_shape([("products", array_shape)]);
+
+        walk_type_with_shape(
+            &query_pos,
+            &shape,
+            &original,
+            &mut target,
+            &IndexSet::default(),
+            ConnectSpec::V0_4,
+        )
+        .expect("walk should succeed");
+
+        assert_snapshot!(target.schema().serialize().to_string());
+    }
+
+    #[test]
+    fn walk_interface_with_typename() {
+        let (original, mut target) = setup_schemas();
+        let query_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!(Query),
+        });
+
+        // Shape with __typename identifying concrete type
+        let node_shape = make_object_shape([
+            ("__typename", Shape::string_value("User", [])),
+            ("id", Shape::string([])),
+            ("name", Shape::string([])),
+        ]);
+        let shape = make_object_shape([("node", node_shape)]);
+
+        walk_type_with_shape(
+            &query_pos,
+            &shape,
+            &original,
+            &mut target,
+            &IndexSet::default(),
+            ConnectSpec::V0_4,
+        )
+        .expect("walk should succeed");
+
+        assert_snapshot!(target.schema().serialize().to_string());
+    }
+
+    #[test]
+    fn walk_union_with_typename() {
+        let (original, mut target) = setup_schemas();
+        let query_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!(Query),
+        });
+
+        // Shape with __typename identifying union member
+        let pet_shape = make_object_shape([
+            ("__typename", Shape::string_value("Cat", [])),
+            ("id", Shape::string([])),
+            ("meow", Shape::bool(None)),
+        ]);
+        let shape = make_object_shape([("pet", pet_shape)]);
+
+        walk_type_with_shape(
+            &query_pos,
+            &shape,
+            &original,
+            &mut target,
+            &IndexSet::default(),
+            ConnectSpec::V0_4,
+        )
+        .expect("walk should succeed");
+
+        assert_snapshot!(target.schema().serialize().to_string());
+    }
+
+    #[test]
+    fn walk_object_primitive_shape_error() {
+        let (original, mut target) = setup_schemas();
+        let product_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!(Product),
+        });
+
+        // Invalid: primitive shape for object type
+        let shape = Shape::string([]);
+
+        let result = walk_type_with_shape(
+            &product_pos,
+            &shape,
+            &original,
+            &mut target,
+            &IndexSet::default(),
+            ConnectSpec::V0_4,
+        );
+
+        assert!(result.is_err());
+        assert_snapshot!(result.unwrap_err().to_string());
+    }
 }
