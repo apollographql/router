@@ -155,6 +155,9 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 ## Performance
 
 - `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
+- `apollo.router.request.memory` - Histogram of memory allocated during request processing, in bytes. Tracks memory allocation patterns for the entire request lifecycle, including GraphQL parsing, validation, query planning, response composition, and plugin execution. Attributes:
+  - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
+  - `context`: The context name where the allocation occurred (e.g., `router.request`)
 
 ## Query planning
 
@@ -162,6 +165,9 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
 - `apollo.router.query_planning.plan.evaluated_plans` - Histogram of the number of evaluated query plans.
+- `apollo.router.query_planner.memory` - Histogram of memory allocated during query planning, in bytes. Tracks memory allocation patterns specifically for query planning operations executed in the compute job thread pool. Attributes:
+  - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
+  - `context`: The context name where the allocation occurred (e.g., `query_planning`)
 
 ## Compute jobs
 
