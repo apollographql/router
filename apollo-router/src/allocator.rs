@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
-#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 use std::sync::atomic::Ordering;
 use std::task::Context;
 use std::task::Poll;
