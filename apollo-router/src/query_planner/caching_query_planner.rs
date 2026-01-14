@@ -934,6 +934,9 @@ mod tests {
     use tracing_subscriber::layer::Context as TracingContext;
     use tracing_subscriber::prelude::*;
 
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    use bytesize::ByteSize;
+
     use super::*;
     use crate::Configuration;
     use crate::Context;
@@ -1039,6 +1042,7 @@ mod tests {
         enforce: bool,
     }
 
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     impl Service<QueryPlannerRequest> for ExcessiveMemoryQueryPlanner {
         type Response = QueryPlannerResponse;
         type Error = MaybeBackPressureError<QueryPlannerError>;
@@ -1266,9 +1270,9 @@ mod tests {
                     .query_planning(
                         QueryPlanning::builder()
                             .experimental_cooperative_cancellation(
-                                CooperativeCancellation::enforce_with_memory_limit(
-                                    bytesize::ByteSize::mb(10),
-                                ),
+                                CooperativeCancellation::enforce_with_memory_limit(ByteSize::mb(
+                                    10,
+                                )),
                             )
                             .build(),
                     )
