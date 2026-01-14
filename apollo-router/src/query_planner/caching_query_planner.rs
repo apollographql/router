@@ -1527,6 +1527,7 @@ mod tests {
         assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
     }
 
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     #[test(tokio::test)]
     async fn test_cooperative_cancellation_measurement_mode_memory_limit() {
         let (layer, _guard) = setup_tracing();
@@ -1603,6 +1604,7 @@ mod tests {
         assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
     }
 
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     #[test(tokio::test)]
     async fn test_cooperative_cancellation_both_timeout_and_memory_limit_timeout_first() {
         let (layer, _guard) = setup_tracing();
@@ -1679,6 +1681,7 @@ mod tests {
         assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
     }
 
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     #[test(tokio::test)]
     async fn test_cooperative_cancellation_both_timeout_and_memory_limit_memory_first() {
         let (layer, _guard) = setup_tracing();
@@ -1755,6 +1758,7 @@ mod tests {
         assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
     }
 
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     #[test(tokio::test)]
     async fn test_cooperative_cancellation_measure_mode_both_timeout_and_memory_limit_timeout_first()
      {
