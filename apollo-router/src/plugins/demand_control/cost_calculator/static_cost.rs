@@ -206,10 +206,8 @@ impl StaticCostCalculator {
         }
     }
 
-    fn subgraph_list_size(&self, subgraph_name: &str) -> u32 {
-        self.subgraph_list_sizes
-            .get(subgraph_name)
-            .unwrap_or(self.list_size)
+    fn subgraph_list_size(&self, subgraph_name: &str) -> Option<u32> {
+        *self.subgraph_list_sizes.get(subgraph_name)
     }
 
     /// Scores a field within a GraphQL operation, handling some expected cases where
@@ -269,8 +267,10 @@ impl StaticCostCalculator {
             .and_then(|dir| dir.expected_size)
         {
             expected_size
-        } else if let Some(subgraph) = subgraph {
-            self.subgraph_list_size(subgraph) as i32
+        } else if let Some(subgraph) = subgraph
+            && let Some(subgraph_list_size) = self.subgraph_list_size(subgraph)
+        {
+            subgraph_list_size as i32
         } else {
             self.list_size as i32
         };

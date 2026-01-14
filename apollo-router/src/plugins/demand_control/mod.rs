@@ -83,6 +83,26 @@ pub(crate) enum StrategyConfig {
         list_size: u32,
         /// The maximum cost of a query
         max: f64,
+    },
+
+    /// A simple, statically-defined cost mapping for operations and types.
+    ///
+    /// Operation costs:
+    /// - Mutation: 10
+    /// - Query: 0
+    /// - Subscription 0
+    ///
+    /// Type costs:
+    /// - Object: 1
+    /// - Interface: 1
+    /// - Union: 1
+    /// - Scalar: 0
+    /// - Enum: 0
+    StaticEstimatedBySubgraph {
+        /// The assumed length of lists returned by the operation.
+        list_size: u32,
+        /// The maximum cost of a query
+        max: f64,
         /// Cost control by subgraph
         #[serde(default)]
         subgraphs: SubgraphConfiguration<SubgraphStrategyLimit>,
@@ -113,8 +133,8 @@ impl StrategyConfig {
         }
 
         #[allow(irrefutable_let_patterns)]
-        // need to destructure StrategyConfig and ignore StrategyConfig::Test
-        let StrategyConfig::StaticEstimated { subgraphs, .. } = self else {
+        // need to destructure StrategyConfig::StaticEstimatedBySubgraph and ignore the others
+        let StrategyConfig::StaticEstimatedBySubgraph { subgraphs, .. } = self else {
             return Ok(());
         };
 

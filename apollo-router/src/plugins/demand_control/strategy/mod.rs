@@ -14,10 +14,12 @@ use crate::plugins::demand_control::SubgraphStrategyLimit;
 use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
+use crate::plugins::demand_control::strategy::static_estimated_by_subgraph::StaticEstimatedBySubgraph;
 use crate::services::execution;
 use crate::services::subgraph;
 
 mod static_estimated;
+mod static_estimated_by_subgraph;
 #[cfg(test)]
 mod test;
 
@@ -99,12 +101,12 @@ impl StrategyFactory {
 
     // Function extracted for use in tests - allows us to build a `StaticEstimated` directly rather
     // than a `impl StrategyImpl`
-    fn create_static_estimated_strategy(
+    fn create_static_estimated_by_subgraph_strategy(
         &self,
         list_size: u32,
         max: f64,
         subgraphs: &SubgraphConfiguration<SubgraphStrategyLimit>,
-    ) -> StaticEstimated {
+    ) -> StaticEstimatedBySubgraph {
         let subgraph_list_sizes = Arc::new(subgraphs.extract(|strategy| strategy.list_size));
         let subgraph_maxes = Arc::new(subgraphs.extract(|strategy| strategy.max));
         let cost_calculator = StaticCostCalculator::new(
@@ -113,7 +115,7 @@ impl StrategyFactory {
             list_size,
             subgraph_list_sizes,
         );
-        StaticEstimated {
+        StaticEstimatedBySubgraph {
             max,
             subgraph_maxes,
             cost_calculator,
@@ -122,11 +124,25 @@ impl StrategyFactory {
 
     pub(crate) fn create(&self) -> Strategy {
         let strategy: Arc<dyn StrategyImpl> = match &self.config.strategy {
-            StrategyConfig::StaticEstimated {
+            StrategyConfig::StaticEstimated { list_size, max } => {
+                let cost_calculator = StaticCostCalculator::new(
+                    self.supergraph_schema.clone(),
+                    self.subgraph_schemas.clone(),
+                    *list_size,
+                    Arc::new(SubgraphConfiguration::default()),
+                );
+                Arc::new(StaticEstimated {
+                    max: *max,
+                    cost_calculator,
+                })
+            }
+            StrategyConfig::StaticEstimatedBySubgraph {
                 list_size,
                 max,
                 subgraphs,
-            } => Arc::new(self.create_static_estimated_strategy(*list_size, *max, subgraphs)),
+            } => Arc::new(
+                self.create_static_estimated_by_subgraph_strategy(*list_size, *max, subgraphs),
+            ),
             #[cfg(test)]
             StrategyConfig::Test { stage, error } => Arc::new(test::Test {
                 stage: stage.clone(),

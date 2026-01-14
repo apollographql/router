@@ -135,7 +135,7 @@ mod basic_fragments_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated": {
+                "static_estimated_by_subgraph": {
                     "list_size": 10,
                     "max": max_cost
                 }
@@ -148,7 +148,10 @@ mod basic_fragments_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context).unwrap(), "static_estimated");
+        assert_eq!(
+            &get_strategy(&context).unwrap(),
+            "static_estimated_by_subgraph"
+        );
         assert_eq!(&get_result(&context).unwrap(), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
 
@@ -184,7 +187,7 @@ mod basic_fragments_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated": {
+                "static_estimated_by_subgraph": {
                     "list_size": 10,
                     "max": max_cost
                 }
@@ -197,7 +200,10 @@ mod basic_fragments_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context).unwrap(), "static_estimated");
+        assert_eq!(
+            &get_strategy(&context).unwrap(),
+            "static_estimated_by_subgraph"
+        );
         assert_eq!(&get_result(&context).unwrap(), CODE_TOO_EXPENSIVE);
         assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
 
@@ -226,7 +232,7 @@ mod basic_fragments_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated": {
+                "static_estimated_by_subgraph": {
                     "list_size": 10,
                     "max": 15,
                     "subgraphs": {
@@ -247,7 +253,10 @@ mod basic_fragments_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context).unwrap(), "static_estimated");
+        assert_eq!(
+            &get_strategy(&context).unwrap(),
+            "static_estimated_by_subgraph"
+        );
         assert_eq!(&get_result(&context).unwrap(), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
         assert_eq!(
@@ -373,7 +382,7 @@ mod federated_ships_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated": {
+                "static_estimated_by_subgraph": {
                     "list_size": 100,
                     "max": max_cost
                 }
@@ -386,7 +395,10 @@ mod federated_ships_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context).unwrap(), "static_estimated");
+        assert_eq!(
+            &get_strategy(&context).unwrap(),
+            "static_estimated_by_subgraph"
+        );
         assert_eq!(&get_result(&context).unwrap(), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
 
@@ -423,7 +435,7 @@ mod federated_ships_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated": {
+                "static_estimated_by_subgraph": {
                     "list_size": 100,
                     "max": max_cost
                 }
@@ -436,7 +448,10 @@ mod federated_ships_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context).unwrap(), "static_estimated");
+        assert_eq!(
+            &get_strategy(&context).unwrap(),
+            "static_estimated_by_subgraph"
+        );
         assert_eq!(&get_result(&context).unwrap(), CODE_TOO_EXPENSIVE);
         assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
 
@@ -466,7 +481,7 @@ mod federated_ships_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated": {
+                "static_estimated_by_subgraph": {
                     "list_size": 100,
                     "max": 15000.0,
                     "subgraphs": {
@@ -487,7 +502,10 @@ mod federated_ships_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context).unwrap(), "static_estimated");
+        assert_eq!(
+            &get_strategy(&context).unwrap(),
+            "static_estimated_by_subgraph"
+        );
         assert_eq!(&get_result(&context).unwrap(), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
         assert_eq!(
