@@ -922,6 +922,8 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    use bytesize::ByteSize;
     use mockall::mock;
     use parking_lot::Mutex;
     use serde_json_bytes::json;
@@ -933,9 +935,6 @@ mod tests {
     use tracing_subscriber::Registry;
     use tracing_subscriber::layer::Context as TracingContext;
     use tracing_subscriber::prelude::*;
-
-    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-    use bytesize::ByteSize;
 
     use super::*;
     use crate::Configuration;
