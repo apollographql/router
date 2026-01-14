@@ -464,14 +464,14 @@ pub(crate) fn stream_from_oci(
                             Err(err) => {
                                 if let Some(retry_after) = parse_rate_limit_error(&err) {
                                     polling_time = retry_after;
-                                } else {
-                                    // Error logging is now handled in fetch_oci
-                                    if let Err(e) = sender.send(Err(err)).await {
-                                        tracing::debug!(
-                                            "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
-                                        );
-                                        break;
-                                    }
+                                }
+
+                                // Error logging is now handled in fetch_oci
+                                if let Err(e) = sender.send(Err(err)).await {
+                                    tracing::debug!(
+                                        "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                                    );
+                                    break;
                                 }
                             }
                         }
@@ -481,13 +481,13 @@ pub(crate) fn stream_from_oci(
                     // It should not be possible to get a rate limit error here since the client will automatically move to a get request if the digest is not found, but just in case
                     if let Some(retry_after) = parse_rate_limit_error(&err) {
                         polling_time = retry_after;
-                    } else {
-                        if let Err(e) = sender.send(Err(err)).await {
-                            tracing::debug!(
-                                "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
-                            );
-                            break;
-                        }
+                    }
+                    
+                    if let Err(e) = sender.send(Err(err)).await {
+                        tracing::debug!(
+                            "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                        );
+                        break;
                     }
                 }
             }
@@ -1622,11 +1622,20 @@ mod tests {
         // The stream should eventually succeed after the backoff period
         // Use a timeout to ensure the test completes
         let result = timeout(Duration::from_secs(10), stream.next()).await;
-        // let result = stream.next().await;
-
         assert!(
             result.is_ok(),
-            "Stream should produce a result within timeout"
+            "Stream should produce an error first within timeout"
+        );
+        let first_result = result.unwrap();
+        assert!(
+            first_result.is_some() && first_result.as_ref().unwrap().is_err(),
+            "First result should be an error"
+        );
+
+        let result = timeout(Duration::from_secs(10), stream.next()).await;
+        assert!(
+            result.is_ok(),
+            "Stream should produce a result after the backoff period second within timeout"
         );
 
         let elapsed = start_time.elapsed();
