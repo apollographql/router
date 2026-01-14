@@ -9,7 +9,6 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::OnceLock;
-#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
@@ -20,17 +19,21 @@ use std::task::Poll;
 #[cfg(feature = "dhat-heap")]
 use parking_lot::Mutex;
 
+#[allow(dead_code)] // some fields are only used if feature global-allocator is enabled
 pub(crate) struct AllocationLimit {
     bytes: usize,
-    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     on_exceeded: Box<dyn Fn(usize) + Send + Sync>,
-    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     exceeded: AtomicBool,
 }
 
 impl std::fmt::Debug for AllocationLimit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AllocationLimit {{ bytes: {} }}", self.bytes)
+        write!(
+            f,
+            "AllocationLimit {{ bytes: {}, exceeded: {} }}",
+            self.bytes,
+            self.exceeded.load(Ordering::Relaxed)
+        )
     }
 }
 
