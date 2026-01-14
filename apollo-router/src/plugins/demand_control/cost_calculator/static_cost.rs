@@ -1216,4 +1216,102 @@ mod tests {
             assert_eq!(estimated_cost(SCHEMA, query, variables), 50.0);
         }
     }
+
+    /// Tests for nested input path resolution in @listSize slicingArguments
+    ///
+    /// Note: Expected costs include the cost of input objects (1 per nested object).
+    /// For inline objects: SearchInput (1) + PaginationInput (1) = 2 base cost
+    /// For variables: input objects are costed based on their nesting level
+    mod nested_input_path_tests {
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
+
+        // Input object costs:
+        // - SearchInput: 1
+        // - PaginationInput: 1
+        // Total input cost for search queries: 2
+
+        #[rstest::rstest]
+        #[case::inline_nested_first_10(
+            r#"query { search(input: {pagination: {first: 10}}) { id } }"#,
+            "{}",
+            12.0  // 10 (list size) + 2 (input objects: SearchInput + PaginationInput)
+        )]
+        #[case::inline_nested_first_5(
+            r#"query { search(input: {pagination: {first: 5}, query: "test"}) { id } }"#,
+            "{}",
+            7.0  // 5 (list size) + 2 (input objects)
+        )]
+        #[case::variable_nested_object(
+            r#"query Q($input: SearchInput!) { search(input: $input) { id } }"#,
+            r#"{"input": {"pagination": {"first": 7}, "query": "test"}}"#,
+            9.0  // 7 (list size) + 2 (input objects)
+        )]
+        #[case::variable_nested_first_only(
+            r#"query Q($input: SearchInput!) { search(input: $input) { id } }"#,
+            r#"{"input": {"pagination": {"first": 3}}}"#,
+            5.0  // 3 (list size) + 2 (input objects)
+        )]
+        fn nested_path_determines_list_size(
+            #[case] query: &str,
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+
+        // Input object costs for searchWithAssumedSize:
+        // - SearchInput: 1
+        // - PaginationInput: 1 (if present)
+        // When path not found, falls back to assumedSize (25)
+
+        #[rstest::rstest]
+        #[case::missing_nested_value(
+            r#"{"input": {"pagination": {}}}"#,
+            27.0  // 25 (assumed size) + 2 (SearchInput + PaginationInput)
+        )]
+        #[case::missing_pagination(
+            r#"{"input": {}}"#,
+            26.0  // 25 (assumed size) + 1 (SearchInput only)
+        )]
+        #[case::null_input(
+            r#"{"input": null}"#,
+            25.0  // 25 (assumed size) + 0 (null is not scored)
+        )]
+        fn missing_nested_path_falls_back_to_assumed_size(
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            let query =
+                r#"query Q($input: SearchInput) { searchWithAssumedSize(input: $input) { id } }"#;
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+
+        // DeeplyNestedInput has 3 levels: DeeplyNestedInput(1) + NestedLevel1Input(1) + NestedLevel2Input(1) = 3
+
+        #[test]
+        fn deeply_nested_path_inline() {
+            let query = r#"query { deeplyNested(input: {level1: {level2: {count: 15}}}) { id } }"#;
+            // 15 (list size) + 3 (input objects: DeeplyNestedInput + NestedLevel1Input + NestedLevel2Input)
+            assert_eq!(estimated_cost(SCHEMA, query, "{}"), 18.0);
+        }
+
+        #[test]
+        fn deeply_nested_path_variable() {
+            let query =
+                r#"query Q($input: DeeplyNestedInput!) { deeplyNested(input: $input) { id } }"#;
+            let variables = r#"{"input": {"level1": {"level2": {"count": 12}}}}"#;
+            // 12 (list size) + 3 (input objects)
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 15.0);
+        }
+
+        #[test]
+        fn inline_nested_object_with_other_fields() {
+            // Ensure other fields in the nested object don't affect the size resolution
+            let query = r#"query { search(input: {pagination: {first: 8, after: "cursor"}, query: "search term"}) { id } }"#;
+            // 8 (list size) + 2 (input objects: SearchInput + PaginationInput)
+            assert_eq!(estimated_cost(SCHEMA, query, "{}"), 10.0);
+        }
+    }
 }
