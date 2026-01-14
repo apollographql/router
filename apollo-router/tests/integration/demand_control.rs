@@ -5,16 +5,20 @@ const CODE_OK: &str = "COST_OK";
 const CODE_TOO_EXPENSIVE: &str = "COST_ESTIMATED_TOO_EXPENSIVE";
 const CODE_SUBGRAPH_TOO_EXPENSIVE: &str = "SUBGRAPH_COST_ESTIMATED_TOO_EXPENSIVE";
 
-fn get_strategy(context: &Context) -> Option<String> {
+fn get_strategy(context: &Context) -> String {
+    let field = "apollo::demand_control::strategy";
     context
-        .get::<_, String>("apollo::demand_control::strategy")
+        .get::<_, String>(field)
         .expect("can't deserialize")
+        .expect(&format!("context missing {field}"))
 }
 
-fn get_result(context: &Context) -> Option<String> {
+fn get_result(context: &Context) -> String {
+    let field = "apollo::demand_control::result";
     context
-        .get::<_, String>("apollo::demand_control::result")
+        .get::<_, String>(field)
         .expect("can't deserialize")
+        .expect(&format!("context missing {field}"))
 }
 
 fn get_result_by_subgraph(context: &Context) -> Option<serde_json::Value> {
@@ -148,11 +152,8 @@ mod basic_fragments_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(
-            &get_strategy(&context).unwrap(),
-            "static_estimated_by_subgraph"
-        );
-        assert_eq!(&get_result(&context).unwrap(), CODE_OK);
+        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_result(&context), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
 
         assert_eq!(
@@ -200,11 +201,8 @@ mod basic_fragments_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(
-            &get_strategy(&context).unwrap(),
-            "static_estimated_by_subgraph"
-        );
-        assert_eq!(&get_result(&context).unwrap(), CODE_TOO_EXPENSIVE);
+        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_result(&context), CODE_TOO_EXPENSIVE);
         assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
 
         assert_eq!(
@@ -253,11 +251,8 @@ mod basic_fragments_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(
-            &get_strategy(&context).unwrap(),
-            "static_estimated_by_subgraph"
-        );
-        assert_eq!(&get_result(&context).unwrap(), CODE_OK);
+        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_result(&context), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
         assert_eq!(
             get_result_by_subgraph(&context).unwrap(),
@@ -395,11 +390,8 @@ mod federated_ships_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(
-            &get_strategy(&context).unwrap(),
-            "static_estimated_by_subgraph"
-        );
-        assert_eq!(&get_result(&context).unwrap(), CODE_OK);
+        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_result(&context), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
 
         assert_eq!(
@@ -448,11 +440,8 @@ mod federated_ships_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(
-            &get_strategy(&context).unwrap(),
-            "static_estimated_by_subgraph"
-        );
-        assert_eq!(&get_result(&context).unwrap(), CODE_TOO_EXPENSIVE);
+        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_result(&context), CODE_TOO_EXPENSIVE);
         assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
 
         assert_eq!(
@@ -502,11 +491,8 @@ mod federated_ships_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(
-            &get_strategy(&context).unwrap(),
-            "static_estimated_by_subgraph"
-        );
-        assert_eq!(&get_result(&context).unwrap(), CODE_OK);
+        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_result(&context), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
         assert_eq!(
             get_result_by_subgraph(&context).unwrap(),
