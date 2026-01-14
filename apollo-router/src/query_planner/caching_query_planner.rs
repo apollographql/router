@@ -922,7 +922,6 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use bytesize::ByteSize;
     use mockall::mock;
     use parking_lot::Mutex;
     use serde_json_bytes::json;
@@ -1034,6 +1033,7 @@ mod tests {
     }
 
     // Unified ExcessiveMemoryQueryPlanner that can work in both enforce and measure modes
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     #[derive(Clone)]
     struct ExcessiveMemoryQueryPlanner {
         enforce: bool,
@@ -1255,6 +1255,7 @@ mod tests {
         assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
     }
 
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     #[test(tokio::test)]
     async fn test_cooperative_cancellation_memory_limit() {
         let (layer, _guard) = setup_tracing();
@@ -1265,9 +1266,9 @@ mod tests {
                     .query_planning(
                         QueryPlanning::builder()
                             .experimental_cooperative_cancellation(
-                                CooperativeCancellation::enforce_with_memory_limit(ByteSize::mb(
-                                    10,
-                                )),
+                                CooperativeCancellation::enforce_with_memory_limit(
+                                    bytesize::ByteSize::mb(10),
+                                ),
                             )
                             .build(),
                     )
@@ -1837,6 +1838,7 @@ mod tests {
         assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
     }
 
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     #[test(tokio::test)]
     async fn test_cooperative_cancellation_measure_mode_both_timeout_and_memory_limit_memory_first()
     {

@@ -95,7 +95,7 @@ impl CooperativeCancellation {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
     /// Create a new `CooperativeCancellation` config in enforce mode with a memory limit.
     pub(crate) fn enforce_with_memory_limit(memory_limit: ByteSize) -> Self {
         Self {
@@ -106,8 +106,8 @@ impl CooperativeCancellation {
         }
     }
 
-    #[cfg(test)]
     /// Create a new `CooperativeCancellation` config in measure mode with a memory limit.
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
     pub(crate) fn measure_with_memory_limit(memory_limit: ByteSize) -> Self {
         Self {
             enabled: true,
@@ -117,7 +117,7 @@ impl CooperativeCancellation {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
     /// Create a new `CooperativeCancellation` config in enforcement mode with both timeout and memory limit.
     pub(crate) fn enforce_with_timeout_and_memory_limit(
         timeout: Duration,
@@ -131,7 +131,7 @@ impl CooperativeCancellation {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
     /// Create a new `CooperativeCancellation` config in measure mode with both timeout and memory limit.
     pub(crate) fn measure_with_timeout_and_memory_limit(
         timeout: Duration,
