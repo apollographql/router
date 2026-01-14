@@ -9,6 +9,8 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::OnceLock;
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 use std::sync::atomic::Ordering;
@@ -20,8 +22,10 @@ use parking_lot::Mutex;
 
 pub(crate) struct AllocationLimit {
     bytes: usize,
-    #[allow(dead_code)] // only used if feature global-allocator is enabled
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     on_exceeded: Box<dyn Fn(usize) + Send + Sync>,
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    exceeded: AtomicBool,
 }
 
 impl std::fmt::Debug for AllocationLimit {
@@ -40,6 +44,7 @@ impl std::fmt::Debug for AllocationLimit {
 /// that share the same Arc<AllocationStats>. This is critical for performance in the global
 /// allocator hot path where even an uncontended Mutex would add significant overhead.
 #[derive(Debug)]
+#[allow(dead_code)] // some fields are only used if feature global-allocator is enabled
 pub(crate) struct AllocationStats {
     /// Context name used for metric labeling
     name: &'static str,
@@ -82,27 +87,9 @@ impl AllocationStats {
 
     /// Get the context name for this allocation stats.
     #[inline]
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     pub(crate) fn name(&self) -> &'static str {
         self.name
-    }
-
-    /// Get the parent context, if any.
-    #[inline]
-    #[allow(dead_code)]
-    pub(crate) fn parent(&self) -> Option<&Arc<AllocationStats>> {
-        self.parent.as_ref()
-    }
-
-    /// Get the root context by traversing up the parent chain.
-    /// Returns self if this is already a root context.
-    #[inline]
-    #[allow(dead_code)]
-    pub(crate) fn root(&self) -> &Self {
-        let mut current = self;
-        while let Some(parent) = &current.parent {
-            current = parent.as_ref();
-        }
-        current
     }
 
     /// Track allocation in this context and all parent contexts.
@@ -197,9 +184,11 @@ impl AllocationStats {
         bytes: usize,
         on_exceeded: Box<dyn Fn(usize) + Send + Sync>,
     ) {
-        let _ = self
-            .allocation_limit
-            .set(AllocationLimit { bytes, on_exceeded });
+        let _ = self.allocation_limit.set(AllocationLimit {
+            bytes,
+            on_exceeded,
+            exceeded: AtomicBool::new(false),
+        });
     }
 }
 
@@ -429,7 +418,10 @@ unsafe impl GlobalAlloc for CustomAllocator {
                         #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
                         if let Some(limit) = stats_ptr.as_ref().allocation_limit.get() {
                             let bytes_allocated = stats_ptr.as_ref().bytes_allocated();
-                            if bytes_allocated > limit.bytes {
+                            if bytes_allocated > limit.bytes
+                                && !limit.exceeded.load(Ordering::Relaxed)
+                            {
+                                limit.exceeded.store(true, Ordering::Relaxed);
                                 (limit.on_exceeded)(bytes_allocated);
                             }
                         }
@@ -550,11 +542,10 @@ static malloc_conf: Option<&'static libc::c_char> = Some(unsafe {
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 mod tests {
 
-    use tokio::task;
-
-    use super::*;
     use std::ffi::CStr;
     use std::thread;
+
+    use tokio::task;
 
     use super::*;
 

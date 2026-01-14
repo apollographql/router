@@ -13,8 +13,6 @@ use tower::Layer;
 use tower::Service;
 
 use crate::allocator::WithMemoryTracking;
-use crate::allocator::AllocationStats;
-use crate::allocator::WithMemoryTracking;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::services::router;
