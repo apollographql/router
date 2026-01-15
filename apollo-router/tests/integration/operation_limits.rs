@@ -7,6 +7,7 @@ use apollo_router::TestHarness;
 use apollo_router::graphql;
 use apollo_router::services::execution;
 use apollo_router::services::supergraph;
+use serde_json::Value;
 use serde_json::json;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -265,6 +266,76 @@ async fn test_warn_only_in_memory_cache_logs_twice() {
         .filter(|line| line.contains("request exceeded complexity limits"))
         .count();
     assert_eq!(warning_count, 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_warn_only_reload_cached_plan_enforces_limits() -> Result<(), BoxError> {
+    let base_config = r#"
+supergraph:
+  query_planning:
+    cache:
+      in_memory:
+        limit: 1
+      redis:
+        required_to_start: true
+        urls:
+          - redis://localhost:6379
+        ttl: 10s
+limits:
+  max_aliases: 1
+"#;
+
+    let config_warn_only = format!("{base_config}\n  warn_only: true");
+
+    let config_enforce = format!("{base_config}\n  warn_only: false");
+
+    let mut router = IntegrationTest::builder()
+        .config(config_warn_only)
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+
+    let query = "query Test { topProducts { name1: name name2: name } }";
+
+    let request = Query::builder()
+        .body(json!({"query": query, "variables": {}}))
+        .build();
+
+    let (_, response) = router.execute_query(request.clone()).await;
+    let body: Value = response.json().await.unwrap();
+    assert!(
+        body.get("errors").is_none(),
+        "expected no errors with warn_only, got: {body:?}"
+    );
+    assert!(body.get("data").is_some());
+
+    router.update_config(&config_enforce).await;
+    router.assert_reloaded().await;
+
+    let (_, response) = router.execute_query(request).await;
+    let body: Value = response.json().await.unwrap();
+
+    let errors = body
+        .get("errors")
+        .and_then(|value| value.as_array())
+        .expect("expected errors after enforcement");
+    let error_codes: Vec<&str> = errors
+        .iter()
+        .filter_map(|error| {
+            error
+                .get("extensions")
+                .and_then(|ext| ext.get("code"))
+                .and_then(|code| code.as_str())
+        })
+        .collect();
+    assert!(
+        error_codes.contains(&"MAX_ALIASES_LIMIT"),
+        "expected MAX_ALIASES_LIMIT, got: {error_codes:?}"
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
 }
 
 async fn build_test_harness(
