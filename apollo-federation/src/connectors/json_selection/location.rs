@@ -248,6 +248,10 @@ pub(crate) mod strip_ranges {
                     NamingPrefix::None => NamingPrefix::None,
                     NamingPrefix::Alias(alias) => NamingPrefix::Alias(alias.strip_ranges()),
                     NamingPrefix::Spread(_) => NamingPrefix::Spread(None),
+                    NamingPrefix::SpreadNamed { name, .. } => NamingPrefix::SpreadNamed {
+                        name: name.strip_ranges(),
+                        range: None,
+                    },
                 },
                 path: self.path.strip_ranges(),
             }

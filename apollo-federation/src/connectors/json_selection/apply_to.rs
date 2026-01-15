@@ -432,7 +432,7 @@ impl ApplyToInternal for NamedSelection {
                 }
             }
 
-            NamingPrefix::Spread(_spread_range) => {
+            NamingPrefix::Spread(_) | NamingPrefix::SpreadNamed { .. } => {
                 match value_opt {
                     Some(JSON::Object(_) | JSON::Null) => {
                         // Objects and null are valid outputs for an

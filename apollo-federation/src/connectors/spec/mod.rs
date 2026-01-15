@@ -2,6 +2,7 @@
 pub(crate) mod connect;
 pub(crate) mod errors;
 pub(crate) mod http;
+pub(crate) mod mapping;
 pub(crate) mod source;
 mod type_and_directive_specifications;
 
@@ -16,12 +17,15 @@ use apollo_compiler::schema::Component;
 pub use connect::ConnectHTTPArguments;
 pub(crate) use connect::extract_connect_directive_arguments;
 use itertools::Itertools;
+pub(crate) use mapping::MappingDirectiveArguments;
+pub(crate) use mapping::extract_mapping_directive_arguments;
 pub use source::SourceHTTPArguments;
 pub(crate) use source::extract_source_directive_arguments;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use self::connect::CONNECT_DIRECTIVE_NAME_IN_SPEC;
+use self::mapping::MAPPING_DIRECTIVE_NAME_IN_SPEC;
 use self::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::connectors::spec::type_and_directive_specifications::directive_specifications;
 use crate::connectors::spec::type_and_directive_specifications::type_specifications;
@@ -46,6 +50,7 @@ pub(crate) struct ConnectLink {
     pub(crate) spec: ConnectSpec,
     pub(crate) source_directive_name: Name,
     pub(crate) connect_directive_name: Name,
+    pub(crate) mapping_directive_name: Name,
     pub(crate) directive: Component<Directive>,
     pub(crate) link: Link,
 }
@@ -78,10 +83,12 @@ impl<'schema> ConnectLink {
         };
         let source_directive_name = link.directive_name_in_schema(&SOURCE_DIRECTIVE_NAME_IN_SPEC);
         let connect_directive_name = link.directive_name_in_schema(&CONNECT_DIRECTIVE_NAME_IN_SPEC);
+        let mapping_directive_name = link.directive_name_in_schema(&MAPPING_DIRECTIVE_NAME_IN_SPEC);
         Some(Ok(Self {
             spec,
             source_directive_name,
             connect_directive_name,
+            mapping_directive_name,
             directive: directive.clone(),
             link,
         }))
@@ -107,6 +114,7 @@ pub enum ConnectSpec {
     V0_2,
     V0_3,
     V0_4,
+    V0_5,
 }
 
 impl PartialOrd for ConnectSpec {
@@ -138,6 +146,7 @@ impl ConnectSpec {
             Self::V0_2 => "0.2",
             Self::V0_3 => "0.3",
             Self::V0_4 => "0.4",
+            Self::V0_5 => "0.5",
         }
     }
 
@@ -164,6 +173,7 @@ impl TryFrom<&Version> for ConnectSpec {
             (0, 2) => Ok(Self::V0_2),
             (0, 3) => Ok(Self::V0_3),
             (0, 4) => Ok(Self::V0_4),
+            (0, 5) => Ok(Self::V0_5),
             _ => Err(format!("Unknown connect version: {version}")),
         }
     }
@@ -182,6 +192,7 @@ impl From<ConnectSpec> for Version {
             ConnectSpec::V0_2 => Version { major: 0, minor: 2 },
             ConnectSpec::V0_3 => Version { major: 0, minor: 3 },
             ConnectSpec::V0_4 => Version { major: 0, minor: 4 },
+            ConnectSpec::V0_5 => Version { major: 0, minor: 5 },
         }
     }
 }
@@ -272,6 +283,13 @@ pub(crate) static CONNECT_VERSIONS: LazyLock<SpecDefinitions<ConnectSpecDefiniti
             Version {
                 major: 2,
                 minor: 13,
+            },
+        ));
+        definitions.add(ConnectSpecDefinition::new(
+            Version { major: 0, minor: 5 },
+            Version {
+                major: 2,
+                minor: 14,
             },
         ));
         definitions

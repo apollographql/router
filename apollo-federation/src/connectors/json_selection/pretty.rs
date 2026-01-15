@@ -335,6 +335,10 @@ impl PrettyPrintable for NamedSelection {
                     result.push_str("... ");
                 }
             }
+            NamingPrefix::SpreadNamed { name, .. } => {
+                result.push_str("...");
+                result.push_str(name.as_str());
+            }
         };
 
         // The .trim_start() handles the case when self.path is just a

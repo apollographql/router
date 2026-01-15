@@ -22,6 +22,8 @@ use super::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use super::connect::IS_SUCCESS_ARGUMENT_NAME;
 use super::errors::ERRORS_ARGUMENT_NAME;
 use super::errors::ERRORS_NAME_IN_SPEC;
+use super::mapping::MAPPING_AS_ARGUMENT_NAME;
+use super::mapping::MAPPING_DIRECTIVE_NAME_IN_SPEC;
 use super::http::HEADERS_ARGUMENT_NAME;
 use super::http::HTTP_ARGUMENT_NAME;
 use super::http::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
@@ -473,10 +475,47 @@ fn source_directive_spec() -> DirectiveSpecification {
     )
 }
 
+// directive @mapping(
+//   selection: JSONSelection
+//   as: String
+// ) repeatable on OBJECT | INTERFACE
+fn mapping_directive_spec() -> DirectiveSpecification {
+    DirectiveSpecification::new(
+        MAPPING_DIRECTIVE_NAME_IN_SPEC,
+        &[
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: name!(selection),
+                    get_type: |s, _| {
+                        let name = link(s)?.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
+                        Ok(Type::Named(name))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: MAPPING_AS_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+        ],
+        true,
+        &[DirectiveLocation::Object, DirectiveLocation::Interface],
+        false,
+        None,
+        None,
+    )
+}
+
 pub(crate) fn directive_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
     vec![
         Box::new(connect_directive_spec()),
         Box::new(source_directive_spec()),
+        Box::new(mapping_directive_spec()),
     ]
 }
 
@@ -524,6 +563,8 @@ mod tests {
         directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+
+        directive @connect__mapping(selection: connect__JSONSelection, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -610,6 +651,8 @@ mod tests {
         directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+
+        directive @connect__mapping(selection: connect__JSONSelection, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -701,6 +744,8 @@ mod tests {
         directive @connect(source: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, isSuccess: Mapping, selection: Mapping!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @api(name: String!, http: connect__SourceHTTP, errors: ErrorMappings, isSuccess: Mapping) repeatable on SCHEMA
+
+        directive @connect__mapping(selection: Mapping, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -794,6 +839,8 @@ mod tests {
         directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!) repeatable on FIELD_DEFINITION
 
         directive @connect__source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+
+        directive @connect__mapping(selection: connect__JSONSelection, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String

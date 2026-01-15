@@ -29,6 +29,7 @@ pub use self::problem_location::ProblemLocation;
 pub use self::source::SourceName;
 use super::ConnectId;
 use super::JSONSelection;
+use super::MappingRegistry;
 use super::PathSelection;
 use super::id::ConnectorPosition;
 use super::json_selection::VarPaths;
@@ -178,10 +179,20 @@ impl Connector {
         let connect_arguments =
             extract_connect_directive_arguments(schema, &link.connect_directive_name)?;
 
+        // Build the MappingRegistry to expand ...TypeName spreads
+        let mapping_registry = MappingRegistry::from_schema(schema)?;
+
         connect_arguments
             .into_iter()
             .map(|args| {
-                Self::from_directives(schema, subgraph_name, link.spec, args, &source_arguments)
+                Self::from_directives(
+                    schema,
+                    subgraph_name,
+                    link.spec,
+                    args,
+                    &source_arguments,
+                    &mapping_registry,
+                )
             })
             .collect::<Result<Vec<_>, _>>()
     }
@@ -192,6 +203,7 @@ impl Connector {
         spec: ConnectSpec,
         connect: ConnectDirectiveArguments,
         source_arguments: &[SourceDirectiveArguments],
+        mapping_registry: &MappingRegistry,
     ) -> Result<Self, FederationError> {
         let source = connect
             .source
@@ -218,13 +230,15 @@ impl Connector {
         let error_settings =
             ConnectorErrorsSettings::from_directive(connect_errors, source_errors, is_success);
 
+        // Expand any ...TypeName spreads in the selection using the MappingRegistry
+        let selection = mapping_registry.expand_selection(&connect.selection)?;
+
         // Collect all variables and subselections used in the request mappings
         let request_references: IndexSet<VariableReference<Namespace>> =
             transport.variable_references().collect();
 
         // Collect all variables and subselections used in response mappings (including errors.message and errors.extensions)
-        let response_references: IndexSet<VariableReference<Namespace>> = connect
-            .selection
+        let response_references: IndexSet<VariableReference<Namespace>> = selection
             .variable_references()
             .chain(error_settings.variable_references())
             .collect();
@@ -261,7 +275,7 @@ impl Connector {
         Ok(Connector {
             id,
             transport,
-            selection: connect.selection,
+            selection,
             entity_resolver,
             config: None,
             max_requests: None,

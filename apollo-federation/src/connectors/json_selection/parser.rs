@@ -7,8 +7,10 @@ use itertools::Itertools;
 use nom::IResult;
 use nom::Slice;
 use nom::branch::alt;
+use nom::bytes::complete::take_while;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
+use nom::character::complete::satisfy;
 use nom::combinator::all_consuming;
 use nom::combinator::map;
 use nom::combinator::opt;
@@ -132,12 +134,12 @@ pub(crate) trait VarPaths {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct JSONSelection {
-    pub(super) inner: TopLevelSelection,
+    pub(crate) inner: TopLevelSelection,
     pub spec: ConnectSpec,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(super) enum TopLevelSelection {
+pub(crate) enum TopLevelSelection {
     // Although we reuse the SubSelection type for the JSONSelection::Named
     // case, we parse it as a sequence of NamedSelection items without the
     // {...} curly braces that SubSelection::parse expects.
@@ -300,7 +302,7 @@ impl JSONSelection {
     fn parse_span(input: Span) -> ParseResult<Self> {
         match get_connect_spec(&input) {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_span_v0_2(input),
-            ConnectSpec::V0_3 | ConnectSpec::V0_4 => Self::parse_span_v0_3(input),
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => Self::parse_span_v0_3(input),
         }
     }
 
@@ -456,12 +458,12 @@ impl VarPaths for JSONSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct NamedSelection {
-    pub(super) prefix: NamingPrefix,
-    pub(super) path: PathSelection,
+    pub(crate) prefix: NamingPrefix,
+    pub(crate) path: PathSelection,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(super) enum NamingPrefix {
+pub(crate) enum NamingPrefix {
     // When a NamedSelection has an Alias, it fully determines the output key,
     // and any applied values from the path will be assigned to that key.
     Alias(Alias),
@@ -470,6 +472,12 @@ pub(super) enum NamingPrefix {
     // properties). In those cases, the OffsetRange will be None. When there is
     // an actual ... token, the OffsetRange will be Some(token_range).
     Spread(OffsetRange),
+    // A named spread like ...TypeName references a @mapping directive.
+    // The name is the type name, and the range covers the full "...TypeName" span.
+    SpreadNamed {
+        name: WithRange<String>,
+        range: OffsetRange,
+    },
     // When there is no Alias or ... spread token, and the path is not inlined
     // implicitly due to a trailing SubSelection (which would be represented by
     // ::Spread(None)), the NamingPrefix is ::None. The NamedSelection may still
@@ -492,6 +500,7 @@ impl Ranged for NamedSelection {
             NamingPrefix::None => None,
             NamingPrefix::Alias(alias) => alias.range(),
             NamingPrefix::Spread(range) => range.clone(),
+            NamingPrefix::SpreadNamed { range, .. } => range.clone(),
         };
         merge_ranges(alias_or_spread_range, self.path.range())
     }
@@ -506,6 +515,7 @@ impl NamedSelection {
         match &self.prefix {
             NamingPrefix::None => self.path.get_single_key(),
             NamingPrefix::Spread(_) => None,
+            NamingPrefix::SpreadNamed { .. } => None,
             NamingPrefix::Alias(alias) => Some(&alias.name),
         }
     }
@@ -515,6 +525,7 @@ impl NamedSelection {
             NamingPrefix::None => self.path.is_anonymous(),
             NamingPrefix::Alias(_) => false,
             NamingPrefix::Spread(_) => false,
+            NamingPrefix::SpreadNamed { .. } => false,
         }
     }
 
@@ -552,6 +563,7 @@ impl NamedSelection {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_v0_2(input),
             ConnectSpec::V0_3 => Self::parse_v0_3(input),
             ConnectSpec::V0_4 => Self::parse_v0_4(input),
+            ConnectSpec::V0_5 => Self::parse_v0_5(input),
         }
     }
 
@@ -645,6 +657,19 @@ impl NamedSelection {
                 },
             )
         })
+    }
+
+    /// Parse a type name (identifier starting with uppercase letter) for ...TypeName spread syntax.
+    fn parse_spread_type_name(input: Span) -> ParseResult<WithRange<String>> {
+        // Parse identifier that starts with uppercase letter
+        let (remainder, name) = recognize(tuple((
+            satisfy(|c: char| c.is_ascii_uppercase()),
+            take_while(|c: char| c.is_alphanumeric() || c == '_'),
+        )))(input)?;
+
+        let name_str = name.fragment().to_string();
+        let range = Some(name.location_offset()..name.location_offset() + name_str.len());
+        Ok((remainder, WithRange::new(name_str, range)))
     }
 
     // NamedSelection ::= (Alias | "...")? PathSelection | Alias SubSelection
@@ -803,6 +828,83 @@ impl NamedSelection {
         }
     }
 
+    // NamedSelection ::= (Alias | "..." | "...TypeName")? PathSelection | Alias SubSelection
+    // V0_5 adds support for ...TypeName spread syntax for @mapping directive references.
+    fn parse_v0_5(input: Span) -> ParseResult<Self> {
+        let (after_alias, alias) = opt(Alias::parse)(input.clone())?;
+
+        if let Some(alias) = alias {
+            if let Ok((remainder, sub)) = SubSelection::parse(after_alias.clone()) {
+                let sub_range = sub.range();
+                return Ok((
+                    remainder,
+                    Self {
+                        prefix: NamingPrefix::Alias(alias),
+                        path: PathSelection {
+                            path: WithRange::new(PathList::Selection(sub), sub_range),
+                        },
+                    },
+                ));
+            }
+
+            PathSelection::parse(after_alias.clone()).map(|(remainder, path)| {
+                (
+                    remainder,
+                    Self {
+                        prefix: NamingPrefix::Alias(alias),
+                        path,
+                    },
+                )
+            })
+        } else {
+            // First, try to parse ...TypeName (named spread for @mapping references)
+            // This must be attempted before the generic spread parser
+            if let Ok((after_spaces, _)) = spaces_or_comments(input.clone()) {
+                if let Ok((after_spread, spread_token)) = ranged_span("...")(after_spaces.clone()) {
+                    // Try to parse a type name (identifier) immediately after ...
+                    // The identifier must start with an uppercase letter to distinguish
+                    // from anonymous spread paths
+                    if let Ok((remainder, type_name)) =
+                        Self::parse_spread_type_name(after_spread.clone())
+                    {
+                        let spread_range = spread_token.range();
+                        let name_range = type_name.range();
+                        let full_range = merge_ranges(spread_range.clone(), name_range.clone());
+                        return Ok((
+                            remainder,
+                            Self {
+                                prefix: NamingPrefix::SpreadNamed {
+                                    name: type_name,
+                                    range: full_range,
+                                },
+                                // Empty path for named spreads - the mapping defines the selection
+                                path: PathSelection::empty(),
+                            },
+                        ));
+                    }
+                }
+            }
+
+            // Fall through to regular spread/path parsing (same as V0_4)
+            tuple((
+                spaces_or_comments,
+                opt(ranged_span("...")),
+                PathSelection::parse,
+            ))(input.clone())
+            .map(|(remainder, (_spaces, spread, path))| {
+                let prefix = if let Some(spread) = spread {
+                    // Spread syntax is fully supported in V0_5
+                    NamingPrefix::Spread(spread.range())
+                } else if path.is_anonymous() && path.has_subselection() {
+                    NamingPrefix::Spread(None)
+                } else {
+                    NamingPrefix::None
+                };
+                (remainder, Self { prefix, path })
+            })
+        }
+    }
+
     pub(crate) fn names(&self) -> Vec<&str> {
         if let Some(single_key) = self.get_single_key() {
             vec![single_key.as_str()]
@@ -842,7 +944,7 @@ impl VarPaths for NamedSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PathSelection {
-    pub(super) path: WithRange<PathList>,
+    pub(crate) path: WithRange<PathList>,
 }
 
 // Like NamedSelection, PathSelection is an AST structure that takes its range
@@ -858,6 +960,13 @@ impl Ranged for PathSelection {
 impl PathSelection {
     pub(crate) fn parse(input: Span) -> ParseResult<Self> {
         PathList::parse(input).map(|(input, path)| (input, Self { path }))
+    }
+
+    /// Create an empty PathSelection (for SpreadNamed where the mapping defines the selection)
+    pub(super) fn empty() -> Self {
+        Self {
+            path: WithRange::new(PathList::Empty, None),
+        }
     }
 
     pub(crate) fn variable_reference<N: FromStr + ToString>(&self) -> Option<VariableReference<N>> {
@@ -1136,7 +1245,7 @@ impl PathList {
                     // a single struct in connect/v0.3, the ambiguity between
                     // single-key paths and field selections is no longer a
                     // problem, since they are now represented the same way.
-                    ConnectSpec::V0_3 | ConnectSpec::V0_4 => {
+                    ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
                         let full_range = merge_ranges(key.range(), rest.range());
                         Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)))
                     }
@@ -1177,7 +1286,7 @@ impl PathList {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
                 // The ? token was not introduced until connect/v0.3.
             }
-            ConnectSpec::V0_3 | ConnectSpec::V0_4 => {
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
                 if let Ok((suffix, question)) = ranged_span("?")(input.clone()) {
                     let (remainder, rest) = Self::parse_with_depth(suffix.clone(), depth + 1)?;
 
@@ -1452,8 +1561,8 @@ impl VarPaths for PathList {
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct SubSelection {
-    pub(super) selections: Vec<NamedSelection>,
-    pub(super) range: OffsetRange,
+    pub(crate) selections: Vec<NamedSelection>,
+    pub(crate) range: OffsetRange,
 }
 
 impl Ranged for SubSelection {
