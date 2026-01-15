@@ -502,18 +502,17 @@ pub(crate) fn stream_from_oci(
 }
 
 fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
-    if let OciError::Distribution(OciDistributionError::RegistryError { envelope, .. }) = error {
-        if let Some(error) = envelope
+    if let OciError::Distribution(OciDistributionError::RegistryError { envelope, .. }) = error
+        && let Some(error) = envelope
             .errors
             .iter()
             .find(|error| error.code == OciErrorCode::Toomanyrequests)
-        {
-            return error
-                .detail
-                .get("retryAfter")
-                .and_then(|value| value.as_u64())
-                .map(Duration::from_secs);
-        }
+    {
+        return error
+            .detail
+            .get("retryAfter")
+            .and_then(|value| value.as_u64())
+            .map(Duration::from_secs);
     }
     None
 }
