@@ -463,7 +463,7 @@ pub(crate) fn stream_from_oci(
                             }
                             Err(err) => {
                                 if let Some(retry_after) = parse_rate_limit_error(&err) {
-                                    polling_time = retry_after;
+                                    polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
                                 }
 
                                 // Error logging is now handled in fetch_oci
@@ -480,7 +480,7 @@ pub(crate) fn stream_from_oci(
                 Err(err) => {
                     // It should not be possible to get a rate limit error here since the client will automatically move to a get request if the digest is not found, but just in case
                     if let Some(retry_after) = parse_rate_limit_error(&err) {
-                        polling_time = retry_after;
+                        polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
                     }
 
                     if let Err(e) = sender.send(Err(err)).await {
@@ -1571,7 +1571,7 @@ mod tests {
                 "code": "TOOMANYREQUESTS",
                 "message": "pull request limit exceeded",
                 "detail": {
-                    "retryAfter": 2
+                    "retryAfter": 10
                 }
             }]
         });
@@ -1593,7 +1593,7 @@ mod tests {
                 responses: Mutex::new(VecDeque::from([
                     // First response 429 to rate limit
                     ResponseTemplate::new(429)
-                        .append_header("Retry-After", "2")
+                        .append_header("Retry-After", "10")
                         .append_header(http::header::CONTENT_TYPE, "application/json")
                         .set_body_json(&oci_error_body),
                     // Second response 200 to return the manifest
@@ -1621,7 +1621,7 @@ mod tests {
 
         // The stream should eventually succeed after the backoff period
         // Use a timeout to ensure the test completes
-        let result = timeout(Duration::from_secs(10), stream.next()).await;
+        let result = timeout(Duration::from_secs(20), stream.next()).await;
         assert!(
             result.is_ok(),
             "Stream should produce an error first within timeout"
@@ -1632,7 +1632,7 @@ mod tests {
             "First result should be an error"
         );
 
-        let result = timeout(Duration::from_secs(10), stream.next()).await;
+        let result = timeout(Duration::from_secs(20), stream.next()).await;
         assert!(
             result.is_ok(),
             "Stream should produce a result after the backoff period second within timeout"
@@ -1648,10 +1648,10 @@ mod tests {
             None => panic!("expected stream to yield a result"),
         }
 
-        // Verify that at least 2 seconds elapsed (the retry_after_secs from Retry-After header)
+        // Verify that at least 10 seconds elapsed (the retry_after_secs from Retry-After header)
         assert!(
-            elapsed >= Duration::from_secs(2),
-            "Should have slept for at least 2 seconds due to backoff, but elapsed time was {:?}",
+            elapsed >= Duration::from_secs(10),
+            "Should have slept for at least 10 seconds due to backoff, but elapsed time was {:?}",
             elapsed
         );
     }
