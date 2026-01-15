@@ -482,7 +482,7 @@ pub(crate) fn stream_from_oci(
                     if let Some(retry_after) = parse_rate_limit_error(&err) {
                         polling_time = retry_after;
                     }
-                    
+
                     if let Err(e) = sender.send(Err(err)).await {
                         tracing::debug!(
                             "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
