@@ -194,6 +194,14 @@ fn coerce_value(
             *target.make_mut() = Value::List(vec![target.clone()]);
         }
 
+        // Coerce single-element list to a non-list type.
+        // This is the reverse of the scalar-to-list coercion below.
+        (Value::List(list), Some(_)) if !ty.is_list() && list.len() == 1 => {
+            let element = list.pop().unwrap();
+            *target.make_mut() = element.as_ref().clone();
+            coerce_value(types, target, ty)?;
+        }
+
         // Accept null for any nullable type.
         (Value::Null, _) if !ty.is_non_null() => {}
 
@@ -290,25 +298,20 @@ pub(crate) fn coerce_schema_default_values(schema: &mut Schema) {
 }
 
 pub(crate) fn coerce_schema_values(schema: &mut Schema) {
-    // let original_schema = schema.clone().validate().unwrap();
-
     // Keep a copy of the types in the schema so we can mutate the schema while walking it.
     let types = schema.types.clone();
 
     let directive_definitions = schema.directive_definitions.clone();
-    tracing::trace!("directive_definitions: {:?}", directive_definitions);
 
     for ty in schema.types.values_mut() {
         match ty {
             ExtendedType::Object(object) => {
                 let object = object.make_mut();
-                tracing::trace!("object before: {:?}", object);
                 coerce_directive_application_values_schema(
                     &directive_definitions,
                     &types,
                     &mut object.directives,
                 );
-                tracing::trace!("object after: {:?}", object);
                 for field in object.fields.values_mut() {
                     let field = field.make_mut();
                     coerce_arguments_default_values(&types, &mut field.arguments);
@@ -385,7 +388,7 @@ fn coerce_directive_application_values_schema(
                 continue;
             };
             let arg = arg.make_mut();
-            _ = coerce_value(&type_definitions, &mut arg.value, &definition.ty);
+            _ = coerce_value(type_definitions, &mut arg.value, &definition.ty);
         }
     }
 }
@@ -405,7 +408,7 @@ fn coerce_directive_application_values_ast(
                 continue;
             };
             let arg = arg.make_mut();
-            _ = coerce_value(&type_definitions, &mut arg.value, &definition.ty);
+            _ = coerce_value(type_definitions, &mut arg.value, &definition.ty);
         }
     }
 }

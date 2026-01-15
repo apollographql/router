@@ -916,8 +916,7 @@ pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<Schema, Federat
 }
 
 /// Expands schema with all imported federation definitions.
-pub(crate) fn expand_schema(mut schema: Schema) -> Result<FederationSchema, FederationError> {
-    coerce_schema_values(&mut schema);
+pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, FederationError> {
     let mut schema = new_federation_subgraph_schema(schema)?;
 
     // If there's a use of `@link` and we successfully added its definition, add the bootstrap directive
@@ -926,6 +925,10 @@ pub(crate) fn expand_schema(mut schema: Schema) -> Result<FederationSchema, Fede
 
     trace!("expand_links: on_directive_definition_and_schema_parsed");
     FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
+
+    // Coerce directive argument values now that we have all directive definitions
+    trace!("expand_links: coerce_schema_values");
+    coerce_schema_values(schema.schema_mut());
 
     // Also, the backfilled definitions mean we can collect deep references.
     // Ignore the error case, which means the schema has invalid references. It will be
