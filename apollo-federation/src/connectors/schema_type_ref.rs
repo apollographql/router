@@ -20,14 +20,18 @@ use shape::Shape;
 /// can pretty much always safely use a [`SchemaTypeRef`] where you would have
 /// previously used an [`ExtendedType`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SchemaTypeRef<'schema>(&'schema Schema, &'schema Name, &'schema ExtendedType);
+pub(crate) struct SchemaTypeRef<'schema> {
+    schema: &'schema Schema,
+    name: &'schema Name,
+    ext: &'schema ExtendedType,
+}
 
 impl<'schema> SchemaTypeRef<'schema> {
     pub(super) fn new(schema: &'schema Schema, name: &str) -> Option<Self> {
         schema
             .types
             .get_full(name)
-            .map(|(_index, name, extended)| Self(schema, name, extended))
+            .map(|(_index, name, ext)| Self { schema, name, ext })
     }
 
     #[allow(dead_code)]
@@ -39,7 +43,7 @@ impl<'schema> SchemaTypeRef<'schema> {
     }
 
     pub(super) fn as_object_node(&self) -> Option<&'schema Node<ObjectType>> {
-        if let ExtendedType::Object(obj) = self.2 {
+        if let ExtendedType::Object(obj) = self.ext {
             Some(obj)
         } else {
             None
@@ -93,10 +97,10 @@ impl<'schema> SchemaTypeRef<'schema> {
                 )
             }
             ExtendedType::Interface(i) => Shape::one(
-                self.0.types.values().filter_map(|extended_type| {
+                self.schema.types.values().filter_map(|extended_type| {
                     if let ExtendedType::Object(object_type) = extended_type {
                         if object_type.implements_interfaces.contains(&i.name) {
-                            SchemaTypeRef::new(self.0, object_type.name.as_str())
+                            SchemaTypeRef::new(self.schema, object_type.name.as_str())
                                 .map(|type_ref| type_ref.shape_with_visited(visited, true))
                         } else {
                             None
@@ -109,7 +113,7 @@ impl<'schema> SchemaTypeRef<'schema> {
             ),
             ExtendedType::Union(u) => Shape::one(
                 u.members.iter().filter_map(|member_name| {
-                    SchemaTypeRef::new(self.0, member_name.as_str())
+                    SchemaTypeRef::new(self.schema, member_name.as_str())
                         .map(|type_ref| type_ref.shape_with_visited(visited, true))
                 }),
                 [],
@@ -147,7 +151,7 @@ impl<'schema> SchemaTypeRef<'schema> {
         let base_shape = if visited.contains(inner_type_name.as_str()) {
             // Avoid infinite recursion for circular references
             Shape::name(inner_type_name.as_str(), [])
-        } else if let Some(named_type) = SchemaTypeRef::new(self.0, inner_type_name.as_str()) {
+        } else if let Some(named_type) = SchemaTypeRef::new(self.schema, inner_type_name.as_str()) {
             named_type.shape_with_visited(visited, false)
         } else {
             Shape::name(inner_type_name.as_str(), [])
@@ -168,27 +172,27 @@ impl<'schema> SchemaTypeRef<'schema> {
 
     #[expect(dead_code)]
     pub(super) fn schema(&self) -> &'schema Schema {
-        self.0
+        self.schema
     }
 
     pub(super) fn name(&self) -> &'schema Name {
-        self.1
+        self.name
     }
 
     pub(super) fn extended(&self) -> &'schema ExtendedType {
-        self.2
+        self.ext
     }
 
     pub(super) fn is_object(&self) -> bool {
-        self.2.is_object()
+        self.ext.is_object()
     }
 
     pub(super) fn is_interface(&self) -> bool {
-        self.2.is_interface()
+        self.ext.is_interface()
     }
 
     pub(super) fn is_union(&self) -> bool {
-        self.2.is_union()
+        self.ext.is_union()
     }
 
     #[expect(dead_code)]
@@ -198,31 +202,31 @@ impl<'schema> SchemaTypeRef<'schema> {
 
     #[expect(dead_code)]
     pub(super) fn is_input_object(&self) -> bool {
-        self.2.is_input_object()
+        self.ext.is_input_object()
     }
 
     #[expect(dead_code)]
     pub(super) fn is_enum(&self) -> bool {
-        self.2.is_enum()
+        self.ext.is_enum()
     }
 
     #[expect(dead_code)]
     pub(super) fn is_scalar(&self) -> bool {
-        self.2.is_scalar()
+        self.ext.is_scalar()
     }
 
     #[expect(dead_code)]
     pub(super) fn is_built_in(&self) -> bool {
-        self.2.is_built_in()
+        self.ext.is_built_in()
     }
 
     pub(super) fn get_fields(
         &self,
         field_name: &str,
     ) -> IndexMap<String, &'schema Component<FieldDefinition>> {
-        self.0
+        self.schema
             .types
-            .get(self.1)
+            .get(self.name)
             .into_iter()
             .flat_map(|ty| match ty {
                 ExtendedType::Object(o) => o
@@ -234,7 +238,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                     .unwrap_or_default(),
 
                 ExtendedType::Interface(i) => self
-                    .0
+                    .schema
                     .implementers_map()
                     .get(i.name.as_str())
                     .map(|implementers| {
@@ -242,7 +246,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                             .objects
                             .iter()
                             .chain(&implementers.interfaces)
-                            .filter_map(|name| SchemaTypeRef::new(self.0, name.as_str()))
+                            .filter_map(|name| SchemaTypeRef::new(self.schema, name.as_str()))
                             .flat_map(|type_ref| type_ref.get_fields(field_name))
                             .collect::<IndexMap<_, _>>()
                     })
@@ -252,7 +256,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                     .members
                     .iter()
                     .flat_map(|m| {
-                        SchemaTypeRef::new(self.0, m.name.as_str())
+                        SchemaTypeRef::new(self.schema, m.name.as_str())
                             .map(|type_ref| type_ref.get_fields(field_name))
                             .unwrap_or_default()
                     })
