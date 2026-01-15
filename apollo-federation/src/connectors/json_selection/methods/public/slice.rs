@@ -1,6 +1,5 @@
 use std::iter::empty;
 
-use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
@@ -145,11 +144,10 @@ fn slice_shape(
                 "Method ->{} requires an array or string input",
                 method_name.as_ref()
             ),
-            {
-                let mut locations = input_shape.locations().cloned().collect::<IndexSet<_>>();
-                locations.extend(method_name.shape_location(context.source_id()));
-                locations.into_iter()
-            },
+            input_shape
+                .locations()
+                .cloned()
+                .chain(method_name.shape_location(context.source_id())),
         ),
     }
 }
