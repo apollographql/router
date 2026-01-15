@@ -34,7 +34,7 @@ impl<'schema> SchemaTypeRef<'schema> {
             .map(|(_index, name, ext)| Self { schema, name, ext })
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn from_node(
         schema: &'schema Schema,
         node: &'schema Node<ObjectType>,
@@ -50,6 +50,7 @@ impl<'schema> SchemaTypeRef<'schema> {
         }
     }
 
+    #[allow(dead_code)]
     fn shape_with_visited(&self, visited: &mut IndexSet<String>, from_abstract: bool) -> Shape {
         let type_name = self.name().to_string();
         if visited.contains(&type_name) {
@@ -141,11 +142,6 @@ impl<'schema> SchemaTypeRef<'schema> {
         Shape::one([shape, Shape::null([])], [])
     }
 
-    #[expect(dead_code)]
-    pub(super) fn shape_from_type(&self, ty: &Type) -> Shape {
-        self.shape_from_type_with_visited(ty, &mut IndexSet::default())
-    }
-
     fn shape_from_type_with_visited(&self, ty: &Type, visited: &mut IndexSet<String>) -> Shape {
         let inner_type_name = ty.inner_named_type();
         let base_shape = if visited.contains(inner_type_name.as_str()) {
@@ -170,7 +166,11 @@ impl<'schema> SchemaTypeRef<'schema> {
         }
     }
 
-    #[expect(dead_code)]
+    // We don't currently have code that uses this getter method, but it
+    // seems like an important core method of the SchemaTypeRef struct
+    // to keep around. Using #[allow(dead_code)] rather than
+    // #[expect(dead_code)] to avoid interfering with future usage.
+    #[allow(dead_code)]
     pub(super) fn schema(&self) -> &'schema Schema {
         self.schema
     }
@@ -187,37 +187,14 @@ impl<'schema> SchemaTypeRef<'schema> {
         self.ext.is_object()
     }
 
+    #[allow(dead_code)]
     pub(super) fn is_interface(&self) -> bool {
         self.ext.is_interface()
     }
 
+    #[allow(dead_code)]
     pub(super) fn is_union(&self) -> bool {
         self.ext.is_union()
-    }
-
-    #[expect(dead_code)]
-    pub(super) fn is_abstract(&self) -> bool {
-        self.is_interface() || self.is_union()
-    }
-
-    #[expect(dead_code)]
-    pub(super) fn is_input_object(&self) -> bool {
-        self.ext.is_input_object()
-    }
-
-    #[expect(dead_code)]
-    pub(super) fn is_enum(&self) -> bool {
-        self.ext.is_enum()
-    }
-
-    #[expect(dead_code)]
-    pub(super) fn is_scalar(&self) -> bool {
-        self.ext.is_scalar()
-    }
-
-    #[expect(dead_code)]
-    pub(super) fn is_built_in(&self) -> bool {
-        self.ext.is_built_in()
     }
 
     pub(super) fn get_fields(
