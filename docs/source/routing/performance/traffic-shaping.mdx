@@ -162,7 +162,7 @@ traffic_shaping:
 
 ### Compression
 
-The router can compress request bodies to subgraphs (along with response bodies to clients).
+The router can compress request bodies sent to subgraphs, along with response bodies returned to clients.
 It currently supports these algorithms: `gzip`, `br`, and `deflate`.
 
 ```yaml title="router.yaml"
@@ -171,7 +171,20 @@ traffic_shaping:
     compression: gzip # Enable gzip compression for all subgraphs.
 ```
 
-Subgraph response decompression is always supported for these algorithms: `gzip`, `br`, and `deflate`.
+#### Compression headers
+
+When you configure compression for subgraph traffic, the router automatically manages HTTP compression headers:
+
+- **`content-encoding` header**: When you enable compression using `traffic_shaping.all.compression` or `traffic_shaping.subgraphs.<name>.compression`, the router sets this header on outgoing requests to subgraphs. This header indicates the router compressed the request body using the specified algorithm (for example, `content-encoding: gzip`).
+- **`accept-encoding` header**: The router automatically sets this header on all subgraph requests to indicate it accepts compressed responses. The router always accepts responses compressed with `gzip`, `br`, or `deflate`, whether or not you configure outgoing compression.
+
+The router always indicates it accepts compressed responses using the `accept-encoding` header, but it only compresses request bodies when you configure the `compression` option.
+
+<Note>
+
+The router adds these headers to requests after adding them to the debug stack, so the headers don't appear in the Connectors Debugger. They are present in the actual HTTP requests sent to subgraphs.
+
+</Note>
 
 <Note>
 
