@@ -25,7 +25,7 @@ When you use the router's [authorization directives](/router/configuration/autho
 
 ### How do schema updates affect my cache?
 
-The router does not automatically invalidate cache entries when a schema is updated. Cache entries expire based on their TTL or through explicit invalidation via the invalidation API. If a schema change affects the structure of cached data, you should either wait for TTL expiration or use the invalidation API to clear affected entries.
+The router does not explicitly remove cache entries when a schema is updated. However, if a schema change affects the queries sent to subgraphs, the router generates new cache keys for those queries. This means old cache entries won't receive cache hits anymore—from your perspective, they're effectively expired even though the data may still exist in storage until its TTL expires. Cache entries for unchanged query patterns remain available and continue to serve cache hits normally.
 
 ### Does the router cache error responses?
 
@@ -63,10 +63,7 @@ Operations without tags eventually expire based on their TTL. You can invalidate
 
 ### How does caching work for operations with multiple root fields?
 
-The router caches at the subgraph fetch level, not the entire operation. Each root field query and entity fetch is cached separately using a key that includes the subgraph name, type, query hash, and authorization context. This means:
-
-- **Root fields**: Each root field query to a subgraph gets its own cache entry. Different operations that result in the same subgraph query can share cache entries.
-- **Entities**: Entity fetches are cached per entity representation. When different operations request the same entity with the same fields, they can share the cached entity data.
+The router caches the entire response from each subgraph fetch as a single unit. When an operation queries multiple root fields from the same subgraph, the complete response (containing all those root fields) is cached together under a single cache entry. This means operations with overlapping root fields don't currently share cache entries—each unique subgraph request gets its own entry based on the full query sent to that subgraph.
 
 ### When should I use invalidation vs. TTL-based caching?
 
