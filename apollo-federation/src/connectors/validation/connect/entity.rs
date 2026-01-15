@@ -268,7 +268,6 @@ impl<'schema> ArgumentVisitor<'schema> {
 
         // At the root level, visit each argument to the entity field
         for arg in field.arguments.iter() {
-            // if let Some(input_type) = self.schema.types.get(arg.ty.inner_named_type()) {
             if let Some(input_type) = SchemaTypeRef::new(self.schema, arg.ty.inner_named_type()) {
                 let fields_by_type_name = entity_type.get_fields(arg.name.as_str());
                 if fields_by_type_name.is_empty() {
