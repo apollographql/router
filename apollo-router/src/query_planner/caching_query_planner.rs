@@ -753,7 +753,7 @@ where
                         context.extensions().with_lock(|lock| {
                             lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                         });
-                        
+
                         crate::spec::operation_limits::check_measured(
                             &plan.query_metrics,
                             &self.config_limits,

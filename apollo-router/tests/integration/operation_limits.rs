@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 
+use apollo_compiler::parser::Parser;
 use apollo_router::TestHarness;
 use apollo_router::graphql;
 use apollo_router::services::execution;
@@ -10,7 +11,6 @@ use serde_json::json;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing_test::internal;
-use apollo_compiler::parser::Parser;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
