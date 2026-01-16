@@ -103,6 +103,7 @@ use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
+use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
@@ -295,12 +296,6 @@ impl EnabledFeatures {
         .map(&|(name, _): &(&str, _)| name.to_string())
         .collect()
     }
-}
-
-// Struct to hold request attributes for the http client in context
-#[derive(Clone, Debug)]
-pub(crate) struct HttpClientAttributes {
-    pub(crate) attributes: Vec<KeyValue>,
 }
 
 #[async_trait::async_trait]
@@ -1133,28 +1128,80 @@ impl PluginPrivate for Telemetry {
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         let req_fn_config = self.config.clone();
+        let res_fn_config = self.config.clone();
 
         ServiceBuilder::new()
             .layer(router_overhead::OverheadLayer::new())
-            .map_request(move |request: crate::services::http::HttpRequest| {
-                // Get and store attributes so that they can be applied later after the span is created
-                // The config is also stored so that it can be used to set attributes on the http_client
-                // span when the response is received.
-                let client_attributes = HttpClientAttributes {
-                    attributes: req_fn_config
+            .instrument(move |request: &crate::services::http::HttpRequest| {
+                let schema_uri = request.http_request.uri();
+                let host = schema_uri.host().unwrap_or_default();
+                let port = schema_uri.port_u16().unwrap_or_else(|| {
+                    let scheme = schema_uri.scheme_str();
+                    if scheme == Some("https") {
+                        443
+                    } else if scheme == Some("http") {
+                        80
+                    } else {
+                        0
+                    }
+                });
+
+                let path = schema_uri.path();
+                ::tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
+                    "otel.kind" = "CLIENT",
+                    "net.peer.name" = %host,
+                    "net.peer.port" = %port,
+                    "http.route" = %path,
+                    "http.url" = %schema_uri,
+                    "net.transport" = "ip_tcp",
+                )
+            })
+            .map_future_with_request_data(
+                move |request: &crate::services::http::HttpRequest| {
+                    let custom_span_attributes = req_fn_config
                         .instrumentation
                         .spans
                         .http_client
                         .attributes
-                        .on_request(&request),
-                };
-                request.context.extensions().with_lock(|lock| {
-                    lock.insert(client_attributes);
-                    lock.insert(req_fn_config.clone());
-                });
+                        .on_request(request);
 
-                request
-            })
+                    (request.context.clone(), custom_span_attributes)
+                },
+                move |(context, custom_span_attributes): (Context, Vec<KeyValue>),
+                      f: BoxFuture<
+                    'static,
+                    Result<crate::services::http::HttpResponse, BoxError>,
+                >| {
+                    let conf = res_fn_config.clone();
+                    async move {
+                        let span = Span::current();
+                        span.set_span_dyn_attributes(custom_span_attributes);
+
+                        let result = f.await;
+                        match &result {
+                            Ok(response) => {
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .http_client
+                                        .attributes
+                                        .on_response(response),
+                                );
+                            }
+                            Err(err) => {
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .http_client
+                                        .attributes
+                                        .on_error(err, &context),
+                                );
+                            }
+                        }
+                        result
+                    }
+                },
+            )
             .service(service)
             .boxed()
     }
