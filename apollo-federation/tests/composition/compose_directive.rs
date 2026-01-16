@@ -1119,7 +1119,10 @@ mod composition {
             "Expected 2 @auth directives on Query.shared"
         );
 
-        assert_eq!(auth_directives[0].to_string(), r#"@auth(scope: ["VIEWER"])"#);
+        assert_eq!(
+            auth_directives[0].to_string(),
+            r#"@auth(scope: ["VIEWER"])"#
+        );
         assert_eq!(auth_directives[1].to_string(), "@auth");
     }
 }
