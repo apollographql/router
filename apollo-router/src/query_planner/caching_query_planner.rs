@@ -372,6 +372,7 @@ where
                         metadata: caching_key.metadata.clone(),
                         plan_options: caching_key.plan_options.clone(),
                         compute_job_type: ComputeJobType::QueryPlanningWarmup,
+                        variables: Default::default(),
                     };
                     let res = match service.ready().await {
                         Ok(service) => service.call(request).await,
@@ -549,6 +550,7 @@ where
                 query,
                 operation_name,
                 context,
+                variables,
             } = request;
 
             let request = QueryPlannerRequest::builder()
@@ -558,6 +560,7 @@ where
                 .metadata(caching_key.metadata)
                 .plan_options(caching_key.plan_options)
                 .compute_job_type(ComputeJobType::QueryPlanning)
+                .variables(variables)
                 .build();
 
             let planning_task = async move {
@@ -1161,7 +1164,8 @@ mod tests {
                     .call(query_planner::CachingRequest::new(
                         "query Me { me { username } }".to_string(),
                         Some("".into()),
-                        context.clone()
+                        context.clone(),
+                        Default::default()
                     ))
                     .await
                     .is_err()
@@ -1185,7 +1189,8 @@ mod tests {
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { name { first } } }".to_string(),
                     Some("".into()),
-                    context.clone()
+                    context.clone(),
+                    Default::default()
                 ))
                 .await
                 .is_err()
@@ -1248,6 +1253,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
+                Default::default(),
             ))
             .await;
 
@@ -1439,6 +1445,7 @@ mod tests {
                     "query Me { me { name { first } } }".to_string(),
                     Some("".into()),
                     context.clone(),
+                    Default::default(),
                 ))
                 .await
         });
@@ -1522,6 +1529,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
+                Default::default(),
             ))
             .await;
 
@@ -1992,6 +2000,7 @@ mod tests {
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
                     context.clone(),
+                    Default::default(),
                 ))
                 .await
                 .unwrap();
@@ -2075,6 +2084,7 @@ mod tests {
                     .to_string(),
                     Some("".into()),
                     context.clone(),
+                    Default::default()
                 ))
                 .await
                 .is_ok()
@@ -2093,6 +2103,7 @@ mod tests {
                     .to_string(),
                     Some("".into()),
                     context.clone(),
+                    Default::default()
                 ))
                 .await
                 .is_ok()
@@ -2159,6 +2170,7 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
+                Default::default(),
             ))
             .await
             .unwrap();
@@ -2173,6 +2185,7 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
+                Default::default(),
             ))
             .await
             .unwrap();
@@ -2233,6 +2246,7 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
+                Default::default(),
             ))
             .await;
 
@@ -2246,6 +2260,7 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
+                Default::default(),
             ))
             .await;
 
@@ -2301,7 +2316,7 @@ mod tests {
             context
                 .extensions()
                 .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
-            query_planner::CachingRequest::new(query_str, None, context)
+            query_planner::CachingRequest::new(query_str, None, context, Default::default())
         };
 
         // send query to caching planner. it should save this query plan in its cache

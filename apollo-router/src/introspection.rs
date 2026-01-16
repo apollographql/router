@@ -70,6 +70,7 @@ impl IntrospectionCache {
         schema: &Arc<spec::Schema>,
         key: &QueryKey,
         doc: &ParsedDocument,
+        variables: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
     ) -> ControlFlow<Result<graphql::Response, ComputeBackPressureError>, ()> {
         Self::maybe_lone_root_typename(schema, doc)?;
         if doc.operation.is_query() {
@@ -77,7 +78,9 @@ impl IntrospectionCache {
                 if doc.has_explicit_root_fields {
                     ControlFlow::Break(Ok(Self::mixed_fields_error()))?;
                 } else {
-                    ControlFlow::Break(self.cached_introspection(schema, key, doc).await)?
+                    ControlFlow::Break(
+                        self.cached_introspection(schema, key, doc, variables).await,
+                    )?
                 }
             } else if !doc.has_explicit_root_fields {
                 // Root __typename only
@@ -86,7 +89,9 @@ impl IntrospectionCache {
                 let max_depth = MaxDepth::Ignore;
 
                 // Probably a small query, execute it without caching:
-                ControlFlow::Break(Ok(Self::execute_introspection(max_depth, schema, doc)))?
+                ControlFlow::Break(Ok(Self::execute_introspection(
+                    max_depth, schema, doc, variables,
+                )))?
             }
         }
         ControlFlow::Continue(())
@@ -138,6 +143,7 @@ impl IntrospectionCache {
         schema: &Arc<spec::Schema>,
         key: &QueryKey,
         doc: &ParsedDocument,
+        variables: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
     ) -> Result<graphql::Response, ComputeBackPressureError> {
         let (storage, max_depth) = match &self.0 {
             Mode::Enabled { storage, max_depth } => (storage, *max_depth),
@@ -150,17 +156,18 @@ impl IntrospectionCache {
             }
         };
         let query = key.filtered_query.clone();
-        // TODO:  when adding support for variables in introspection queries,
-        // variable values should become part of the cache key.
-        // https://github.com/apollographql/router/issues/3831
-        let cache_key = query;
+        let cache_key = format!(
+            "{}:{}",
+            query,
+            serde_json::to_string(&variables).unwrap_or_default()
+        );
         if let Some(response) = storage.get(&cache_key, |_| unreachable!()).await {
             return Ok(response);
         }
         let schema = schema.clone();
         let doc = doc.clone();
         let response = compute_job::execute(ComputeJobType::Introspection, move |_| {
-            Self::execute_introspection(max_depth, &schema, &doc)
+            Self::execute_introspection(max_depth, &schema, &doc, variables)
         })?
         // `expect()` propagates any panic that potentially happens in the closure, but:
         //
@@ -176,10 +183,13 @@ impl IntrospectionCache {
         max_depth: MaxDepth,
         schema: &spec::Schema,
         doc: &ParsedDocument,
+        variable_values: serde_json_bytes::Map<
+            serde_json_bytes::ByteString,
+            serde_json_bytes::Value,
+        >,
     ) -> graphql::Response {
         let api_schema = schema.api_schema();
         let operation = &doc.operation;
-        let variable_values = Default::default();
         let max_depth_result = match max_depth {
             MaxDepth::Check => {
                 apollo_compiler::introspection::check_max_depth(&doc.executable, operation)

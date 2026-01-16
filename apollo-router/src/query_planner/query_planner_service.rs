@@ -406,6 +406,7 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
             metadata,
             plan_options,
             compute_job_type,
+            variables,
         } = req;
 
         let this = self.clone();
@@ -452,6 +453,7 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                     },
                     doc,
                     compute_job_type,
+                    variables,
                 )
                 .await;
 
@@ -483,6 +485,7 @@ impl QueryPlannerService {
         mut key: QueryKey,
         mut doc: ParsedDocument,
         compute_job_type: ComputeJobType,
+        variables: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let mut query_metrics = Default::default();
         let mut selections = self
@@ -508,7 +511,7 @@ impl QueryPlannerService {
 
         match self
             .introspection
-            .maybe_execute(&self.schema, &key, &doc)
+            .maybe_execute(&self.schema, &key, &doc, variables)
             .await
         {
             ControlFlow::Continue(()) => (),
@@ -1099,6 +1102,7 @@ mod tests {
                 },
                 doc,
                 ComputeJobType::QueryPlanning,
+                Default::default(),
             )
             .await
             .unwrap();
@@ -1156,6 +1160,7 @@ mod tests {
                 },
                 doc,
                 ComputeJobType::QueryPlanning,
+                Default::default(),
             )
             .await;
         match result {

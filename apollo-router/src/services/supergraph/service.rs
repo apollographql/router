@@ -165,6 +165,7 @@ async fn service_call(
             .query
             .clone()
             .unwrap_or_default(),
+        variables.clone(),
     )
     .await
     {
@@ -408,6 +409,7 @@ async fn plan_query(
     operation_name: Option<String>,
     context: Context,
     query_str: String,
+    variables: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
     let qpr = planning
         .call(
@@ -415,6 +417,7 @@ async fn plan_query(
                 .query(query_str)
                 .and_operation_name(operation_name)
                 .context(context.clone())
+                .variables(variables)
                 .build(),
         )
         .instrument(tracing::info_span!(

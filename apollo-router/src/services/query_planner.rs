@@ -35,6 +35,8 @@ pub(crate) struct Request {
     pub(crate) metadata: crate::plugins::authorization::CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) compute_job_type: ComputeJobType,
+    pub(crate) variables:
+        serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
 }
 
 #[buildstructor::buildstructor]
@@ -50,6 +52,7 @@ impl Request {
         metadata: crate::plugins::authorization::CacheKeyMetadata,
         plan_options: PlanOptions,
         compute_job_type: ComputeJobType,
+        variables: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
     ) -> Request {
         Self {
             query,
@@ -58,6 +61,7 @@ impl Request {
             metadata,
             plan_options,
             compute_job_type,
+            variables,
         }
     }
 }
@@ -69,6 +73,8 @@ pub(crate) struct CachingRequest {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
     pub(crate) context: Context,
+    pub(crate) variables:
+        serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
 }
 
 #[buildstructor::buildstructor]
@@ -81,11 +87,13 @@ impl CachingRequest {
         query: String,
         operation_name: Option<String>,
         context: Context,
+        variables: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
     ) -> CachingRequest {
         Self {
             query,
             operation_name,
             context,
+            variables,
         }
     }
 }
