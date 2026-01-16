@@ -268,6 +268,7 @@ async fn test_warn_only_in_memory_cache_logs_twice() {
     assert_eq!(warning_count, 2);
 }
 
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_warn_only_reload_cached_plan_enforces_limits() -> Result<(), BoxError> {
     let base_config = r#"
