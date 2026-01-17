@@ -23,6 +23,7 @@ use crate::connectors::Namespace;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
 use crate::connectors::json_selection::VarPaths;
+use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -95,7 +96,7 @@ impl<'schema> Context<'schema> {
                 .collect();
 
                 if matches!(parent_category, ObjectCategory::Other) {
-                    var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                    var_lookup.insert(Namespace::This, shape_from_schema_type_ref(parent_type));
                 }
 
                 Self {
@@ -106,10 +107,13 @@ impl<'schema> Context<'schema> {
                     has_response_body: false,
                 }
             }
-            ConnectedElement::Type { type_def } => {
+            ConnectedElement::Type { type_ref } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, Shape::from(type_def)),
-                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::This, shape_from_schema_type_ref(type_ref)),
+                    (
+                        Namespace::Batch,
+                        Shape::list(shape_from_schema_type_ref(type_ref), []),
+                    ),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -156,7 +160,7 @@ impl<'schema> Context<'schema> {
                 .collect();
 
                 if matches!(parent_category, ObjectCategory::Other) {
-                    var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                    var_lookup.insert(Namespace::This, shape_from_schema_type_ref(parent_type));
                 }
 
                 Self {
@@ -167,10 +171,13 @@ impl<'schema> Context<'schema> {
                     has_response_body: true,
                 }
             }
-            ConnectedElement::Type { type_def } => {
+            ConnectedElement::Type { type_ref } => {
                 let var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::This, Shape::from(type_def)),
-                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::This, shape_from_schema_type_ref(type_ref)),
+                    (
+                        Namespace::Batch,
+                        Shape::list(shape_from_schema_type_ref(type_ref), []),
+                    ),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Status, Shape::int([])),
@@ -263,6 +270,11 @@ impl<'schema> Context<'schema> {
             has_response_body: false,
         }
     }
+}
+
+/// Convert a SchemaTypeRef to a Shape by using its ExtendedType
+fn shape_from_schema_type_ref(type_ref: SchemaTypeRef<'_>) -> Shape {
+    Shape::from(type_ref.extended())
 }
 
 pub(crate) fn scalars() -> Shape {
@@ -679,6 +691,7 @@ mod tests {
     use super::*;
     use crate::connectors::ConnectSpec;
     use crate::connectors::JSONSelection;
+    use crate::connectors::schema_type_ref::SchemaTypeRef;
     use crate::connectors::validation::ConnectLink;
 
     fn expression(selection: &str, spec: ConnectSpec) -> Expression {
@@ -758,7 +771,7 @@ mod tests {
             .clone();
         let coordinate = ConnectDirectiveCoordinate {
             element: ConnectedElement::Field {
-                parent_type: object,
+                parent_type: SchemaTypeRef::from_node(&schema, object).unwrap(),
                 field_def: field,
                 parent_category: ObjectCategory::Query,
             },
