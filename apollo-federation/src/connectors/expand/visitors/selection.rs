@@ -399,7 +399,11 @@ impl<'a> TypeShapeWalker<'a> {
 
             ShapeCase::One(shapes) => {
                 for member_shape in shapes.iter() {
-                    self.walk_object_helper(object, new_object_type, member_shape)?;
+                    // Skip shapes with unsatisfiable __typename (e.g., All<"Book", "Film">)
+                    // which arise from cartesian products of multiple ... spreads
+                    if has_satisfiable_typename(member_shape) {
+                        self.walk_object_helper(object, new_object_type, member_shape)?;
+                    }
                 }
             }
 
@@ -548,7 +552,11 @@ impl<'a> TypeShapeWalker<'a> {
 
             ShapeCase::One(shapes) => {
                 for member_shape in shapes.iter() {
-                    self.walk_interface_helper(interface, member_shape)?;
+                    // Skip shapes with unsatisfiable __typename (e.g., All<"Book", "Film">)
+                    // which arise from cartesian products of multiple ... spreads
+                    if has_satisfiable_typename(member_shape) {
+                        self.walk_interface_helper(interface, member_shape)?;
+                    }
                 }
             }
 
@@ -733,7 +741,11 @@ impl<'a> TypeShapeWalker<'a> {
 
             ShapeCase::One(shapes) => {
                 for member_shape in shapes.iter() {
-                    self.walk_union_helper(union_type, member_shape)?;
+                    // Skip shapes with unsatisfiable __typename (e.g., All<"Book", "Film">)
+                    // which arise from cartesian products of multiple ... spreads
+                    if has_satisfiable_typename(member_shape) {
+                        self.walk_union_helper(union_type, member_shape)?;
+                    }
                 }
             }
 
@@ -828,6 +840,42 @@ impl<'a> TypeShapeWalker<'a> {
         try_pre_insert!(self.to_schema, enum_type_pos)?;
         try_insert!(self.to_schema, enum_type_pos, Node::new(def))?;
         Ok(())
+    }
+}
+
+/// Filter out object shapes with unsatisfiable `__typename` (e.g., `All<"Book", "Film">`).
+/// These arise from the cartesian product of multiple `... ->match()` spreads.
+fn has_satisfiable_typename(shape: &Shape) -> bool {
+    if let ShapeCase::Object { fields, .. } = shape.case()
+        && let Some(typename_shape) = fields.get("__typename")
+    {
+        is_satisfiable_typename_shape(typename_shape)
+    } else {
+        true
+    }
+}
+
+/// A __typename is satisfiable if it resolves to a single consistent string.
+fn is_satisfiable_typename_shape(shape: &Shape) -> bool {
+    match shape.case() {
+        ShapeCase::String(_) => true,
+        ShapeCase::One(members) => members.iter().any(is_satisfiable_typename_shape),
+        ShapeCase::All(members) => {
+            // All string literals must be identical
+            let mut seen: Option<&str> = None;
+            for m in members.iter() {
+                match m.case() {
+                    ShapeCase::String(Some(s)) => match seen {
+                        Some(prev) if prev != s.as_str() => return false,
+                        _ => seen = Some(s.as_str()),
+                    },
+                    _ if !is_satisfiable_typename_shape(m) => return false,
+                    _ => {}
+                }
+            }
+            true
+        }
+        _ => false,
     }
 }
 
@@ -1035,7 +1083,7 @@ mod tests {
         let pet_shape = make_object_shape([
             ("__typename", Shape::string_value("Cat", [])),
             ("id", Shape::string([])),
-            ("meow", Shape::bool(None)),
+            ("meow", Shape::bool([])),
         ]);
         let shape = make_object_shape([("pet", pet_shape)]);
 
@@ -1073,5 +1121,240 @@ mod tests {
 
         assert!(result.is_err());
         assert_snapshot!(result.unwrap_err().to_string());
+    }
+
+    /// Test that One<> shapes with conflicting __typename are filtered out.
+    ///
+    /// This simulates what happens when multiple `... ->match()` spreads create
+    /// a cartesian product of object shapes with some having conflicting __typename
+    /// like All<"Cat", "Dog">. The filtering should skip those combinations.
+    #[test]
+    fn walk_union_filters_conflicting_typename() {
+        let (original, mut target) = setup_schemas();
+        let query_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!(Query),
+        });
+
+        // Create three object shapes for a union:
+        // 1. Valid: __typename: "Cat"
+        let cat_shape = make_object_shape([
+            ("__typename", Shape::string_value("Cat", [])),
+            ("id", Shape::string([])),
+            ("meow", Shape::bool([])),
+        ]);
+
+        // 2. Valid: __typename: "Dog"
+        let dog_shape = make_object_shape([
+            ("__typename", Shape::string_value("Dog", [])),
+            ("id", Shape::string([])),
+            ("bark", Shape::bool([])),
+        ]);
+
+        // 3. INVALID: __typename: All<"Cat", "Dog"> - conflicting intersection!
+        // This simulates what happens when two spreads both set __typename
+        let conflicting_shape = make_object_shape([
+            (
+                "__typename",
+                Shape::all(
+                    [
+                        Shape::string_value("Cat", []),
+                        Shape::string_value("Dog", []),
+                    ],
+                    [],
+                ),
+            ),
+            ("id", Shape::string([])),
+            // Has fields from both types merged
+            ("meow", Shape::bool([])),
+            ("bark", Shape::bool([])),
+        ]);
+
+        // Create One<> union containing all three shapes
+        let pet_union_shape = Shape::one([cat_shape, dog_shape, conflicting_shape], []);
+        let shape = make_object_shape([("pet", pet_union_shape)]);
+
+        walk_type_with_shape(
+            &query_pos,
+            &shape,
+            &original,
+            &mut target,
+            &IndexSet::default(),
+            ConnectSpec::V0_4,
+        )
+        .expect("walk should succeed - conflicting shape should be filtered");
+
+        // The snapshot should show Cat and Dog types, but the conflicting
+        // All<"Cat", "Dog"> shape should have been filtered out
+        assert_snapshot!(target.schema().serialize().to_string());
+    }
+
+    /// Test filtering when ALL shapes in One<> have conflicting __typename.
+    ///
+    /// When every possibility has an unsatisfiable __typename, the walk should
+    /// still succeed (not error) but no types will be added for those shapes.
+    #[test]
+    fn walk_union_all_shapes_conflicting() {
+        let (original, mut target) = setup_schemas();
+        let query_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!(Query),
+        });
+
+        // All shapes have conflicting __typename - none should be walked
+        let conflict1 = make_object_shape([
+            (
+                "__typename",
+                Shape::all(
+                    [
+                        Shape::string_value("Cat", []),
+                        Shape::string_value("Dog", []),
+                    ],
+                    [],
+                ),
+            ),
+            ("id", Shape::string([])),
+        ]);
+
+        let conflict2 = make_object_shape([
+            (
+                "__typename",
+                Shape::all(
+                    [
+                        Shape::string_value("Cat", []),
+                        Shape::string_value("Unknown", []),
+                    ],
+                    [],
+                ),
+            ),
+            ("id", Shape::string([])),
+        ]);
+
+        let pet_union_shape = Shape::one([conflict1, conflict2], []);
+        let shape = make_object_shape([("pet", pet_union_shape)]);
+
+        walk_type_with_shape(
+            &query_pos,
+            &shape,
+            &original,
+            &mut target,
+            &IndexSet::default(),
+            ConnectSpec::V0_4,
+        )
+        .expect("walk should succeed even with all shapes filtered");
+
+        // The snapshot should show Query but Pet union members should not be added
+        // since all shapes were filtered out
+        assert_snapshot!(target.schema().serialize().to_string());
+    }
+
+    /// Test that second spread without __typename correctly merges with all type possibilities.
+    ///
+    /// This is the VALID pattern for multiple spreads:
+    /// - First spread sets __typename (determines concrete type)
+    /// - Second spread adds fields WITHOUT __typename (merges with all possibilities)
+    ///
+    /// Result: Each type possibility gets the additional fields from the second spread,
+    /// but only type-appropriate fields are included per the schema.
+    #[test]
+    fn walk_union_second_spread_adds_fields() {
+        let (original, mut target) = setup_schemas();
+        let query_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!(Query),
+        });
+
+        // Simulating two spreads where first sets __typename and second doesn't:
+        // First spread: One<{ __typename: "Cat" }, { __typename: "Dog" }>
+        // Second spread: One<{ id }, { id }> (no __typename)
+        // After cartesian product: 4 combinations, all with single __typename
+        //
+        // In real usage, the shape might be:
+        //   One<{ __typename: "Cat", id, meow }, { __typename: "Dog", id, bark }>
+        // where each object has proper fields for its type.
+
+        // Cat with its fields (id, meow)
+        let cat_shape = make_object_shape([
+            ("__typename", Shape::string_value("Cat", [])),
+            ("id", Shape::string([])),
+            ("meow", Shape::bool([])),
+        ]);
+
+        // Dog with its fields (id, bark)
+        let dog_shape = make_object_shape([
+            ("__typename", Shape::string_value("Dog", [])),
+            ("id", Shape::string([])),
+            ("bark", Shape::bool([])),
+        ]);
+
+        // Both have valid single __typename - both should be processed
+        let pet_union_shape = Shape::one([cat_shape, dog_shape], []);
+        let shape = make_object_shape([("pet", pet_union_shape)]);
+
+        walk_type_with_shape(
+            &query_pos,
+            &shape,
+            &original,
+            &mut target,
+            &IndexSet::default(),
+            ConnectSpec::V0_4,
+        )
+        .expect("walk should succeed - all shapes have valid __typename");
+
+        // The snapshot should show both Cat and Dog with their respective fields
+        assert_snapshot!(target.schema().serialize().to_string());
+    }
+
+    /// Test that a second spread can add fields to only one type possibility.
+    ///
+    /// Real scenario: First spread returns One<Book, Film> with __typename.
+    /// Second spread adds `author` field only for Book (not Film).
+    /// Result: Book gets the author field, Film doesn't.
+    ///
+    /// Using Cat/Dog from test schema: first spread sets __typename,
+    /// second spread adds `meow` only for Cat variant.
+    #[test]
+    fn walk_union_second_spread_partial_update() {
+        let (original, mut target) = setup_schemas();
+        let query_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!(Query),
+        });
+
+        // Simulating:
+        // First spread: One<{ __typename: "Cat" }, { __typename: "Dog" }>
+        // Second spread: One<{ meow: Bool }, null>  (meow only for Cat case)
+        //
+        // After cartesian product:
+        //   { __typename: "Cat", id, meow }  - Cat with meow from second spread
+        //   { __typename: "Dog", id, bark }  - Dog unchanged (second spread was null)
+        //
+        // Both have valid single __typename, so both should be processed.
+
+        // Cat: gets the additional field from second spread
+        let cat_with_extra = make_object_shape([
+            ("__typename", Shape::string_value("Cat", [])),
+            ("id", Shape::string([])),
+            ("meow", Shape::bool([])), // from second spread
+        ]);
+
+        // Dog: just the base fields (second spread contributed null/nothing)
+        let dog_base = make_object_shape([
+            ("__typename", Shape::string_value("Dog", [])),
+            ("id", Shape::string([])),
+            ("bark", Shape::bool([])),
+        ]);
+
+        let pet_union_shape = Shape::one([cat_with_extra, dog_base], []);
+        let shape = make_object_shape([("pet", pet_union_shape)]);
+
+        walk_type_with_shape(
+            &query_pos,
+            &shape,
+            &original,
+            &mut target,
+            &IndexSet::default(),
+            ConnectSpec::V0_4,
+        )
+        .expect("walk should succeed - all shapes have valid __typename");
+
+        // Snapshot shows Cat gets meow, Dog gets bark - both processed correctly
+        assert_snapshot!(target.schema().serialize().to_string());
     }
 }

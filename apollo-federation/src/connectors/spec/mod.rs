@@ -129,7 +129,7 @@ impl ConnectSpec {
     /// Test-only!
     #[cfg(test)]
     pub(crate) fn next() -> Self {
-        Self::V0_3
+        Self::V0_4
     }
 
     pub const fn as_str(self) -> &'static str {

@@ -1384,6 +1384,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_apply_to_selection(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
@@ -1548,6 +1549,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_apply_to_errors(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
@@ -1791,6 +1793,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_apply_to_nested_arrays(#[case] spec: ConnectSpec) {
         let data = json!({
             "arrayOfArrays": [
@@ -2024,6 +2027,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_apply_to_variable_expressions(#[case] spec: ConnectSpec) {
         let id_object = selection!("id: $", spec).apply_to(&json!(123));
         assert_eq!(id_object, (Some(json!({"id": 123})), vec![]));
@@ -2350,6 +2354,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_inline_paths_with_subselections(#[case] spec: ConnectSpec) {
         let data = json!({
             "id": 123,
@@ -2982,6 +2987,7 @@ mod tests {
     #[rstest]
     #[case::latest(ConnectSpec::V0_2)]
     #[case::next(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_left_associative_path_evaluation(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("batch.id->first", spec).apply_to(&json!({
@@ -3590,6 +3596,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_key_access_with_existing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3610,6 +3617,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_key_access_with_null_value(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3626,6 +3634,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_key_access_on_non_object(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3647,6 +3656,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_key_access_with_missing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3670,6 +3680,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_chained_optional_key_access(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3690,6 +3701,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_chained_optional_access_with_null_in_middle(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3708,6 +3720,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_method_on_null(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3724,6 +3737,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_method_with_valid_method(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3740,6 +3754,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_method_with_unknown_method(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3757,6 +3772,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_chaining_with_subselection_on_valid_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3785,6 +3801,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_chaining_with_subselection_on_null_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3801,6 +3818,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_mixed_regular_and_optional_chaining_working_case(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3826,6 +3844,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_mixed_regular_and_optional_chaining_with_null(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3845,6 +3864,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_with_valid_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3870,6 +3890,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_with_null_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3886,6 +3907,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_with_missing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3902,6 +3924,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_with_non_object(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4067,6 +4090,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_nested_optional_selection_sets(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4109,6 +4133,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_mixed_optional_selection_and_optional_chaining(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4146,6 +4171,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_parsing(#[case] spec: ConnectSpec) {
         // Test that the parser correctly handles optional selection sets
         let selection = JSONSelection::parse_with_spec("$.user? { id name }", spec).unwrap();
@@ -4163,6 +4189,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_with_arrays(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -5839,5 +5866,562 @@ mod tests {
                 .pretty_print(),
             "String",
         );
+    }
+
+    /// Test that multiple `... ->match()` spreads produce correct shape structure.
+    ///
+    /// When both spreads set __typename, the cartesian product creates
+    /// intersections like All<"Book", "Digital"> which are unsatisfiable.
+    /// This test documents the shape structure before filtering.
+    #[test]
+    fn test_multiple_spreads_shape_with_conflicting_typename() {
+        let spec = ConnectSpec::V0_4;
+
+        // Two spreads both setting __typename - creates conflicts
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... format->match(
+                ['digital', { __typename: $('Digital'), downloadUrl: $.url }],
+                ['physical', { __typename: $('Physical'), weight: $.weight }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // Cartesian product of spreads creates unsatisfiable All<> intersections
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: All<"Book", "Digital">,
+    downloadUrl: $root.*.url,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: All<"Book", "Physical">,
+    title: $root.*.title,
+    upc: $root.*.upc,
+    weight: $root.*.weight,
+  },
+  null,
+  {
+    __typename: All<"Film", "Digital">,
+    director: $root.*.director,
+    downloadUrl: $root.*.url,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: All<"Film", "Physical">,
+    director: $root.*.director,
+    upc: $root.*.upc,
+    weight: $root.*.weight,
+  },
+>"#,
+        );
+    }
+
+    /// Test multiple spreads where only the first sets __typename (valid pattern).
+    ///
+    /// This is the correct pattern: first spread determines __typename,
+    /// second spread adds fields without conflicting.
+    #[test]
+    fn test_multiple_spreads_shape_without_typename_conflict() {
+        let spec = ConnectSpec::V0_4;
+
+        // First spread sets __typename, second adds fields without __typename
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... format->match(
+                ['digital', { downloadUrl: $.url }],
+                ['physical', { weight: $.weight }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // No conflict: second spread adds fields but doesn't override __typename
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: "Book",
+    downloadUrl: $root.*.url,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Book",
+    title: $root.*.title,
+    upc: $root.*.upc,
+    weight: $root.*.weight,
+  },
+  null,
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    downloadUrl: $root.*.url,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    upc: $root.*.upc,
+    weight: $root.*.weight,
+  },
+>"#,
+        );
+    }
+
+    /// Test single spread with ->match() to verify baseline behavior.
+    #[test]
+    fn test_single_spread_shape() {
+        let spec = ConnectSpec::V0_4;
+
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // Single spread produces clean One<> with distinct __typename values
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: "Book",
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    upc: $root.*.upc,
+  },
+  null,
+>"#,
+        );
+    }
+
+    /// Test multiple spreads where both specify the same __typename.
+    ///
+    /// When both spreads set __typename to the same value (e.g., "Book"),
+    /// the second spread matches category->match independently.
+    #[test]
+    fn test_multiple_spreads_same_typename_no_conflict() {
+        let spec = ConnectSpec::V0_4;
+
+        // Both spreads match 'book' and set __typename: "Book"
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { __typename: $('Book'), author: $.author }]
+            )
+            "#,
+            spec
+        );
+
+        // Cartesian product: each first spread case × each second spread case
+        // - Book (first) + Book (second) = Book with both fields
+        // - Book (first) + no match (second) = Book without author
+        // - Film (first) + Book (second) = conflicting All<"Film", "Book">
+        // - Film (first) + no match (second) = Film unchanged
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: "Book",
+    author: $root.*.author,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Book",
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: All<"Film", "Book">,
+    author: $root.*.author,
+    director: $root.*.director,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    upc: $root.*.upc,
+  },
+  null,
+>"#,
+        );
+    }
+
+    /// Test field shadowing when second spread overwrites a field from first.
+    #[test]
+    fn test_multiple_spreads_field_shadowing() {
+        let spec = ConnectSpec::V0_4;
+
+        // First spread sets greeting: "hello", second sets greeting: "goodbye"
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), greeting: $('hello') }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { __typename: $('Book'), greeting: $('goodbye') }]
+            )
+            "#,
+            spec
+        );
+
+        // Two Book shapes depending on whether second spread matched:
+        // - Both matched: greeting is All<"hello", "goodbye">
+        // - Only first matched: greeting is just "hello"
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: "Book",
+    greeting: All<"hello", "goodbye">,
+    upc: $root.*.upc,
+  },
+  { __typename: "Book", greeting: "hello", upc: $root.*.upc },
+  null,
+>"#,
+        );
+    }
+
+    /// Test that second spread without __typename adds to all shapes.
+    #[test]
+    fn test_second_spread_no_typename_adds_to_all() {
+        let spec = ConnectSpec::V0_4;
+
+        // First spread sets __typename, second spread has no __typename
+        // so its fields merge with ALL shapes from first spread
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book') }],
+                ['film', { __typename: $('Film') }],
+                [@, null]
+            )
+            ... format->match(
+                ['digital', { isDigital: $(true) }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // isDigital field appears on both Book and Film shapes
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  { __typename: "Book", isDigital: true, upc: $root.*.upc },
+  null,
+  { __typename: "Film", isDigital: true, upc: $root.*.upc },
+>"#,
+        );
+    }
+
+    /// Test cartesian product of spreads with different match conditions.
+    ///
+    /// Shape analysis is conservative: it creates all combinations of spread
+    /// results, even when runtime conditions would prevent some combinations.
+    /// Here, the second spread only matches 'book', but shape analysis still
+    /// creates Film × extraField combinations since it doesn't track that
+    /// category='film' would never match ['book', ...].
+    #[test]
+    fn test_spread_cartesian_product_conservative() {
+        let spec = ConnectSpec::V0_4;
+
+        // First spread handles all categories, second only handles 'book'
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { extraField: $('only for books') }]
+            )
+            "#,
+            spec
+        );
+
+        // Shape analysis conservatively creates ALL combinations:
+        // - Book × extraField-matched = Book with extraField
+        // - Book × extraField-unmatched = Book without extraField
+        // - Film × extraField-matched = Film with extraField (even though runtime won't produce this)
+        // - Film × extraField-unmatched = Film without extraField
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: "Book",
+    extraField: "only for books",
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Book",
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    extraField: "only for books",
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    upc: $root.*.upc,
+  },
+  null,
+>"#,
+        );
+    }
+
+    // ==========================================
+    // Runtime tests for multiple spread behavior
+    // ==========================================
+
+    /// Runtime test: Both spreads match 'book', fields are merged.
+    #[test]
+    fn test_multiple_spreads_runtime_both_match_book() {
+        let spec = ConnectSpec::V0_4;
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { __typename: $('Book'), author: $.author }]
+            )
+            "#,
+            spec
+        );
+
+        // Book: both spreads match, fields merge
+        let book_data = json!({
+            "upc": "123",
+            "category": "book",
+            "title": "Great Gatsby",
+            "author": "Fitzgerald"
+        });
+        let (result, errors) = selection.apply_to(&book_data);
+        assert_eq!(errors, vec![]);
+        assert_eq!(
+            result,
+            Some(json!({
+                "upc": "123",
+                "__typename": "Book",
+                "title": "Great Gatsby",
+                "author": "Fitzgerald"
+            }))
+        );
+    }
+
+    /// Runtime test: First spread matches 'film', second doesn't match.
+    #[test]
+    fn test_multiple_spreads_runtime_film_no_second_match() {
+        let spec = ConnectSpec::V0_4;
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { __typename: $('Book'), author: $.author }]
+            )
+            "#,
+            spec
+        );
+
+        // Film: first spread matches, second doesn't (category != 'book')
+        let film_data = json!({
+            "upc": "456",
+            "category": "film",
+            "director": "Nolan"
+        });
+        let (result, errors) = selection.apply_to(&film_data);
+        // Second spread produces no-match error but result is still valid
+        assert!(!errors.is_empty());
+        assert_eq!(
+            result,
+            Some(json!({
+                "upc": "456",
+                "__typename": "Film",
+                "director": "Nolan"
+            }))
+        );
+    }
+
+    /// Runtime test: Field shadowing - second spread overwrites field.
+    #[test]
+    fn test_multiple_spreads_runtime_field_shadowing() {
+        let spec = ConnectSpec::V0_4;
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), greeting: $('hello') }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { __typename: $('Book'), greeting: $('goodbye') }]
+            )
+            "#,
+            spec
+        );
+
+        // Book: both spreads match, second overwrites 'greeting'
+        let book_data = json!({
+            "upc": "789",
+            "category": "book"
+        });
+        let (result, errors) = selection.apply_to(&book_data);
+        assert_eq!(errors, vec![]);
+        // Second spread's greeting: 'goodbye' shadows first's 'hello'
+        assert_eq!(
+            result,
+            Some(json!({
+                "upc": "789",
+                "__typename": "Book",
+                "greeting": "goodbye"
+            }))
+        );
+    }
+
+    /// Runtime test: Second spread without __typename adds to all types.
+    #[test]
+    fn test_multiple_spreads_runtime_no_typename_adds_to_all() {
+        let spec = ConnectSpec::V0_4;
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book') }],
+                ['film', { __typename: $('Film') }],
+                [@, null]
+            )
+            ... format->match(
+                ['digital', { isDigital: $(true) }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // Book + digital: both spreads match
+        let book_digital = json!({
+            "upc": "111",
+            "category": "book",
+            "format": "digital"
+        });
+        let (result, errors) = selection.apply_to(&book_digital);
+        assert_eq!(errors, vec![]);
+        assert_eq!(
+            result,
+            Some(json!({
+                "upc": "111",
+                "__typename": "Book",
+                "isDigital": true
+            }))
+        );
+
+        // Film + digital: both spreads match
+        let film_digital = json!({
+            "upc": "222",
+            "category": "film",
+            "format": "digital"
+        });
+        let (result, errors) = selection.apply_to(&film_digital);
+        assert_eq!(errors, vec![]);
+        assert_eq!(
+            result,
+            Some(json!({
+                "upc": "222",
+                "__typename": "Film",
+                "isDigital": true
+            }))
+        );
+
+        // Book + physical: first spread matches, second spread hits [@, null] fallback
+        // which returns null for the whole spread, resulting in null for the output
+        let book_physical = json!({
+            "upc": "333",
+            "category": "book",
+            "format": "physical"
+        });
+        let (result, errors) = selection.apply_to(&book_physical);
+        assert_eq!(errors, vec![]);
+        // When second spread returns null via [@, null], the entire result becomes null
+        assert_eq!(result, Some(json!(null)));
+    }
+
+    /// Runtime test: Category doesn't match any case, returns null.
+    #[test]
+    fn test_multiple_spreads_runtime_no_match_returns_null() {
+        let spec = ConnectSpec::V0_4;
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // Unknown category: matches [@, null] fallback
+        let unknown_data = json!({
+            "upc": "999",
+            "category": "unknown"
+        });
+        let (result, errors) = selection.apply_to(&unknown_data);
+        assert_eq!(errors, vec![]);
+        assert_eq!(result, Some(json!(null)));
     }
 }

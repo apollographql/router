@@ -88,7 +88,7 @@ pub(super) fn validate_entity_arg(
         return Err(Message {
             code: Code::EntityTypeInvalid,
             message: format!(
-                "{coordinate} is invalid. Entity connectors must return object types.",
+                "{coordinate} is invalid. Entity connector fields must return a GraphQL type that exists in the schema.",
             ),
             locations: entity_arg
                 .line_column_range(&schema.sources)
@@ -97,13 +97,11 @@ pub(super) fn validate_entity_arg(
         });
     };
 
-    // TODO: When abstract types (interfaces/unions) are supported for entity connectors,
-    // change this check to: !object_type.is_object() && !object_type.is_interface() && !object_type.is_union()
-    if !object_type.is_object() {
+    if !object_type.is_object() && !object_type.is_interface() && !object_type.is_union() {
         return Err(Message {
             code: Code::EntityTypeInvalid,
             message: format!(
-                "{coordinate} is invalid. Entity connectors must return object types.",
+                "{coordinate} is invalid. Entity connectors must return object, interface, or union types.",
             ),
             locations: entity_arg
                 .line_column_range(&schema.sources)
