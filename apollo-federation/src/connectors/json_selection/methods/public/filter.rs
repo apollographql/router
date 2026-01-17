@@ -162,7 +162,7 @@ fn filter_shape(
         );
     }
 
-    Shape::list(input_shape.any_item([]), input_shape.locations)
+    Shape::list(input_shape.any_item([]), input_shape.locations().cloned())
 }
 
 #[cfg(test)]
@@ -387,7 +387,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 input_shape.clone()
             ),
-            Shape::list(input_shape.any_item([]), input_shape.locations)
+            Shape::list(input_shape.any_item([]), input_shape.locations().cloned())
         );
     }
 
@@ -399,7 +399,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 input_shape.clone()
             ),
-            Shape::list(input_shape.any_item([]), input_shape.locations)
+            Shape::list(input_shape.any_item([]), input_shape.locations().cloned())
         );
     }
 

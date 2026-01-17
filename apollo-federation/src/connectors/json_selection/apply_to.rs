@@ -25,6 +25,8 @@ use super::methods::ArrowMethod;
 use super::parser::*;
 use crate::connectors::spec::ConnectSpec;
 
+pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
+
 impl JSONSelection {
     // Applying a selection to a JSON value produces a new JSON value, along
     // with any/all errors encountered in the process. The value is represented
@@ -46,7 +48,7 @@ impl JSONSelection {
         let mut vars_with_paths: VarsWithPathsMap = IndexMap::default();
         for (var_name, var_data) in vars {
             vars_with_paths.insert(
-                KnownVariable::External(var_name.clone()),
+                KnownVariable::External(var_name.as_str().to_string()),
                 (var_data, InputPath::empty().append(json!(var_name))),
             );
         }
@@ -115,8 +117,6 @@ impl JSONSelection {
         }
     }
 }
-
-pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
 
 fn lookup_variable<'a>(
     vars: &'a VarsWithPathsMap,
@@ -694,8 +694,8 @@ impl ApplyToInternal for WithRange<PathList> {
                                 .prepend_errors(errors);
                         }
 
-                        if let Some(result) = result_opt.as_ref() {
-                            tail.apply_to_path(result, vars, &method_path, spec)
+                        if let Some(result) = result_opt {
+                            tail.apply_to_path(&result, vars, &method_path, spec)
                                 .prepend_errors(errors)
                         } else {
                             // If the method produced no output, assume the errors
@@ -737,7 +737,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
-                    input_shape.locations.iter().cloned(),
+                    input_shape.locations().cloned(),
                 );
             }
             ShapeCase::All(shapes) => {
@@ -745,7 +745,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
-                    input_shape.locations.iter().cloned(),
+                    input_shape.locations().cloned(),
                 );
             }
             ShapeCase::Error(error) => {
@@ -753,7 +753,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     Some(partial) => Shape::error_with_partial(
                         error.message.clone(),
                         self.compute_output_shape(context, partial.clone(), dollar_shape),
-                        input_shape.locations.iter().cloned(),
+                        input_shape.locations().cloned(),
                     ),
                     None => input_shape.clone(),
                 };
@@ -1315,7 +1315,7 @@ impl ApplyToInternal for SubSelection {
 
         // Build up the merged object shape using Shape::all to merge the
         // individual named_selection object shapes.
-        let mut all_shape = Shape::none();
+        let mut all_shape = Shape::unknown([]);
 
         for named_selection in self.selections.iter() {
             // Simplifying as we go with Shape::all keeps all_shape relatively
@@ -1342,7 +1342,7 @@ impl ApplyToInternal for SubSelection {
             }
         }
 
-        if all_shape.is_none() {
+        if all_shape.is_unknown() {
             Shape::empty_object(self.shape_location(context.source_id()))
         } else {
             all_shape
@@ -1354,10 +1354,10 @@ impl ApplyToInternal for SubSelection {
 fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
     if let ShapeCase::One(inner) = shape.case() {
         let mut new_fields = Vec::new();
-        for inner_field in inner {
+        for inner_field in inner.iter() {
             new_fields.push(field(inner_field, key, source_id));
         }
-        return Shape::one(new_fields, shape.locations.iter().cloned());
+        return Shape::one(new_fields, shape.locations().cloned());
     }
     if shape.is_none() || shape.is_null() {
         return Shape::none();
@@ -3478,29 +3478,21 @@ mod tests {
 
     #[test]
     fn test_compute_output_shape() {
-        assert_eq!(selection!("").shape().pretty_print(), "{}");
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(selection!("", spec).shape().pretty_print(), "{}");
 
         assert_eq!(
-            selection!("id name").shape().pretty_print(),
+            selection!("id name", spec).shape().pretty_print(),
             "{ id: $root.*.id, name: $root.*.name }",
         );
 
-        // // On hold until variadic $(...) is merged (PR #6456).
-        // assert_eq!(
-        //     selection!("$.data { thisOrThat: $(maybe.this, maybe.that) }")
-        //         .shape()
-        //         .pretty_print(),
-        //     // Technically $.data could be an array, so this should be a union
-        //     // of this shape and a list of this shape, except with
-        //     // $root.data.0.maybe.{this,that} shape references.
-        //     //
-        //     // We could try to say that any { ... } shape represents either an
-        //     // object or a list of objects, by policy, to avoid having to write
-        //     // One<{...}, List<{...}>> everywhere a SubSelection appears.
-        //     //
-        //     // But then we don't know where the array indexes should go...
-        //     "{ thisOrThat: One<$root.data.*.maybe.this, $root.data.*.maybe.that> }",
-        // );
+        assert_eq!(
+            selection!("$.data { thisOrThat: $(maybe.this ?? maybe.that) }", spec)
+                .shape()
+                .pretty_print(),
+            "{ thisOrThat: One<$root.data.*.maybe.this?!, $root.data.*.maybe.that> }",
+        );
 
         assert_eq!(
             selection!(
@@ -3510,7 +3502,8 @@ mod tests {
                 friends: friend_ids { id: @ }
                 alias: arrayOfArrays { x y }
                 ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#
+            "#,
+                spec
             )
             .shape()
             .pretty_print(),
@@ -3520,55 +3513,79 @@ mod tests {
             // $root.friend_ids.* }> (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
             // List, rather than the friends field?
-            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
+            r#"{
+  alias: {
+    x: $root.*.arrayOfArrays.*.x,
+    y: $root.*.arrayOfArrays.*.y,
+  },
+  friends: { id: $root.*.friend_ids.* },
+  id: $root.*.id,
+  name: $root.*.name,
+  xs: $root.*.arrayOfArrays.x,
+  ys: $root.*.arrayOfArrays.y,
+}"#,
         );
 
-        // TODO: re-test when method type checking is re-enabled
-        // assert_eq!(
-        //     selection!(r#"
-        //         id
-        //         name
-        //         friends: friend_ids->map({ id: @ })
-        //         alias: arrayOfArrays { x y }
-        //         ys: arrayOfArrays.y xs: arrayOfArrays.x
-        //     "#).shape().pretty_print(),
-        //     "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: List<{ id: $root.*.friend_ids.* }>, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })")
-        //         .shape()
-        //         .pretty_print(),
-        //     "{ thrice: [$root, $root, $root] }",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[{ key: \"thrice\", value: [$root, $root, $root] }]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries.key")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[\"thrice\"]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries.value")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[[$root, $root, $root]]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[{ k: \"wrapped\", v: $root }]",
-        // );
+        assert_eq!(
+            selection!(
+                r#"
+                id
+                name
+                friends: friend_ids->map({ id: @ })
+                alias: arrayOfArrays { x y }
+                ys: arrayOfArrays.y xs: arrayOfArrays.x
+            "#,
+                spec
+            )
+            .shape()
+            .pretty_print(),
+            r#"{
+  alias: {
+    x: $root.*.arrayOfArrays.*.x,
+    y: $root.*.arrayOfArrays.*.y,
+  },
+  friends: List<{ id: $root.*.friend_ids.* }>,
+  id: $root.*.id,
+  name: $root.*.name,
+  xs: $root.*.arrayOfArrays.x,
+  ys: $root.*.arrayOfArrays.y,
+}"#,
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })", spec)
+                .shape()
+                .pretty_print(),
+            "{ thrice: [$root, $root, $root] }",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries", spec)
+                .shape()
+                .pretty_print(),
+            "[{ key: \"thrice\", value: [$root, $root, $root] }]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.key", spec)
+                .shape()
+                .pretty_print(),
+            "[\"thrice\"]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.value", spec)
+                .shape()
+                .pretty_print(),
+            "[[$root, $root, $root]]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ wrapped: @ })->entries { k: key v: value }", spec)
+                .shape()
+                .pretty_print(),
+            "[{ k: \"wrapped\", v: $root }]",
+        );
     }
 
     #[rstest]
@@ -3922,7 +3939,13 @@ mod tests {
         );
         assert_eq!(
             author_selection.shape().pretty_print(),
-            "{ author: One<{ age: $root.*.author?.*.age, middleName: $root.*.author?.*.middleName? }, None> }",
+            r#"{ author: One<
+    {
+      age: $root.*.author?.*.age,
+      middleName: $root.*.author?.*.middleName?,
+    },
+    None,
+  > }"#,
         );
     }
 
@@ -3978,7 +4001,7 @@ mod tests {
     }
 
     // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
-    // syntax and abstract typs.
+    // syntax and abstract types.
     /** #[cfg(test)]
     mod spread {
         use serde_json_bytes::Value as JSON;
@@ -4190,7 +4213,7 @@ mod tests {
 
     // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
     // syntax and abstract types.
-    /**
+    /*
     #[test]
     fn test_spread_syntax_a_spread_b() {
         let spec = ConnectSpec::V0_4;
@@ -4259,7 +4282,14 @@ mod tests {
         );
         assert_eq!(
             sel.shape().pretty_print(),
-            "One<{ after: $root.*.after, before: $root.*.before, matched: true }, { after: $root.*.after, before: $root.*.before }>",
+            r#"One<
+  {
+    after: $root.*.after,
+    before: $root.*.before,
+    matched: true,
+  },
+  { after: $root.*.after, before: $root.*.before },
+>"#,
         );
 
         assert_eq!(
@@ -4342,9 +4372,28 @@ mod tests {
 
             assert_eq!(
                 sel.shape().pretty_print(),
-                // An upcoming Shape library update should improve the readability
-                // of this pretty printing considerably.
-                "One<{ __typename: \"Book\", author: { name: $root.*.author.name }, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Movie\", director: $root.*.director.name, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Magazine\", editor: $root.*.editor.name, title: $root.*.title, upc: $root.*.upc }, { upc: $root.*.upc }, null>"
+                r#"One<
+  {
+    __typename: "Book",
+    author: { name: $root.*.author.name },
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Movie",
+    director: $root.*.director.name,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Magazine",
+    editor: $root.*.editor.name,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  { upc: $root.*.upc },
+  null,
+>"#
             );
 
             sel
@@ -4978,7 +5027,7 @@ mod tests {
 
     // TODO Reenable this test in ConnectSpec::V0_4 when we support ... spread
     // syntax and abstract types.
-    /**
+    /*
     #[test]
     fn none_coalescing_should_allow_defaulting_match() {
         let spec = ConnectSpec::V0_4;
@@ -5059,7 +5108,7 @@ mod tests {
             ]),
         );
     }
-    **/
+    */
 
     #[test]
     fn wtf_operator_should_not_exclude_null_from_nullable_union_shape() {
@@ -5162,21 +5211,13 @@ mod tests {
                 .with_named_shapes(named_shapes)
         };
 
-        let root_shape = shape_context.named_shapes().get("$root").unwrap().clone();
-
-        assert_eq!(
-            root_shape.pretty_print(),
-            "{ stringOrNull: One<String, null> }",
-        );
-
         assert_eq!(
             nullish_string_selection
                 .compute_output_shape(
                     &shape_context,
-                    shape_context.named_shapes().get("$root").unwrap().clone(),
+                    shape_context.named_shapes()["$root"].clone()
                 )
                 .pretty_print(),
-            // Note that null has been replaced with None.
             "One<String, None>",
         );
     }
@@ -5211,6 +5252,52 @@ mod tests {
             (None, vec![]),
         );
         assert_eq!(nested_selection.apply_to(&json!({})), (None, vec![]));
+    }
+
+    #[test]
+    fn question_operator_with_nested_objects_shape() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            let person_shape = Shape::record(
+                {
+                    let mut map = Shape::empty_map();
+                    map.insert("name".to_string(), Shape::string([]));
+                    map.insert("age".to_string(), Shape::int([]));
+                    map
+                },
+                [],
+            );
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert("person".to_string(), person_shape);
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let nested_selection = selection!("$(person?.name)", spec);
+        assert_eq!(
+            nested_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "One<String, None>",
+        );
     }
 
     #[test]
@@ -5274,6 +5361,45 @@ mod tests {
     }
 
     #[test]
+    fn question_operator_with_union_shapes_non_nullable() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "value".to_string(),
+                            Shape::one([Shape::string([]), Shape::int([])], []),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let union_selection = selection!("$(value?)", spec);
+        assert_eq!(
+            union_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "One<String, Int>",
+        );
+    }
+
+    #[test]
     fn question_operator_with_error_shapes() {
         let spec = ConnectSpec::V0_3;
 
@@ -5314,6 +5440,45 @@ mod tests {
         // The question mark should be applied recursively to the partial shape within the error
         assert!(result_shape.pretty_print().contains("Error"));
         assert!(result_shape.pretty_print().contains("None"));
+    }
+
+    #[test]
+    fn question_operator_with_simple_error_shapes() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "error".to_string(),
+                            Shape::error("Something went wrong".to_string(), []),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let error_selection = selection!("$(error?)", spec);
+        assert_eq!(
+            error_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "Error<\"Something went wrong\">",
+        );
     }
 
     #[test]
@@ -5359,6 +5524,45 @@ mod tests {
                 )
                 .pretty_print(),
             "One<String, None>",
+        );
+    }
+
+    #[test]
+    fn question_operator_with_simple_all_shapes() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "intersection".to_string(),
+                            Shape::all([Shape::string([]), Shape::int([])], []),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let all_selection = selection!("$(intersection?)", spec);
+        assert_eq!(
+            all_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "All<String, Int>",
         );
     }
 
@@ -5420,6 +5624,63 @@ mod tests {
     }
 
     #[test]
+    fn question_operator_chained_shape() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "level1".to_string(),
+                            Shape::record(
+                                {
+                                    let mut inner_map = Shape::empty_map();
+                                    inner_map.insert(
+                                        "level2".to_string(),
+                                        Shape::record(
+                                            {
+                                                let mut inner_inner_map = Shape::empty_map();
+                                                inner_inner_map
+                                                    .insert("value".to_string(), Shape::string([]));
+                                                inner_inner_map
+                                            },
+                                            [],
+                                        ),
+                                    );
+                                    inner_map
+                                },
+                                [],
+                            ),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let chained_selection = selection!("$(level1?.level2?.value)", spec);
+        assert_eq!(
+            chained_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "One<String, None>",
+        );
+    }
+
+    #[test]
     fn question_operator_direct_null_input_shape() {
         let spec = ConnectSpec::V0_3;
 
@@ -5452,7 +5713,13 @@ mod tests {
         let sel = selection!("book.author? { name age? }", spec);
         assert_eq!(
             sel.shape().pretty_print(),
-            "One<{ age: $root.book.author?.*.age?, name: $root.book.author?.*.name }, None>",
+            r#"One<
+  {
+    age: $root.book.author?.*.age?,
+    name: $root.book.author?.*.name,
+  },
+  None,
+>"#,
         );
     }
 
@@ -5538,6 +5805,39 @@ mod tests {
             )
             .pretty_print(),
             "One<String, null>",
+        );
+    }
+
+    #[test]
+    fn test_none_coalescing_with_literal_fallback() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes([(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "optional".to_string(),
+                            Shape::one([Shape::string([]), Shape::none()], []),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            )]);
+
+        let none_coalesce = selection!("$(optional ?! 'fallback')", spec);
+        assert_eq!(
+            none_coalesce
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "String",
         );
     }
 }
