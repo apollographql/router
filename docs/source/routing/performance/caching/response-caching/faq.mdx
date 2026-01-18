@@ -63,7 +63,7 @@ Operations without tags eventually expire based on their TTL. You can invalidate
 
 ### How does caching work for operations with multiple root fields?
 
-The router caches the entire response from each subgraph fetch as a single unit. When an operation queries multiple root fields from the same subgraph, the router caches the complete response (containing all root fields) under a single cache entry. Operations with overlapping root fields don't share cache entries. The router creates a unique entry for each subgraph request based on the full query sent to the subgraph.
+The router caches the entire response from each subgraph fetch as a single unit. When an operation queries multiple root fields from the same subgraph, the router caches the complete response (containing all root fields) under a single cache entry. Operations with overlapping root fields don't share cache entries. The router creates a unique entry for each subgraph request based on the full query sent to the subgraph except for entities.
 
 ### When should I use invalidation vs. TTL-based caching?
 
