@@ -756,24 +756,45 @@ impl CacheService {
                 == Some(&HeaderValue::from_static("true")));
 
         if request.operation_kind == OperationKind::Mutation {
-            let invalidations_to_execute = mutation::get_invalidations_from_mutation(
-                &request,
-                &self.subgraph_enums,
-                self.supergraph_schema.clone(),
-            )?;
+            let (async_invalidations_to_execute, sync_invalidations_to_execute) =
+                mutation::get_invalidations_from_mutation(
+                    &request,
+                    &self.subgraph_enums,
+                    self.supergraph_schema.clone(),
+                )?;
 
-            let resp = self.service.call(request).await?;
+            let mut resp = self.service.call(request).await?;
             if resp.response.body().errors.is_empty() {
-                tokio::spawn(async move {
+                if !async_invalidations_to_execute.is_empty() {
+                    let invalidation = self.invalidation.clone();
+                    tokio::spawn(async move {
+                        let res = mutation::automatic_invalidation(
+                            invalidation,
+                            async_invalidations_to_execute,
+                        )
+                        .await;
+                        if let Err(err) = res {
+                            tracing::error!(error = ?err, "cannot automatically invalidate data for your mutation");
+                        }
+                    });
+                }
+
+                if !sync_invalidations_to_execute.is_empty() {
                     let res = mutation::automatic_invalidation(
                         self.invalidation.clone(),
-                        invalidations_to_execute,
+                        sync_invalidations_to_execute,
                     )
                     .await;
                     if let Err(err) = res {
                         tracing::error!(error = ?err, "cannot automatically invalidate data for your mutation");
+                        resp.response.body_mut().append_errors(&mut vec![
+                            graphql::Error::builder()
+                                .message("cannot automatically invalidate data for your mutation")
+                                .extension_code("AUTOMATIC_INVALIDATION_ERROR")
+                                .build(),
+                        ]);
                     }
-                });
+                }
             }
 
             return Ok(resp);

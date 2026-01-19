@@ -62,7 +62,7 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
 
     directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
 
-    directive @federation__cacheInvalidation(cacheTag: String, type: String) repeatable on FIELD_DEFINITION
+    directive @federation__cacheInvalidation(cacheTag: String, type: String, async: Boolean! = false) repeatable on FIELD_DEFINITION
 
     directive @federation__cacheTag(format: String!) repeatable on INTERFACE | OBJECT | FIELD_DEFINITION
 

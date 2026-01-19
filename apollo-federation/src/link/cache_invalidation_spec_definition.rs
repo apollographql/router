@@ -4,6 +4,7 @@ use apollo_compiler::schema::DirectiveLocation;
 
 use super::federation_spec_definition::FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::Purpose;
+use crate::link::federation_spec_definition::FEDERATION_ASYNC_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_CACHE_TAG_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_TYPE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
@@ -54,6 +55,14 @@ impl CacheInvalidationSpecDefinition {
                         name: FEDERATION_TYPE_ARGUMENT_NAME,
                         get_type: |_, _| Ok(apollo_compiler::ty!(String)),
                         default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: FEDERATION_ASYNC_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(apollo_compiler::ty!(bool)),
+                        default_value: Some(apollo_compiler::ast::Value::Boolean(false)),
                     },
                     composition_strategy: None,
                 },

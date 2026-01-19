@@ -56,7 +56,7 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
             let _ = write!(&mut key, ":{private_id}");
         }
 
-        dbg!(key)
+        key
     }
 }
 
@@ -102,7 +102,7 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
             let _ = write!(&mut key, ":{private_id}");
         }
 
-        dbg!(key)
+        key
     }
 }
 

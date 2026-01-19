@@ -10,6 +10,9 @@ use apollo_compiler::resolvers;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
+use itertools::Either;
+use itertools::Itertools;
+use itertools::multiunzip;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
@@ -24,12 +27,12 @@ pub(crate) fn get_invalidations_from_mutation(
     request: &subgraph::Request,
     subgraph_enums: &HashMap<String, String>,
     supergraph_schema: Arc<Valid<Schema>>,
-) -> Result<Invalidations, anyhow::Error> {
+) -> Result<(Invalidations, Invalidations), anyhow::Error> {
     struct Root<'a> {
         subgraph_name: &'a str,
         subgraph_enums: &'a HashMap<String, String>,
         mutation_object_type: &'a ObjectType,
-        result: RefCell<Result<Invalidations, anyhow::Error>>,
+        result: RefCell<Result<(Invalidations, Invalidations), anyhow::Error>>,
     }
 
     impl resolvers::ObjectValue for Root<'_> {
@@ -42,7 +45,7 @@ pub(crate) fn get_invalidations_from_mutation(
             info: &'a resolvers::ResolveInfo<'a>,
         ) -> Result<resolvers::ResolvedValue<'a>, resolvers::FieldError> {
             let mut result = self.result.borrow_mut();
-            let Ok(invalidation_keys) = &mut *result else {
+            let Ok((async_invalidation_keys, sync_invalidation_keys)) = &mut *result else {
                 return Ok(resolvers::ResolvedValue::SkipForPartialExecution);
             };
             // We don't use info.field_definition() because we need the directive
@@ -80,6 +83,7 @@ pub(crate) fn get_invalidations_from_mutation(
                     }
                     let mut cache_tag = None;
                     let mut entity_type = None;
+                    let mut is_async = false;
                     for (field_name, value) in dir
                         .argument_by_name("args", info.schema())
                         .ok()?
@@ -94,25 +98,51 @@ pub(crate) fn get_invalidations_from_mutation(
                                 .as_str()
                                 .and_then(|v| v.parse::<StringTemplate>().ok())
                         }
+
+                        if field_name.as_str() == "async" {
+                            is_async = value.to_bool().unwrap_or_default();
+                        }
                     }
                     if cache_tag.is_none() && entity_type.is_none() {
                         None
                     } else {
-                        Some((entity_type, cache_tag))
+                        Some((entity_type, cache_tag, is_async))
                     }
                 });
             let mut vars = IndexMap::default();
             vars.insert("$args".to_string(), Value::Object(info.arguments().clone()));
-            let (entity_type_invalidations, cache_tag_invalidations): (Vec<_>, Vec<_>) =
-                invalidations.unzip();
+            let (entity_type_invalidations, cache_tag_invalidations, is_asyncs): (
+                Vec<_>,
+                Vec<_>,
+                Vec<bool>,
+            ) = multiunzip(invalidations);
+
             match entity_type_invalidations
                 .into_iter()
                 .flatten()
-                .map(|entity_type| Ok(entity_type.interpolate(&vars).map(|(res, _)| res)?))
-                .collect::<Result<HashSet<String>, anyhow::Error>>()
+                .zip(is_asyncs.clone())
+                .map(|(entity_type, is_async)| {
+                    Ok((
+                        entity_type.interpolate(&vars).map(|(res, _)| res)?,
+                        is_async,
+                    ))
+                })
+                .collect::<Result<HashSet<(String, bool)>, anyhow::Error>>()
             {
                 Ok(entity_types) => {
-                    invalidation_keys.entity_types = entity_types;
+                    let (async_entity_types, sync_entity_types): (Vec<String>, Vec<String>) =
+                        entity_types
+                            .into_iter()
+                            .partition_map(|(entity_type, is_async)| {
+                                if is_async {
+                                    Either::Left(entity_type)
+                                } else {
+                                    Either::Right(entity_type)
+                                }
+                            });
+
+                    async_invalidation_keys.entity_types = async_entity_types.into_iter().collect();
+                    sync_invalidation_keys.entity_types = sync_entity_types.into_iter().collect();
                 }
                 Err(err) => {
                     *result = Err(err);
@@ -122,11 +152,26 @@ pub(crate) fn get_invalidations_from_mutation(
             match cache_tag_invalidations
                 .into_iter()
                 .flatten()
-                .map(|cache_tag| Ok(cache_tag.interpolate(&vars).map(|(res, _)| res)?))
-                .collect::<Result<HashSet<String>, anyhow::Error>>()
+                .zip(is_asyncs)
+                .map(|(cache_tag, is_async)| {
+                    Ok((cache_tag.interpolate(&vars).map(|(res, _)| res)?, is_async))
+                })
+                .collect::<Result<HashSet<(String, bool)>, anyhow::Error>>()
             {
                 Ok(cache_tags) => {
-                    invalidation_keys.cache_tags = cache_tags;
+                    let (async_cache_tags, sync_cache_tags): (Vec<String>, Vec<String>) =
+                        cache_tags
+                            .into_iter()
+                            .partition_map(|(cache_tag, is_async)| {
+                                if is_async {
+                                    Either::Left(cache_tag)
+                                } else {
+                                    Either::Right(cache_tag)
+                                }
+                            });
+
+                    async_invalidation_keys.cache_tags = async_cache_tags.into_iter().collect();
+                    sync_invalidation_keys.cache_tags = sync_cache_tags.into_iter().collect();
                 }
                 Err(err) => {
                     *result = Err(err);
@@ -158,10 +203,16 @@ pub(crate) fn get_invalidations_from_mutation(
         subgraph_name: &request.subgraph_name,
         subgraph_enums,
         mutation_object_type,
-        result: RefCell::new(Ok(Invalidations {
-            subgraph_name: request.subgraph_name.to_string(),
-            ..Default::default()
-        })),
+        result: RefCell::new(Ok((
+            Invalidations {
+                subgraph_name: request.subgraph_name.to_string(),
+                ..Default::default()
+            },
+            Invalidations {
+                subgraph_name: request.subgraph_name.to_string(),
+                ..Default::default()
+            },
+        ))),
     };
     let subgraph_request = request.subgraph_request.body();
     // FIXME: in principle we should use the subgraph schema here.
@@ -181,6 +232,12 @@ pub(crate) struct Invalidations {
     cache_tags: HashSet<String>,
     entity_types: HashSet<String>,
     subgraph_name: String,
+}
+
+impl Invalidations {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.cache_tags.is_empty() && self.entity_types.is_empty()
+    }
 }
 
 pub(crate) async fn automatic_invalidation(

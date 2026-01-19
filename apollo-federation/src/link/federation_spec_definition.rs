@@ -64,6 +64,7 @@ pub(crate) const FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC: Name = name!("FieldSet")
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
 pub(crate) const FEDERATION_FORMAT_ARGUMENT_NAME: Name = name!("format");
 pub(crate) const FEDERATION_CACHE_TAG_ARGUMENT_NAME: Name = name!("cacheTag");
+pub(crate) const FEDERATION_ASYNC_ARGUMENT_NAME: Name = name!("async");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
 pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
@@ -123,6 +124,8 @@ pub(crate) struct CacheTagDirectiveArguments<'doc> {
 pub(crate) struct CacheInvalidationDirectiveArguments<'doc> {
     pub(crate) cache_tag: Option<&'doc str>,
     pub(crate) r#type: Option<&'doc str>,
+    #[allow(dead_code)]
+    pub(crate) r#async: Option<bool>,
 }
 
 #[derive(Clone)]
@@ -710,6 +713,10 @@ impl FederationSpecDefinition {
             r#type: directive_optional_string_argument(
                 application,
                 &FEDERATION_TYPE_ARGUMENT_NAME,
+            )?,
+            r#async: directive_optional_boolean_argument(
+                application,
+                &FEDERATION_ASYNC_ARGUMENT_NAME,
             )?,
         })
     }
