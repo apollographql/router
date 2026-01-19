@@ -544,7 +544,7 @@ mod test_for_harness {
         let f2 = service.call_default();
 
         let (r1, r2) = join!(f1, f2);
-        let results = vec![r1, r2];
+        let results = [r1, r2];
         // One of the calls should succeed, the other should fail due to concurrency limit
         assert!(results.iter().any(|r| r.is_ok()));
         assert!(results.iter().any(|r| r.is_err()));

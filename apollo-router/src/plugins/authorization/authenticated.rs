@@ -6,8 +6,10 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
+use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
+use apollo_federation::link::spec::Identity;
 use tower::BoxError;
 
 use crate::json_ext::Path;
@@ -18,8 +20,7 @@ use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
 
-pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
-pub(crate) const AUTHENTICATED_SPEC_BASE_URL: &str = "https://specs.apollo.dev/authenticated";
+pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: Name = name!("authenticated");
 pub(crate) const AUTHENTICATED_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 pub(crate) struct AuthenticatedCheckVisitor<'a> {
@@ -43,9 +44,9 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
             found: false,
             authenticated_directive_name: Schema::directive_name(
                 schema,
-                AUTHENTICATED_SPEC_BASE_URL,
+                &Identity::authenticated_identity(),
                 AUTHENTICATED_SPEC_VERSION_RANGE,
-                AUTHENTICATED_DIRECTIVE_NAME,
+                &AUTHENTICATED_DIRECTIVE_NAME,
             )?,
         })
     }
@@ -204,9 +205,9 @@ impl<'a> AuthenticatedVisitor<'a> {
             current_path: Path::default(),
             authenticated_directive_name: Schema::directive_name(
                 schema,
-                AUTHENTICATED_SPEC_BASE_URL,
+                &Identity::authenticated_identity(),
                 AUTHENTICATED_SPEC_VERSION_RANGE,
-                AUTHENTICATED_DIRECTIVE_NAME,
+                &AUTHENTICATED_DIRECTIVE_NAME,
             )?,
         })
     }
@@ -232,7 +233,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             .flatten()
     }
 
-    fn implementors_with_different_requirements(
+    fn implementors_with_authenticated_requirements(
         &self,
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
@@ -253,33 +254,25 @@ impl<'a> AuthenticatedVisitor<'a> {
 
         let type_name = field_def.ty.inner_named_type();
         if let Some(type_definition) = self.schema.types.get(type_name)
-            && self.implementors_with_different_type_requirements(type_name, type_definition)
+            && self.implementors_with_authenticated_type_requirements(type_name, type_definition)
         {
             return true;
         }
         false
     }
 
-    fn implementors_with_different_type_requirements(
+    fn implementors_with_authenticated_type_requirements(
         &self,
         type_name: &str,
         t: &schema::ExtendedType,
     ) -> bool {
         if t.is_interface() {
-            let mut is_authenticated: Option<bool> = None;
-
             for ty in self
                 .implementors(type_name)
                 .filter_map(|ty| self.schema.types.get(ty))
             {
-                let ty_is_authenticated = ty.directives().has(&self.authenticated_directive_name);
-                match is_authenticated {
-                    None => is_authenticated = Some(ty_is_authenticated),
-                    Some(other_ty_is_authenticated) => {
-                        if ty_is_authenticated != other_ty_is_authenticated {
-                            return true;
-                        }
-                    }
+                if self.is_type_authenticated(ty) {
+                    return true;
                 }
             }
         }
@@ -287,7 +280,7 @@ impl<'a> AuthenticatedVisitor<'a> {
         false
     }
 
-    fn implementors_with_different_field_requirements(
+    fn implementors_with_authenticated_field_requirements(
         &self,
         parent_type: &str,
         field: &ast::Field,
@@ -295,22 +288,11 @@ impl<'a> AuthenticatedVisitor<'a> {
         if let Some(t) = self.schema.types.get(parent_type)
             && t.is_interface()
         {
-            let mut is_authenticated: Option<bool> = None;
-
             for ty in self.implementors(parent_type) {
-                if let Ok(f) = self.schema.type_field(ty, &field.name) {
-                    let field_is_authenticated =
-                        f.directives.has(&self.authenticated_directive_name);
-                    match is_authenticated {
-                        Some(other) => {
-                            if field_is_authenticated != other {
-                                return true;
-                            }
-                        }
-                        _ => {
-                            is_authenticated = Some(field_is_authenticated);
-                        }
-                    }
+                if let Ok(f) = self.schema.type_field(ty, &field.name)
+                    && self.is_field_authenticated(f)
+                {
+                    return true;
                 }
             }
         }
@@ -359,15 +341,15 @@ impl transform::Visitor for AuthenticatedVisitor<'_> {
             self.current_path.push(PathElement::Flatten(None));
         }
 
-        let implementors_with_different_requirements =
-            self.implementors_with_different_requirements(field_def, node);
+        let implementors_with_authenticated_requirements =
+            self.implementors_with_authenticated_requirements(field_def, node);
 
-        let implementors_with_different_field_requirements =
-            self.implementors_with_different_field_requirements(parent_type, node);
+        let implementors_with_authenticated_field_requirements =
+            self.implementors_with_authenticated_field_requirements(parent_type, node);
 
         let res = if field_requires_authentication
-            || implementors_with_different_requirements
-            || implementors_with_different_field_requirements
+            || implementors_with_authenticated_requirements
+            || implementors_with_authenticated_field_requirements
         {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_authentication = true;
@@ -1123,7 +1105,11 @@ mod tests {
     schema
       @link(url: "https://specs.apollo.dev/link/v1.0")
       @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-      @link(url: "https://specs.apollo.dev/authenticated/v0.1", as: "auth", for: SECURITY)
+      @link(
+        url: "https://specs.apollo.dev/authenticated/v0.1"
+        import: [{ name: "@authenticated", as: "@auth" }]
+        for: SECURITY
+      )
     {
       query: Query
       mutation: Mutation
@@ -1995,5 +1981,200 @@ mod tests {
         insta::assert_json_snapshot!(first_response);
 
         assert!(response.next_response().await.is_none());
+    }
+
+    #[test]
+    fn implementations_with_same_auth() {
+        static SCHEMA: &str = r#"
+      schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+        {
+        query: Query
+      }
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+      directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+      scalar link__Import
+      enum link__Purpose {
+        """
+        `SECURITY` features provide metadata necessary to securely resolve fields.
+        """
+        SECURITY
+
+        """
+        `EXECUTION` features provide metadata necessary for operation execution.
+        """
+        EXECUTION
+      }
+      type Query {
+        test: String
+        intf(id: ID!): I
+      }
+
+      interface I {
+        id: ID!
+        name: String
+      }
+
+      type T implements I @authenticated {
+        id: ID!
+        name: String
+      }
+
+      type U implements I @authenticated {
+        id: ID!
+        name: String
+      }
+      "#;
+
+        static QUERY: &str = r#"
+          query Anonymous {
+            test
+            intf(id: "1") {
+              id
+              name
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY);
+
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn implementations_with_different_field_auth() {
+        static SCHEMA: &str = r#"
+      schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+        {
+        query: Query
+      }
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+      directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+      scalar link__Import
+      enum link__Purpose {
+        """
+        `SECURITY` features provide metadata necessary to securely resolve fields.
+        """
+        SECURITY
+
+        """
+        `EXECUTION` features provide metadata necessary for operation execution.
+        """
+        EXECUTION
+      }
+      type Query {
+        test: String
+        intf(id: ID!): I
+      }
+
+      interface I {
+        id: ID!
+        name: String
+      }
+
+      type T implements I  {
+        id: ID! @authenticated
+        name: String
+      }
+
+      type U implements I {
+        id: ID!
+        name: String
+      }
+      "#;
+
+        static QUERY: &str = r#"
+          query Anonymous {
+            test
+            intf(id: "1") {
+              id
+              name
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY);
+
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn implementations_with_different_type_auth() {
+        static SCHEMA: &str = r#"
+      schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+        {
+        query: Query
+      }
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+      directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+      scalar link__Import
+      enum link__Purpose {
+        """
+        `SECURITY` features provide metadata necessary to securely resolve fields.
+        """
+        SECURITY
+
+        """
+        `EXECUTION` features provide metadata necessary for operation execution.
+        """
+        EXECUTION
+      }
+      type Query {
+        test: String
+        intf(id: ID!): I
+      }
+
+      interface I {
+        id: ID!
+        name: String
+      }
+
+      type T implements I @authenticated {
+        id: ID!
+        name: String
+      }
+
+      type U implements I {
+        id: ID!
+        name: String
+      }
+      "#;
+
+        static QUERY: &str = r#"
+          query Anonymous {
+            test
+            intf(id: "1") {
+              id
+              name
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY);
+
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 }

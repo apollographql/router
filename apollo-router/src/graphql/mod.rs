@@ -261,7 +261,7 @@ impl Error {
         self.apollo_id
     }
 
-    /// Returns a duplicate of the error where [`self.apollo_id`] is now the given ID
+    /// Returns a duplicate of the error where [`self.apollo_id`][Self::apollo_id] is now the given ID
     pub fn with_apollo_id(&self, id: Uuid) -> Self {
         let mut new_err = self.clone();
         new_err.apollo_id = id;

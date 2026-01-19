@@ -143,6 +143,8 @@ pub enum CompositionError {
         error: SingleFederationError,
         locations: Locations,
     },
+    #[error("{error}")]
+    MergeError { error: SingleFederationError },
     #[error("{message}")]
     ContextualArgumentNotContextualInAllSubgraphs {
         message: String,
@@ -268,6 +270,7 @@ impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::SubgraphError { error, .. } => error.code(),
+            Self::MergeError { error, .. } => error.code(),
             Self::ContextualArgumentNotContextualInAllSubgraphs { .. } => {
                 ErrorCode::ContextualArgumentNotContextualInAllSubgraphs
             }
@@ -458,6 +461,7 @@ impl CompositionError {
             },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
+            | Self::MergeError { .. }
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
             | Self::UnsupportedSpreadDirective { .. }

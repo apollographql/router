@@ -179,6 +179,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Explicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -425,6 +430,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Explicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -620,6 +630,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Explicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -788,6 +803,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Implicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -1008,6 +1028,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Implicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -1204,6 +1229,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Implicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -1396,6 +1426,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Implicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
@@ -1611,6 +1646,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
             Implicit,
         ),
         spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "T",
+            },
+        },
         request_headers: {},
         response_headers: {},
         request_variable_keys: {

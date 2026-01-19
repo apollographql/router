@@ -9,7 +9,6 @@ use std::time::Instant;
 
 use ::tracing::Span;
 use ::tracing::info_span;
-use axum_extra::headers::HeaderName;
 use config_new::Selectors;
 use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
@@ -22,6 +21,7 @@ use futures::future::BoxFuture;
 use futures::future::ready;
 use futures::stream::once;
 use http::HeaderMap;
+use http::HeaderName;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header;
@@ -279,6 +279,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
 struct EnabledFeatures {
     distributed_apq_cache: bool,
     entity_cache: bool,
+    response_cache: bool,
 }
 
 impl EnabledFeatures {
@@ -287,6 +288,7 @@ impl EnabledFeatures {
         [
             ("distributed_apq_cache", self.distributed_apq_cache),
             ("entity_cache", self.entity_cache),
+            ("response_cache", self.response_cache),
         ]
         .iter()
         .filter(|&&(_, enabled)| enabled)
@@ -384,6 +386,7 @@ impl PluginPrivate for Telemetry {
             .clone();
 
         ServiceBuilder::new()
+            .layer(metrics::allocation::AllocationMetricsLayer::new())
             .map_response(move |response: router::Response| {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();
@@ -453,6 +456,27 @@ impl PluginPrivate for Telemetry {
 
                     if let Some(version) = client_version {
                         let _ = request.context.insert(CLIENT_VERSION, version.to_owned());
+                    }
+
+                    let library_name = request
+                        .router_request
+                        .headers()
+                        .get(&config_request.apollo.library_name_header)
+                        .and_then(|h| h.to_str().ok());
+                    let library_version = request
+                        .router_request
+                        .headers()
+                        .get(&config_request.apollo.library_version_header)
+                        .and_then(|h| h.to_str().ok());
+
+                    if let Some(name) = library_name {
+                        let _ = request.context.insert(CLIENT_LIBRARY_NAME, name.to_owned());
+                    }
+
+                    if let Some(version) = library_version {
+                        let _ = request
+                            .context
+                            .insert(CLIENT_LIBRARY_VERSION, version.to_owned());
                     }
 
                     let mut custom_attributes = config_request
@@ -1736,6 +1760,12 @@ impl Telemetry {
             entity_cache: full_config["preview_entity_cache"]["enabled"]
                 .as_bool()
                 .unwrap_or(false),
+            // Response cache's top-level enabled flag defaults to false. If the top-level flag is
+            // enabled, the feature is considered enabled regardless of the subgraph-level enabled
+            // settings.
+            response_cache: full_config["response_cache"]["enabled"]
+                .as_bool()
+                .unwrap_or(false),
         }
     }
 }
@@ -1942,8 +1972,8 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
-    use axum_extra::headers::HeaderName;
     use http::HeaderMap;
+    use http::HeaderName;
     use http::HeaderValue;
     use http::StatusCode;
     use http::header::CONTENT_TYPE;
@@ -2119,7 +2149,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_enabled_features() {
-        // Explicitly enabled
+        // Explicitly enabled except response caching because entity caching and response caching are mutually exclusive
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_all_features_enabled.router.yaml"
         ))
@@ -2132,6 +2162,21 @@ mod tests {
         assert!(
             features.entity_cache,
             "Telemetry plugin should consider entity cache feature enabled when explicitly enabled"
+        );
+
+        // Explicitly enabled
+        let plugin = create_plugin_with_config(include_str!(
+            "testdata/full_config_all_features_enabled_response_cache.router.yaml"
+        ))
+        .await;
+        let features = enabled_features(plugin.as_ref());
+        assert!(
+            features.response_cache,
+            "Telemetry plugin should consider response cache feature enabled when explicitly enabled"
+        );
+        assert!(
+            features.distributed_apq_cache,
+            "Telemetry plugin should consider apq feature enabled when explicitly enabled"
         );
 
         // Explicitly disabled
@@ -2148,6 +2193,10 @@ mod tests {
             !features.entity_cache,
             "Telemetry plugin should consider entity cache feature disabled when explicitly disabled"
         );
+        assert!(
+            !features.response_cache,
+            "Telemetry plugin should consider response cache feature disabled when explicitly disabled"
+        );
 
         // Default Values
         let plugin = create_plugin_with_config(include_str!(
@@ -2162,6 +2211,10 @@ mod tests {
         assert!(
             !features.entity_cache,
             "Telemetry plugin should consider entity cache feature disabled when all values are defaulted"
+        );
+        assert!(
+            !features.response_cache,
+            "Telemetry plugin should consider response cache feature disabled when all values are defaulted"
         );
 
         // APQ enabled when default enabled with redis config defined

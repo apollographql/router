@@ -226,6 +226,22 @@ expression: "&schema"
           ],
           "description": "Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses."
         },
+        "library_name_header": {
+          "default": "apollographql-library-name",
+          "description": "The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "library_version_header": {
+          "default": "apollographql-library-version",
+          "description": "The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "metrics": {
           "allOf": [
             {
@@ -782,6 +798,25 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "CacheControlSelector": {
+      "oneOf": [
+        {
+          "const": "scope",
+          "description": "Returns the scope, either `public` or `private`",
+          "type": "string"
+        },
+        {
+          "const": "no_store",
+          "description": "Boolean to know the value of no-store",
+          "type": "string"
+        },
+        {
+          "const": "max_age",
+          "description": "Value of s-maxage or max-age in cache-control",
+          "type": "string"
+        }
+      ]
     },
     "CacheKind": {
       "enum": [
@@ -1910,6 +1945,10 @@ expression: "&schema"
       "type": "object"
     },
     "Config7": {
+      "description": "Configuration for the progressive override plugin",
+      "type": "object"
+    },
+    "Config8": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -1955,7 +1994,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config8": {
+    "Config9": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
@@ -2052,14 +2091,6 @@ expression: "&schema"
           "default": null,
           "description": "TLS client configuration"
         },
-        "ttl": {
-          "default": null,
-          "description": "TTL for entries",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "urls": {
           "description": "List of URLs to the Redis cluster",
           "items": {
@@ -2079,10 +2110,6 @@ expression: "&schema"
       "required": [
         "urls"
       ],
-      "type": "object"
-    },
-    "Config9": {
-      "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
     "ConnectorConfiguration": {
@@ -3678,7 +3705,7 @@ expression: "&schema"
           ],
           "description": "A counter of times we have a cache hit or cache miss (deprecated)"
         },
-        "apollo.router.operations.response.cache": {
+        "apollo.router.response.cache": {
           "allOf": [
             {
               "$ref": "#/definitions/StandardInstrumentExtendedCacheAttributesWithSubgraphSelector"
@@ -6346,6 +6373,14 @@ expression: "&schema"
             "null"
           ]
         },
+        "http2_max_headers_list_bytes": {
+          "default": null,
+          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "http_max_request_bytes": {
           "default": 2000000,
           "description": "Limit the size of incoming HTTP requests read from the network,\nto protect against running out of memory. Default: 2000000 (2 MB)",
@@ -7347,9 +7382,12 @@ expression: "&schema"
           "type": "boolean"
         },
         "datadog": {
-          "default": false,
+          "default": null,
           "description": "Propagate Datadog",
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "jaeger": {
           "default": false,
@@ -8312,6 +8350,20 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "The size hint of the body.\nThis is used as the Content-Length header has not yet been populated\nwhen selectors are evaluated",
+          "properties": {
+            "response_size_hint": {
+              "description": "Extract response size hint in bytes",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "response_size_hint"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Router overhead duration (time not spent in subgraph requests)",
           "properties": {
             "router_overhead": {
@@ -8544,6 +8596,10 @@ expression: "&schema"
             "header_read_timeout": {
               "nanos": 0,
               "secs": 10
+            },
+            "tls_handshake_timeout": {
+              "nanos": 0,
+              "secs": 10
             }
           },
           "description": "The server http configuration"
@@ -8561,6 +8617,14 @@ expression: "&schema"
             "secs": 10
           },
           "description": "Header read timeout in human-readable format; defaults to 10s",
+          "type": "string"
+        },
+        "tls_handshake_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "TLS handshake timeout in human-readable format; defaults to 10s",
           "type": "string"
         }
       },
@@ -9209,7 +9273,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Config8"
+              "$ref": "#/definitions/Config9"
             },
             {
               "type": "null"
@@ -9799,6 +9863,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "subgraph_request_body_size": {
+              "description": "The subgraph request body size.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_request_body_size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "default": {
               "description": "Optional default value.",
               "type": [
@@ -10190,6 +10267,23 @@ expression: "&schema"
           },
           "required": [
             "response_cache_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "response_cache_control": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CacheControlSelector"
+                }
+              ],
+              "description": "Select data you want from the computed cache control from response caching"
+            }
+          },
+          "required": [
+            "response_cache_control"
           ],
           "type": "object"
         }
@@ -11881,8 +11975,8 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "^preview_response_cache$": {
-      "$ref": "#/definitions/Config7"
+    "^response_cache$": {
+      "$ref": "#/definitions/Config8"
     }
   },
   "properties": {
@@ -12078,7 +12172,7 @@ expression: "&schema"
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config9"
+      "$ref": "#/definitions/Config7"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"
@@ -12103,6 +12197,10 @@ expression: "&schema"
       "default": {
         "http": {
           "header_read_timeout": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "tls_handshake_timeout": {
             "nanos": 0,
             "secs": 10
           }

@@ -14,7 +14,8 @@ use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use apollo_federation::bail;
 use apollo_federation::composition;
-use apollo_federation::composition::validate_satisfiability;
+use apollo_federation::composition::compose_with_connectors;
+use apollo_federation::composition::validate_satisfiability_with_connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::error::CompositionError;
@@ -29,11 +30,32 @@ use apollo_federation::subgraph::SubgraphError;
 use apollo_federation::subgraph::typestate;
 use apollo_federation::supergraph as new_supergraph;
 use clap::Parser;
+use serde::Deserialize;
 use tracing_subscriber::prelude::*;
 
 mod bench;
 use bench::BenchOutput;
 use bench::run_bench;
+
+/// Rover supergraph config file format
+#[derive(Debug, Deserialize)]
+struct SupergraphConfig {
+    #[allow(dead_code)]
+    federation_version: Option<String>,
+    subgraphs: std::collections::HashMap<String, SubgraphConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubgraphConfig {
+    routing_url: String,
+    schema: SchemaConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct SchemaConfig {
+    sdl: Option<String>,
+    file: Option<PathBuf>,
+}
 
 #[derive(Parser)]
 struct QueryPlannerArgs {
@@ -101,8 +123,11 @@ enum Command {
     },
     /// Compose a supergraph schema from multiple subgraph schemas
     Compose {
-        /// Path(s) to subgraph schemas.
+        /// Path(s) to subgraph schemas or a Rover supergraph config YAML file.
         schemas: Vec<PathBuf>,
+        /// Path to a Rover supergraph config YAML file.
+        #[arg(long, conflicts_with = "schemas")]
+        config: Option<PathBuf>,
     },
     /// Expand and validate a subgraph schema and print the result
     Subgraph {
@@ -196,7 +221,7 @@ fn main() -> ExitCode {
         Command::Validate { schemas } => cmd_validate(&schemas),
         Command::Subgraph { subgraph_schema } => cmd_subgraph(&subgraph_schema),
         Command::Satisfiability { supergraph_schema } => cmd_satisfiability(&supergraph_schema),
-        Command::Compose { schemas } => cmd_compose(&schemas),
+        Command::Compose { schemas, config } => cmd_compose(&schemas, config.as_ref()),
         Command::Extract {
             supergraph_schema,
             destination_dir,
@@ -272,7 +297,73 @@ fn compose_files_inner(
         return Err(composition_errors);
     }
 
-    composition::compose(subgraphs)
+    compose_with_connectors(subgraphs)
+}
+
+/// Compose a supergraph from a Rover config YAML file.
+fn compose_from_config_inner(
+    config_path: &Path,
+) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
+    let config_str = read_input(config_path);
+    let config: SupergraphConfig = serde_yaml::from_str(&config_str).map_err(|e| {
+        vec![CompositionError::MergeError {
+            error: SingleFederationError::Internal {
+                message: format!("Failed to parse YAML config: {}", e),
+            },
+        }]
+    })?;
+
+    let mut subgraphs = Vec::new();
+    let mut errors = Vec::new();
+
+    let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+
+    for (name, subgraph_config) in config.subgraphs {
+        let doc_str = if let Some(sdl) = subgraph_config.schema.sdl {
+            sdl
+        } else if let Some(file_path) = subgraph_config.schema.file {
+            let full_path = if file_path.is_absolute() {
+                file_path
+            } else {
+                config_dir.join(file_path)
+            };
+            // Follow the same pattern as compose_files_inner - use unwrap for file I/O errors
+            std::fs::read_to_string(&full_path).unwrap_or_else(|e| {
+                panic!("Failed to read schema file for subgraph '{}': {}", name, e)
+            })
+        } else {
+            // Return early with a composition error for missing schema specification
+            return Err(vec![CompositionError::MergeError {
+                error: SingleFederationError::Internal {
+                    message: format!(
+                        "Subgraph '{}' must specify either 'sdl' or 'file' in schema",
+                        name
+                    ),
+                },
+            }]);
+        };
+
+        let result = typestate::Subgraph::parse(&name, &subgraph_config.routing_url, &doc_str);
+        match result {
+            Ok(subgraph) => {
+                subgraphs.push(subgraph);
+            }
+            Err(err) => {
+                errors.push(err);
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        // Subgraph errors
+        let mut composition_errors = Vec::new();
+        for error in errors {
+            composition_errors.extend(error.to_composition_errors());
+        }
+        return Err(composition_errors);
+    }
+
+    compose_with_connectors(subgraphs)
 }
 
 /// Compose a supergraph from multiple subgraph files.
@@ -280,6 +371,21 @@ fn compose_files(
     file_paths: &[PathBuf],
 ) -> Result<composition::Supergraph<composition::Satisfiable>, AnyError> {
     match compose_files_inner(file_paths) {
+        Ok(supergraph) => Ok(supergraph),
+        Err(errors) => {
+            // Print composition errors
+            print_composition_errors(&errors);
+            let num_errors = errors.len();
+            Err(anyhow!("Error: found {num_errors} composition error(s)."))
+        }
+    }
+}
+
+/// Compose a supergraph from a Rover config YAML file.
+fn compose_from_config(
+    config_path: &Path,
+) -> Result<composition::Supergraph<composition::Satisfiable>, AnyError> {
+    match compose_from_config_inner(config_path) {
         Ok(supergraph) => Ok(supergraph),
         Err(errors) => {
             // Print composition errors
@@ -477,12 +583,44 @@ fn print_locations(locations: &[Range<LineColumn>]) {
 fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
     let doc_str = read_input(file_path);
     let supergraph = new_supergraph::Supergraph::parse(&doc_str).unwrap();
-    _ = validate_satisfiability(supergraph).expect("Supergraph should be satisfiable");
-    Ok(())
+    match validate_satisfiability_with_connectors(supergraph) {
+        Ok(_) => {
+            println!("[SUCCESS]");
+            Ok(())
+        }
+        Err(errors) => {
+            // Print composition errors
+            print_composition_errors(&errors);
+            let num_errors = errors.len();
+            Err(anyhow!(
+                "Error: found {num_errors} satisfiability error(s)."
+            ))
+        }
+    }
 }
 
-fn cmd_compose(file_paths: &[PathBuf]) -> Result<(), AnyError> {
-    let supergraph = compose_files(file_paths)?;
+fn cmd_compose(file_paths: &[PathBuf], config_path: Option<&PathBuf>) -> Result<(), AnyError> {
+    let config_path = if let Some((first, rest)) = file_paths.split_first()
+        && rest.is_empty()
+        && (first.extension().is_some_and(|ext| ext == "yaml")
+            || first == std::path::Path::new("-"))
+    {
+        assert!(
+            config_path.is_none(),
+            "Error: cannot provide both --config and a single YAML schema file."
+        );
+        Some(first)
+    } else {
+        config_path
+    };
+    let supergraph = if let Some(config) = config_path {
+        compose_from_config(config)?
+    } else if !file_paths.is_empty() {
+        compose_files(file_paths)?
+    } else {
+        bail!("Error: must provide either schema files or --config");
+    };
+
     println!("{}", supergraph.schema().schema());
     let hints = supergraph.hints();
     if !hints.is_empty() {

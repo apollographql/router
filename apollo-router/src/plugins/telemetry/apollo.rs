@@ -84,6 +84,19 @@ pub(crate) struct Config {
     #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_version_header: HeaderName,
 
+    /// The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.
+    #[schemars(with = "Option<String>", default = "library_name_header_default_str")]
+    #[serde(deserialize_with = "deserialize_header_name")]
+    pub(crate) library_name_header: HeaderName,
+
+    /// The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.
+    #[schemars(
+        with = "Option<String>",
+        default = "library_version_header_default_str"
+    )]
+    #[serde(deserialize_with = "deserialize_header_name")]
+    pub(crate) library_version_header: HeaderName,
+
     /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
     pub(crate) buffer_size: NonZeroUsize,
 
@@ -355,6 +368,22 @@ const fn client_version_header_default() -> HeaderName {
     HeaderName::from_static(client_version_header_default_str())
 }
 
+const fn library_name_header_default_str() -> &'static str {
+    "apollographql-library-name"
+}
+
+const fn library_name_header_default() -> HeaderName {
+    HeaderName::from_static(library_name_header_default_str())
+}
+
+const fn library_version_header_default_str() -> &'static str {
+    "apollographql-library-version"
+}
+
+const fn library_version_header_default() -> HeaderName {
+    HeaderName::from_static(library_version_header_default_str())
+}
+
 pub(crate) const fn default_buffer_size() -> NonZeroUsize {
     unsafe { NonZeroUsize::new_unchecked(10000) }
 }
@@ -370,6 +399,8 @@ impl Default for Config {
             apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),
             client_version_header: client_version_header_default(),
+            library_name_header: library_name_header_default(),
+            library_version_header: library_version_header_default(),
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: default_buffer_size(),
             field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
@@ -401,8 +432,10 @@ schemar_fn!(
 /// Forward headers
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[derive(Default)]
 pub(crate) enum ForwardHeaders {
     /// Don't send any headers
+    #[default]
     None,
 
     /// Send all headers
@@ -417,12 +450,6 @@ pub(crate) enum ForwardHeaders {
     #[schemars(schema_with = "forward_headers_except")]
     #[serde(deserialize_with = "deserialize_vec_header_name")]
     Except(Vec<HeaderName>),
-}
-
-impl Default for ForwardHeaders {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 schemar_fn!(
@@ -440,8 +467,10 @@ schemar_fn!(
 /// Forward GraphQL variables
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[derive(Default)]
 pub(crate) enum ForwardValues {
     /// Dont send any variables
+    #[default]
     None,
     /// Send all variables
     All,
@@ -451,12 +480,6 @@ pub(crate) enum ForwardValues {
     /// Send all variables except those specified
     #[schemars(schema_with = "forward_variables_except")]
     Except(Vec<String>),
-}
-
-impl Default for ForwardValues {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Serialize)]

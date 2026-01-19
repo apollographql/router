@@ -360,7 +360,7 @@ pub trait Plugin: Send + Sync + 'static {
     /// The configuration for this plugin.
     /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
     ///
-    /// If a plugin is [registered][register_plugin()!],
+    /// If a plugin is [registered][crate::register_plugin],
     /// it can be enabled through the `plugins` section of Router YAML configuration
     /// by having a sub-section named after the plugin.
     /// The contents of this section are deserialized into this `Config` type
@@ -434,7 +434,7 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// The configuration for this plugin.
     /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
     ///
-    /// If a plugin is [registered][register_plugin()!],
+    /// If a plugin is [registered][crate::register_plugin],
     /// it can be enabled through the `plugins` section of Router YAML configuration
     /// by having a sub-section named after the plugin.
     /// The contents of this section are deserialized into this `Config` type
@@ -563,7 +563,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// The configuration for this plugin.
     /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
     ///
-    /// If a plugin is [registered][register_plugin()!],
+    /// If a plugin is [registered][crate::register_plugin],
     /// it can be enabled through the `plugins` section of Router YAML configuration
     /// by having a sub-section named after the plugin.
     /// The contents of this section are deserialized into this `Config` type

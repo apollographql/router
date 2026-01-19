@@ -2,12 +2,16 @@ mod metrics;
 
 use std::future::Future;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
+use tokio::task_local;
 use tracing::Instrument;
 use tracing::Span;
 use tracing::info_span;
@@ -52,6 +56,7 @@ fn thread_pool_size() -> usize {
 
 pub(crate) struct JobStatus<'a, T> {
     result_sender: &'a oneshot::Sender<std::thread::Result<T>>,
+    cancelled: Option<Arc<AtomicBool>>,
 }
 
 impl<T> JobStatus<'_, T> {
@@ -64,7 +69,13 @@ impl<T> JobStatus<'_, T> {
     /// In this case, a long-running job should try to cancel itself
     /// to avoid needless resource consumption.
     pub(crate) fn check_for_cooperative_cancellation(&self) -> ControlFlow<()> {
-        if self.result_sender.is_closed() {
+        if self.result_sender.is_closed()
+            || self
+                .cancelled
+                .as_ref()
+                .map(|c| c.load(Ordering::Relaxed))
+                .unwrap_or(false)
+        {
             ControlFlow::Break(())
         } else {
             ControlFlow::Continue(())
@@ -110,7 +121,7 @@ impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
     }
 }
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::IntoStaticStr)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum ComputeJobType {
     QueryParsing,
@@ -145,6 +156,7 @@ pub(crate) struct Job {
     ty: ComputeJobType,
     queue_start: Instant,
     job_fn: Box<dyn FnOnce() + Send + 'static>,
+    allocation_stats: Option<std::sync::Arc<crate::allocator::AllocationStats>>,
 }
 
 pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
@@ -182,10 +194,33 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                                 job.type = job.ty
                             );
                             let job_start = Instant::now();
-                            (job.job_fn)();
+
+                            // Execute job with memory tracking if stats are available
+                            if let Some(stats) = job.allocation_stats {
+                                // Create a child context with the job type as the name
+                                let job_name: &'static str = job.ty.into();
+                                crate::allocator::with_parented_memory_tracking(
+                                    job_name,
+                                    stats,
+                                    || {
+                                        (job.job_fn)();
+                                        #[cfg(all(
+                                            feature = "global-allocator",
+                                            not(feature = "dhat-heap"),
+                                            unix
+                                        ))]
+                                        if let Some(allocation_stats) = crate::allocator::current()
+                                        {
+                                            record_metrics(&allocation_stats);
+                                        }
+                                    },
+                                );
+                            } else {
+                                (job.job_fn)();
+                            }
                             observe_compute_duration(job.ty, job_start.elapsed());
                         })
-                    })
+                    });
                 }
             });
         }
@@ -196,6 +231,60 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
         );
         AgeingPriorityQueue::bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
     })
+}
+
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+fn record_metrics(stats: &crate::allocator::AllocationStats) {
+    let bytes_allocated = stats.bytes_allocated() as u64;
+    let bytes_deallocated = stats.bytes_deallocated() as u64;
+    let bytes_zeroed = stats.bytes_zeroed() as u64;
+    let bytes_reallocated = stats.bytes_reallocated() as u64;
+    let context_name = stats.name();
+
+    // Record total bytes allocated
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_allocated,
+        allocation.type = "allocated",
+        context = context_name
+    );
+
+    // Record bytes deallocated
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_deallocated,
+        allocation.type = "deallocated",
+        context = context_name
+    );
+
+    // Record bytes zeroed
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_zeroed,
+        allocation.type = "zeroed",
+        context = context_name
+    );
+
+    // Record bytes reallocated
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_reallocated,
+        allocation.type = "reallocated",
+        context = context_name
+    );
+}
+
+task_local! {
+    /// This can be set to true from a parent task to cancel a child compute job.
+    pub(crate) static CANCEL_JOB: Option<Arc<AtomicBool>>;
 }
 
 /// Returns a future that resolves to a `Result` that is `Ok` if `f` returned or `Err` if it panicked.
@@ -216,8 +305,14 @@ where
     span.in_scope(|| {
         let mut job_watcher = JobWatcher::new(compute_job_type);
         let (tx, rx) = oneshot::channel();
+        // Since the compute job runs in a separate thread, we retrieve the cancellation flag task local storage
+        // and pass it into the status.
+        let cancelled = CANCEL_JOB.try_with(|b| b.clone()).ok().flatten();
         let wrapped_job_fn = Box::new(move || {
-            let status = JobStatus { result_sender: &tx };
+            let status = JobStatus {
+                result_sender: &tx,
+                cancelled,
+            };
             // `AssertUnwindSafe` here is correct because this `catch_unwind`
             // is paired with `resume_unwind` below, so the overall effect on unwind safety
             // is the same as if the caller had executed `job` directly without a thread pool.
@@ -238,6 +333,7 @@ where
             ty: compute_job_type,
             job_fn: wrapped_job_fn,
             queue_start: Instant::now(),
+            allocation_stats: crate::allocator::current(),
         };
 
         queue
@@ -415,6 +511,34 @@ mod tests {
         match side_channel_receiver.await {
             Ok(Ok(())) => {}
             e => panic!("job did not cancel as expected: {e:?}"),
+        };
+    }
+
+    #[tokio::test]
+    async fn test_cancel_with_task_local() {
+        let (side_channel_sender, side_channel_receiver) = oneshot::channel();
+
+        let queue_receiver = crate::compute_job::CANCEL_JOB.scope(
+            Some(Arc::new(AtomicBool::new(true))),
+            async move {
+                execute(ComputeJobType::Introspection, move |status| {
+                    // We expect the first iteration to succeed,
+                    // but let’s add lots of margin for CI machines with super-busy CPU cores
+                    for _ in 0..1_000 {
+                        std::thread::sleep(Duration::from_millis(10));
+                        if status.check_for_cooperative_cancellation().is_break() {
+                            side_channel_sender.send(Ok(())).unwrap();
+                            return;
+                        }
+                    }
+                    side_channel_sender.send(Err(())).unwrap();
+                })
+            },
+        );
+
+        match tokio::join!(side_channel_receiver, queue_receiver) {
+            (Ok(Ok(())), _) => {}
+            (e, _) => panic!("job did not cancel as expected: {e:?}"),
         };
     }
 }

@@ -1049,3 +1049,121 @@ async fn test_subgraph_error_logging_with_body() -> Result<(), BoxError> {
         .with_subscriber(assert_snapshot_subscriber!())
         .await
 }
+
+// Helper for calling property mutation test functions
+async fn call_property_mutation_test(
+    fn_name: &str,
+    arg: impl Sync + Send + 'static,
+) -> Result<(), Box<rhai::EvalAltResult>> {
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(
+                r#"{"scripts":"tests/fixtures", "main":"test_property_mutations.rhai"}"#,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let it: &dyn std::any::Any = dyn_plugin.as_any();
+    let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
+
+    let scope = rhai_instance.scope.clone();
+    let mut guard = scope.lock();
+
+    let wrapped_arg = Arc::new(Mutex::new(Some(arg)));
+
+    rhai_instance
+        .engine
+        .call_fn(&mut guard, &rhai_instance.ast, fn_name, (wrapped_arg,))
+}
+
+#[tokio::test]
+async fn test_supergraph_header_mutation() {
+    let request = SupergraphRequest::fake_builder().build().unwrap();
+    call_property_mutation_test("test_supergraph_header_mutation", request)
+        .await
+        .expect("test failed");
+}
+
+#[tokio::test]
+async fn test_supergraph_body_mutation() {
+    let request = SupergraphRequest::fake_builder().build().unwrap();
+    call_property_mutation_test("test_supergraph_body_mutation", request)
+        .await
+        .expect("test failed");
+}
+
+#[tokio::test]
+async fn test_execution_header_mutation() {
+    let request = ExecutionRequest::fake_builder().build();
+    call_property_mutation_test("test_execution_header_mutation", request)
+        .await
+        .expect("test failed");
+}
+
+#[tokio::test]
+async fn test_router_header_mutation() {
+    let request = RhaiRouterFirstRequest::default();
+    call_property_mutation_test("test_router_header_mutation", request)
+        .await
+        .expect("test failed");
+}
+
+#[tokio::test]
+async fn test_subgraph_read_only_headers() {
+    let request = SubgraphRequest::fake_builder().build();
+    call_property_mutation_test("test_subgraph_read_only_headers", request)
+        .await
+        .expect("test failed");
+}
+
+#[tokio::test]
+async fn test_subgraph_property_chain_with_split() {
+    let supergraph_req = http::Request::builder()
+        .header("cookie", "session=abc; user=john; theme=dark")
+        .body(graphql::Request::builder().query(String::new()).build())
+        .unwrap();
+
+    let request = SubgraphRequest::fake_builder()
+        .supergraph_request(Arc::new(supergraph_req))
+        .build();
+
+    call_property_mutation_test("test_subgraph_property_chain_with_split", request)
+        .await
+        .expect("test failed - property chains should work with read-only properties");
+}
+
+#[tokio::test]
+async fn test_subgraph_property_chain_with_trim() {
+    let supergraph_req = http::Request::builder()
+        .header("auth", "  token  ")
+        .body(graphql::Request::builder().query(String::new()).build())
+        .unwrap();
+
+    let request = SubgraphRequest::fake_builder()
+        .supergraph_request(Arc::new(supergraph_req))
+        .build();
+
+    call_property_mutation_test("test_subgraph_property_chain_with_trim", request)
+        .await
+        .expect("test failed - property chains should work with read-only properties");
+}
+
+#[tokio::test]
+async fn test_complex_property_chain() {
+    let supergraph_req = http::Request::builder()
+        .header("cookie", " session=abc ; user=john")
+        .body(graphql::Request::builder().query(String::new()).build())
+        .unwrap();
+
+    let request = SubgraphRequest::fake_builder()
+        .supergraph_request(Arc::new(supergraph_req))
+        .build();
+
+    call_property_mutation_test("test_complex_property_chain", request)
+        .await
+        .expect("test failed - complex property chains should work");
+}

@@ -51,7 +51,6 @@
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
-use std::net::TcpListener;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -82,6 +81,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
+use tokio::net::TcpListener;
 use tower::ServiceExt;
 use tracing::debug;
 use tracing::error;
@@ -410,10 +410,14 @@ impl SnapshotServer {
         include_headers: Option<Vec<String>>,
         port: Option<u16>,
     ) -> Self {
-        let listener = port.map(|port| {
-            TcpListener::bind(format!("127.0.0.1:{port}"))
-                .expect("Failed to bind an OS port for snapshot server")
-        });
+        let listener = match port {
+            Some(port) => Some(
+                TcpListener::bind(format!("127.0.0.1:{port}"))
+                    .await
+                    .expect("Failed to bind an OS port for snapshot server"),
+            ),
+            None => None,
+        };
         Self::inner_start(
             snapshot_path,
             base_url,
@@ -521,10 +525,12 @@ impl SnapshotServer {
                 update,
                 include_headers,
             });
-        let listener = listener.unwrap_or(
-            TcpListener::bind("127.0.0.1:0")
+        let listener = match listener {
+            Some(listener) => listener,
+            None => TcpListener::bind("127.0.0.1:0")
+                .await
                 .expect("Failed to bind an OS port for snapshot server"),
-        );
+        };
         let local_address = listener
             .local_addr()
             .expect("Failed to get snapshot server address.");
@@ -534,16 +540,10 @@ impl SnapshotServer {
         );
         if spawn {
             tokio::spawn(async move {
-                axum_server::Server::from_tcp(listener)
-                    .serve(app.into_make_service())
-                    .await
-                    .unwrap();
+                axum::serve(listener, app).await.unwrap();
             });
         } else {
-            axum_server::from_tcp(listener)
-                .serve(app.into_make_service())
-                .await
-                .unwrap();
+            axum::serve(listener, app).await.unwrap();
         }
         Self {
             socket_address: local_address,
@@ -627,11 +627,11 @@ struct Response {
 
 /// Standalone snapshot server
 pub(crate) mod standalone {
-    use std::net::TcpListener;
     use std::path::PathBuf;
 
     use clap::Parser;
     use http::Uri;
+    use tokio::net::TcpListener;
     use tracing_core::Level;
 
     use super::SnapshotServer;
@@ -679,10 +679,14 @@ pub(crate) mod standalone {
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
 
-        let listener = args.port.map(|port| {
-            TcpListener::bind(format!("127.0.0.1:{port}"))
-                .expect("Failed to bind an OS port for snapshot server")
-        });
+        let listener = match args.port {
+            Some(port) => Some(
+                TcpListener::bind(format!("127.0.0.1:{port}"))
+                    .await
+                    .expect("Failed to bind an OS port for snapshot server"),
+            ),
+            None => None,
+        };
 
         SnapshotServer::start(
             args.snapshot_path,

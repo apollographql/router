@@ -16,6 +16,7 @@ use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use hyper_util::rt::TokioTimer;
 use hyper_util::server::conn::auto::Builder;
+use hyper_util::server::conn::auto::Http1Builder;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -306,18 +307,21 @@ async fn process_error(io_error: std::io::Error) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn serve_router_on_listen_addr(
+    router: axum::Router,
     pipeline_ref: Arc<PipelineRef>,
     address: ListenAddr,
     mut listener: Listener,
-    connection_shutdown_timeout: Duration,
-    router: axum::Router,
-    opt_max_headers: Option<usize>,
-    opt_max_buf_size: Option<ByteSize>,
-    header_read_timeout: Duration,
+    configuration: Arc<Configuration>,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
+    let opt_max_http1_headers = configuration.limits.http1_max_request_headers;
+    let opt_max_http1_buf_size = configuration.limits.http1_max_request_buf_size;
+    let opt_max_http2_headers_list_bytes = configuration.limits.http2_max_headers_list_bytes;
+    let connection_shutdown_timeout = configuration.supergraph.connection_shutdown_timeout;
+    let header_read_timeout = configuration.server.http.header_read_timeout;
+    let tls_handshake_timeout = configuration.server.http.tls_handshake_timeout;
+
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
     // this server reproduces most of hyper::server::Server's behaviour
     // we select over the stop_listen_receiver channel and the listener's
@@ -353,6 +357,24 @@ pub(super) fn serve_router_on_listen_addr(
                                 let _connection_stop_signal = connection_stop_signal;
                                 let connection_handle = ConnectionHandle::new(pipeline_ref, address);
 
+                                // Development note: the following describes the different network
+                                // streams and how to think about them when modifying the logic
+                                // below. In general, a change to one stream (eg, TLS) should also
+                                // have similar changes to the others unless there's a very good
+                                // reason why it shouldn't be applied more broadly. Any changes to
+                                // how the connections are configured should be centralized in
+                                // configure_connections()
+                                //
+                                //  Here are some pratical examples of each network stream below:
+                                //    - TCP :: after TLS termination (eg, reverse proxy), dev
+                                //    servers, or testing environments; ie, whenever https isn't
+                                //    used
+                                //    - Unix :: unix sockets, which are used widely in sidecars or
+                                //    when commnicating on the same machine, but can also be used
+                                //    by reverse proxies
+                                //    - TLS :: encrypted requests, often when the router is used to
+                                //    expose its graph to the public internet (ie, not behind a proxy)
+
                                 match res {
                                     NetworkStream::Tcp(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
@@ -373,19 +395,8 @@ pub(super) fn serve_router_on_listen_addr(
                                         });
 
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        let mut http_connection = builder.http1();
-                                        let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
-                                            http_config.max_headers(max_headers);
-                                        }
-
-                                        if let Some(max_buf_size) = opt_max_buf_size {
-                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
-                                        }
-                                        let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
+                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     }
                                     #[cfg(unix)]
@@ -397,56 +408,53 @@ pub(super) fn serve_router_on_listen_addr(
                                             app.clone().call(request)
                                         });
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        let mut http_connection = builder.http1();
-                                        let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
-                                            http_config.max_headers(max_headers);
-                                        }
-
-                                        if let Some(max_buf_size) = opt_max_buf_size {
-                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
-                                        }
-                                        let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
+                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     },
-                                    NetworkStream::Tls(stream) => {
+                                    NetworkStream::Tls { stream, acceptor } => {
+                                        // Perform TLS handshake with a timeout to prevent DoS attacks.
+                                        // If a client connects with plain TCP and doesn't initiate TLS,
+                                        // the handshake will timeout and the connection will be closed.
+                                        let tls_stream = match tokio::time::timeout(tls_handshake_timeout, acceptor.accept(stream)).await {
+                                            Ok(Ok(tls_stream)) => tls_stream,
+                                            Ok(Err(e)) => {
+                                                tracing::debug!(
+                                                    error = %e,
+                                                    "TLS handshake failed, closing connection"
+                                                );
+                                                return;
+                                            }
+                                            Err(_) => {
+                                                tracing::debug!(
+                                                    timeout = ?tls_handshake_timeout,
+                                                    "TLS handshake timed out, closing connection"
+                                                );
+                                                return;
+                                            }
+                                        };
+
                                         let received_first_request = Arc::new(AtomicBool::new(false));
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
 
-                                        stream.get_ref().0
+                                        tls_stream.get_ref().0
                                             .set_nodelay(true)
                                             .expect(
                                                 "this should not fail unless the socket is invalid",
                                             );
 
-                                        let mut builder = Builder::new(TokioExecutor::new());
-                                        if stream.get_ref().1.alpn_protocol() == Some(&b"h2"[..]) {
-                                            builder = builder.http2_only();
-                                        }
-
-                                        let tokio_stream = TokioIo::new(stream);
                                         let hyper_service = hyper::service::service_fn(move |request| {
                                             app.clone().call(request)
                                         });
-                                        let mut http_connection = builder.http1();
-                                        let http_config = http_connection
-                                                         .keep_alive(true)
-                                                         .timer(TokioTimer::new())
-                                                         .header_read_timeout(header_read_timeout);
-                                        if let Some(max_headers) = opt_max_headers {
-                                            http_config.max_headers(max_headers);
-                                        }
 
-                                        if let Some(max_buf_size) = opt_max_buf_size {
-                                            http_config.max_buf_size(max_buf_size.as_u64() as usize);
-                                        }
-                                        let connection = http_config
+                                        let tokio_stream = TokioIo::new(tls_stream);
+
+                                        let mut builder = Builder::new(TokioExecutor::new());
+                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        let connection = config
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
 
+                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     }
                                 }
                             });
@@ -464,6 +472,49 @@ pub(super) fn serve_router_on_listen_addr(
         listener
     };
     (server, shutdown_sender)
+}
+
+/// Configures a connection, no matter whether it's TLS, TCP, or UDS (ie, unix sockets) with
+/// whatever parameters are configured by the end-user in their router config
+///
+/// NOTE: centralize all connection configuration changes here so that the behavior of the
+/// connections remains in-step
+fn configure_connection(
+    conn_builder: &mut Builder<TokioExecutor>,
+    header_read_timeout: Duration,
+    opt_max_http1_headers: Option<usize>,
+    opt_max_http1_buf_size: Option<ByteSize>,
+    opt_max_http2_headers_list_bytes: Option<ByteSize>,
+) -> Http1Builder<'_, TokioExecutor> {
+    // NOTE: this is a builder that auto-detects http1/http2, so we can configure both and rely on
+    // it to figure out whether we have an http1 or http2 connection
+    let mut builder = conn_builder.http2();
+    if let Some(max_header_list_size) = opt_max_http2_headers_list_bytes {
+        let max_header_list_size = u32::try_from(max_header_list_size.as_u64())
+            .inspect_err(|e| tracing::warn!("attempted to use an HTTP/2 header size limit greater than is allowed by u32 (~4.3gb): {e}"))
+            .unwrap_or(u32::MAX);
+        builder.max_header_list_size(max_header_list_size);
+    }
+
+    let mut builder = conn_builder.http1();
+
+    builder
+        .keep_alive(true)
+        .timer(TokioTimer::new())
+        .header_read_timeout(header_read_timeout);
+
+    if let Some(max_headers) = opt_max_http1_headers {
+        builder.max_headers(max_headers);
+    }
+
+    if let Some(max_buf_size) = opt_max_http1_buf_size {
+        let max_buf_size = usize::try_from(max_buf_size.as_u64())
+            .inspect_err(|e| tracing::warn!("attempted to use an HTTP/2 header size limit greater than is allowed by an unsized integer (quite large, multiple GBs, but platform-specific): {e}"))
+            .unwrap_or(usize::MAX);
+        builder.max_buf_size(max_buf_size);
+    }
+
+    builder
 }
 
 #[derive(Clone)]

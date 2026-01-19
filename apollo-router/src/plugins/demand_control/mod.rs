@@ -480,6 +480,7 @@ impl Plugin for DemandControl {
                                     err.into_graphql_errors()
                                         .expect("must be able to convert to graphql error"),
                                 )
+                                .id(req.id)
                                 .context(req.context.clone())
                                 .extensions(crate::json_ext::Object::new())
                                 .subgraph_name(subgraph_name.clone())
@@ -507,6 +508,7 @@ impl Plugin for DemandControl {
                                     err.into_graphql_errors()
                                         .expect("must be able to convert to graphql error"),
                                 )
+                                .id(resp.id)
                                 .subgraph_name(subgraph_name)
                                 .context(resp.context.clone())
                                 .extensions(Object::new())

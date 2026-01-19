@@ -5,10 +5,10 @@ use std::sync::Arc;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
+use apollo_federation::link::spec::Identity;
 use tower::BoxError;
 
 use super::JOIN_FIELD_DIRECTIVE_NAME;
-use super::JOIN_SPEC_BASE_URL;
 use super::JOIN_SPEC_VERSION_RANGE;
 use super::OVERRIDE_LABEL_ARG_NAME;
 use crate::spec::Schema;
@@ -21,9 +21,9 @@ impl<'a> OverrideLabelVisitor<'a> {
             override_labels: HashSet::new(),
             join_field_directive_name: Schema::directive_name(
                 schema,
-                JOIN_SPEC_BASE_URL,
+                &Identity::join_identity(),
                 JOIN_SPEC_VERSION_RANGE,
-                JOIN_FIELD_DIRECTIVE_NAME,
+                &JOIN_FIELD_DIRECTIVE_NAME,
             )?,
         })
     }

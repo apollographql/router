@@ -24,6 +24,7 @@ OpenTelemetry specifies multiple [standard metric instruments](https://opentelem
   * `http.server.active_requests` - The number of active requests in flight.
   * `http.server.request.body.size` - A histogram of request body sizes for requests handled by the router.
   * `http.server.request.duration` - A histogram of request durations for requests handled by the router.
+  * `http.server.response.body.size` - A histogram of response body sizes for requests handled by the router.
 
 + In the [subgraph service](#router-request-lifecycle-services):
 
@@ -53,6 +54,7 @@ telemetry:
         http.server.active_requests: true # (default false)
         http.server.request.body.size: true # (default false)
         http.server.request.duration: true # (default false)
+        http.server.response.body.size: true # (default false)
       subgraph:
         http.client.request.body.size: true # (default false)
         http.client.request.duration: true # (default false)
@@ -188,8 +190,14 @@ The `default_requirement_level` option sets the default attributes to attach to 
 
 Valid values:
 
-* `required` (default) - required attributes will be attached to standard instruments by default.
-* `recommended` - recommended attributes will be attached to standard instruments by default.
+* `required` (default, Apollo recommended) - required attributes will be attached to standard instruments by default.
+* `recommended` - experimental attributes from OpenTelemetry's development-status conventions will be attached to standard instruments by default.
+
+<Note>
+
+Apollo recommends using `required`, rather than `recommended`. Using `recommended` includes experimental attributes from OpenTelemetry's [development-status GraphQL semantic conventions](https://opentelemetry.io/docs/specs/semconv/graphql/graphql-spans/), such as `graphql.document` and `subgraph.graphql.document`. These attributes can create high cardinality and may contain sensitive information. See the [standard attributes documentation](/router/configuration/telemetry/instrumentation/standard-attributes) for details.
+
+</Note>
 
 ```yaml title="router.yaml"
 telemetry:

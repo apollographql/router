@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -6,6 +7,8 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::schema::Value;
 use apollo_compiler::ty;
 
 use super::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -30,6 +33,8 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::subgraph::spec::CONTEXTFIELDVALUE_SCALAR_NAME;
+use crate::subgraph::typestate::Subgraph;
+use crate::subgraph::typestate::Validated;
 
 pub(crate) struct ContextDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
@@ -50,6 +55,25 @@ impl ContextSpecDefinition {
             },
             minimum_federation_version,
         }
+    }
+
+    fn static_argument_transform(
+        subgraph: &Subgraph<Validated>,
+        args: IndexMap<Name, Value>,
+    ) -> IndexMap<Name, Value> {
+        let subgraph_name = &subgraph.name;
+        args.into_iter()
+            .map(|(key, value)| {
+                if *key.as_str() == *FEDERATION_NAME_ARGUMENT_NAME.as_str() {
+                    (
+                        key,
+                        Value::String(format!("{}__{}", subgraph_name, value.as_str().unwrap())),
+                    )
+                } else {
+                    (key, value)
+                }
+            })
+            .collect()
     }
 
     pub(crate) fn context_directive_definition<'schema>(
@@ -147,7 +171,7 @@ impl SpecDefinition for ContextSpecDefinition {
             ],
             true,
             Some(&|v| CONTEXT_VERSIONS.get_dyn_minimum_required_version(v)),
-            None, // TODO: Add transform
+            Some(Rc::new(Self::static_argument_transform)),
         );
         let from_context_spec = DirectiveSpecification::new(
             FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,

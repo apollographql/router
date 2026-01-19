@@ -18,7 +18,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tokio_util::future::FutureExt;
+use tokio_util::time::FutureExt;
 use tower::BoxError;
 
 use super::CacheEntry;
@@ -35,6 +35,7 @@ use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
 use crate::plugins::response_cache::metrics::record_maintenance_queue_error;
 use crate::plugins::response_cache::metrics::record_maintenance_success;
+use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 
 pub(crate) type Config = super::config::Config;
 
@@ -42,6 +43,8 @@ pub(crate) type Config = super::config::Config;
 struct CacheValue {
     data: serde_json_bytes::Value,
     cache_control: CacheControl,
+    // Only set in debug mode
+    cache_tags: Option<HashSet<String>>,
 }
 
 impl ValueType for CacheValue {}
@@ -52,6 +55,7 @@ impl From<(&str, CacheValue)> for CacheEntry {
             key: cache_key.to_string(),
             data: cache_value.data,
             control: cache_value.cache_control,
+            cache_tags: cache_value.cache_tags,
         }
     }
 }
@@ -107,10 +111,13 @@ impl Storage {
         };
         let pipeline = self.storage.pipeline().with_options(&options);
         for invalidation_key in &invalidation_keys {
-            let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
+            let invalidation_key =
+                format!("version:{RESPONSE_CACHE_VERSION}:cache-tag:{invalidation_key}");
             self.send_to_maintenance_queue(invalidation_key.clone());
+
+            let redis_key = self.make_key(invalidation_key.clone());
             let _: () = pipeline
-                .zrange(invalidation_key.clone(), 0, -1, None, false, None, false)
+                .zrange(redis_key, 0, -1, None, false, None, false)
                 .await?;
         }
 
@@ -120,7 +127,11 @@ impl Storage {
             return Ok(0);
         }
 
-        let keys = all_keys.into_iter().map(fred::types::Key::from);
+        // add namespace to keys
+        let keys = all_keys
+            .into_iter()
+            .map(|key| self.make_key(key))
+            .map(fred::types::Key::from);
         let deleted = self
             .storage
             .delete_from_scan_result_with_options(keys, options)
@@ -159,7 +170,6 @@ impl Storage {
     }
 
     async fn perform_maintenance_on_cache_tag(&self, cache_tag: String) {
-        // NB: `cache_tag` already includes namespace
         let cutoff = now() - 1;
 
         let now = Instant::now();
@@ -186,6 +196,9 @@ impl Storage {
             timeout: Some(self.maintenance_timeout()),
             ..Options::default()
         };
+
+        // NB: add namespace to cache tag
+        let cache_tag_key = self.make_key(cache_tag_key);
         Ok(self
             .storage
             .client()
@@ -194,17 +207,17 @@ impl Storage {
             .await?)
     }
 
-    /// Create a list of the cache tags that describe this document, with associated namespaces.
+    /// Create a list of the cache tags that describe this document, without namespaces.
     ///
     /// For a given subgraph `s` and invalidation keys `i1`, `i2`, ..., we need to store the
     /// following subgraph-invalidation-key permutations:
     /// * `subgraph-{s}` (whole subgraph)
     /// * `subgraph-{s}:key-{i1}`, `subgraph-{s}:key-{i2}`, ... (invalidation key per subgraph)
     ///
-    /// These are then turned into redis keys by adding the namespace and a `cache-tag:` prefix, ie:
-    /// * `{namespace}:cache-tag:subgraph-{s}`
-    /// * `{namespace}:cache-tag:subgraph-{s}:key-{i1}`, ...
-    fn namespaced_cache_tags(
+    /// These are then turned into redis keys by adding the namespace, version, and `cache-tag:` prefix, ie:
+    /// * `{namespace}:version:{RESPONSE_CACHE_VERSION}:cache-tag:subgraph-{s}`
+    /// * `{namespace}:version:{RESPONSE_CACHE_VERSION}:cache-tag:subgraph-{s}:key-{i1}`, ...
+    fn cache_tag_permutations(
         &self,
         document_invalidation_keys: &[String],
         subgraph_name: &str,
@@ -216,7 +229,7 @@ impl Storage {
         }
 
         for cache_tag in cache_tags.iter_mut() {
-            *cache_tag = self.make_key(format!("cache-tag:{cache_tag}"));
+            *cache_tag = format!("version:{RESPONSE_CACHE_VERSION}:cache-tag:{cache_tag}");
         }
 
         cache_tags
@@ -258,11 +271,17 @@ impl CacheStorage for Storage {
 
         let now = now();
 
+        // Only useful for caching debugger, it will only contains entries if the doc is set to debug
+        let mut original_cache_tags = Vec::with_capacity(batch_docs.len());
         // phase 1
         for document in &mut batch_docs {
-            document.key = self.make_key(&document.key);
+            if document.debug {
+                original_cache_tags.push(document.invalidation_keys.clone());
+            } else {
+                original_cache_tags.push(Vec::new());
+            }
             document.invalidation_keys =
-                self.namespaced_cache_tags(&document.invalidation_keys, subgraph_name);
+                self.cache_tag_permutations(&document.invalidation_keys, subgraph_name);
         }
 
         // phase 2
@@ -301,9 +320,11 @@ impl CacheStorage for Storage {
                 .fold(now as f64, f64::max);
             let cache_tag_expiry_time = max_expiry_time as i64 + 1;
 
+            let redis_key = self.make_key(cache_tag_key);
+
             let _: Result<(), _> = pipeline
                 .zadd(
-                    cache_tag_key.clone(),
+                    redis_key.clone(),
                     None,
                     Some(Ordering::GreaterThan),
                     false,
@@ -321,7 +342,7 @@ impl CacheStorage for Storage {
             // that means we have to call `expire_at` twice :(
             for exp_opt in [ExpireOptions::NX, ExpireOptions::GT] {
                 let _: Result<(), _> = pipeline
-                    .expire_at(cache_tag_key.clone(), cache_tag_expiry_time, Some(exp_opt))
+                    .expire_at(redis_key.clone(), cache_tag_expiry_time, Some(exp_opt))
                     .await;
             }
         }
@@ -336,14 +357,15 @@ impl CacheStorage for Storage {
 
         // phase 3
         let pipeline = self.storage.client().pipeline().with_options(&options);
-        for document in batch_docs.into_iter() {
+        for (document, cache_tags) in batch_docs.into_iter().zip(original_cache_tags.into_iter()) {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
+                cache_tags: document.debug.then(|| cache_tags.into_iter().collect()),
             };
             let _: () = pipeline
                 .set::<(), _, _>(
-                    document.key,
+                    self.make_key(document.key),
                     &serde_json::to_string(&value)?,
                     Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
                     None,
@@ -379,7 +401,7 @@ impl CacheStorage for Storage {
     async fn internal_fetch_multiple(
         &self,
         cache_keys: &[&str],
-    ) -> StorageResult<Vec<Option<CacheEntry>>> {
+    ) -> StorageResult<Vec<StorageResult<CacheEntry>>> {
         let keys: Vec<RedisKey<String>> = cache_keys
             .iter()
             .map(|key| RedisKey(key.to_string()))
@@ -388,14 +410,18 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Option<RedisValue<CacheValue>>> =
-            self.storage.get_multiple_with_options(keys, options).await;
+        let values: Vec<Result<RedisValue<CacheValue>, _>> = self
+            .storage
+            .get_multiple_with_options(keys, options)
+            .await?;
 
         let entries = values
             .into_iter()
             .zip(cache_keys)
             .map(|(opt_value, cache_key)| {
-                opt_value.map(|value| CacheEntry::from((*cache_key, value.0)))
+                opt_value
+                    .map(|value| CacheEntry::from((*cache_key, value.0)))
+                    .map_err(Into::into)
             })
             .collect();
 
@@ -481,6 +507,8 @@ impl Storage {
         Ok(s)
     }
 
+    /// Return a list of all keys in this namespace, with the namespace string stripped from
+    /// each key.
     async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
         use fred::types::scan::Scanner;
         use tokio_stream::StreamExt;
@@ -494,6 +522,7 @@ impl Storage {
                 let mut str_keys: Vec<String> = page_keys
                     .into_iter()
                     .map(|k| k.into_string().unwrap())
+                    .map(|k| self.storage.strip_namespace(k))
                     .collect();
                 keys.append(&mut str_keys);
             }
@@ -503,29 +532,35 @@ impl Storage {
     }
 
     async fn ttl(&self, key: &str) -> StorageResult<i64> {
+        let key = self.make_key(key);
         Ok(self.storage.client().ttl(key).await?)
     }
 
     async fn expire_time(&self, key: &str) -> StorageResult<i64> {
+        let key = self.make_key(key);
         Ok(self.storage.client().expire_time(key).await?)
     }
 
     async fn zscore(&self, sorted_set_key: &str, member: &str) -> Result<i64, BoxError> {
+        let sorted_set_key = self.make_key(sorted_set_key);
         let score: String = self.storage.client().zscore(sorted_set_key, member).await?;
         Ok(score.parse()?)
     }
 
     async fn zcard(&self, sorted_set_key: &str) -> StorageResult<u64> {
+        let sorted_set_key = self.make_key(sorted_set_key);
         let cardinality = self.storage.client().zcard(sorted_set_key).await?;
         Ok(cardinality)
     }
 
     async fn zexists(&self, sorted_set_key: &str, member: &str) -> StorageResult<bool> {
+        let sorted_set_key = self.make_key(sorted_set_key);
         let score: Option<String> = self.storage.client().zscore(sorted_set_key, member).await?;
         Ok(score.is_some())
     }
 
     async fn exists(&self, key: &str) -> StorageResult<bool> {
+        let key = self.make_key(key);
         Ok(self.storage.client().exists(key).await?)
     }
 }
@@ -541,14 +576,18 @@ mod tests {
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
     use tokio::sync::broadcast;
+    use tokio::time::Instant;
     use tower::BoxError;
     use uuid::Uuid;
 
     use super::Config;
     use super::Storage;
     use super::now;
+    use crate::metrics::FutureMetricsExt;
+    use crate::plugins::response_cache::ErrorCode;
     use crate::plugins::response_cache::storage::CacheStorage;
     use crate::plugins::response_cache::storage::Document;
+    use crate::plugins::response_cache::storage::Error;
 
     const SUBGRAPH_NAME: &str = "test";
 
@@ -567,6 +606,7 @@ mod tests {
             control: Default::default(),
             invalidation_keys: vec!["invalidate".to_string()],
             expire: Duration::from_secs(60),
+            debug: true,
         }
     }
 
@@ -601,7 +641,7 @@ mod tests {
             .map(ToString::to_string)
             .collect();
 
-        let mut cache_tags = storage.namespaced_cache_tags(&invalidation_keys, "products");
+        let mut cache_tags = storage.cache_tag_permutations(&invalidation_keys, "products");
         cache_tags.sort();
         assert_debug_snapshot!(cache_tags);
     }
@@ -637,9 +677,9 @@ mod tests {
             let document = common_document();
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
-            let document_key = storage.make_key(document.key.clone());
+            let document_key = document.key.clone();
             let expected_cache_tag_keys =
-                storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
+                storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME);
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
             let keys = storage.all_keys_in_namespace().await?;
@@ -717,9 +757,9 @@ mod tests {
             let mut expected_document_keys = Vec::new();
             let mut expected_cache_tag_keys = Vec::new();
             for document in &documents {
-                expected_document_keys.push(storage.make_key(&document.key));
+                expected_document_keys.push(document.key.clone());
                 expected_cache_tag_keys.push(
-                    storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME),
+                    storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME),
                 );
             }
 
@@ -851,14 +891,14 @@ mod tests {
                 data: serde_json_bytes::Value::Number(1.into()),
                 ..common_document()
             };
-            let document_key = storage.make_key(document.key.clone());
+            let document_key = document.key.clone();
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was stored
-            let stored_data = storage.fetch(&common_document().key, SUBGRAPH_NAME).await?;
+            let stored_data = storage.fetch(&document_key, SUBGRAPH_NAME).await?;
             assert_eq!(stored_data.data, document.data);
 
-            let keys = storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
+            let keys = storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME);
 
             // save current scores
             let mut scores: HashMap<String, i64> = HashMap::default();
@@ -919,14 +959,14 @@ mod tests {
                 data: serde_json_bytes::Value::Number(1.into()),
                 ..common_document()
             };
-            let document_key = storage.make_key(document.key.clone());
+            let document_key = document.key.clone();
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was stored
             let stored_data = storage.fetch(&common_document().key, SUBGRAPH_NAME).await?;
             assert_eq!(stored_data.data, document.data);
 
-            let keys = storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
+            let keys = storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME);
 
             // update the document with new data and a longer TTL
             let old_ttl = document.expire;
@@ -979,6 +1019,7 @@ mod tests {
         use super::SUBGRAPH_NAME;
         use super::common_document;
         use super::redis_config;
+        use crate::plugins::response_cache::ErrorCode;
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
         use crate::plugins::response_cache::storage::redis::Storage;
@@ -993,22 +1034,18 @@ mod tests {
             storage.truncate_namespace().await?;
 
             let document = common_document();
-            let document_key = storage.make_key(document.key.clone());
+            let document_key = document.key.clone();
             let cache_tag_keys =
-                storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
+                storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME);
 
             let insert_invalid_cache_tag = |key: String| async {
-                let expiration = config.ttl.map(|ttl| Expiration::EX(ttl.as_secs() as i64));
+                let namespaced_key = storage.make_key(key);
                 let _: () = storage
                     .storage
                     .client()
-                    .set(key, 1, expiration, None, false)
+                    .set(namespaced_key, 1, Some(Expiration::EX(60)), None, false)
                     .await?;
                 Ok::<(), BoxError>(())
-            };
-            let inserted_data = |key: String| async {
-                let exists = storage.storage.client().exists(key).await?;
-                Ok::<bool, BoxError>(exists)
             };
 
             // try performing the insert with one of the cache_tag_keys set to a string so that the ZADD
@@ -1024,7 +1061,7 @@ mod tests {
                     "cache tag {key} should have caused insertion failure"
                 ));
 
-                assert!(!inserted_data(document_key.clone()).await?);
+                assert!(!storage.exists(&document_key).await?);
             }
 
             // this should also be true if inserting multiple documents, even if only one of the
@@ -1043,7 +1080,7 @@ mod tests {
             ];
 
             let cache_tag_keys =
-                storage.namespaced_cache_tags(&documents[1].invalidation_keys, SUBGRAPH_NAME);
+                storage.cache_tag_permutations(&documents[1].invalidation_keys, SUBGRAPH_NAME);
             for key in cache_tag_keys {
                 storage.truncate_namespace().await?;
                 insert_invalid_cache_tag(key.clone()).await?;
@@ -1056,7 +1093,7 @@ mod tests {
                     ));
 
                 for document in &documents {
-                    assert!(!inserted_data(storage.make_key(document.key.clone())).await?);
+                    assert!(!storage.exists(&document.key).await?);
                 }
             }
 
@@ -1094,7 +1131,8 @@ mod tests {
 
             let result = storage.insert(document, SUBGRAPH_NAME).await;
             let error = result.expect_err("should have timed out via redis");
-            assert!(matches!(error, StorageError::Database(e) if e.details() == "timeout"));
+            assert!(matches!(error, StorageError::Database(ref e) if e.details() == "timeout"));
+            assert_eq!(error.code(), "TIMEOUT");
 
             // make sure the insert function did not try to operate on the document key
             for command in mock_storage.0.read().iter() {
@@ -1139,12 +1177,12 @@ mod tests {
             .await?;
 
         // ensure that we have three elements in the 'whole-subgraph' invalidation key
-        let invalidation_key = storage.namespaced_cache_tags(&[], SUBGRAPH_NAME).remove(0);
+        let invalidation_key = storage.cache_tag_permutations(&[], SUBGRAPH_NAME).remove(0);
         assert_eq!(storage.zcard(&invalidation_key).await?, 3);
 
-        let doc_key1 = storage.make_key("key1");
-        let doc_key2 = storage.make_key("key2");
-        let doc_key3 = storage.make_key("key3");
+        let doc_key1 = "key1";
+        let doc_key2 = "key2";
+        let doc_key3 = "key3";
         for key in [&doc_key1, &doc_key2, &doc_key3] {
             assert!(storage.zexists(&invalidation_key, key).await?);
         }
@@ -1152,7 +1190,7 @@ mod tests {
         // manually trigger maintenance with a time in the future, in between the expiry times of doc1
         // and docs 2 and 3. therefore, we should remove `key1` and leave `key2` and `key3`
         let cutoff = now() + 10;
-        assert!(storage.zscore(&invalidation_key, &doc_key1).await? < cutoff as i64);
+        assert!(storage.zscore(&invalidation_key, doc_key1).await? < cutoff as i64);
         let removed_keys = storage
             .remove_keys_from_cache_tag_by_cutoff(invalidation_key.clone(), cutoff as f64)
             .await?;
@@ -1160,9 +1198,9 @@ mod tests {
 
         // now we should have two elements in the 'whole-subgraph' invalidation key
         assert_eq!(storage.zcard(&invalidation_key).await?, 2);
-        assert!(!storage.zexists(&invalidation_key, &doc_key1).await?);
-        assert!(storage.zexists(&invalidation_key, &doc_key2).await?);
-        assert!(storage.zexists(&invalidation_key, &doc_key3).await?);
+        assert!(!storage.zexists(&invalidation_key, doc_key1).await?);
+        assert!(storage.zexists(&invalidation_key, doc_key2).await?);
+        assert!(storage.zexists(&invalidation_key, doc_key3).await?);
 
         // manually trigger maintenance with the time set way in the future
         let cutoff = now() + 1000;
@@ -1221,14 +1259,14 @@ mod tests {
             // invalidate just subgraph1
             let num_invalidated = storage.invalidate_by_subgraph("S1", "subgraph").await?;
             assert_eq!(num_invalidated, 1);
-            assert!(!storage.exists(&storage.make_key("key1")).await?);
-            assert!(storage.exists(&storage.make_key("key2")).await?);
+            assert!(!storage.exists("key1").await?);
+            assert!(storage.exists("key2").await?);
 
             // invalidate subgraph2
             let num_invalidated = storage.invalidate_by_subgraph("S2", "subgraph").await?;
             assert_eq!(num_invalidated, 2);
-            assert!(!storage.exists(&storage.make_key("key2")).await?);
-            assert!(!storage.exists(&storage.make_key("key3")).await?);
+            assert!(!storage.exists("key2").await?);
+            assert!(!storage.exists("key3").await?);
 
             Ok(())
         }
@@ -1272,9 +1310,9 @@ mod tests {
                 .await?;
             assert_eq!(invalidated.len(), 1);
             assert_eq!(*invalidated.get("S2").unwrap(), 1);
-            assert!(storage.exists(&storage.make_key("key1")).await?);
-            assert!(!storage.exists(&storage.make_key("key2")).await?);
-            assert!(storage.exists(&storage.make_key("key3")).await?);
+            assert!(storage.exists("key1").await?);
+            assert!(!storage.exists("key2").await?);
+            assert!(storage.exists("key3").await?);
 
             Ok(())
         }
@@ -1332,7 +1370,7 @@ mod tests {
             storage.truncate_namespace().await?;
 
             let document = common_document();
-            let document_key = storage.make_key(&document.key);
+            let document_key = document.key.clone();
 
             storage.insert(document, "S1").await?;
             assert!(storage.exists(&document_key).await?);
@@ -1350,5 +1388,51 @@ mod tests {
 
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn timeout_errors_are_captured() -> Result<(), BoxError> {
+        async move {
+            let config = Config {
+                fetch_timeout: Duration::from_nanos(0),
+                ..redis_config(false)
+            };
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&config, drop_rx).await?;
+            storage.truncate_namespace().await?;
+
+            let document = common_document();
+
+            // because of how tokio::timeout polls, it's possible for a command to finish before the
+            // timeout is polled (even if the duration is 0). perform the check in a loop to give it
+            // a few changes to trigger.
+            let now = Instant::now();
+            while now.elapsed() < Duration::from_secs(5) {
+                // NotFound manifests as Ok<Vec<None>> with fetch multiple, try again if that is the case
+                let error = match storage.fetch_multiple(&[&document.key], "S1").await {
+                    Ok(v) => {
+                        if v.iter().all(|e| e.is_none()) {
+                            continue;
+                        }
+                        panic!("Value was unexpected");
+                    }
+                    Err(err) => err,
+                };
+
+                assert!(matches!(error, Error::Timeout(_)), "{:?}", error);
+                assert_eq!(error.code(), "TIMEOUT");
+                assert_counter!(
+                    "apollo.router.operations.response_cache.fetch.error",
+                    1,
+                    "code" = "TIMEOUT",
+                    "subgraph.name" = "S1"
+                );
+                return Ok(());
+            }
+
+            panic!("Never observed a timeout");
+        }
+        .with_metrics()
+        .await
     }
 }

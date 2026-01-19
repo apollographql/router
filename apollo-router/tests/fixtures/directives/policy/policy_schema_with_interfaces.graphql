@@ -44,10 +44,11 @@ type Query
 {  
     private: Private @join__field(graph: SUBGRAPH_A) @policy(policies: [["admin"]])
     public: Public @join__field(graph: SUBGRAPH_A)
-    opensecret: OpenSecret @join__field(graph: SUBGRAPH_A)
     secure: Secure @join__field(graph: SUBGRAPH_A)
 }
 
+# NOTE: despite its name, this wouldn't have the `admin` policy in the subgraph A
+#  policy would be inherited from the Private type
 interface Secure 
     @join__type(graph: SUBGRAPH_A)
 {
@@ -62,16 +63,9 @@ type Private implements Secure
     id: ID @policy(policies: [["admin"]]) @join__field(graph: SUBGRAPH_A)
 }
 
-# NOTE: despite its name, this _doesn't_ have the `admin` policy
-type OpenSecret implements Secure 
+type Public implements Secure
     @join__type(graph: SUBGRAPH_A)
     @join__implements(graph: SUBGRAPH_A, interface: "Secure")
-{
-    id: ID @join__field(graph: SUBGRAPH_A)
-}
-
-type Public 
-    @join__type(graph: SUBGRAPH_A)
 {
     id: ID @join__field(graph: SUBGRAPH_A)
 }

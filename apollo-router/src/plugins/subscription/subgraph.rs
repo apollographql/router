@@ -35,6 +35,8 @@ use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
+use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::services::OperationKind;
@@ -444,6 +446,14 @@ fn get_websocket_request(
     );
     parts.headers.extend(request.headers_mut().drain());
     *request.headers_mut() = parts.headers;
+
+    // Inject trace propagation headers into the WebSocket upgrade request
+    opentelemetry::global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(
+            &prepare_context(tracing::Span::current().context()),
+            &mut crate::otel_compat::HeaderInjector(request.headers_mut()),
+        );
+    });
 
     Ok(request)
 }

@@ -17,7 +17,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use strum_macros::Display;
+use strum::Display;
 use tower::BoxError;
 use tower::Service;
 use tracing::Instrument;

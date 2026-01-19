@@ -2,8 +2,7 @@
 title: Response Caching
 subtitle: Cache subgraph responses to improve query performance
 description: Learn how response caching in GraphOS Router enables entity-level caching to reduce subgraph load and improve query latency.
-minVersion: Router v2.8.0
-releaseStage: preview
+minVersion: Router v2.10.0
 ---
 
 <PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
@@ -25,7 +24,7 @@ Response caching enables the router to cache origin responses and reuse them acr
 - **Root query fields**: Cached as complete units (the entire response for that root field)
 - **Entity representations**: Cached independently—each origin's contribution to an entity is cached separately and can be reused across different queries. (See [_entities query](/federation/subgraph-spec/#understanding-query_entities).)
 
-The router uses Redis to cache data from origin query responses. The cache organizes data by origin and entity representation, so different clients requesting the same data hit shared cache entries. You can use the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger) to see exactly what's being cached during development.
+The router uses Redis to cache data from origin query responses. The cache organizes data by origin and entity representation, so different clients requesting the same data hit shared cache entries. You can use the [cache debugger](/graphos/routing/performance/caching/response-caching/observability#cache-debugger) to see exactly what's being cached during development.
 
 ### Goals
 

@@ -16,7 +16,7 @@ info:
                 subgraph_name: true
               supergraph.operation.name:
                 supergraph_operation_name: string
-          apollo.router.operations.response.cache:
+          apollo.router.response.cache:
             attributes:
               graphql.type.name:
                 alias: entity_type
@@ -112,7 +112,7 @@ info:
           entity_type: Review
           subgraph.name: products
           supergraph.operation.name: Test
-- name: apollo.router.operations.response.cache
+- name: apollo.router.response.cache
   description: Response cache hit/miss operations at the subgraph level
   unit: ops
   data:

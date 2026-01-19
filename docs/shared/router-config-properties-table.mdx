@@ -559,14 +559,14 @@ preview_entity_cache:
 
 ---
 
-### `preview_response_cache`
+### `response_cache`
 
 Configuration for response caching
 
 - **Type:** `object`
 
-```yaml title="preview_response_cache"
-preview_response_cache:
+```yaml title="response_cache.router.yaml"
+response_cache:
   enabled: false
   debug: false
   private_queries_buffer_size: 2048
@@ -587,7 +587,6 @@ preview_response_cache:
         insert_timeout: 500ms
         invalidate_timeout: 1s
         maintenance_timeout: 500ms
-        ttl: null
         namespace: example_namespace
         tls:
           certificate_authorities: null

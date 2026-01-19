@@ -8,7 +8,7 @@ GraphOS Router is built for high performance and scalability. This section cover
 
 ## Response caching
 
-[Response caching](/graphos/routing/performance/caching/response-caching) lets you cache GraphQL operation responses at the router level. The router stores reusable sections of the response tree—when multiple operations request the same entities or root fields, the router serves them from cache instead of querying your subgraphs repeatedly.
+[Response caching](/graphos/routing/performance/caching/response-caching/overview) lets you cache GraphQL operation responses at the router level. The router stores reusable sections of the response tree—when multiple operations request the same entities or root fields, the router serves them from cache instead of querying your subgraphs repeatedly.
 
 This reduces load on your subgraphs and backend services while improving response times for clients.
 
@@ -18,7 +18,7 @@ Response caching includes:
 - **Authorization-aware caching** that automatically separates cache entries by authorization context
 - **Redis-backed distributed caching** to share cached data across router instances
 
-[Get started with response caching →](/graphos/routing/performance/caching/response-caching)
+[Get started with response caching →](/graphos/routing/performance/caching/response-caching/overview)
 
 ## Traffic shaping
 

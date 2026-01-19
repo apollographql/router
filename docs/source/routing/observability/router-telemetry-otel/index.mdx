@@ -68,6 +68,18 @@ Selectors allow you to define custom data points based on the router's request l
 | **Attribute** | Standard data points that can be attached to spans, instruments, and events. |
 | **Selector** | Custom data points extracted from the router's request lifecycle, tailored to specific needs. |
 
+### Attribute security and cardinality considerations
+
+When configuring telemetry attributes, consider the security and performance implications of your choices. Different attribute sets can have varying impacts on:
+
+- High cardinality: Some attributes create many unique values that can overwhelm monitoring systems
+- Privacy and security: Certain attributes may expose sensitive information
+- Performance: Large attribute values can significantly increase telemetry overhead
+
+OpenTelemetry semantic conventions include both stable attributes and experimental attributes that are still evolving. The router's configuration options allow you to choose between different requirement levels, each with different trade-offs.
+
+For detailed guidance on specific attributes and Apollo's recommendations, see the [standard attributes documentation](/router/configuration/telemetry/instrumentation/standard-attributes).
+
 ## Router telemetry signals
 
 The router supports three signal types for collecting and exporting telemetry:

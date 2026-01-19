@@ -1,0 +1,5 @@
+description: "'apollo.router.operations.response.cache' instrument has been renamed to 'apollo.router.response.cache'"
+actions:
+  - type: move
+    from: telemetry.instrumentation.instruments.cache["apollo.router.operations.response.cache"]
+    to: telemetry.instrumentation.instruments.cache["apollo.router.response.cache"]

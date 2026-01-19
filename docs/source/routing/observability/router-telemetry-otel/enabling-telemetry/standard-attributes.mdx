@@ -101,6 +101,20 @@ Standard attributes of the `supergraph` service:
 | `graphql.operation.type`    | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query  |
 | `graphql.document`          |                                     | The GraphQL query to the subgraph (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)          |
 
+<Caution>
+
+OpenTelemetry vs Apollo recommendations: OpenTelemetry has experimental attributes in their [GraphQL semantic conventions](https://opentelemetry.io/docs/specs/semconv/graphql/graphql-spans/) that are currently in [Development status](https://opentelemetry.io/docs/specs/otel/versioning-and-stability/#semantic-conventions-stability) and still evolving. Apollo does not have the same recommendations as the OpenTelemetry group and recommends using our "default" options instead.
+
+Apollo does not recommend using the `graphql.document` attribute (marked as "Recommended" in OpenTelemetry's experimental conventions) due to significant risks:
+
+- High cardinality: Each unique query creates a separate metric series, which can overwhelm your monitoring systems
+- Security concerns: Operations may contain sensitive data in string literals that's difficult to sanitize
+- Performance impact: Large operations (potentially megabytes) significantly increase telemetry overhead and storage costs
+
+Use `graphql.operation.name` instead, which provides correlation capabilities with lower risk.
+
+</Caution>
+
 
 #### Subgraph
 
@@ -113,6 +127,12 @@ Standard attributes of the `subgraph` service:
 | `subgraph.graphql.operation.type`  | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query     |
 | `subgraph.graphql.document`        |                                     | The GraphQL query to the subgraph  (need `spec_compliant` [mode](/router/configuration/telemetry/instrumentation/spans/#mode) to disable it)             |
 | `http.request.resend_count`        | `true`\|`false`                     | Number of retries for an http request to a subgraph              |
+
+<Caution>
+
+OpenTelemetry vs Apollo recommendations: The `subgraph.graphql.document` attribute has the same risks as the `graphql.document` attribute. While OpenTelemetry marks this as "Recommended" in their [experimental development-status semantic conventions](https://opentelemetry.io/docs/specs/semconv/graphql/graphql-spans/), Apollo does not recommend using this attribute due to high cardinality, potential sensitive data exposure, and performance impact.
+
+</Caution>
 
 #### Connector
 

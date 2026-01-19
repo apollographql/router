@@ -32,4 +32,23 @@ where
             self.insert(key, value);
         }
     }
+
+    pub(crate) fn get_vec(&self, key: &K) -> Option<&Vec<V>> {
+        self.0.get(key)
+    }
+
+    pub(crate) fn iter_all(&self) -> impl Iterator<Item = (&K, &Vec<V>)> {
+        self.0.iter()
+    }
+}
+
+impl<K, V> FromIterator<(K, V)> for MultiIndexMap<K, V>
+where
+    K: Eq + Hash,
+{
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
+        let mut multi_map = MultiIndexMap::new();
+        multi_map.extend(iter);
+        multi_map
+    }
 }

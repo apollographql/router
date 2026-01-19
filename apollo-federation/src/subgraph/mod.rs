@@ -452,7 +452,6 @@ impl Display for SubgraphError {
 }
 
 pub mod test_utils {
-    use either::Either;
 
     use super::SubgraphError;
     use super::typestate::Expanded;
@@ -476,11 +475,10 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        let subgraph = subgraph.expand_links()?;
-        match subgraph.normalize_root_types()? {
-            Either::Left(s) => Ok(s.assume_validated()),
-            Either::Right(s) => s.validate(),
-        }
+        Ok(subgraph
+            .expand_links()?
+            .normalize_root_types()?
+            .assume_validated())
     }
 
     pub fn build_inner_expanded(
@@ -614,14 +612,15 @@ pub mod test_utils {
 // WARNING: Any changes to this function signature will result in breakages in the dependency chain
 // Generates a diff string containing directives and types not included in initial schema string
 pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, FederationError> {
-    // Parse schema string as Schema
+    // Parse schema string as Schema without validation.
     let initial_schema = Schema::parse(schema_str, "")?;
 
-    // Initialize and expand subgraph, without validation
-    let initial_subgraph = typestate::Subgraph::new("S", "http://S", initial_schema.clone());
+    // Initialize and expand subgraph without validation
+    let initial_subgraph =
+        typestate::Subgraph::new("S", "http://S", initial_schema.clone(), Default::default());
     let expanded_subgraph = initial_subgraph
         .map_err(|e| e.into_federation_error())?
-        .expand_links()
+        .expand_links_without_validation()
         .map_err(|e| e.into_federation_error())?;
 
     // Build string of missing directives and types from initial to expanded

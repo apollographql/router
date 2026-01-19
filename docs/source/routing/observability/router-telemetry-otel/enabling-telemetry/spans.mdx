@@ -92,8 +92,14 @@ The `default_attribute_requirement_level` option sets the default attributes to 
 
 Valid values:
 
-* `required` (default)
-* `recommended`
+* `required` (default, Apollo recommended)
+* `recommended` (experimental attributes from OpenTelemetry's development-status conventions)
+
+<Note>
+
+Apollo recommends using `required`, rather than `recommended`. Using `recommended` includes experimental attributes from OpenTelemetry's [development-status GraphQL semantic conventions](https://opentelemetry.io/docs/specs/semconv/graphql/graphql-spans/), such as `graphql.document` and `subgraph.graphql.document`. These attributes can create high cardinality and may contain sensitive information. See the [standard attributes documentation](/router/configuration/telemetry/instrumentation/standard-attributes) for details.
+
+</Note>
 
 ```yaml title="router.yaml"
 telemetry:

@@ -1644,6 +1644,7 @@ mod test {
             .unwrap();
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1718,6 +1719,7 @@ mod test {
                     )
                     .expect("expecting valid request"),
             ),
+            operation: Default::default(),
         }
     }
 

@@ -2,8 +2,8 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
-use axum_extra::headers::HeaderName;
 use derivative::Derivative;
+use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
@@ -225,6 +225,32 @@ pub(crate) struct Tracing {
     pub(crate) datadog: tracing::datadog::Config,
 }
 
+impl Tracing {
+    pub(crate) fn is_baggage_propagation_enabled(&self) -> bool {
+        self.propagation.baggage
+    }
+
+    pub(crate) fn is_trace_context_propagation_enabled(&self) -> bool {
+        self.propagation.trace_context || self.otlp.enabled
+    }
+
+    pub(crate) fn is_jaeger_propagation_enabled(&self) -> bool {
+        self.propagation.jaeger
+    }
+
+    pub(crate) fn is_datadog_propagation_enabled(&self) -> bool {
+        self.propagation.datadog.unwrap_or(false) || self.datadog.enabled
+    }
+
+    pub(crate) fn is_zipkin_propagation_enabled(&self) -> bool {
+        self.propagation.zipkin || self.zipkin.enabled
+    }
+
+    pub(crate) fn is_aws_xray_propagation_enabled(&self) -> bool {
+        self.propagation.aws_xray
+    }
+}
+
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ExposeTraceId {
@@ -314,7 +340,7 @@ pub(crate) struct Propagation {
     /// Propagate Jaeger
     pub(crate) jaeger: bool,
     /// Propagate Datadog
-    pub(crate) datadog: bool,
+    pub(crate) datadog: Option<bool>,
     /// Propagate Zipkin
     pub(crate) zipkin: bool,
     /// Propagate AWS X-Ray

@@ -10,6 +10,12 @@ fn default_header_read_timeout() -> Duration {
     DEFAULT_HEADER_READ_TIMEOUT
 }
 
+const DEFAULT_TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn default_tls_handshake_timeout() -> Duration {
+    DEFAULT_TLS_HANDSHAKE_TIMEOUT
+}
+
 /// Configuration for HTTP
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -21,6 +27,13 @@ pub(crate) struct ServerHttpConfig {
     )]
     #[schemars(with = "String", default = "default_header_read_timeout")]
     pub(crate) header_read_timeout: Duration,
+    /// TLS handshake timeout in human-readable format; defaults to 10s
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_tls_handshake_timeout"
+    )]
+    #[schemars(with = "String", default = "default_tls_handshake_timeout")]
+    pub(crate) tls_handshake_timeout: Duration,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -34,6 +47,7 @@ impl Default for ServerHttpConfig {
     fn default() -> Self {
         Self {
             header_read_timeout: Duration::from_secs(10),
+            tls_handshake_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -63,10 +77,15 @@ mod tests {
     #[test]
     fn it_builds_default_server_configuration() {
         let default_duration_seconds = Duration::from_secs(10);
+        let default_tls_handshake_timeout = Duration::from_secs(10);
         let server_config = Server::builder().build();
         assert_eq!(
             server_config.http.header_read_timeout,
             default_duration_seconds
+        );
+        assert_eq!(
+            server_config.http.tls_handshake_timeout,
+            default_tls_handshake_timeout
         );
     }
 
@@ -114,5 +133,51 @@ mod tests {
         let config: Server = serde_json::from_value(json_config).unwrap();
 
         assert_eq!(config.http.header_read_timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn it_json_parses_default_tls_handshake_timeout_when_server_http_config_omitted() {
+        let json_server = json!({});
+
+        let config: Server = serde_json::from_value(json_server).unwrap();
+
+        assert_eq!(config.http.tls_handshake_timeout, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn it_json_parses_default_tls_handshake_timeout_when_omitted() {
+        let json_config = json!({
+            "http": {}
+        });
+
+        let config: Server = serde_json::from_value(json_config).unwrap();
+
+        assert_eq!(config.http.tls_handshake_timeout, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn it_json_parses_specified_tls_handshake_timeout_seconds_correctly() {
+        let json_config = json!({
+           "http": {
+               "tls_handshake_timeout": "30s"
+           }
+        });
+
+        let config: Server = serde_json::from_value(json_config).unwrap();
+
+        assert_eq!(config.http.tls_handshake_timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn it_json_parses_specified_tls_handshake_timeout_minutes_correctly() {
+        let json_config = json!({
+            "http": {
+                "tls_handshake_timeout": "1m"
+            }
+        });
+
+        let config: Server = serde_json::from_value(json_config).unwrap();
+
+        assert_eq!(config.http.tls_handshake_timeout, Duration::from_secs(60));
     }
 }

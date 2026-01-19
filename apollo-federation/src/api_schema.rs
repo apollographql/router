@@ -115,7 +115,7 @@ pub(crate) fn to_api_schema(
     options: ApiSchemaOptions,
 ) -> Result<ValidFederationSchema, FederationError> {
     // Create a whole new federation schema that we can mutate.
-    let mut api_schema = FederationSchema::new(schema.schema().clone().into_inner())?;
+    let mut api_schema = FederationSchema::from(schema);
 
     // As we compute the API schema of a supergraph, we want to ignore explicit definitions of `@defer` and `@stream` because
     // those correspond to the merging of potential definitions from the subgraphs, but whether the supergraph API schema

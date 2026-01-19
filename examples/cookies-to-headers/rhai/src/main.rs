@@ -81,7 +81,8 @@ mod tests {
             "rhai": {
                 "scripts": "src",
                 "main": "cookies_to_headers.rhai",
-            }
+            },
+            "include_subgraph_errors": {"all": true}
         });
         let test_harness = apollo_router::TestHarness::builder()
             .configuration_json(config)

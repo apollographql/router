@@ -3,11 +3,12 @@ mod error;
 pub(super) mod redis;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Duration;
 use std::time::Instant;
 
 pub(super) use error::Error;
-use tokio_util::future::FutureExt;
+use tokio_util::time::FutureExt;
 
 use super::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
@@ -28,6 +29,7 @@ pub(super) struct Document {
     pub(super) control: CacheControl,
     pub(super) invalidation_keys: Vec<String>,
     pub(super) expire: Duration,
+    pub(super) debug: bool,
 }
 
 /// A `CacheEntry` is a unit of data returned from the cache. It contains the cache key, value, and
@@ -37,6 +39,8 @@ pub(super) struct CacheEntry {
     pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
+    // Only set in debug mode
+    pub(super) cache_tags: Option<HashSet<String>>,
 }
 
 /// The `CacheStorage` trait defines an API that the backing storage layer must implement for
@@ -115,7 +119,7 @@ pub(super) trait CacheStorage {
     async fn internal_fetch_multiple(
         &self,
         cache_keys: &[&str],
-    ) -> StorageResult<Vec<Option<CacheEntry>>>;
+    ) -> StorageResult<Vec<StorageResult<CacheEntry>>>;
 
     /// Fetch the values belonging to `cache_keys`. Command will be timed out after `self.fetch_timeout()`.
     async fn fetch_multiple(
@@ -133,7 +137,18 @@ pub(super) trait CacheStorage {
         );
 
         record_fetch_duration(now.elapsed(), subgraph_name, batch_size);
-        result.inspect_err(|err| record_fetch_error(err, subgraph_name))
+
+        // go through values to record partial errors
+        let values = result
+            .inspect_err(|err| record_fetch_error(err, subgraph_name))?
+            .into_iter()
+            .map(|value| {
+                value
+                    .inspect_err(|err| record_fetch_error(err, subgraph_name))
+                    .ok()
+            })
+            .collect();
+        Ok(values)
     }
 
     #[doc(hidden)]

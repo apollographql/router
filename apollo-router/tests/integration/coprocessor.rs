@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use insta::assert_yaml_snapshot;
 use serde_json::json;
 use tower::BoxError;
@@ -488,4 +491,234 @@ mod on_graphql_error_selector {
 
         Ok(())
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Track the context keys received in each stage
+    let router_response_context = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let router_response_context_clone = router_response_context.clone();
+
+    // Handle all coprocessor stages, but modify SubgraphResponse and track RouterResponse
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| {
+            let body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = body.get("stage").and_then(|s| s.as_str()).unwrap_or("");
+
+            let mut response = body.clone();
+
+            // Ensure Request stages have a control field
+            if stage.ends_with("Request")
+                && !response.as_object().unwrap().contains_key("control")
+                && let Some(obj) = response.as_object_mut()
+            {
+                obj.insert("control".to_string(), serde_json::json!("continue"));
+            }
+
+            if stage == "RouterRequest" {
+                // Add a context entry to the router request
+                response
+                    .as_object_mut()
+                    .expect("response was not an object")
+                    .entry("context")
+                    .or_insert_with(|| serde_json::Value::Object(Default::default()))
+                    .as_object_mut()
+                    .expect("context was not an object")
+                    .entry("entries")
+                    .or_insert_with(|| serde_json::Value::Object(Default::default()))
+                    .as_object_mut()
+                    .expect("entries was not an object")
+                    .insert("k1".to_string(), serde_json::json!("v1"));
+            } else if stage == "SubgraphResponse" {
+                // Return context without "k1" (deleted)
+                response
+                    .as_object_mut()
+                    .expect("response was not an object")
+                    .get_mut("context")
+                    .expect("context was not found")
+                    .as_object_mut()
+                    .expect("context was not an object")
+                    .get_mut("entries")
+                    .expect("entries was not found")
+                    .as_object_mut()
+                    .expect("entries was not an object")
+                    .remove("k1");
+            } else if stage == "RouterResponse" {
+                // Track the context received in RouterResponse
+                let context = body.get("context").and_then(|c| c.get("entries"));
+                if let Some(ctx) = context {
+                    *router_response_context_clone.lock().unwrap() = Some(ctx.clone());
+                }
+            }
+
+            // For all other stages, just pass through
+            ResponseTemplate::new(200).set_body_json(response)
+        })
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_context.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute a query that will trigger both SubgraphResponse and RouterResponse stages
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Verify that RouterResponse does NOT have "k1" (it was deleted in SubgraphResponse)
+    assert!(
+        !router_response_context
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("router response context was None")
+            .as_object()
+            .expect("router response context was not an object")
+            .contains_key("k1")
+    );
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError> {
+    // GIVEN:
+    //   - graphos
+    //   - a mock server with a mocked coprocessor
+    //   - a way to track cache key data across threads (for the mock server thread and test thread)
+    //   - a router with coprocessor debugging enabled
+    //   - a request to that router with a `apollo-cache-debugging: true` header
+
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // looks sort of over-complicated but we need to access and mutate the key data across threads
+    // (test thread and the mock server's thread)
+    type CacheKey = (
+        serde_json::Value,
+        serde_json::Map<String, serde_json::Value>,
+    );
+    let received_cache_keys: Arc<Mutex<Option<CacheKey>>> = Arc::new(Mutex::new(None));
+    let received_cache_keys_clone = received_cache_keys.clone();
+
+    // coprocessor mock
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| {
+            let body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = body.get("stage").and_then(|s| s.as_str()).unwrap_or("");
+
+            // we're targeting the response stage to make sure keys are available by then (they
+            // should be, but this is an understated yet critical part of what we're testing)
+            if stage == "SupergraphResponse"
+                && let Some(context) = body.get("context")
+                && let Some(entries) = context.get("entries").and_then(|e| e.as_object())
+                && let Some(cache_keys) = entries.get("apollo::response_cache::debug_cached_keys")
+            {
+                *received_cache_keys_clone.lock().unwrap() =
+                    Some((cache_keys.clone(), entries.clone()));
+            }
+
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&mock_server)
+        .await;
+
+    let subgraph_response = ResponseTemplate::new(200)
+        .insert_header("cache-control", "public, max-age=60")
+        .set_body_json(json!({
+            "data": {
+                "topProducts": [{
+                    "name": "Table",
+                    "__typename": "Product",
+                    "reviews": [{
+                        "id": "1",
+                        "product": { "__typename": "Product" },
+                        "author": { "__typename": "User", "id": "u1" }
+                    }],
+                    "reviewsForAuthor": [{
+                        "id": "2",
+                        "product": { "__typename": "Product" },
+                        "author": { "__typename": "User", "id": "u1" }
+                    }]
+                }]
+            }
+        }));
+
+    // NOTE: this config has `debug: true` enabled for response caching, that's an important part
+    // of getting the cache key data into a coprocessor
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_response_cache_keys.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .responder(subgraph_response)
+        .build()
+        .await;
+
+    // NOTE: very importantly, this header is required for getting context keys into a coprocessor!
+    let query = Query::builder()
+        .header("apollo-cache-debugging".to_string(), "true".to_string())
+        .build();
+
+    // WHEN:
+    //   - we run the router
+    //   - and send a query with the apollo-cache-debugging header
+
+    router.start().await;
+    router.assert_started().await;
+    let (_trace_id, response) = router.execute_query(query).await;
+
+    // THEN:
+    //   - all is well (ie, status code 200)
+    //   - the coprocessor receives the cache keys
+    //   - there's actually data for those keys
+    assert_eq!(response.status(), 200);
+
+    let (cache_keys, _context_entries) = received_cache_keys
+        .lock()
+        .unwrap()
+        .take()
+        .expect("coprocessor should have received response cache keys in context");
+
+    tracing::info!("cache keys: {cache_keys}");
+
+    let mut cache_keys = cache_keys;
+    for entry in cache_keys.as_array_mut().unwrap() {
+        if let Some(cache_control) = entry
+            .get_mut("cacheControl")
+            .and_then(|v| v.as_object_mut())
+        {
+            cache_control.remove("created");
+        }
+    }
+
+    // NOTE: `created` removed from this block
+    let expected = json!([{"key":"version:1.1:subgraph:products:type:Query:hash:a41f028306ba19f5a29b1474ef621a8cb18236cf8476b43d4863820fdd9d1398:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6","invalidationKeys":[],"kind":{"rootFields":["topProducts"]},"subgraphName":"products","subgraphRequest":{"query":"query ExampleQuery__products__0 { topProducts { name } }","operationName":"ExampleQuery__products__0"},"source":"subgraph","cacheControl":{"maxAge":60,"public":true},"shouldStore":true,"data":{"data":{"topProducts":[{"name":"Table","__typename":"Product","reviews":[{"id":"1","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}],"reviewsForAuthor":[{"id":"2","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}]}]}},"warnings":[{"code":"NO_CACHE_TAG_ON_ROOT_FIELD","links":[{"url":"https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods","title":"Add '@cacheTag' in your schema"}],"message":"No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."}]}]);
+
+    assert_eq!(cache_keys, expected);
+
+    router.graceful_shutdown().await;
+
+    Ok(())
 }

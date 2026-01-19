@@ -7,6 +7,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
@@ -33,6 +34,7 @@ pub(crate) struct SubgraphMetadata {
     external_metadata: ExternalMetadata,
     context_fields: IndexSet<FieldDefinitionPosition>,
     interface_constraint_fields: IndexSet<FieldDefinitionPosition>,
+    interface_object_types: IndexSet<apollo_compiler::Name>,
     key_fields: IndexSet<FieldDefinitionPosition>,
     provided_fields: IndexSet<FieldDefinitionPosition>,
     required_fields: IndexSet<FieldDefinitionPosition>,
@@ -49,6 +51,8 @@ impl SubgraphMetadata {
         let context_fields = Self::collect_fields_used_by_context_directive(schema)?;
         let interface_constraint_fields =
             Self::collect_fields_used_to_satisfy_interface_constraints(schema)?;
+        let interface_object_types =
+            Self::collect_interface_object_types(schema, federation_spec_definition)?;
         let key_fields = Self::collect_key_fields(schema)?;
         let provided_fields = Self::collect_provided_fields(schema)?;
         let required_fields = Self::collect_required_fields(schema)?;
@@ -64,6 +68,7 @@ impl SubgraphMetadata {
             external_metadata,
             context_fields,
             interface_constraint_fields,
+            interface_object_types,
             key_fields,
             provided_fields,
             required_fields,
@@ -119,6 +124,36 @@ impl SubgraphMetadata {
             || self.key_fields.contains(field)
             || self.provided_fields.contains(field)
             || self.required_fields.contains(field)
+    }
+
+    pub(crate) fn is_interface_object_type(&self, type_name: &apollo_compiler::Name) -> bool {
+        self.interface_object_types.contains(type_name)
+    }
+
+    pub(crate) fn remove_external_field(&mut self, field: &FieldDefinitionPosition) {
+        self.external_metadata.external_fields.shift_remove(field);
+    }
+
+    /// Update field coordinates in metadata after a type has been renamed.
+    /// This is necessary when root operation types are normalized (e.g., MyMutation -> Mutation).
+    pub(crate) fn update_type_references(
+        &mut self,
+        old_type_name: &apollo_compiler::Name,
+        new_type_name: &apollo_compiler::Name,
+    ) {
+        update_field_definition_positions(&mut self.context_fields, old_type_name, new_type_name);
+        update_field_definition_positions(
+            &mut self.interface_constraint_fields,
+            old_type_name,
+            new_type_name,
+        );
+        update_field_definition_positions(&mut self.key_fields, old_type_name, new_type_name);
+        update_field_definition_positions(&mut self.provided_fields, old_type_name, new_type_name);
+        update_field_definition_positions(&mut self.required_fields, old_type_name, new_type_name);
+        update_field_definition_positions(&mut self.shareable_fields, old_type_name, new_type_name);
+
+        self.external_metadata
+            .update_type_references(old_type_name, new_type_name);
     }
 
     pub(crate) fn selection_selects_any_external_field(&self, selection: &SelectionSet) -> bool {
@@ -298,6 +333,32 @@ impl SubgraphMetadata {
         }
 
         Ok(interface_constraint_fields)
+    }
+
+    fn collect_interface_object_types(
+        schema: &FederationSchema,
+        federation_spec_definition: &'static FederationSpecDefinition,
+    ) -> Result<IndexSet<apollo_compiler::Name>, FederationError> {
+        let mut interface_object_types = IndexSet::default();
+
+        let Some(interface_object_directive_name) = federation_spec_definition
+            .directive_name_in_schema(schema, &FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            return Ok(interface_object_types);
+        };
+
+        let Ok(interface_object_directive_referencers) = schema
+            .referencers
+            .get_directive(&interface_object_directive_name)
+        else {
+            return Ok(interface_object_types);
+        };
+
+        for object_type_position in &interface_object_directive_referencers.object_types {
+            interface_object_types.insert(object_type_position.type_name.clone());
+        }
+
+        Ok(interface_object_types)
     }
 }
 
@@ -510,6 +571,62 @@ impl ExternalMetadata {
         }
         false
     }
+
+    /// Update field coordinates in external metadata after a type has been renamed.
+    pub(crate) fn update_type_references(
+        &mut self,
+        old_type_name: &apollo_compiler::Name,
+        new_type_name: &apollo_compiler::Name,
+    ) {
+        update_field_definition_positions(&mut self.external_fields, old_type_name, new_type_name);
+        update_field_definition_positions(
+            &mut self.fake_external_fields,
+            old_type_name,
+            new_type_name,
+        );
+        update_field_definition_positions(
+            &mut self.fields_on_external_types,
+            old_type_name,
+            new_type_name,
+        );
+        update_field_definition_positions(
+            &mut self.fields_with_external_implementation,
+            old_type_name,
+            new_type_name,
+        );
+    }
+}
+
+/// Helper function to update field positions in an IndexSet after a type has been renamed.
+/// Since IndexSet uses hashing and the type_name is part of the hash, we need to remove
+/// old entries and insert new ones rather than mutating in place.
+fn update_field_definition_positions(
+    fields: &mut IndexSet<FieldDefinitionPosition>,
+    old_type_name: &apollo_compiler::Name,
+    new_type_name: &apollo_compiler::Name,
+) {
+    let updated_fields: Vec<_> = fields
+        .iter()
+        .filter(|f| f.type_name() == old_type_name)
+        .map(|old_field| match old_field {
+            FieldDefinitionPosition::Object(field) => {
+                FieldDefinitionPosition::Object(ObjectFieldDefinitionPosition {
+                    type_name: new_type_name.clone(),
+                    field_name: field.field_name.clone(),
+                })
+            }
+            FieldDefinitionPosition::Interface(field) => {
+                FieldDefinitionPosition::Interface(InterfaceFieldDefinitionPosition {
+                    type_name: new_type_name.clone(),
+                    field_name: field.field_name.clone(),
+                })
+            }
+            FieldDefinitionPosition::Union(field) => FieldDefinitionPosition::Union(field.clone()),
+        })
+        .collect();
+
+    fields.retain(|f| f.type_name() != old_type_name);
+    fields.extend(updated_fields);
 }
 
 #[cfg(test)]

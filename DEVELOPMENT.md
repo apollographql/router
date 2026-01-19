@@ -9,7 +9,7 @@ The **Apollo Router Core** is a configurable, high-performance **graph router** 
 
 ## Development
 
-We use [`mise`](https://mise.jdx.dev/) to manage toolchain dependencies.
+We use [`mise`](https://mise.jdx.dev/) to manage toolchain and test dependencies.
 Example commands in this document assume that mise shims are available in the environment.
 If you do not use `mise activate`, you can use `mise x -- <COMMAND>` in place of the commands below, for example `mise x -- cargo build`.
 
@@ -28,14 +28,15 @@ docker compose up -d
 ```
 
 This starts:
-- **Redis** (port 6379-7005) - Required for entity caching, response caching, and Redis-related integration tests
-- **PostgreSQL** (port 5432) - Used by database integration tests
+- **Redis** (port 6379, 7000-7005) - Required for entity caching, response caching, and Redis-related integration tests
 - **Zipkin** (port 9411) - For distributed tracing tests
 - **Datadog Agent** (port 8126) - For Datadog telemetry integration tests
 
 Some tests that use the features above are configured with `required_to_start: true`. The router won't start if these services aren't available, causing test failures.
 
 **Note:** `-d` runs services in the background. Remove `-d` if you want to see logs or run in foreground.
+
+Several tests also require the `redis-cli` binary; this is installed by default if you use `mise`.
 
 #### Enterprise feature testing
 
@@ -53,7 +54,8 @@ export TEST_APOLLO_GRAPH_REF="your-graph-ref@variant"
 
 ### Testing
 
-Tests on this repository are run using [nextest](https://nexte.st/). nextest is installed automatically when you use `mise`.
+Tests on this repository are run using [nextest](https://nexte.st/). nextest is installed automatically when you use
+`mise`.
 
 #### Test environment setup
 

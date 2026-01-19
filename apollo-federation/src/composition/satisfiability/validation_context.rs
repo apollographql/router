@@ -249,8 +249,7 @@ type T implements I
     #[test]
     fn test_is_shareable() {
         let supergraph = Supergraph::parse(TEST_SUPERGRAPH).unwrap();
-        let supergraph_schema =
-            ValidFederationSchema::new(supergraph.state.schema().clone()).unwrap();
+        let supergraph_schema = supergraph.schema().clone();
         let context = ValidationContext::new(supergraph_schema).unwrap();
 
         assert!(is_shareable_field(&context, "P", "id"));
@@ -271,8 +270,7 @@ type T implements I
     #[test]
     fn test_matching_contexts() {
         let supergraph = Supergraph::parse(TEST_SUPERGRAPH).unwrap();
-        let supergraph_schema =
-            ValidFederationSchema::new(supergraph.state.schema().clone()).unwrap();
+        let supergraph_schema = supergraph.schema().clone();
         let context = ValidationContext::new(supergraph_schema).unwrap();
 
         assert_eq!(matching_contexts(&context, "I"), Some(vec!["A__contextI"]),);

@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::debug::DebugRequest;
@@ -63,6 +65,7 @@ impl From<RuntimeError> for graphql::Error {
 
 // --- handle_responses --------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn process_response<T: HttpBody>(
     result: Result<http::Response<T>, Error>,
     response_key: ResponseKey,
@@ -71,6 +74,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     debug_request: DebugRequest,
     debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
+    operation: Option<Arc<Valid<ExecutableDocument>>>,
 ) -> connector::request_service::Response {
     let (mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
@@ -148,6 +152,12 @@ pub(crate) async fn process_response<T: HttpBody>(
                     &connector,
                     context,
                     supergraph_request.headers(),
+                )
+                .apply_operation(
+                    operation
+                        .as_ref()
+                        .map(|arc_valid_doc| arc_valid_doc.as_ref().as_ref()),
+                    &connector.schema_subtypes_map,
                 ),
             };
 
@@ -196,6 +206,7 @@ pub(crate) async fn process_response<T: HttpBody>(
 
 pub(crate) fn aggregate_responses(
     responses: Vec<MappedResponse>,
+    _context: Context,
 ) -> Result<Response, HandleResponseError> {
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
@@ -346,6 +357,7 @@ mod tests {
     async fn test_handle_responses_root_fields() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -396,67 +408,71 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response2),
-                response_key2,
-                connector,
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response2),
+                    response_key2,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
-        assert_debug_snapshot!(res, @r###"
+        assert_debug_snapshot!(res.response, @r#"
         Response {
-            response: Response {
-                status: 200,
-                version: HTTP/1.1,
-                headers: {},
-                body: Response {
-                    label: None,
-                    data: Some(
-                        Object({
-                            "hello": String(
-                                "world",
-                            ),
-                            "hello2": String(
-                                "world",
-                            ),
-                        }),
-                    ),
-                    path: None,
-                    errors: [],
-                    extensions: {},
-                    has_next: None,
-                    subscribed: None,
-                    created_at: None,
-                    incremental: [],
-                },
+            status: 200,
+            version: HTTP/1.1,
+            headers: {},
+            body: Response {
+                label: None,
+                data: Some(
+                    Object({
+                        "hello": String(
+                            "world",
+                        ),
+                        "hello2": String(
+                            "world",
+                        ),
+                    }),
+                ),
+                path: None,
+                errors: [],
+                extensions: {},
+                has_next: None,
+                subscribed: None,
+                created_at: None,
+                incremental: [],
             },
         }
-        "###);
+        "#);
     }
 
     #[tokio::test]
     async fn test_handle_responses_entities() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -507,67 +523,70 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response2),
-                response_key2,
-                connector,
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response2),
+                    response_key2,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
-        assert_debug_snapshot!(res, @r###"
+        assert_debug_snapshot!(res.response, @r#"
         Response {
-            response: Response {
-                status: 200,
-                version: HTTP/1.1,
-                headers: {},
-                body: Response {
-                    label: None,
-                    data: Some(
-                        Object({
-                            "_entities": Array([
-                                Object({
-                                    "id": String(
-                                        "1",
-                                    ),
-                                }),
-                                Object({
-                                    "id": String(
-                                        "2",
-                                    ),
-                                }),
-                            ]),
-                        }),
-                    ),
-                    path: None,
-                    errors: [],
-                    extensions: {},
-                    has_next: None,
-                    subscribed: None,
-                    created_at: None,
-                    incremental: [],
-                },
+            status: 200,
+            version: HTTP/1.1,
+            headers: {},
+            body: Response {
+                label: None,
+                data: Some(
+                    Object({
+                        "_entities": Array([
+                            Object({
+                                "id": String(
+                                    "1",
+                                ),
+                            }),
+                            Object({
+                                "id": String(
+                                    "2",
+                                ),
+                            }),
+                        ]),
+                    }),
+                ),
+                path: None,
+                errors: [],
+                extensions: {},
+                has_next: None,
+                subscribed: None,
+                created_at: None,
+                incremental: [],
             },
         }
-        "###);
+        "#);
     }
 
     #[tokio::test]
@@ -575,6 +594,7 @@ mod tests {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_2,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
+            schema_subtypes_map: Default::default(),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
@@ -632,59 +652,61 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
-        assert_debug_snapshot!(res, @r#"
+        assert_debug_snapshot!(res.response, @r#"
         Response {
-            response: Response {
-                status: 200,
-                version: HTTP/1.1,
-                headers: {},
-                body: Response {
-                    label: None,
-                    data: Some(
-                        Object({
-                            "_entities": Array([
-                                Object({
-                                    "id": String(
-                                        "1",
-                                    ),
-                                    "name": String(
-                                        "A",
-                                    ),
-                                }),
-                                Object({
-                                    "id": String(
-                                        "2",
-                                    ),
-                                    "name": String(
-                                        "B",
-                                    ),
-                                }),
-                            ]),
-                        }),
-                    ),
-                    path: None,
-                    errors: [],
-                    extensions: {},
-                    has_next: None,
-                    subscribed: None,
-                    created_at: None,
-                    incremental: [],
-                },
+            status: 200,
+            version: HTTP/1.1,
+            headers: {},
+            body: Response {
+                label: None,
+                data: Some(
+                    Object({
+                        "_entities": Array([
+                            Object({
+                                "id": String(
+                                    "1",
+                                ),
+                                "name": String(
+                                    "A",
+                                ),
+                            }),
+                            Object({
+                                "id": String(
+                                    "2",
+                                ),
+                                "name": String(
+                                    "B",
+                                ),
+                            }),
+                        ]),
+                    }),
+                ),
+                path: None,
+                errors: [],
+                extensions: {},
+                has_next: None,
+                subscribed: None,
+                created_at: None,
+                incremental: [],
             },
         }
         "#);
@@ -694,6 +716,7 @@ mod tests {
     async fn test_handle_responses_entity_field() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -748,79 +771,83 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response2),
-                response_key2,
-                connector,
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response2),
+                    response_key2,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
-        assert_debug_snapshot!(res, @r###"
+        assert_debug_snapshot!(res.response, @r#"
         Response {
-            response: Response {
-                status: 200,
-                version: HTTP/1.1,
-                headers: {},
-                body: Response {
-                    label: None,
-                    data: Some(
-                        Object({
-                            "_entities": Array([
-                                Object({
-                                    "__typename": String(
-                                        "User",
-                                    ),
-                                    "field": String(
-                                        "value1",
-                                    ),
-                                }),
-                                Object({
-                                    "__typename": String(
-                                        "User",
-                                    ),
-                                    "field": String(
-                                        "value2",
-                                    ),
-                                }),
-                            ]),
-                        }),
-                    ),
-                    path: None,
-                    errors: [],
-                    extensions: {},
-                    has_next: None,
-                    subscribed: None,
-                    created_at: None,
-                    incremental: [],
-                },
+            status: 200,
+            version: HTTP/1.1,
+            headers: {},
+            body: Response {
+                label: None,
+                data: Some(
+                    Object({
+                        "_entities": Array([
+                            Object({
+                                "__typename": String(
+                                    "User",
+                                ),
+                                "field": String(
+                                    "value1",
+                                ),
+                            }),
+                            Object({
+                                "__typename": String(
+                                    "User",
+                                ),
+                                "field": String(
+                                    "value2",
+                                ),
+                            }),
+                        ]),
+                    }),
+                ),
+                path: None,
+                errors: [],
+                extensions: {},
+                has_next: None,
+                subscribed: None,
+                created_at: None,
+                incremental: [],
             },
         }
-        "###);
+        "#);
     }
 
     #[tokio::test]
     async fn test_handle_responses_errors() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -891,52 +918,59 @@ mod tests {
                 .unwrap(),
         );
 
-        let mut res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response_plaintext),
-                response_key_plaintext,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response2),
-                response_key2,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-            process_response(
-                Ok(response3),
-                response_key3,
-                connector,
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let mut res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response_plaintext),
+                    response_key_plaintext,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response2),
+                    response_key2,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+                process_response(
+                    Ok(response3),
+                    response_key3,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
         // Overwrite error IDs to avoid random Uuid mismatch.
@@ -945,148 +979,146 @@ mod tests {
         let body = res.response.body_mut();
         body.errors = body.errors.iter_mut().map(|e| e.with_null_id()).collect();
 
-        assert_debug_snapshot!(res, @r#"
+        assert_debug_snapshot!(res.response, @r#"
         Response {
-            response: Response {
-                status: 200,
-                version: HTTP/1.1,
-                headers: {},
-                body: Response {
-                    label: None,
-                    data: Some(
-                        Object({
-                            "_entities": Array([
-                                Null,
-                                Null,
-                                Object({
-                                    "id": String(
-                                        "2",
-                                    ),
-                                }),
-                                Null,
-                            ]),
-                        }),
-                    ),
-                    path: None,
-                    errors: [
-                        Error {
-                            message: "The server returned data in an unexpected format.",
-                            locations: [],
-                            path: Some(
-                                Path(
-                                    [
-                                        Key(
-                                            "_entities",
-                                            None,
-                                        ),
-                                        Index(
-                                            0,
-                                        ),
-                                    ],
+            status: 200,
+            version: HTTP/1.1,
+            headers: {},
+            body: Response {
+                label: None,
+                data: Some(
+                    Object({
+                        "_entities": Array([
+                            Null,
+                            Null,
+                            Object({
+                                "id": String(
+                                    "2",
                                 ),
+                            }),
+                            Null,
+                        ]),
+                    }),
+                ),
+                path: None,
+                errors: [
+                    Error {
+                        message: "The server returned data in an unexpected format.",
+                        locations: [],
+                        path: Some(
+                            Path(
+                                [
+                                    Key(
+                                        "_entities",
+                                        None,
+                                    ),
+                                    Index(
+                                        0,
+                                    ),
+                                ],
                             ),
-                            extensions: {
-                                "code": String(
-                                    "CONNECTOR_RESPONSE_INVALID",
-                                ),
-                                "service": String(
-                                    "subgraph_name",
-                                ),
-                                "connector": Object({
-                                    "coordinate": String(
-                                        "subgraph_name:Query.user[0]",
-                                    ),
-                                }),
-                                "http": Object({
-                                    "status": Number(200),
-                                }),
-                                "apollo.private.subgraph.name": String(
-                                    "subgraph_name",
-                                ),
-                            },
-                            apollo_id: 00000000-0000-0000-0000-000000000000,
-                        },
-                        Error {
-                            message: "Request failed",
-                            locations: [],
-                            path: Some(
-                                Path(
-                                    [
-                                        Key(
-                                            "_entities",
-                                            None,
-                                        ),
-                                        Index(
-                                            1,
-                                        ),
-                                    ],
-                                ),
+                        ),
+                        extensions: {
+                            "code": String(
+                                "CONNECTOR_RESPONSE_INVALID",
                             ),
-                            extensions: {
-                                "code": String(
-                                    "CONNECTOR_FETCH",
-                                ),
-                                "service": String(
-                                    "subgraph_name",
-                                ),
-                                "connector": Object({
-                                    "coordinate": String(
-                                        "subgraph_name:Query.user[0]",
-                                    ),
-                                }),
-                                "http": Object({
-                                    "status": Number(404),
-                                }),
-                                "apollo.private.subgraph.name": String(
-                                    "subgraph_name",
-                                ),
-                            },
-                            apollo_id: 00000000-0000-0000-0000-000000000000,
-                        },
-                        Error {
-                            message: "Request failed",
-                            locations: [],
-                            path: Some(
-                                Path(
-                                    [
-                                        Key(
-                                            "_entities",
-                                            None,
-                                        ),
-                                        Index(
-                                            3,
-                                        ),
-                                    ],
-                                ),
+                            "service": String(
+                                "subgraph_name",
                             ),
-                            extensions: {
-                                "code": String(
-                                    "CONNECTOR_FETCH",
+                            "connector": Object({
+                                "coordinate": String(
+                                    "subgraph_name:Query.user[0]",
                                 ),
-                                "service": String(
-                                    "subgraph_name",
-                                ),
-                                "connector": Object({
-                                    "coordinate": String(
-                                        "subgraph_name:Query.user[0]",
-                                    ),
-                                }),
-                                "http": Object({
-                                    "status": Number(500),
-                                }),
-                                "apollo.private.subgraph.name": String(
-                                    "subgraph_name",
-                                ),
-                            },
-                            apollo_id: 00000000-0000-0000-0000-000000000000,
+                            }),
+                            "http": Object({
+                                "status": Number(200),
+                            }),
+                            "apollo.private.subgraph.name": String(
+                                "subgraph_name",
+                            ),
                         },
-                    ],
-                    extensions: {},
-                    has_next: None,
-                    subscribed: None,
-                    created_at: None,
-                    incremental: [],
-                },
+                        apollo_id: 00000000-0000-0000-0000-000000000000,
+                    },
+                    Error {
+                        message: "Request failed",
+                        locations: [],
+                        path: Some(
+                            Path(
+                                [
+                                    Key(
+                                        "_entities",
+                                        None,
+                                    ),
+                                    Index(
+                                        1,
+                                    ),
+                                ],
+                            ),
+                        ),
+                        extensions: {
+                            "code": String(
+                                "CONNECTOR_FETCH",
+                            ),
+                            "service": String(
+                                "subgraph_name",
+                            ),
+                            "connector": Object({
+                                "coordinate": String(
+                                    "subgraph_name:Query.user[0]",
+                                ),
+                            }),
+                            "http": Object({
+                                "status": Number(404),
+                            }),
+                            "apollo.private.subgraph.name": String(
+                                "subgraph_name",
+                            ),
+                        },
+                        apollo_id: 00000000-0000-0000-0000-000000000000,
+                    },
+                    Error {
+                        message: "Request failed",
+                        locations: [],
+                        path: Some(
+                            Path(
+                                [
+                                    Key(
+                                        "_entities",
+                                        None,
+                                    ),
+                                    Index(
+                                        3,
+                                    ),
+                                ],
+                            ),
+                        ),
+                        extensions: {
+                            "code": String(
+                                "CONNECTOR_FETCH",
+                            ),
+                            "service": String(
+                                "subgraph_name",
+                            ),
+                            "connector": Object({
+                                "coordinate": String(
+                                    "subgraph_name:Query.user[0]",
+                                ),
+                            }),
+                            "http": Object({
+                                "status": Number(500),
+                            }),
+                            "apollo.private.subgraph.name": String(
+                                "subgraph_name",
+                            ),
+                        },
+                        apollo_id: 00000000-0000-0000-0000-000000000000,
+                    },
+                ],
+                extensions: {},
+                has_next: None,
+                subscribed: None,
+                created_at: None,
+                incremental: [],
             },
         }
         "#);
@@ -1097,6 +1129,7 @@ mod tests {
         let selection = JSONSelection::parse("$status").unwrap();
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1139,45 +1172,47 @@ mod tests {
                 .unwrap(),
         );
 
-        let res = super::aggregate_responses(vec![
-            process_response(
-                Ok(response1),
-                response_key1,
-                connector,
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request,
-            )
-            .await
-            .mapped_response,
-        ])
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap();
 
-        assert_debug_snapshot!(res, @r###"
+        assert_debug_snapshot!(res.response, @r#"
         Response {
-            response: Response {
-                status: 200,
-                version: HTTP/1.1,
-                headers: {},
-                body: Response {
-                    label: None,
-                    data: Some(
-                        Object({
-                            "hello": Number(201),
-                        }),
-                    ),
-                    path: None,
-                    errors: [],
-                    extensions: {},
-                    has_next: None,
-                    subscribed: None,
-                    created_at: None,
-                    incremental: [],
-                },
+            status: 200,
+            version: HTTP/1.1,
+            headers: {},
+            body: Response {
+                label: None,
+                data: Some(
+                    Object({
+                        "hello": Number(201),
+                    }),
+                ),
+                path: None,
+                errors: [],
+                extensions: {},
+                has_next: None,
+                subscribed: None,
+                created_at: None,
+                incremental: [],
             },
         }
-        "###);
+        "#);
     }
 
     #[tokio::test]
@@ -1192,6 +1227,7 @@ mod tests {
         };
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,
@@ -1247,38 +1283,46 @@ mod tests {
         );
 
         // Make failing request
-        let res_expect_fail = super::aggregate_responses(vec![
-            process_response(
-                Ok(response_fail),
-                response_fail_key,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-        ])
+        let res_expect_fail = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response_fail),
+                    response_fail_key,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap()
         .response;
         assert_eq!(res_expect_fail.body().data, Some(JsonValue::Null));
         assert_eq!(res_expect_fail.body().errors.len(), 1);
 
         // Make succeeding request
-        let res_expect_success = super::aggregate_responses(vec![
-            process_response(
-                Ok(response_succeed),
-                response_succeed_key,
-                connector.clone(),
-                &Context::default(),
-                (None, Default::default()),
-                None,
-                supergraph_request.clone(),
-            )
-            .await
-            .mapped_response,
-        ])
+        let res_expect_success = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response_succeed),
+                    response_succeed_key,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request.clone(),
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
         .unwrap()
         .response;
         assert!(res_expect_success.body().errors.is_empty());

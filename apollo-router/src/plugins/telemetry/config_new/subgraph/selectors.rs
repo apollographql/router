@@ -22,6 +22,7 @@ use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::selectors::All;
+use crate::plugins::telemetry::config_new::selectors::CacheControlSelector;
 use crate::plugins::telemetry::config_new::selectors::CacheKind;
 use crate::plugins::telemetry::config_new::selectors::CacheStatus;
 use crate::plugins::telemetry::config_new::selectors::EntityType;
@@ -55,6 +56,8 @@ pub(crate) enum SubgraphQuery {
     /// The raw query kind.
     String,
 }
+
+pub(crate) struct SubgraphRequestBodySize(pub u64);
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
@@ -135,6 +138,10 @@ pub(crate) enum SubgraphSelector {
         redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
+    },
+    SubgraphRequestBodySize {
+        /// The subgraph request body size.
+        subgraph_request_body_size: bool,
     },
     SubgraphResponseHeader {
         /// The name of a subgraph response header.
@@ -277,6 +284,10 @@ pub(crate) enum SubgraphSelector {
         response_cache_status: CacheStatus,
         /// Specify the entity type on which you want the cache data status. (default: all)
         entity_type: Option<EntityType>,
+    },
+    ResponseCacheControl {
+        /// Select data you want from the computed cache control from response caching
+        response_cache_control: CacheControlSelector,
     },
 }
 
@@ -465,6 +476,16 @@ impl Selector for SubgraphSelector {
 
     fn on_response(&self, response: &subgraph::Response) -> Option<opentelemetry::Value> {
         match self {
+            // We check for this in on_response instead of on_request as the request body has
+            // not yet been serialized during on_request, so the size is not available.
+            SubgraphSelector::SubgraphRequestBodySize {
+                subgraph_request_body_size,
+                ..
+            } if *subgraph_request_body_size => response
+                .context
+                .extensions()
+                .with_lock(|lock| lock.get::<SubgraphRequestBodySize>().map(|bs| bs.0))
+                .map(|size| opentelemetry::Value::I64(size as i64)),
             SubgraphSelector::SubgraphResponseHeader {
                 subgraph_response_header,
                 default,
@@ -651,6 +672,26 @@ impl Selector for SubgraphSelector {
                     }
                 }
             }
+            SubgraphSelector::ResponseCacheControl {
+                response_cache_control,
+            } => response.context.extensions().with_lock(|cc| {
+                let cc = cc
+                    .get::<response_cache::plugin::CacheControls>()?
+                    .get(&response.id)?;
+                match response_cache_control {
+                    CacheControlSelector::Scope => {
+                        if cc.private() {
+                            Some(opentelemetry::Value::String("private".to_string().into()))
+                        } else {
+                            Some(opentelemetry::Value::String("public".to_string().into()))
+                        }
+                    }
+                    CacheControlSelector::NoStore => Some(cc.is_no_store().into()),
+                    CacheControlSelector::MaxAge => cc
+                        .ttl()
+                        .and_then(|ttl| Some(opentelemetry::Value::I64(i64::try_from(ttl).ok()?))),
+                }
+            }),
             SubgraphSelector::ResponseCacheStatus {
                 response_cache_status,
                 entity_type,
@@ -796,6 +837,7 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::StaticField { .. }
                     | SubgraphSelector::Cache { .. }
                     | SubgraphSelector::ResponseCache { .. }
+                    | SubgraphSelector::ResponseCacheControl { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
@@ -819,10 +861,14 @@ impl Selector for SubgraphSelector {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use http::HeaderMap;
+    use http::HeaderValue;
     use http::StatusCode;
+    use http::header::CACHE_CONTROL;
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
     use opentelemetry::StringValue;
@@ -846,9 +892,11 @@ mod test {
     use crate::plugins::cache::entity::CacheSubgraph;
     use crate::plugins::cache::metrics::CacheMetricContextKey;
     use crate::plugins::response_cache;
+    use crate::plugins::response_cache::plugin::CacheControls;
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::selectors::All;
+    use crate::plugins::telemetry::config_new::selectors::CacheControlSelector;
     use crate::plugins::telemetry::config_new::selectors::CacheKind;
     use crate::plugins::telemetry::config_new::selectors::CacheStatus;
     use crate::plugins::telemetry::config_new::selectors::EntityType;
@@ -858,6 +906,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphRequestResendCountKey;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphQuery;
+    use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
     use crate::plugins::telemetry::otel;
     use crate::services::subgraph::SubgraphRequestId;
@@ -983,6 +1032,30 @@ mod test {
                     .unwrap()
             ),
             None
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_request_body_size() {
+        let selector = SubgraphSelector::SubgraphRequestBodySize {
+            subgraph_request_body_size: true,
+        };
+
+        let context = crate::context::Context::new();
+        context
+            .extensions()
+            .with_lock(|l| l.insert(SubgraphRequestBodySize(100)));
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .context(context)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            opentelemetry::Value::I64(100)
         );
     }
 
@@ -1644,6 +1717,59 @@ mod test {
                     .build(),
             ),
             Some(opentelemetry::Value::I64(2))
+        );
+    }
+
+    #[test]
+    fn response_cache_control() {
+        let mut header_map = HeaderMap::new();
+        header_map.insert(CACHE_CONTROL, HeaderValue::from_static("public,max-age=60"));
+
+        let cache_control =
+            crate::plugins::response_cache::cache_control::CacheControl::new(&header_map, None)
+                .unwrap();
+        let context = crate::context::Context::new();
+        let mut cache_controls: CacheControls = HashMap::new();
+        let subgraph_request_id = SubgraphRequestId("test".to_string());
+        cache_controls.insert(subgraph_request_id.clone(), cache_control);
+        context.extensions().with_lock(|l| l.insert(cache_controls));
+
+        let selector = SubgraphSelector::ResponseCacheControl {
+            response_cache_control: CacheControlSelector::MaxAge,
+        };
+
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .build(),
+            ),
+            None
+        );
+
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .id(subgraph_request_id.clone())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::I64(60))
+        );
+
+        let selector = SubgraphSelector::ResponseCacheControl {
+            response_cache_control: CacheControlSelector::Scope,
+        };
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .id(subgraph_request_id.clone())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::String("public".to_string().into()))
         );
     }
 
