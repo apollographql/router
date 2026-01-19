@@ -453,7 +453,7 @@ impl CacheStorage for Storage {
         let mut counts = HashMap::with_capacity(num_subgraphs);
         while let Some(result) = join_set.join_next().await {
             let (subgraph_name, count) = result?;
-            counts.insert(subgraph_name, count.unwrap_or(0));
+            counts.insert(subgraph_name, count?);
         }
 
         Ok(counts)
