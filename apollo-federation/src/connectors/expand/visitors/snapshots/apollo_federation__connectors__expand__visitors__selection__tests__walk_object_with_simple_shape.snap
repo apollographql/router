@@ -1,0 +1,9 @@
+---
+source: apollo-federation/src/connectors/expand/visitors/selection.rs
+assertion_line: 946
+expression: target.schema().serialize().to_string()
+---
+type Product {
+  id: ID!
+  name: String!
+}

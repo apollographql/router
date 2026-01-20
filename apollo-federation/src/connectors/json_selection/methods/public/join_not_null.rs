@@ -153,7 +153,7 @@ fn join_not_null_method_shape(
     // allow unknown input
     if !(input_shape.is_unknown() || matches!(input_shape.case(), ShapeCase::Name(_, _))) {
         let mismatches = input_shape_contract.validate(&input_shape);
-        if !mismatches.is_empty() {
+        if mismatches.is_some() {
             return Shape::error(
                 format!(
                     "Method ->{} requires an array of scalar values as input",
@@ -189,7 +189,7 @@ fn join_not_null_method_shape(
     // allow unknown separator
     if !(selection_shape.is_unknown() || matches!(selection_shape.case(), ShapeCase::Name(_, _))) {
         let mismatches = Shape::string([]).validate(&selection_shape);
-        if !mismatches.is_empty() {
+        if mismatches.is_some() {
             return Shape::error(
                 format!(
                     "Method ->{} requires a string argument",
@@ -367,6 +367,7 @@ mod tests {
     #[rstest::rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn join_not_null_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->joinNotNull($.missing)", spec).apply_to(&json!({
