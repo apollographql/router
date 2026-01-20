@@ -180,6 +180,13 @@ fn coerce_value(
                 coerce_value(types, element, ty.item_type())?;
             }
         }
+        // Coerce single-element list to a non-list type.
+        // This is the reverse of the scalar-to-list coercion below.
+        (Value::List(list), Some(_)) if !ty.is_list() && list.len() == 1 => {
+            let element = list.pop().unwrap();
+            *target.make_mut() = element.as_ref().clone();
+            coerce_value(types, target, ty)?;
+        }
         // Coerce single values (except null) to a list.
         (
             Value::Object(_)
@@ -192,14 +199,6 @@ fn coerce_value(
         ) if ty.is_list() => {
             coerce_value(types, target, ty.item_type())?;
             *target.make_mut() = Value::List(vec![target.clone()]);
-        }
-
-        // Coerce single-element list to a non-list type.
-        // This is the reverse of the scalar-to-list coercion above.
-        (Value::List(list), Some(_)) if !ty.is_list() && list.len() == 1 => {
-            let element = list.pop().unwrap();
-            *target.make_mut() = element.as_ref().clone();
-            coerce_value(types, target, ty)?;
         }
 
         // Accept null for any nullable type.
