@@ -1,10 +1,12 @@
 use std::sync::LazyLock;
 
+use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Type;
 use apollo_compiler::ty;
+use itertools::Itertools;
 
 use crate::schema::FederationSchema;
 
@@ -19,6 +21,7 @@ pub(crate) enum ArgumentCompositionStrategy {
     NullableAnd,
     NullableMax,
     NullableUnion,
+    DnfConjunction,
 }
 
 pub(crate) static MAX_STRATEGY: LazyLock<MaxArgumentCompositionStrategy> =
@@ -37,6 +40,8 @@ pub(crate) static NULLABLE_MAX_STRATEGY: LazyLock<NullableMaxArgumentComposition
     LazyLock::new(NullableMaxArgumentCompositionStrategy::new);
 pub(crate) static NULLABLE_UNION_STRATEGY: LazyLock<NullableUnionArgumentCompositionStrategy> =
     LazyLock::new(|| NullableUnionArgumentCompositionStrategy {});
+pub(crate) static DNF_CONJUNCTION_STRATEGY: LazyLock<DnfConjunctionArgumentCompositionStrategy> =
+    LazyLock::new(|| DnfConjunctionArgumentCompositionStrategy {});
 
 impl ArgumentCompositionStrategy {
     fn get_impl(&self) -> &dyn ArgumentComposition {
@@ -49,6 +54,7 @@ impl ArgumentCompositionStrategy {
             Self::NullableAnd => &*NULLABLE_AND_STRATEGY,
             Self::NullableMax => &*NULLABLE_MAX_STRATEGY,
             Self::NullableUnion => &*NULLABLE_UNION_STRATEGY,
+            Self::DnfConjunction => &*DNF_CONJUNCTION_STRATEGY,
         }
     }
 
@@ -132,6 +138,20 @@ fn support_any_array(ty: &Type) -> Result<(), String> {
     }
 }
 
+/// Support for doubly nested non-nullable list types of any non-nullable type `[[Foo!]!]!`
+fn support_any_non_null_nested_array(ty: &Type) -> Result<(), String> {
+    if ty.is_non_null()
+        && ty.is_list()
+        && ty.item_type().is_non_null()
+        && ty.item_type().is_list()
+        && ty.item_type().item_type().is_non_null()
+    {
+        Ok(())
+    } else {
+        Err("non-nullable doubly nested list of any type".to_string())
+    }
+}
+
 fn max_int_value<'a>(values: impl Iterator<Item = &'a Value>) -> Value {
     values
         .filter_map(|val| match val {
@@ -191,6 +211,147 @@ fn merge_nullable_values(
         return None; // No values to merge, return None (instead of null)
     }
     merge_values(&values).into()
+}
+
+/// Performs conjunction of 2d arrays that represent conditions in Disjunctive Normal Form.
+///
+/// Each 2D array is interpreted as follows
+///  * Inner array is interpreted as the conjunction (an AND) of the conditions in the array.
+///  * Outer array is interpreted as the disjunction (an OR) of the inner arrays.
+///
+/// Algorithm
+///  * filter out duplicate entries to limit the amount of necessary computations
+///  * calculate cartesian product of the arrays to find all possible combinations
+///    * simplify combinations by dropping duplicate conditions (i.e. p ^ p = p, p ^ q = q ^ p)
+///  * eliminate entries that are subsumed by others (i.e. (p ^ q) subsumes (p ^ q ^ r))
+fn dnf_conjunction(values: &[Value]) -> Value {
+    // should never be the case
+    if values.is_empty() {
+        return Value::List(vec![]); // TODO should this be [[]] instead?
+    }
+
+    // copy the 2D arrays, as we'll be modifying them below (due to sorting)
+    let mut candidates: Vec<Value> = vec![];
+    for value in values.iter() {
+        if let Value::List(disjunctions) = value {
+            // Normally for DNF, you'd consider [] to be always false and [[]] to be always true,
+            // and code that uses any()/all() needs no special-casing to work with these
+            // definitions. However, router special-cases [] to also mean true, and so if we're
+            // about to do any evaluation on DNFs, we need to do these conversions beforehand.
+            if disjunctions.is_empty() {
+                candidates.push(Value::List(vec![Node::new(Value::List(vec![]))]));
+            } else {
+                candidates.push(value.clone());
+            }
+        }
+    }
+
+    // we first filter out duplicate values from candidates
+    // this avoids exponential computation of exactly the same conditions
+    sort_nested_array(&mut candidates);
+    let mut filtered = candidates.into_iter().unique();
+
+    // initialize with first entry
+    let mut result = filtered
+        .next()
+        .expect("At least a single DNF conjunction value should exist");
+
+    // perform cartesian product to find all possible entries
+    while let Some(current) = filtered.next() {
+        let mut accumulator: Vec<Node<Value>> = Vec::new();
+        let mut seen: HashSet<Value> = HashSet::default();
+
+        if let (Value::List(final_disjunctions), Value::List(current_disjunctions)) =
+            (&result, &current)
+        {
+            for final_disjunction in final_disjunctions {
+                for current_disjunction in current_disjunctions {
+                    if let (Value::List(final_conjunctions), Value::List(current_conjunctions)) =
+                        (final_disjunction.as_ref(), current_disjunction.as_ref())
+                    {
+                        // filter out elements that are already present in final_disjunction
+                        let filtered_conjunctions = current_conjunctions
+                            .iter()
+                            .filter(|e| !final_conjunctions.contains(e));
+                        let mut candidate = final_conjunctions.clone();
+                        candidate.extend(filtered_conjunctions.cloned());
+                        candidate.sort_by_key(|c| c.to_string());
+
+                        let candidate_value = Value::List(candidate);
+                        // only add entries which has not been seen yet
+                        if seen.insert(candidate_value.clone()) {
+                            accumulator.push(Node::new(candidate_value));
+                        }
+                    }
+                }
+            }
+            // now we need to deduplicate the results to avoid unnecessary computations
+            result = deduplicate_subsumed_values(Value::List(accumulator));
+        }
+    }
+    result
+}
+
+fn sort_nested_array(values: &mut Vec<Value>) {
+    values.iter_mut().for_each(|value| {
+        if let Value::List(disjunctions) = value {
+            disjunctions.iter_mut().for_each(|disjunction| {
+                if let Value::List(conjunctions) = disjunction.make_mut() {
+                    // TODO should this also filter duplicates? ["A", "A"]?
+                    conjunctions.sort_by_key(|c| c.to_string());
+                }
+            });
+            disjunctions.sort_by_key(|c| c.to_string());
+        }
+    });
+}
+
+/// Deduplicate subsumed values from 2D arrays.
+///
+/// Given that
+/// - outer array implies OR requirements
+/// - inner array implies AND requirements
+///
+/// We can filter out any inner arrays that fully contain other inner arays, i.e.
+///   A OR B OR (A AND B) OR (A AND B AND C) => A OR B
+fn deduplicate_subsumed_values(value: Value) -> Value {
+    let mut result: Vec<Node<Value>> = Vec::new();
+
+    if let Value::List(mut disjunctions) = value {
+        // we first sort by length as the longer ones might be dropped
+        disjunctions.sort_by_key(|d| {
+            if let Value::List(conjunctions) = d.as_ref() {
+                conjunctions.len()
+            } else {
+                0
+            }
+        });
+
+        for candidate in disjunctions {
+            let mut redundant = false;
+            if let Value::List(candidate_disjunctions) = candidate.as_ref() {
+                let candidate_set: HashSet<&Node<Value>> =
+                    HashSet::from_iter(candidate_disjunctions);
+
+                for existing_entry in &result {
+                    // if `existing_entry` is a subset of a `candidate` then it means `candidate` is redundant
+                    if let Value::List(existing_disjunctions) = existing_entry.as_ref() {
+                        if existing_disjunctions
+                            .iter()
+                            .all(|e| candidate_set.contains(e))
+                        {
+                            redundant = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if !redundant {
+                result.push(candidate);
+            }
+        }
+    }
+    Value::List(result)
 }
 
 // MAX
@@ -433,5 +594,144 @@ impl ArgumentComposition for NullableUnionArgumentCompositionStrategy {
 
     fn merge_values(&self, values: &[Value]) -> Option<Value> {
         merge_nullable_values(values, |values| union_list_values(values.iter().copied()))
+    }
+}
+
+// DNF_CONJUNCTION
+#[derive(Clone)]
+pub(crate) struct DnfConjunctionArgumentCompositionStrategy {}
+
+impl ArgumentComposition for DnfConjunctionArgumentCompositionStrategy {
+    fn name(&self) -> &str {
+        "DNF_CONJUNCTION"
+    }
+
+    fn is_type_supported(&self, _schema: &FederationSchema, ty: &Type) -> Result<(), String> {
+        support_any_non_null_nested_array(ty)
+    }
+
+    fn merge_values(&self, values: &[Value]) -> Option<Value> {
+        dnf_conjunction(values).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::Node;
+    use apollo_compiler::ast::Type;
+    use apollo_compiler::ast::Value;
+
+    use crate::schema::argument_composition_strategies::ArgumentComposition;
+    use crate::schema::argument_composition_strategies::DnfConjunctionArgumentCompositionStrategy;
+    use crate::schema::argument_composition_strategies::deduplicate_subsumed_values;
+    use crate::schema::argument_composition_strategies::support_any_non_null_nested_array;
+
+    #[test]
+    fn verify_support_any_non_null_nested_array() {
+        for unsupported_type in vec![
+            "String",
+            "String!",
+            "[String]",
+            "[String!]",
+            "[String]!",
+            "[String!]!",
+            "[[String]]",
+            "[[String!]]",
+            "[[String]!]",
+            "[[String!]!]",
+            "[[String]]!",
+            "[[String!]]!",
+            "[[String]!]!", // this one is incorrectly allowed by JS
+        ] {
+            let _type = Type::parse(unsupported_type, "schema.graphql").expect("valid type");
+            assert!(support_any_non_null_nested_array(&_type).is_err());
+        }
+
+        for supported_type in vec!["[[String!]!]!", "[[Foo!]!]!"] {
+            let _type = Type::parse(supported_type, "schema.graphql").expect("valid type");
+            assert!(support_any_non_null_nested_array(&_type).is_ok());
+        }
+    }
+
+    #[test]
+    fn verify_deduplicate_subsumed_values() {
+        let value = parse_into_ast_value_list(vec![vec!["A", "B", "C"], vec!["A", "B"], vec!["A"]]);
+        let result = deduplicate_subsumed_values(value);
+        assert_eq!(parse_into_ast_value_list(vec![vec!["A"]]), result);
+
+        let value = parse_into_ast_value_list(vec![
+            vec!["A", "B"],
+            vec!["A", "B", "C"],
+            vec!["A", "B", "C", "D"],
+            vec!["A", "B", "D"],
+            vec!["A", "B"],
+            vec!["A", "D"],
+            vec!["A", "B"],
+        ]);
+        let result = deduplicate_subsumed_values(value);
+        assert_eq!(
+            parse_into_ast_value_list(vec![vec!["A", "B"], vec!["A", "D"]]),
+            result
+        );
+    }
+
+    #[test]
+    fn dnf_conjunction_of_empty_values() {
+        let strategy = DnfConjunctionArgumentCompositionStrategy {};
+        let value = strategy
+            .merge_values(&vec![])
+            .expect("successfully computed DNF conjunction value");
+        if let Value::List(result) = value {
+            assert!(result.is_empty());
+        } else {
+            assert!(
+                false,
+                "DNF_conjunction result should have been a Value::List"
+            );
+        }
+    }
+
+    #[test]
+    fn dnf_conjunction_of_multiple_lists() {
+        let strategy = DnfConjunctionArgumentCompositionStrategy {};
+        let values = parse_into_ast_vec_value_list(vec![
+            vec![vec!["C", "B", "D"], vec!["B", "A"]],
+            vec![vec!["A", "D"]],
+            vec![vec!["A"]],
+            vec![vec!["A"], vec!["B"]],
+            vec![vec!["C", "B"]],
+            vec![vec!["A", "D"]],
+            vec![vec!["A", "A"]],
+        ]);
+        let result = strategy
+            .merge_values(&values)
+            .expect("computed DNF conjunction value");
+        assert_eq!(
+            parse_into_ast_value_list(vec![vec!["A", "B", "C", "D"]]),
+            result
+        );
+    }
+
+    fn parse_into_ast_vec_value_list(values: Vec<Vec<Vec<&str>>>) -> Vec<Value> {
+        let mut result = vec![];
+        // each outer_array is a specific directive application value of [[Policy!]!]! and/or [[Scope!]!]!
+        for outer_array in values {
+            result.push(parse_into_ast_value_list(outer_array));
+        }
+        result
+    }
+
+    fn parse_into_ast_value_list(value: Vec<Vec<&str>>) -> Value {
+        // outer array is interpreted as the disjunction (an OR) of the inner arrays.
+        let mut disjunctions = vec![];
+        for inner_array in value {
+            // inner array is interpreted as the conjunction (an AND) of the conditions in the array.
+            let mut conjunctions = vec![];
+            for value in inner_array {
+                conjunctions.push(Node::new(Value::String(value.to_string())));
+            }
+            disjunctions.push(Node::new(Value::List(conjunctions)));
+        }
+        Value::List(disjunctions)
     }
 }
