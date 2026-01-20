@@ -27,6 +27,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use crate::Configuration;
+use crate::allocator::WithMemoryTracking;
 use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::metrics::UpDownCounterGuard;
@@ -161,7 +162,9 @@ where
         let (sender, receiver) = mpsc::channel(NOTIFY_CHANNEL_SIZE);
         let receiver_stream: ReceiverStream<Notification<K, V>> = ReceiverStream::new(receiver);
         tokio::task::spawn(
-            task(receiver_stream, ttl, heartbeat_error_message).with_current_meter_provider(),
+            task(receiver_stream, ttl, heartbeat_error_message)
+                .with_current_meter_provider()
+                .with_memory_tracking("subscription.task"),
         );
         Notify {
             sender,

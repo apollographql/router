@@ -16,7 +16,7 @@ The GraphOS Router and Apollo Router Core support collection of metrics with [Op
 * [Datadog via OTLP](/router/configuration/telemetry/exporters/metrics/datadog)
 * [New Relic via OTLP](/router/configuration/telemetry/exporters/metrics/new-relic)
 
-In [`router.yaml`](/router/configuration/overview/#yaml-config-file), you configure router metrics with the following settings:
+In [`router.yaml`](/graphos/routing/configuration/yaml), you configure router metrics with the following settings:
 
 - `telemetry.exporters.metrics.common`. Configure values for the router which are common across metrics exporters.
 - `telemetry.exporters.metrics.prometheus`. Configure the Prometheus exporter.
@@ -35,7 +35,7 @@ Common metrics configuration contains global settings for all exporters:
 
 Set a service name for your router metrics so you can easily locate them in external metrics dashboards. 
 
-The service name can be set by an environment variable or in [`router.yaml`](/router/configuration/overview/#yaml-config-file), with the following order of precedence (first to last):
+The service name can be set by an environment variable or in [`router.yaml`](/graphos/routing/configuration/yaml), with the following order of precedence (first to last):
 
 1. `OTEL_SERVICE_NAME` environment variable
 2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
@@ -81,7 +81,7 @@ If the service name isn't explicitly set, it defaults to `unknown_service:router
 
 A resource attribute is a set of key-value pairs that provide additional information to an exporter. It's an attribute of an [OpenTelemetry resource](https://opentelemetry.io/docs/specs/otel/resource/sdk/). Application performance monitors (APM) can interpret and display resource information. 
 
-In [`router.yaml`](/router/configuration/overview/#yaml-config-file), resource attributes are set in `telemetry.metrics.common.resource`. For example:
+In [`router.yaml`](/graphos/routing/configuration/yaml#telemetry), resource attributes are set in `telemetry.metrics.common.resource`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -98,7 +98,25 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### `buckets`
 
-You can customize bucket boundaries for all generated histograms by setting `telemetry.exporters.metrics.common.buckets` in [`router.yaml`](/router/configuration/overview/#yaml-config-file). For example:
+Histogram metrics use bucket boundaries to group measurement values. Configure these buckets to accurately monitor request durations and timeout behavior.
+
+#### Default buckets
+
+By default, the router uses the following bucket boundaries (in seconds):
+
+```text
+0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0
+```
+
+These defaults work well for most applications where the majority of requests complete in under ten seconds.
+
+Histogram buckets are represented as "less than or equal to" their specified boundaries. With the default buckets, any request taking longer than ten seconds goes into the `+Inf` (infinity) bucket. When you configure timeouts greater than ten seconds, you lose granularity in your metrics because all requests above ten seconds are grouped together.
+
+If your application has longer timeouts or slower operations, customize your histogram buckets to include higher values that match your timeout configuration.
+
+#### Customizing buckets
+
+Customize bucket boundaries for all generated histograms by setting `telemetry.exporters.metrics.common.buckets` in [`router.yaml`](/graphos/routing/configuration/yaml#telemetry):
 
 ```yaml title="router.yaml"
 telemetry:
@@ -116,6 +134,12 @@ telemetry:
           - 10.00
           - 20.00
 ```
+
+<Note>
+
+When customizing buckets, set your highest bucket value greater than or equal to your configured timeout values. This ensures your metrics accurately represent timeout behavior.
+
+</Note>
 
 ### `views`
 

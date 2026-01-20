@@ -386,6 +386,7 @@ impl PluginPrivate for Telemetry {
             .clone();
 
         ServiceBuilder::new()
+            .layer(metrics::allocation::AllocationMetricsLayer::new())
             .map_response(move |response: router::Response| {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();
@@ -455,6 +456,27 @@ impl PluginPrivate for Telemetry {
 
                     if let Some(version) = client_version {
                         let _ = request.context.insert(CLIENT_VERSION, version.to_owned());
+                    }
+
+                    let library_name = request
+                        .router_request
+                        .headers()
+                        .get(&config_request.apollo.library_name_header)
+                        .and_then(|h| h.to_str().ok());
+                    let library_version = request
+                        .router_request
+                        .headers()
+                        .get(&config_request.apollo.library_version_header)
+                        .and_then(|h| h.to_str().ok());
+
+                    if let Some(name) = library_name {
+                        let _ = request.context.insert(CLIENT_LIBRARY_NAME, name.to_owned());
+                    }
+
+                    if let Some(version) = library_version {
+                        let _ = request
+                            .context
+                            .insert(CLIENT_LIBRARY_VERSION, version.to_owned());
                     }
 
                     let mut custom_attributes = config_request

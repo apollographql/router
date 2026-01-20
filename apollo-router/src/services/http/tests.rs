@@ -183,7 +183,10 @@ async fn tls_server(
     }
 }
 
-async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
+pub(crate) async fn serve<Handler, Fut>(
+    listener: TcpListener,
+    handle: Handler,
+) -> std::io::Result<()>
 where
     Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Sync + Send + 'static,
     Fut: std::future::Future<Output = Result<http::Response<Body>, Infallible>> + Send + 'static,

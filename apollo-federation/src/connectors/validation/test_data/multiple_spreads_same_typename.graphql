@@ -1,0 +1,64 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.13")
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+  @source(
+    name: "products-api"
+    http: { baseURL: "http://localhost:3001" }
+  )
+
+interface Product {
+  upc: ID!
+}
+
+type Book implements Product {
+  upc: ID!
+  title: String
+  author: Person
+  hi: String
+}
+
+type Film implements Product {
+  upc: ID!
+  title: String
+  director: Person
+}
+
+type Person {
+  id: ID!
+  name: String
+}
+
+# Both spreads specify __typename: "Book", so the second spread's fields
+# are only added to Book shapes (not Film). This allows splitting Book
+# fragments across multiple spreads without affecting Film.
+type Query {
+  products: [Product] @connect(
+    source: "products-api"
+    http: { GET: "/products" }
+    selection: """
+      upc
+      ... category->match(
+        ['book', $ {
+          __typename: $('Book')
+          title
+          author { id name }
+        }],
+        ['movie', $ {
+          __typename: $('Film')
+          title
+          director { id name }
+        }],
+        [@, null]
+      )
+      ... category->match(
+        ['book', $ {
+          __typename: $('Book')
+          hi: $('hello')
+        }]
+      )
+    """
+  )
+}

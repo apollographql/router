@@ -79,8 +79,23 @@ impl Request {
     /// This is the constructor (or builder) to use when constructing a "fake" ExecutionRequest.
     ///
     /// This does not enforce the provision of the data that is required for a fully functional
-    /// ExecutionRequest. It's usually enough for testing, when a fully consructed ExecutionRequest is
-    /// difficult to construct and not required for the pusposes of the test.
+    /// ExecutionRequest. It's usually enough for testing, when a fully constructed ExecutionRequest is
+    /// difficult to construct and not required for the purposes of the test.
+    ///
+    /// # Example
+    /// ```
+    /// use apollo_router::services::execution;
+    /// use apollo_router::Context;
+    ///
+    /// // This builder must remain usable from external crates for plugin testing.
+    /// let request = execution::Request::fake_builder()
+    ///     .context(Context::default())
+    ///     .build();
+    /// ```
+    // WARN: make sure to keep the example in the doc test; it gets compiled as an external crate,
+    // which is very useful in determining whether the public API has changed. In particular, we
+    // had an issue with SubscriptionTaskParams going from pub to pub(crate), preventing folks from
+    // compiling their unit tests for plugins because of the visibility change for the fake_builder
     #[builder(visibility = "pub")]
     fn fake_new(
         supergraph_request: Option<http::Request<graphql::Request>>,

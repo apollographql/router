@@ -1233,11 +1233,24 @@ fn it_includes_default_header_read_timeout_when_server_config_omitted() {
 }
 
 #[test]
+fn it_includes_default_tls_handshake_timeout_when_server_config_omitted() {
+    let json_config = json!({});
+
+    let config: Configuration = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(
+        config.server.http.tls_handshake_timeout,
+        Duration::from_secs(10)
+    );
+}
+
+#[test]
 fn it_processes_specified_server_config_correctly() {
     let json_config = json!({
         "server": {
             "http": {
-                "header_read_timeout": "30s"
+                "header_read_timeout": "30s",
+                "tls_handshake_timeout": "30s"
             }
         }
     });
@@ -1246,6 +1259,10 @@ fn it_processes_specified_server_config_correctly() {
 
     assert_eq!(
         config.server.http.header_read_timeout,
+        Duration::from_secs(30)
+    );
+    assert_eq!(
+        config.server.http.tls_handshake_timeout,
         Duration::from_secs(30)
     );
 }

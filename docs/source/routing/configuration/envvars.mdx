@@ -16,6 +16,12 @@ These environment variables apply only if your supergraph schema is managed by G
 
 </Tip>
 
+<Tip>
+
+When running Apollo Router locally with a schema fetched from Uplink, the API key must have at least the Observer role; keys with lower privileges cannot retrieve the schema.
+
+</Tip>
+
 <table class="field-table api-ref">
   <thead>
     <tr>
@@ -70,6 +76,22 @@ A path to a file containing the [graph API key](/graphos/api-keys/#graph-api-key
 </td>
 </tr>
 <tr>
+<td style="min-width: 150px;">
+
+##### `APOLLO_GRAPH_ARTIFACT_REFERENCE`
+
+</td>
+<td>
+
+An OCI reference to a graph artifact that contains the supergraph schema. The reference must use a SHA256 digest format.
+
+When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink. The router still fetches entitlements and persisted queries from Uplink.
+
+For information on finding OCI artifact references, see [Schema from Graph Artifacts](/graphos/routing/configuration/schema-oci).
+
+</td>
+</tr>
+<tr>
 </tr>
 </tbody>
 </table>
@@ -79,5 +101,5 @@ A path to a file containing the [graph API key](/graphos/api-keys/#graph-api-key
 To use environment variables when running router, you must set them before the `router` command:
 
 ```bash
-APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+APOLLO_KEY="..." APOLLO_GRAPH_REF="artifact.api.apollographql.com/my-graph-a50b9d546b298e5a@sha256:14409db3d8a8d74ff9e9a0b5712c0aa8d574bcacc3656e1bc0c55ecf97cd9264" ./router
 ```

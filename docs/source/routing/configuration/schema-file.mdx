@@ -1,0 +1,135 @@
+---
+title: Schema from Local File
+subtitle: Load supergraph schemas from local files
+description: Learn how to load supergraph schemas from local files
+---
+
+## Overview
+
+Load schemas from local files to give you complete control over which schema version is deployed. However, you must manage those files yourself.
+
+## Configuration
+
+### Command line
+
+```bash
+router --supergraph ./supergraph.graphql
+```
+
+### Environment variable
+
+```bash
+APOLLO_ROUTER_SUPERGRAPH_PATH=./supergraph.graphql router
+```
+
+#### Docker
+
+Mount the schema file into the container:
+
+```bash
+docker run -v $(pwd)/supergraph.graphql:/app/supergraph.graphql \
+  ghcr.io/apollographql/router:latest \
+  --supergraph /app/supergraph.graphql
+```
+
+Or use a Dockerfile:
+
+```dockerfile
+FROM ghcr.io/apollographql/router:latest
+COPY supergraph.graphql /app/supergraph.graphql
+CMD ["--supergraph", "/app/supergraph.graphql"]
+```
+
+#### Kubernetes ConfigMap
+
+Store the schema in a ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: supergraph-schema
+data:
+  supergraph.graphql: |
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key", "@shareable"])
+    {
+      query: Query
+    }
+    
+    type Query {
+      hello: String
+    }
+```
+
+Mount the schema in your deployment:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: router
+spec:
+  template:
+    spec:
+      containers:
+        - name: router
+          image: ghcr.io/apollographql/router:latest
+          args: ["--supergraph", "/config/supergraph.graphql"]
+          volumeMounts:
+          - name: schema
+            mountPath: /config
+      volumes:
+        - name: schema
+          configMap:
+            name: supergraph-schema
+```
+
+## Hot reloading
+
+Enable hot reloading to automatically reload the schema when the file changes.
+
+<Note>Hot reloading has performance implications and might not be suitable for production environments. See [Hot Reload](/graphos/routing/configuration/hot-reload-schema) for details.</Note>
+
+### Command line
+
+```bash
+router --supergraph ./supergraph.graphql --hot-reload
+```
+
+### Environment variable
+
+```bash
+APOLLO_ROUTER_SUPERGRAPH_PATH=./supergraph.graphql \
+APOLLO_ROUTER_HOT_RELOAD=true \
+router
+```
+
+### Development mode
+
+Development mode automatically enables hot reloading:
+
+```bash
+router --supergraph ./supergraph.graphql --dev
+```
+
+
+## Best practices
+
+Follow these guidelines to ensure reliability:
+
+- Version control: Store schema files in version control to track changes.
+- CI/CD integration: Download schemas in CI/CD pipelines for reproducible deployments.
+- Use hot reload for development only: Avoid hot reloading in production due to performance impact.
+- Validate schemas: Validate schemas before deploying to catch errors early.
+- Use ConfigMaps for Kubernetes: Store schemas in ConfigMaps for Kubernetes deployments.
+
+
+## Related documentation
+
+For more information, see the following resources:
+
+- [Router Configuration Overview](/graphos/routing/configuration/overview) - Overview of all schema loading options
+- [Hot Reload](/graphos/routing/configuration/hot-reload-schema) - Hot reloading details and performance considerations
+- [Rover CLI](/rover) - Schema composition and management tools
