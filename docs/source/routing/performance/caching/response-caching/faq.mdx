@@ -35,9 +35,9 @@ No. Responses containing errors aren't cached—this prevents transient errors f
 
 Yes. Compound `@key`s, including lists, are supported, but their complexity introduces overhead so be careful to prioritize simplicity where possible in your cache key design.
 
-### Can `@key`s represent nullable data?
+### Can `@key`s represent nullable data and can I use it in `@cacheTag`?
 
-Yes, but be careful when using `@key`s that represent nullable data because `null` data might be cached. 
+Yes, but be careful when using `@key`s that represent nullable data and interpolate it in your `@cacheTag` format because `null` data will be interpolated with an empty string. For example if you have entity key with `id name` and `name` is nullable, if you specify `@cacheTag(format: "user-{$key.id}-{$key.name}")` and your entity key is `{"id": 1, name: null}` it will generate this cache tag: `user-1-`. 
 
 
 ### What if one of my subgraphs is unavailable?
