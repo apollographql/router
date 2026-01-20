@@ -195,7 +195,7 @@ fn coerce_value(
         }
 
         // Coerce single-element list to a non-list type.
-        // This is the reverse of the scalar-to-list coercion below.
+        // This is the reverse of the scalar-to-list coercion above.
         (Value::List(list), Some(_)) if !ty.is_list() && list.len() == 1 => {
             let element = list.pop().unwrap();
             *target.make_mut() = element.as_ref().clone();

@@ -122,7 +122,7 @@ mod tests {
 
             type T
               @key(fields: "k")
-              @requiresScopes(scopes: ["foo", "bar"])
+              @requiresScopes(scopes: [["foo"], ["bar"]])
             {
               k: ID @requiresScopes(scopes: [])
             }
@@ -134,11 +134,11 @@ mod tests {
             type_defs: r#"
             type T
               @key(fields: "k")
-              @requiresScopes(scopes: ["foo"])
+              @requiresScopes(scopes: [["foo"]])
             {
-              k: ID @requiresScopes(scopes: ["v1", "v2"])
+              k: ID @requiresScopes(scopes: [["v1"], ["v2"]])
               a: Int
-              b: String @requiresScopes(scopes: ["x"])
+              b: String @requiresScopes(scopes: [["x"]])
             }
             "#,
         };

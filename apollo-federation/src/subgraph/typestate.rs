@@ -225,6 +225,9 @@ impl Subgraph<Initial> {
         // Simulate graphql-js behavior accepting duplicate argument definitions.
         parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
 
+        // Coerce directive argument values based on directive definitions.
+        coerce_schema_values(&mut schema);
+
         Self::new(name, url, schema, orphan_extension_types)
     }
 
@@ -925,10 +928,6 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
 
     trace!("expand_links: on_directive_definition_and_schema_parsed");
     FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
-
-    // Coerce directive argument values now that we have all directive definitions
-    trace!("expand_links: coerce_schema_values");
-    coerce_schema_values(schema.schema_mut());
 
     // Also, the backfilled definitions mean we can collect deep references.
     // Ignore the error case, which means the schema has invalid references. It will be

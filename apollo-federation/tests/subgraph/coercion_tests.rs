@@ -58,8 +58,8 @@ fn coerces_input_field_default_values() {
         }
 
         input UserInput {
-            name: String = "Anonymous"
-            age: Int = 18
+            name: String = Anonymous
+            age: Int = [18]
         }
     "#;
     let _subgraph = build_and_validate(schema);

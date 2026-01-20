@@ -1089,7 +1089,7 @@ mod composition {
             directive @auth(scope: [String!]) repeatable on FIELD_DEFINITION
 
             type Query {
-              shared: String @shareable @auth(scope: "VIEWER")
+              shared: String @shareable @auth(scope: ["VIEWER"])
             }
         "#).unwrap();
         let subgraph_b = Subgraph::parse("subgraphB", "", r#"
