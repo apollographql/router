@@ -3,8 +3,6 @@ use apollo_federation::subgraph::test_utils::build_and_validate;
 #[test]
 fn coerces_directive_argument_values() {
     // Test that directive argument values are coerced correctly.
-    // The @key directive expects `fields` to be a String, but we pass a list ["id"]
-    // which should be coerced.
     let schema = r#"
         extend schema @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
 
@@ -12,7 +10,7 @@ fn coerces_directive_argument_values() {
             test: T!
         }
 
-        type T @key(fields: ["id"]) {
+        type T @key(fields: "id") {
             id: ID!
             x: Int!
         }
