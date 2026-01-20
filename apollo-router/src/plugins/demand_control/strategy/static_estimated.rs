@@ -71,6 +71,7 @@ impl StrategyImpl for StaticEstimated {
                     .extensions()
                     .with_lock(|lock| lock.get().cloned())
                     .unwrap_or_default(),
+                false,
             )?;
             context.insert_actual_cost(cost)?;
         }

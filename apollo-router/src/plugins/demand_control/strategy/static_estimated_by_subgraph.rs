@@ -87,8 +87,6 @@ impl StrategyImpl for StaticEstimatedBySubgraph {
     }
 
     /// Parse response to measure actual cost for subgraph.
-    ///
-    /// TODO: make this configurable; don't want to incur penalty if we don't want to
     fn on_subgraph_response(
         &self,
         subgraph_name: String,
@@ -96,7 +94,6 @@ impl StrategyImpl for StaticEstimatedBySubgraph {
         response: &subgraph::Response,
     ) -> Result<(), DemandControlError> {
         let subgraph_response_body = response.response.body();
-        // TODO: cost calculator cannot currently calculate the cost of an entities fetch
         let cost = self.cost_calculator.actual(
             request,
             subgraph_response_body,
@@ -105,6 +102,7 @@ impl StrategyImpl for StaticEstimatedBySubgraph {
                 .extensions()
                 .with_lock(|lock| lock.get().cloned())
                 .unwrap_or_default(),
+            true,
         )?;
 
         response
@@ -117,18 +115,14 @@ impl StrategyImpl for StaticEstimatedBySubgraph {
     fn on_execution_response(
         &self,
         context: &crate::Context,
-        request: &ExecutableDocument,
+        _request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
+        // sum up values from subgraph responses
         if response.data.is_some() {
-            let cost = self.cost_calculator.actual(
-                request,
-                response,
-                &context
-                    .extensions()
-                    .with_lock(|lock| lock.get().cloned())
-                    .unwrap_or_default(),
-            )?;
+            let cost = context
+                .get_actual_cost_by_subgraph()?
+                .map_or(0.0, |cost| cost.total());
             context.insert_actual_cost(cost)?;
         }
         Ok(())

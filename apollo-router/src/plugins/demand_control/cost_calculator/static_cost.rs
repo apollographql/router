@@ -607,8 +607,9 @@ impl StaticCostCalculator {
         request: &ExecutableDocument,
         response: &Response,
         variables: &Object,
+        include_entities: bool,
     ) -> Result<f64, DemandControlError> {
-        let mut visitor = ResponseCostCalculator::new(&self.supergraph_schema);
+        let mut visitor = ResponseCostCalculator::new(&self.supergraph_schema, include_entities);
         visitor.visit(request, response, variables);
         Ok(visitor.cost)
     }
@@ -617,11 +618,16 @@ impl StaticCostCalculator {
 pub(crate) struct ResponseCostCalculator<'a> {
     pub(crate) cost: f64,
     schema: &'a DemandControlledSchema,
+    include_entities: bool,
 }
 
 impl<'schema> ResponseCostCalculator<'schema> {
-    pub(crate) fn new(schema: &'schema DemandControlledSchema) -> Self {
-        Self { cost: 0.0, schema }
+    pub(crate) fn new(schema: &'schema DemandControlledSchema, include_entities: bool) -> Self {
+        Self {
+            cost: 0.0,
+            schema,
+            include_entities,
+        }
     }
 
     fn score_response_field(
@@ -637,53 +643,61 @@ impl<'schema> ResponseCostCalculator<'schema> {
         if field.name == TYPENAME {
             return;
         }
-        if let Some(definition) = self.schema.output_field_definition(parent_ty, &field.name) {
-            match value {
-                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                    self.cost += definition
-                        .cost_directive()
-                        .map_or(0.0, |cost| cost.weight());
-                }
-                Value::Array(items) => {
-                    for item in items {
-                        self.visit_list_item(request, variables, parent_ty, field, item);
-                    }
-                }
-                Value::Object(children) => {
-                    self.cost += definition
-                        .cost_directive()
-                        .map_or(1.0, |cost| cost.weight());
-                    self.visit_selections(request, variables, &field.selection_set, children);
-                }
-            }
 
-            if include_argument_score {
-                for argument in &field.arguments {
-                    if let Some(argument_definition) = definition.argument_by_name(&argument.name) {
-                        if let Ok(score) = score_argument(
-                            &argument.value,
-                            argument_definition,
-                            self.schema,
-                            variables,
-                        ) {
-                            self.cost += score;
-                        }
-                    } else {
-                        tracing::debug!(
-                            "Failed to get schema definition for argument {}.{}({}:). The resulting response cost will be a partial result.",
-                            parent_ty,
-                            field.name,
-                            argument.name,
-                        )
-                    }
-                }
-            }
-        } else {
+        let definition = self.schema.output_field_definition(parent_ty, &field.name);
+
+        // if the definition is None, that means one of two things:
+        //   (1) the field is missing from the schema, or
+        //   (2) the query is an `_entities` query.
+        // If the field _should_ be there and isn't, or we don't want to score entities, return now.
+        let is_entities_query = parent_ty == "Query" && field.name == "_entities";
+        if definition.is_none() && !(is_entities_query && self.include_entities) {
             tracing::debug!(
                 "Failed to get schema definition for field {}.{}. The resulting response cost will be a partial result.",
                 parent_ty,
                 field.name,
-            )
+            );
+            return;
+        }
+
+        match value {
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                self.cost += definition
+                    .and_then(|d| d.cost_directive())
+                    .map_or(0.0, |cost| cost.weight());
+            }
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_list_item(request, variables, parent_ty, field, item);
+                }
+            }
+            Value::Object(children) => {
+                self.cost += definition
+                    .and_then(|d| d.cost_directive())
+                    .map_or(1.0, |cost| cost.weight());
+                self.visit_selections(request, variables, &field.selection_set, children);
+            }
+        }
+
+        if include_argument_score && let Some(definition) = definition {
+            for argument in &field.arguments {
+                if let Some(argument_definition) = definition.argument_by_name(&argument.name) {
+                    if let Ok(score) =
+                        score_argument(&argument.value, argument_definition, self.schema, variables)
+                    {
+                        self.cost += score;
+                    } else {
+                        eprintln!("argument score is none");
+                    }
+                } else {
+                    tracing::debug!(
+                        "Failed to get schema definition for argument {}.{}({}:). The resulting response cost will be a partial result.",
+                        parent_ty,
+                        field.name,
+                        argument.name,
+                    )
+                }
+            }
         }
     }
 }
@@ -936,7 +950,7 @@ mod tests {
             100,
             Default::default(),
         )
-        .actual(&query.executable, &response, &variables)
+        .actual(&query.executable, &response, &variables, false)
         .unwrap()
     }
 
@@ -969,7 +983,7 @@ mod tests {
             100,
             Default::default(),
         )
-        .actual(&query, &response, &variables)
+        .actual(&query, &response, &variables, false)
         .unwrap()
     }
 

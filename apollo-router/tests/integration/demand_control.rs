@@ -10,7 +10,7 @@ fn get_strategy(context: &Context) -> String {
     context
         .get::<_, String>(field)
         .expect("can't deserialize")
-        .expect(&format!("context missing {field}"))
+        .unwrap_or_else(|| panic!("context missing {field}"))
 }
 
 fn get_result(context: &Context) -> String {
@@ -18,7 +18,7 @@ fn get_result(context: &Context) -> String {
     context
         .get::<_, String>(field)
         .expect("can't deserialize")
-        .expect(&format!("context missing {field}"))
+        .unwrap_or_else(|| panic!("context missing {field}"))
 }
 
 fn get_result_by_subgraph(context: &Context) -> Option<serde_json::Value> {
@@ -30,6 +30,12 @@ fn get_result_by_subgraph(context: &Context) -> Option<serde_json::Value> {
 fn get_actual_cost(context: &Context) -> Option<f64> {
     context
         .get::<_, f64>("apollo::demand_control::actual_cost")
+        .expect("can't deserialize")
+}
+
+fn get_actual_cost_by_subgraph(context: &Context) -> Option<serde_json::Value> {
+    context
+        .get::<_, serde_json::Value>("apollo::demand_control::actual_cost_by_subgraph")
         .expect("can't deserialize")
 }
 
@@ -55,15 +61,18 @@ fn estimated_too_expensive(error: &&graphql::Error) -> bool {
     error
         .extensions
         .get("code")
-        .map_or(false, |code| code == CODE_TOO_EXPENSIVE)
+        .is_some_and(|code| code == CODE_TOO_EXPENSIVE)
 }
 
 fn subgraph_estimated_too_expensive(error: &&graphql::Error) -> bool {
     error
         .extensions
         .get("code")
-        .map_or(false, |code| code == CODE_SUBGRAPH_TOO_EXPENSIVE)
+        .is_some_and(|code| code == CODE_SUBGRAPH_TOO_EXPENSIVE)
 }
+
+// TODO: add tests for static_estimated as well. would be good to have tests showing the difference
+//  between actual costs, and asserting that estimated costs are the same
 
 mod basic_fragments_tests {
     use apollo_router::TestHarness;
@@ -76,6 +85,8 @@ mod basic_fragments_tests {
     use super::CODE_SUBGRAPH_TOO_EXPENSIVE;
     use super::CODE_TOO_EXPENSIVE;
     use super::estimated_too_expensive;
+    use super::get_actual_cost;
+    use super::get_actual_cost_by_subgraph;
     use super::get_estimated_cost;
     use super::get_estimated_cost_by_subgraph;
     use super::get_result;
@@ -131,7 +142,7 @@ mod basic_fragments_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[rstest::rstest]
-    async fn requests_within_max_are_accepted(
+    async fn requests_within_max_are_accepted_with_static_estimated_by_subgraph_strategy(
         #[values(12.0, 15.0)] max_cost: f64,
     ) -> Result<(), BoxError> {
         // query total cost is 12.0; max_cost >= 12.0 should result in query being accepted
@@ -172,18 +183,22 @@ mod basic_fragments_tests {
         let subgraph_call_count = get_subgraph_call_count(&context).unwrap();
         assert_eq!(subgraph_call_count["products"], 1);
 
-        // TODO: check actuals, once we figure out how to handle by-subgraph actuals
+        assert_eq!(get_actual_cost(&context).unwrap(), 2.0);
+        assert_eq!(
+            get_actual_cost_by_subgraph(&context).unwrap(),
+            serde_json::json!({ "products": 2.0 })
+        );
 
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[rstest::rstest]
-    async fn requests_exceeding_max_are_rejected(
-        #[values(5.0, 10.0)] max_cost: f64,
-    ) -> Result<(), BoxError> {
-        // query total cost is 12.0; all `max_cost` values are less than this, so the response should
-        // be an error
+    async fn requests_exceeding_max_are_rejected_with_static_estimated_by_subgraph_strategy()
+    -> Result<(), BoxError> {
+        let max_cost = 10.0;
+
+        // query total cost is 12.0 for list_size = 10; since `max_cost` value is less than this,
+        // the response should be an error
         let demand_control = serde_json::json!({
             "enabled": true,
             "mode": "enforce",
@@ -219,11 +234,15 @@ mod basic_fragments_tests {
 
         assert!(get_subgraph_call_count(&context).is_none());
 
+        assert!(get_actual_cost(&context).is_none());
+        assert!(get_actual_cost_by_subgraph(&context).is_none());
+
         Ok(())
     }
 
     #[tokio::test]
-    async fn requests_which_exceed_subgraph_limit_are_partially_accepted() -> Result<(), BoxError> {
+    async fn requests_which_exceed_subgraph_limit_are_partially_accepted_with_static_estimated_by_subgraph_strategy()
+    -> Result<(), BoxError> {
         // query checks products once; query should be accepted based on max but products subgraph
         // should not be called.
         let demand_control = serde_json::json!({
@@ -265,7 +284,7 @@ mod basic_fragments_tests {
 
         // actuals
         assert!(body.data.is_some());
-        assert!(body.errors.iter().find(estimated_too_expensive).is_none());
+        assert!(!body.errors.iter().any(|e| estimated_too_expensive(&e)));
 
         let error = body
             .errors
@@ -278,7 +297,8 @@ mod basic_fragments_tests {
         let subgraph_call_count = get_subgraph_call_count(&context).unwrap_or_default();
         assert!(subgraph_call_count.get("products").is_none());
 
-        // TODO: check actuals, once we figure out how to handle by-subgraph actuals
+        assert_eq!(get_actual_cost(&context).unwrap(), 0.0);
+        assert!(get_actual_cost_by_subgraph(&context).is_none());
 
         Ok(())
     }
@@ -295,6 +315,8 @@ mod federated_ships_tests {
     use super::CODE_SUBGRAPH_TOO_EXPENSIVE;
     use super::CODE_TOO_EXPENSIVE;
     use super::estimated_too_expensive;
+    use super::get_actual_cost;
+    use super::get_actual_cost_by_subgraph;
     use super::get_estimated_cost;
     use super::get_estimated_cost_by_subgraph;
     use super::get_result;
@@ -368,7 +390,7 @@ mod federated_ships_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[rstest::rstest]
-    async fn requests_within_max_are_accepted(
+    async fn requests_within_max_are_accepted_with_static_estimated_by_subgraph_strategy(
         #[values(10400.0, 10500.0)] max_cost: f64,
     ) -> Result<(), BoxError> {
         // query total cost is 10400 for list_size = 100; all `max_cost` values are geq than this,
@@ -411,18 +433,22 @@ mod federated_ships_tests {
         assert_eq!(subgraph_call_count["users"], 1);
         assert_eq!(subgraph_call_count["vehicles"], 2);
 
-        // TODO: check actuals, once we figure out how to handle by-subgraph actuals
+        assert_eq!(get_actual_cost(&context).unwrap(), 15.0);
+        assert_eq!(
+            get_actual_cost_by_subgraph(&context).unwrap(),
+            serde_json::json!({ "users": 6.0, "vehicles": 9.0 })
+        );
 
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[rstest::rstest]
-    async fn requests_exceeding_max_are_rejected(
-        #[values(100.0, 10000.0)] max_cost: f64,
-    ) -> Result<(), BoxError> {
-        // query total cost is 10400 for list_size = 100; all `max_cost` values are less than this,
-        // so the response should be an error
+    async fn requests_exceeding_max_are_rejected_with_static_estimated_by_subgraph_strategy()
+    -> Result<(), BoxError> {
+        let max_cost = 10000.0;
+
+        // query total cost is 10400 for list_size = 100; since `max_cost` value is less than this,
+        // the response should be an error
         let demand_control = serde_json::json!({
             "enabled": true,
             "mode": "enforce",
@@ -458,11 +484,15 @@ mod federated_ships_tests {
 
         assert!(get_subgraph_call_count(&context).is_none());
 
+        assert!(get_actual_cost(&context).is_none());
+        assert!(get_actual_cost_by_subgraph(&context).is_none());
+
         Ok(())
     }
 
     #[tokio::test]
-    async fn requests_which_exceed_subgraph_limit_are_partially_accepted() -> Result<(), BoxError> {
+    async fn requests_which_exceed_subgraph_limit_are_partially_accepted_with_static_estimated_by_subgraph_strategy()
+    -> Result<(), BoxError> {
         // query checks vehicles, then users, then vehicles.
         // interrupting the users check via a demand control limit should still permit both vehicles
         // checks.
@@ -505,7 +535,7 @@ mod federated_ships_tests {
 
         // actuals
         assert!(body.data.is_some());
-        assert!(body.errors.iter().find(estimated_too_expensive).is_none());
+        assert!(!body.errors.iter().any(|e| estimated_too_expensive(&e)));
 
         let error = body
             .errors
@@ -519,7 +549,12 @@ mod federated_ships_tests {
         assert!(subgraph_call_count.get("users").is_none());
         assert_eq!(subgraph_call_count["vehicles"], 2);
 
-        // TODO: check actuals, once we figure out how to handle by-subgraph actuals
+        assert_eq!(get_actual_cost(&context).unwrap(), 9.0);
+        assert_eq!(
+            get_actual_cost_by_subgraph(&context).unwrap(),
+            serde_json::json!({ "vehicles": 9.0 })
+        );
+
 
         Ok(())
     }
