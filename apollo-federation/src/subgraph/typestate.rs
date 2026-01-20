@@ -16,6 +16,7 @@ use tracing::trace;
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
+use crate::compat::coerce_schema_values;
 use crate::ensure;
 use crate::error::FederationError;
 use crate::error::Locations;
@@ -223,6 +224,9 @@ impl Subgraph<Initial> {
 
         // Simulate graphql-js behavior accepting duplicate argument definitions.
         parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
+
+        // Coerce directive argument values based on directive definitions.
+        coerce_schema_values(&mut schema);
 
         Self::new(name, url, schema, orphan_extension_types)
     }
