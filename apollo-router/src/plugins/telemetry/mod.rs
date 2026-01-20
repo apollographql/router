@@ -386,6 +386,7 @@ impl PluginPrivate for Telemetry {
             .clone();
 
         ServiceBuilder::new()
+            .layer(metrics::allocation::AllocationMetricsLayer::new())
             .map_response(move |response: router::Response| {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();

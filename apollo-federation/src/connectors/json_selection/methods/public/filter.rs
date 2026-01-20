@@ -162,7 +162,7 @@ fn filter_shape(
         );
     }
 
-    Shape::list(input_shape.any_item([]), input_shape.locations)
+    Shape::list(input_shape.any_item([]), input_shape.locations().cloned())
 }
 
 #[cfg(test)]
@@ -299,6 +299,7 @@ mod method_tests {
     #[rstest::rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn filter_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->filter($.missing)", spec).apply_to(&json!({
@@ -387,7 +388,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 input_shape.clone()
             ),
-            Shape::list(input_shape.any_item([]), input_shape.locations)
+            Shape::list(input_shape.any_item([]), input_shape.locations().cloned())
         );
     }
 
@@ -399,7 +400,7 @@ mod shape_tests {
                 vec![WithRange::new(LitExpr::Bool(true), None)],
                 input_shape.clone()
             ),
-            Shape::list(input_shape.any_item([]), input_shape.locations)
+            Shape::list(input_shape.any_item([]), input_shape.locations().cloned())
         );
     }
 

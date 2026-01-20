@@ -9,11 +9,11 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
 
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::json_selection::SelectionTrie;
+use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 use crate::connectors::validation::graphql::SchemaInfo;
@@ -40,7 +40,7 @@ impl<'a> VariableResolver<'a> {
             } => {
                 resolvers.insert(
                     Namespace::This,
-                    Box::new(ThisResolver::new(parent_type, field_def)),
+                    Box::new(ThisResolver::new(*parent_type, field_def)),
                 );
                 resolvers.insert(Namespace::Args, Box::new(ArgsResolver::new(field_def)));
             }
@@ -176,13 +176,16 @@ fn resolve_path(
 
 /// Resolves variables in the `$this` namespace
 pub(crate) struct ThisResolver<'a> {
-    object: &'a ObjectType,
+    object_type: SchemaTypeRef<'a>,
     field: &'a Component<FieldDefinition>,
 }
 
 impl<'a> ThisResolver<'a> {
-    pub(crate) const fn new(object: &'a ObjectType, field: &'a Component<FieldDefinition>) -> Self {
-        Self { object, field }
+    pub(crate) const fn new(
+        object_type: SchemaTypeRef<'a>,
+        field: &'a Component<FieldDefinition>,
+    ) -> Self {
+        Self { object_type, field }
     }
 }
 
@@ -194,25 +197,26 @@ impl NamespaceResolver for ThisResolver<'_> {
         schema: &SchemaInfo,
     ) -> Result<(), Message> {
         for (root, sub_trie) in reference.selection.iter() {
-            let fields = &self.object.fields;
+            let fields = self.object_type.get_fields(root);
 
-            let field_type = fields
-                .get(root)
-                .ok_or_else(|| Message {
+            if fields.is_empty() {
+                return Err(Message {
                     code: Code::UndefinedField,
                     message: format!(
                         "`{object}` does not have a field named `{root}`",
-                        object = self.object.name,
+                        object = self.object_type.name(),
                     ),
                     locations: reference
                         .selection
                         .key_ranges(root)
                         .flat_map(|range| subslice_location(node, range, schema))
                         .collect(),
-                })
-                .map(|field| field.ty.clone())?;
+                });
+            }
 
-            resolve_path(schema, sub_trie, node, &field_type, self.field)?;
+            for field_def in fields.values() {
+                resolve_path(schema, sub_trie, node, &field_def.ty, self.field)?;
+            }
         }
 
         Ok(())

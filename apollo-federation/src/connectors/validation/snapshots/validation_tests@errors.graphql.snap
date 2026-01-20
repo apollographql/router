@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/errors.graphql
 [
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@source(name: \"invalid_source_message_not_string\" errors.message:)`: object values aren't valid here",
+        message: "In `@source(name: \"invalid_source_message_not_string\" errors.message:)`: expected string but received incompatible object\nDetails: `String` does not accept `{ message: Unknown }`",
         locations: [
             13:25..13:47,
         ],
@@ -41,14 +41,14 @@ input_file: apollo-federation/src/connectors/validation/test_data/errors.graphql
     },
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string`: object values aren't valid here",
+        message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string`: expected string but received incompatible object\nDetails: `String` does not accept `{ message: Unknown }`",
         locations: [
             86:27..86:49,
         ],
     },
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string_from_args`: number values aren't valid here",
+        message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string_from_args`: expected string but received incompatible union\nDetails: `String` does not accept `One<Int, null>`",
         locations: [
             97:58..97:61,
             97:51..97:61,

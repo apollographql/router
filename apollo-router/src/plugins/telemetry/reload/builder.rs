@@ -99,6 +99,10 @@ impl<'a> Builder<'a> {
             let mut builder = MetricsBuilder::new(self.config);
             builder.configure(&self.config.exporters.metrics.prometheus)?;
             builder.configure(&self.config.exporters.metrics.otlp)?;
+            // Register memory allocation views with custom buckets
+            crate::plugins::telemetry::metrics::allocation::register_memory_allocation_views(
+                &mut builder,
+            );
             builder.configure_views(MeterProviderType::Public)?;
 
             let (prometheus_registry, meter_providers, _) = builder.build();
@@ -240,6 +244,8 @@ impl<'a> Builder<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::config::Exporters;
@@ -419,10 +425,10 @@ mod tests {
             instr.logging_layer_set,
             "First run should set logging layer"
         );
-        // But no meter providers get added if nothing is configured
-        assert!(
-            instr.meter_providers_added.is_empty(),
-            "No meter providers added on first run when nothing enabled"
+        // One meter provider is added for memory tracking
+        assert_eq!(
+            instr.meter_providers_added,
+            HashSet::from([MeterProviderType::Public])
         );
     }
 

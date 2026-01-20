@@ -19,7 +19,7 @@ pub(crate) struct SchemaInfo<'schema> {
     lookup: LineColLookup<'schema>,
     pub(crate) connect_link: ConnectLink,
     /// A lookup map for the Shapes computed from GraphQL types.
-    pub(crate) shape_lookup: IndexMap<&'schema str, Shape>,
+    pub(crate) shape_lookup: IndexMap<String, Shape>,
 }
 
 impl<'schema> SchemaInfo<'schema> {
