@@ -952,6 +952,9 @@ async fn test_cache_keys_nullable_data() {
     // NOTE: nulls here are what we're testing
     let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name": null}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
     assert_eq!(body.data, Some(expectation));
+    insta::assert_json_snapshot!(body.extensions, {
+        ".apolloCacheDebugging.data[].cacheControl.created" => 0
+    });
 }
 
 #[tokio::test]
