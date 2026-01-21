@@ -153,7 +153,7 @@ fn validate_args_on_field(
                         .iter()
                         .map(|arg| (arg.name.clone(), arg.ty.as_ref()))
                         .collect::<IndexMap<Name, &Type>>();
-                    validate_args_selection(schema, None, &fields, &var_ref.selection).err()
+                    validate_args_selection(schema, &fields, &var_ref.selection).err()
                 }
                 None => None,
             },
@@ -166,7 +166,6 @@ fn validate_args_on_field(
 /// parent_type_name: The name of the parent composite type; None if selection is a field argument.
 fn validate_args_selection(
     schema: &FederationSchema,
-    parent_type_name: Option<&Name>,
     fields: &IndexMap<Name, &Type>,
     selection: &SelectionTrie,
 ) -> Result<(), CacheTagValidationError> {
@@ -190,18 +189,7 @@ fn validate_args_selection(
                 .ok_or_else(|| CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!("unknown field \"{name}\""),
                 })?;
-        if !is_fully_non_null(field) {
-            if let Some(parent_type_name) = parent_type_name {
-                return Err(CacheTagValidationError::CacheTagFormatNullableField {
-                    field_name: name.clone(),
-                    parent_type: parent_type_name.to_string(),
-                });
-            } else {
-                return Err(CacheTagValidationError::CacheTagFormatNullableArgument {
-                    arg_name: name.clone(),
-                });
-            }
-        }
+
         let type_name = field.inner_named_type();
         let type_def = schema.get_type(type_name.clone())?;
         if !sel.is_leaf() {
@@ -225,7 +213,7 @@ fn validate_args_selection(
                     ))
                 })
                 .collect::<Result<IndexMap<_, _>, _>>()?;
-            validate_args_selection(schema, Some(type_name), &next_fields, sel)?;
+            validate_args_selection(schema, &next_fields, sel)?;
         } else {
             // A leaf field must not be a list.
             if field.is_list() {
@@ -247,17 +235,6 @@ fn validate_args_selection(
         }
     }
     Ok(())
-}
-
-/// Similar to `Type::is_non_null`, but checks if the type is non-null at all nested levels of
-/// lists.
-fn is_fully_non_null(ty: &Type) -> bool {
-    match ty {
-        Type::Named(_) => false,
-        Type::List(_) => false,
-        Type::NonNullNamed(_) => true,
-        Type::NonNullList(inner) => is_fully_non_null(inner),
-    }
 }
 
 fn validate_args_on_object_type(
@@ -397,13 +374,6 @@ fn build_selection_set(
                 message: format!("invalid field selection name \"{key}\""),
             })?;
 
-        if !is_fully_non_null(new_field.ty()) {
-            return Err(CacheTagValidationError::CacheTagFormatNullableField {
-                field_name: name.clone(),
-                parent_type: selection_set.ty.to_string(),
-            });
-        }
-
         if !sel.is_leaf() {
             ObjectOrInterfaceTypeDefinitionPosition::try_from(new_field_type_def).map_err(
                 |_| CacheTagValidationError::CacheTagInvalidFormat {
@@ -500,13 +470,6 @@ enum CacheTagValidationError {
         "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"{format}\" on type \"{type_name}\""
     )]
     CacheTagInvalidFormatFieldSetOnEntity { type_name: Name, format: String },
-    #[error("@cacheTag format references a nullable field \"{parent_type}.{field_name}\"")]
-    CacheTagFormatNullableField {
-        field_name: Name,
-        parent_type: String,
-    },
-    #[error("@cacheTag format references a nullable argument \"{arg_name}\"")]
-    CacheTagFormatNullableArgument { arg_name: Name },
 }
 
 impl CacheTagValidationError {
@@ -647,7 +610,7 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_format_string_nullable_args() {
+    fn test_valid_format_string_nullable_args() {
         const SCHEMA: &str = r#"
             type Product @key(fields: "upc name")
                          @cacheTag(format: "product-{$key.upc}-{$key.name}")
@@ -660,18 +623,9 @@ mod tests {
                 topProducts(first: Int): [Product]
                     @cacheTag(format: "topProducts")
                     @cacheTag(format: "topProducts-{$args.first}")
-                productsByCountry(country: [String]!): [Product]
-                    @cacheTag(format: "productsByCountry-{$args.country}")
             }
         "#;
-        assert_eq!(
-            build_for_errors(SCHEMA),
-            vec![
-                "@cacheTag format references a nullable field \"Product.name\"",
-                "@cacheTag format references a nullable argument \"first\"",
-                "@cacheTag format references a nullable argument \"country\"",
-            ]
-        );
+        build_and_validate(SCHEMA);
     }
 
     #[test]
@@ -760,7 +714,6 @@ mod tests {
                 "cacheTag format is invalid: cannot create selection set with \"somethingElse\"",
                 "cacheTag format is invalid: invalid path ending at \"test\", which is not a scalar type or an enum",
                 "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.test.b}\" on type \"Product\"",
-                "@cacheTag format references a nullable field \"Test.c\"",
                 "cacheTag format is invalid: unknown field \"second\""
             ]
         );
