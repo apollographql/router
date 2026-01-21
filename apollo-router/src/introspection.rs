@@ -152,9 +152,9 @@ impl IntrospectionCache {
                     .collect::<Vec<_>>();
                 sorted.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-                Value::Object(sorted.into_iter().collect::<Object>())
+                Value::Object(sorted.into_iter().collect())
             }
-            // Normalize array values in case it contains strings or objects
+            // Normalize array values in case it contains objects
             Value::Array(arr) => {
                 Value::Array(arr.into_iter().map(Self::normalize_variables).collect())
             }
@@ -163,8 +163,8 @@ impl IntrospectionCache {
     }
 
     fn introspection_cache_key(query: &str, variables: Object) -> String {
-        let normalized = Self::normalize_variables(Value::Object(variables));
-        let variable_key = serde_json::to_string(&normalized).unwrap_or_default();
+        let normalized_variables = Self::normalize_variables(Value::Object(variables));
+        let variable_key = serde_json::to_string(&normalized_variables).unwrap_or_default();
 
         let mut hasher = Sha256::new();
         hasher.update(variable_key);
