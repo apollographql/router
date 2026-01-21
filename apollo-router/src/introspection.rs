@@ -3,7 +3,10 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use apollo_compiler::executable::Selection;
+use serde_json_bytes::Value;
 use serde_json_bytes::json;
+use sha2::Digest;
+use sha2::Sha256;
 
 use crate::Configuration;
 use crate::cache::storage::CacheStorage;
@@ -11,6 +14,7 @@ use crate::compute_job;
 use crate::compute_job::ComputeBackPressureError;
 use crate::compute_job::ComputeJobType;
 use crate::graphql;
+use crate::json_ext::Object;
 use crate::query_planner::QueryKey;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::spec;
@@ -70,7 +74,7 @@ impl IntrospectionCache {
         schema: &Arc<spec::Schema>,
         key: &QueryKey,
         doc: &ParsedDocument,
-        variables: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
+        variables: Object,
     ) -> ControlFlow<Result<graphql::Response, ComputeBackPressureError>, ()> {
         Self::maybe_lone_root_typename(schema, doc)?;
         if doc.operation.is_query() {
@@ -138,12 +142,41 @@ impl IntrospectionCache {
         graphql::Response::builder().error(error).build()
     }
 
+    fn normalize_variables(value: Value) -> Value {
+        match value {
+            // Object keys need to be sorted.
+            Value::Object(map) => {
+                let mut sorted = map
+                    .into_iter()
+                    .map(|(k, v)| (k, Self::normalize_variables(v)))
+                    .collect::<Vec<_>>();
+                sorted.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+                Value::Object(sorted.into_iter().collect::<Object>())
+            }
+            // Normalize array values in case it contains strings or objects
+            Value::Array(arr) => {
+                Value::Array(arr.into_iter().map(Self::normalize_variables).collect())
+            }
+            other => other,
+        }
+    }
+
+    fn introspection_cache_key(query: &str, variables: Object) -> String {
+        let normalized = Self::normalize_variables(Value::Object(variables));
+        let variable_key = serde_json::to_string(&normalized).unwrap_or_default();
+
+        let mut hasher = Sha256::new();
+        hasher.update(variable_key);
+        format!("{query}:{:x}", hasher.finalize())
+    }
+
     async fn cached_introspection(
         &self,
         schema: &Arc<spec::Schema>,
         key: &QueryKey,
         doc: &ParsedDocument,
-        variables: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
+        variables: Object,
     ) -> Result<graphql::Response, ComputeBackPressureError> {
         let (storage, max_depth) = match &self.0 {
             Mode::Enabled { storage, max_depth } => (storage, *max_depth),
@@ -155,12 +188,7 @@ impl IntrospectionCache {
                 return Ok(graphql::Response::builder().error(error).build());
             }
         };
-        let query = key.filtered_query.clone();
-        let cache_key = format!(
-            "{}:{}",
-            query,
-            serde_json::to_string(&variables).unwrap_or_default()
-        );
+        let cache_key = Self::introspection_cache_key(&key.filtered_query, variables.clone());
         if let Some(response) = storage.get(&cache_key, |_| unreachable!()).await {
             return Ok(response);
         }
@@ -183,10 +211,7 @@ impl IntrospectionCache {
         max_depth: MaxDepth,
         schema: &spec::Schema,
         doc: &ParsedDocument,
-        variable_values: serde_json_bytes::Map<
-            serde_json_bytes::ByteString,
-            serde_json_bytes::Value,
-        >,
+        variables: Object,
     ) -> graphql::Response {
         let api_schema = schema.api_schema();
         let operation = &doc.operation;
@@ -198,11 +223,7 @@ impl IntrospectionCache {
         };
         let result = max_depth_result
             .and_then(|()| {
-                apollo_compiler::request::coerce_variable_values(
-                    api_schema,
-                    operation,
-                    &variable_values,
-                )
+                apollo_compiler::request::coerce_variable_values(api_schema, operation, &variables)
             })
             .and_then(|variable_values| {
                 apollo_compiler::introspection::partial_execute(
@@ -220,5 +241,66 @@ impl IntrospectionCache {
                 graphql::Response::builder().error(error).build()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json_bytes::json;
+
+    use crate::introspection::IntrospectionCache;
+
+    #[test]
+    fn test_variable_normalization() {
+        let variables = json!({
+            "e": true,
+            "a": "John Doe",
+            "b": 30,
+            "f": null,
+            "d": {
+                "a": "123 Main St",
+                "c": "CA",
+            },
+            "c": [1, "Hello", { "d": "World","a": 3 }],
+        });
+        let normalized = IntrospectionCache::normalize_variables(variables);
+        assert_eq!(
+            serde_json::to_string(&normalized).unwrap_or_default(),
+            serde_json::to_string(&json!({
+                "a": "John Doe",
+                "b": 30,
+                "c": [1, "Hello", { "a": 3, "d": "World" }],
+                "d": {
+                    "a": "123 Main St",
+                    "c": "CA",
+                },
+                "e": true,
+                "f": null,
+            }))
+            .unwrap_or_default(),
+        );
+    }
+
+    #[test]
+    fn test_variable_normalization_key() {
+        let variables = json!({
+            "e": true,
+            "a": "John Doe",
+            "b": 30,
+            "f": null,
+            "d": {
+                "b": 1,
+                "a": 2,
+            },
+            "c": [1, "Hello", { "d": "World","a": 3 }],
+        });
+        let key = IntrospectionCache::introspection_cache_key(
+            "query { __typename }",
+            variables.as_object().unwrap().clone(),
+        );
+        assert_eq!(
+            key,
+            "query { __typename }:de9b6428db82b324ea84fb6b7368dba2a296b49aed6c3e66cdaca8908e5a879f"
+        );
     }
 }

@@ -485,7 +485,7 @@ impl QueryPlannerService {
         mut key: QueryKey,
         mut doc: ParsedDocument,
         compute_job_type: ComputeJobType,
-        variables: serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>,
+        variables: Object,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let mut query_metrics = Default::default();
         let mut selections = self
