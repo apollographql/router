@@ -2199,6 +2199,15 @@ pub(in crate::plugins) fn matches_selection_set(
                 matches_array_of_objects(arr, &field.selection_set)
             }
 
+            // We allow nullable fields in selection sets (ie, those fields that identify an entity, usually
+            // [if not always] listed in `@key`). That _doesn't_ mean that entities definitively
+            // must allow nullable fields, only that we happen to allow it right now; it's probably
+            // a bit of a schema-development smell to have an entity identifiable by nullable
+            // fields, but it makes practical sense if you're wanting to cache partial responses
+            Value::Null => {
+                return true;
+            }
+
             // scalar values
             _other => {
                 // Mismatch: object or array value was expected.
@@ -3383,6 +3392,52 @@ mod tests {
                 "test.graphql",
             )
             .unwrap();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_set_handles_null() {
+        // Note the nullable type, Nullable; this represents when you have some entity you want to
+        // identify via nullable fields, which is most useful when you're wanting to cache partial
+        // responses (what does it mean to partially identify a thing? Everything is all and only
+        // itself, no more or less--be careful in reading this test as saying something important
+        // about how entities _should_ be identified with respect to nullable fields)
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                nullable: Nullable
+            }
+            type Nullable {
+                id: ID!
+            }
+        "#;
+
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id nullable { id }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Note second location: it's `null`
+        let representation = json!({
+            "id": "TEST123",
+            "nullable": null,
+        })
+        .as_object()
+        .unwrap()
+        .clone();
 
         assert!(
             matches_selection_set(&representation, &field_set.selection_set),

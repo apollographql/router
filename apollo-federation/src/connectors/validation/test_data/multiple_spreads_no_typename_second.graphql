@@ -1,0 +1,63 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.13")
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+  @source(
+    name: "products-api"
+    http: { baseURL: "http://localhost:3001" }
+  )
+
+interface Product {
+  upc: ID!
+}
+
+type Book implements Product {
+  upc: ID!
+  title: String
+  author: Person
+  hi: String
+}
+
+type Film implements Product {
+  upc: ID!
+  title: String
+  director: Person
+  hi: String
+}
+
+type Person {
+  id: ID!
+  name: String
+}
+
+# Second spread omits __typename, so its fields (hi) get added to ALL
+# object shapes in the union. This requires hi to be defined on Film too.
+type Query {
+  products: [Product] @connect(
+    source: "products-api"
+    http: { GET: "/products" }
+    selection: """
+      upc
+      ... category->match(
+        ['book', $ {
+          __typename: $('Book')
+          title
+          author { id name }
+        }],
+        ['movie', $ {
+          __typename: $('Film')
+          title
+          director { id name }
+        }],
+        [@, null]
+      )
+      ... category->match(
+        ['book', $ {
+          hi: $('hello from book')
+        }]
+      )
+    """
+  )
+}

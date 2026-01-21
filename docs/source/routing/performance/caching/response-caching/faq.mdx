@@ -31,6 +31,14 @@ Cached data remains valid across schema updates. When a new schema is deployed, 
 
 No. Responses containing errors aren't cached—this prevents transient errors from being served repeatedly from the cache.
 
+### Can I use compound `@key`s?
+
+Yes. Compound `@key`s, including lists, are supported. However, their complexity introduces overhead. Prioritize simplicity in your cache key design.
+
+### Can `@key`s represent nullable data in `@cacheTag`?
+
+Yes. However, `null` data is interpolated as an empty string. For example, consider an entity key with fields `id` and `name`, where `name` is nullable. If you specify `@cacheTag(format: "user-{$key.id}-{$key.name}")` and the entity key is `{"id": 1, "name": null}`, the generated cache tag is `user-1-`.
+
 ### What if one of my subgraphs is unavailable?
 
 The router returns whatever cached data is available and populates the rest of the response tree according to your schema's nullability rules. Fields that can't be resolved are nulled out with corresponding error messages, while successfully cached portions of the response are still returned.
