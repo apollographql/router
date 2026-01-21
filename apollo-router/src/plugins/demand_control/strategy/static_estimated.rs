@@ -128,7 +128,7 @@ impl StrategyImpl for StaticEstimated {
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
-        if !response.data.is_some() {
+        if response.data.is_none() {
             return Ok(());
         }
 

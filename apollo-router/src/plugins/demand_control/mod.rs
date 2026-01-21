@@ -106,7 +106,7 @@ pub(crate) enum StrategyConfig {
     },
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ActualCostComputationMode {
     #[default]
@@ -151,8 +151,7 @@ impl StrategyConfig {
             ActualCostComputationMode::Legacy
         ) {
             tracing::warn!(
-                "Actual cost computation mode `{}` will be deprecated in the future; migrate to `{}` when possible",
-                actual_cost_computation_mode
+                "Actual cost computation mode `legacy` will be deprecated in the future; migrate to `by_subgraph` when possible",
             );
         }
 
