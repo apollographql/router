@@ -32,6 +32,7 @@ use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
+use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -649,123 +650,130 @@ where
                 let outcome_recorded_for_abort = outcome_recorded.clone();
                 let outcome_recorded_for_memory_limit = outcome_recorded.clone();
                 let outcome_recorded_for_timeout = outcome_recorded.clone();
-                let enforce_mode = self.cooperative_cancellation.is_enforce_mode();
-                let measure_mode = self.cooperative_cancellation.is_measure_mode();
 
-                if enforce_mode {
-                    let cancelled = Arc::new(AtomicBool::new(false));
-                    let exceeded_memory_limit = Arc::new(AtomicBool::new(false));
-                    let cancellable_planning_task =
-                        crate::compute_job::CANCEL_JOB.scope(Some(cancelled.clone()), planning_task);
+                match self.cooperative_cancellation.mode() {
+                    Mode::Enforce => {
+                        let cancelled = Arc::new(AtomicBool::new(false));
+                        let exceeded_memory_limit = Arc::new(AtomicBool::new(false));
+                        let cancellable_planning_task =
+                            crate::compute_job::CANCEL_JOB.scope(Some(cancelled.clone()), planning_task);
 
-                    let exceeded_memory_limit_setter = exceeded_memory_limit.clone();
-                    let task = if let Some(memory_limit) = self.cooperative_cancellation.memory_limit() {
-                        let stats = crate::allocator::current().expect("memory limit cooperative cancellation is set but no stats are available");
-                        let memory_limit_bytes = memory_limit.as_u64() as usize;
-                        let task = tokio::task::spawn(cancellable_planning_task.with_memory_tracking("planning_task"));
-                        let abort_handle = task.abort_handle();
-                        stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
-                            exceeded_memory_limit_setter.store(true, Ordering::Relaxed);
-                            abort_handle.abort();
-                            log::warn!("memory limit exceeded planning query: {}", &query);
-                        }));
-                        task
-                    } else {
-                        tokio::task::spawn(cancellable_planning_task)
-                    };
-
-                    let _abort_guard =
-                        scopeguard::guard(task.abort_handle(), move |abort_handle| {
-                            if record_outcome_if_none(&outcome_recorded_for_abort, Outcome::Cancelled)
-                            {
-                                cancelled.store(true, Ordering::Relaxed);
-                                abort_handle.abort();
+                        let exceeded_memory_limit_setter = exceeded_memory_limit.clone();
+                        let task = if let Some(memory_limit) = self.cooperative_cancellation.memory_limit() {
+                            if let Some(stats) = crate::allocator::current() {
+                                let memory_limit_bytes = memory_limit.as_u64() as usize;
+                                let task = tokio::task::spawn(cancellable_planning_task.with_memory_tracking("planning_task"));
+                                let abort_handle = task.abort_handle();
+                                stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
+                                    exceeded_memory_limit_setter.store(true, Ordering::Relaxed);
+                                    abort_handle.abort();
+                                        log::warn!("memory limit exceeded planning query: {}", &query);
+                                    }));
+                                task
+                            } else {
+                                log::error!("memory limit cooperative cancellation is set but no stats are available");
+                                tokio::task::spawn(cancellable_planning_task)
                             }
-                        });
+                        } else {
+                            tokio::task::spawn(cancellable_planning_task)
+                        };
 
-                    if let Some(timeout) = self.cooperative_cancellation.timeout() {
-                        match task.timeout(timeout).await {
-                            Ok(result) => match result {
-                                Err(e) if exceeded_memory_limit.load(Ordering::Relaxed) => {
+                        let _abort_guard =
+                            scopeguard::guard(task.abort_handle(), move |abort_handle| {
+                                if record_outcome_if_none(&outcome_recorded_for_abort, Outcome::Cancelled)
+                                {
+                                    cancelled.store(true, Ordering::Relaxed);
+                                    abort_handle.abort();
+                                }
+                            });
+
+                        if let Some(timeout) = self.cooperative_cancellation.timeout() {
+                            match task.timeout(timeout).await {
+                                Ok(result) => match result {
+                                    Err(e) if exceeded_memory_limit.load(Ordering::Relaxed) => {
+                                        record_outcome_if_none(
+                                            &outcome_recorded_for_memory_limit,
+                                            Outcome::Cancelled,
+                                        );
+                                        Err(CacheResolverError::RetrievalError(Arc::new(
+                                        QueryPlannerError::MemoryLimitExceeded(e.to_string()),
+                                        )))?
+                                    },
+                                    result => result,
+                                },
+                                Err(e) => {
                                     record_outcome_if_none(
-                                        &outcome_recorded_for_memory_limit,
-                                        Outcome::Cancelled,
+                                        &outcome_recorded_for_timeout,
+                                        Outcome::Timeout,
                                     );
                                     Err(CacheResolverError::RetrievalError(Arc::new(
-                                    QueryPlannerError::MemoryLimitExceeded(e.to_string()),
+                                        QueryPlannerError::Timeout(e.to_string()),
                                     )))?
-                                },
-                                result => result,
-                            },
-                            Err(e) => {
-                                record_outcome_if_none(
-                                    &outcome_recorded_for_timeout,
-                                    Outcome::Timeout,
-                                );
-                                Err(CacheResolverError::RetrievalError(Arc::new(
-                                    QueryPlannerError::Timeout(e.to_string()),
-                                )))?
+                                }
                             }
-                        }
-                    } else {
-                        match task.await {
-                                Err(e) if exceeded_memory_limit.load(Ordering::Relaxed) => {
-                                    record_outcome_if_none(
-                                        &outcome_recorded_for_memory_limit,
-                                        Outcome::Cancelled,
-                                    );
-                                    Err(CacheResolverError::RetrievalError(Arc::new(
-                                    QueryPlannerError::MemoryLimitExceeded(e.to_string()),
-                                    )))?
-                                },
-                                result => result,
+                        } else {
+                            match task.await {
+                                    Err(e) if exceeded_memory_limit.load(Ordering::Relaxed) => {
+                                        record_outcome_if_none(
+                                            &outcome_recorded_for_memory_limit,
+                                            Outcome::Cancelled,
+                                        );
+                                        Err(CacheResolverError::RetrievalError(Arc::new(
+                                        QueryPlannerError::MemoryLimitExceeded(e.to_string()),
+                                        )))?
+                                    },
+                                    result => result,
+                            }
                         }
                     }
-                } else if measure_mode {
+                    Mode::Measure => {
                     // In measure mode, spawn a timeout task that only records outcome
-                    let _maybe_timeout_guard =  self.cooperative_cancellation.timeout().map(|timeout| {
-                       let timeout_task = tokio::task::spawn(async move {
-                           tokio::time::sleep(timeout).await;
-                           record_outcome_if_none(
-                               &outcome_recorded_for_timeout,
-                               Outcome::Timeout,
-                           );
-                       });
+                        let _maybe_timeout_guard =  self.cooperative_cancellation.timeout().map(|timeout| {
+                           let timeout_task = tokio::task::spawn(async move {
+                               tokio::time::sleep(timeout).await;
+                               record_outcome_if_none(
+                                   &outcome_recorded_for_timeout,
+                                   Outcome::Timeout,
+                               );
+                           });
 
-                        scopeguard::guard(timeout_task.abort_handle(), |abort_handle| {
-                               abort_handle.abort();
-                        })
-                    });
-
-                    // In measure mode, spawn a memory limit task that only records outcome
-                    if let Some(memory_limit) = self.cooperative_cancellation.memory_limit() {
-                        let notify_memory_limit_exceeded = Arc::new(tokio::sync::Notify::new());
-                        let notify_memory_limit_exceeded_listener = notify_memory_limit_exceeded.clone();
-                        let memory_limit_task = tokio::task::spawn(async move {
-                            notify_memory_limit_exceeded_listener.notified().await;
-                            record_outcome_if_none(
-                                &outcome_recorded_for_memory_limit,
-                                Outcome::Cancelled,
-                            );
+                            scopeguard::guard(timeout_task.abort_handle(), |abort_handle| {
+                                   abort_handle.abort();
+                            })
                         });
 
-                        let _memory_limit_guard = scopeguard::guard(memory_limit_task.abort_handle(), |abort_handle| {
-                            abort_handle.abort();
-                        });
+                        // In measure mode, spawn a memory limit task that only records outcome
+                        if let Some(memory_limit) = self.cooperative_cancellation.memory_limit() {
+                            if let Some(stats) = crate::allocator::current() {
+                                let notify_memory_limit_exceeded = Arc::new(tokio::sync::Notify::new());
+                                let notify_memory_limit_exceeded_listener = notify_memory_limit_exceeded.clone();
+                                let memory_limit_task = tokio::task::spawn(async move {
+                                    notify_memory_limit_exceeded_listener.notified().await;
+                                    record_outcome_if_none(
+                                        &outcome_recorded_for_memory_limit,
+                                        Outcome::Cancelled,
+                                    );
+                                });
 
-                        let task = planning_task.with_memory_tracking("planning_task");
-                        let stats = crate::allocator::current().expect("memory limit cooperative cancellation is set but no stats are available");
-                        let memory_limit_bytes = memory_limit.as_u64() as usize;
-                        stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
-                            notify_memory_limit_exceeded.notify_waiters();
-                            log::warn!("memory limit exceeded planning query: {}", &query);
-                        }));
-                        tokio::task::spawn(task).await
-                    } else {
-                        tokio::task::spawn(planning_task).await
+                                let _memory_limit_guard = scopeguard::guard(memory_limit_task.abort_handle(), |abort_handle| {
+                                    abort_handle.abort();
+                                });
+
+                                let task = planning_task.with_memory_tracking("planning_task");
+                                let memory_limit_bytes = memory_limit.as_u64() as usize;
+                                stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
+                                    notify_memory_limit_exceeded.notify_waiters();
+                                    log::warn!("memory limit exceeded planning query: {}", &query);
+                                }));
+                                tokio::task::spawn(task).await
+                            } else {
+                                log::error!("memory limit cooperative cancellation is set but no stats are available");
+                                tokio::task::spawn(planning_task).await
+                            }
+                        } else {
+                            tokio::task::spawn(planning_task).await
+                        }
                     }
-                } else {
-                    unreachable!("cooperative cancellation is not in enforce or measure mode");
                 }
             } else {
                 // some clients might timeout and cancel the request before query planning is finished,
