@@ -115,6 +115,21 @@ expression: "&schema"
         }
       ]
     },
+    "ActualCostMode": {
+      "oneOf": [
+        {
+          "enum": [
+            "by_subgraph"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "legacy",
+          "deprecated": true,
+          "type": "string"
+        }
+      ]
+    },
     "All": {
       "enum": [
         "all"
@@ -9128,6 +9143,14 @@ expression: "&schema"
             "static_estimated": {
               "additionalProperties": false,
               "properties": {
+                "actual_cost_mode": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/ActualCostMode"
+                    }
+                  ],
+                  "description": "The strategy used to calculate the actual cost incurred by an operation.\n\n* `by_subgraph` (default) computes the cost of each subgraph response and sums them\n  to get the total query cost.\n* `legacy` computes the cost based on the final structure of the composed response, not\n  including any interim structures from subgraph responses that did not make it to the\n  composed response."
+                },
                 "list_size": {
                   "description": "The assumed length of lists returned by the operation.",
                   "format": "uint32",
