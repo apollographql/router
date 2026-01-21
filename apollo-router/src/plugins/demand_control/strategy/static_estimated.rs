@@ -1,6 +1,7 @@
 use apollo_compiler::ExecutableDocument;
 
 use crate::graphql;
+use crate::plugins::demand_control::ActualCostMode;
 use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::StrategyImpl;
@@ -11,6 +12,7 @@ use crate::services::subgraph;
 pub(crate) struct StaticEstimated {
     // The estimated value of the demand
     pub(crate) max: f64,
+    pub(crate) actual_cost_mode: ActualCostMode,
     pub(crate) cost_calculator: StaticCostCalculator,
 }
 

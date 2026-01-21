@@ -1,6 +1,7 @@
 //! Demand control plugin.
 //! This plugin will use the cost calculation algorithm to determine if a query should be allowed to execute.
 //! On the request path it will use estimated
+use std::collections::HashSet;
 use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -73,6 +74,16 @@ pub(crate) enum StrategyConfig {
         list_size: u32,
         /// The maximum cost of a query
         max: f64,
+
+        /// The strategy used to calculate the actual cost incurred by an operation.
+        ///
+        /// * `by_subgraph` (default) computes the cost of each subgraph response and sums them
+        ///   to get the total query cost.
+        /// * `legacy` computes the cost based on the final structure of the composed response, not
+        ///   including any interim structures from subgraph responses that did not make it to the
+        ///   composed response.
+        #[serde(default)]
+        actual_cost_mode: ActualCostMode,
     },
 
     #[cfg(test)]
@@ -80,6 +91,39 @@ pub(crate) enum StrategyConfig {
         stage: test::TestStage,
         error: test::TestError,
     },
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ActualCostMode {
+    #[default]
+    BySubgraph,
+
+    #[deprecated(since = "TBD", note = "use `BySubgraph` instead")]
+    #[warn(deprecated_in_future)]
+    Legacy,
+}
+
+impl StrategyConfig {
+    fn validate(&self) -> Result<(), BoxError> {
+        // need to destructure StrategyConfig::StaticEstimated and ignore StrategyConfig::Test
+        #[allow(irrefutable_let_patterns)]
+        let StrategyConfig::StaticEstimated {
+            actual_cost_mode, ..
+        } = self
+        else {
+            return Ok(());
+        };
+
+        #[allow(deprecated_in_future)]
+        if matches!(actual_cost_mode, ActualCostMode::Legacy) {
+            tracing::warn!(
+                "Actual cost computation mode `legacy` will be deprecated in the future; migrate to `by_subgraph` when possible",
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, Eq, PartialEq)]
@@ -347,6 +391,8 @@ impl Plugin for DemandControl {
             demand_controlled_subgraph_schemas
                 .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
         }
+
+        init.config.strategy.validate()?;
 
         Ok(DemandControl {
             strategy_factory: StrategyFactory::new(
