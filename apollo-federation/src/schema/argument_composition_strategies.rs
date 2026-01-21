@@ -227,7 +227,7 @@ fn merge_nullable_values(
 fn dnf_conjunction(values: &[Value]) -> Value {
     // should never be the case
     if values.is_empty() {
-        return Value::List(vec![]); // TODO should this be [[]] instead?
+        return Value::List(vec![]);
     }
 
     // copy the 2D arrays, as we'll be modifying them below (due to sorting)
@@ -257,7 +257,7 @@ fn dnf_conjunction(values: &[Value]) -> Value {
         .expect("At least a single DNF conjunction value should exist");
 
     // perform cartesian product to find all possible entries
-    while let Some(current) = filtered.next() {
+    for current in filtered {
         let mut accumulator: Vec<Node<Value>> = Vec::new();
         let mut seen: HashSet<Value> = HashSet::default();
 
@@ -292,12 +292,11 @@ fn dnf_conjunction(values: &[Value]) -> Value {
     result
 }
 
-fn sort_nested_array(values: &mut Vec<Value>) {
+fn sort_nested_array(values: &mut [Value]) {
     values.iter_mut().for_each(|value| {
         if let Value::List(disjunctions) = value {
             disjunctions.iter_mut().for_each(|disjunction| {
                 if let Value::List(conjunctions) = disjunction.make_mut() {
-                    // TODO should this also filter duplicates? ["A", "A"]?
                     conjunctions.sort_by_key(|c| c.to_string());
                 }
             });
@@ -335,14 +334,13 @@ fn deduplicate_subsumed_values(value: Value) -> Value {
 
                 for existing_entry in &result {
                     // if `existing_entry` is a subset of a `candidate` then it means `candidate` is redundant
-                    if let Value::List(existing_disjunctions) = existing_entry.as_ref() {
-                        if existing_disjunctions
+                    if let Value::List(existing_disjunctions) = existing_entry.as_ref()
+                        && existing_disjunctions
                             .iter()
                             .all(|e| candidate_set.contains(e))
-                        {
-                            redundant = true;
-                            break;
-                        }
+                    {
+                        redundant = true;
+                        break;
                     }
                 }
             }
@@ -628,7 +626,7 @@ mod tests {
 
     #[test]
     fn verify_support_any_non_null_nested_array() {
-        for unsupported_type in vec![
+        for unsupported_type in [
             "String",
             "String!",
             "[String]",
@@ -647,7 +645,7 @@ mod tests {
             assert!(support_any_non_null_nested_array(&_type).is_err());
         }
 
-        for supported_type in vec!["[[String!]!]!", "[[Foo!]!]!"] {
+        for supported_type in ["[[String!]!]!", "[[Foo!]!]!"] {
             let _type = Type::parse(supported_type, "schema.graphql").expect("valid type");
             assert!(support_any_non_null_nested_array(&_type).is_ok());
         }
@@ -679,16 +677,9 @@ mod tests {
     fn dnf_conjunction_of_empty_values() {
         let strategy = DnfConjunctionArgumentCompositionStrategy {};
         let value = strategy
-            .merge_values(&vec![])
+            .merge_values(&[])
             .expect("successfully computed DNF conjunction value");
-        if let Value::List(result) = value {
-            assert!(result.is_empty());
-        } else {
-            assert!(
-                false,
-                "DNF_conjunction result should have been a Value::List"
-            );
-        }
+        assert_eq!(parse_into_ast_value_list(vec![]), value);
     }
 
     #[test]
