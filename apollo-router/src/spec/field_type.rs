@@ -1,3 +1,6 @@
+use ahash::random_state::RandomState;
+use std::collections::HashSet;
+
 use apollo_compiler::Name;
 use apollo_compiler::schema;
 use serde::Deserialize;
@@ -124,15 +127,15 @@ fn validate_input_value(
     schema: &Schema,
     path: &JsonValuePath<'_>,
 ) -> Result<(), InvalidInputValue> {
-    let fmt_path = || match path {
-        JsonValuePath::Variable { .. } => format!("variable `{path}`"),
-        _ => format!("input value at `{path}`"),
+    let fmt_path = | var_path: &JsonValuePath<'_>    | match var_path {
+        JsonValuePath::Variable { .. } => format!("variable `{var_path}`"),
+        _ => format!("input value at `{var_path}`"),
     };
     let Some(value) = value else {
         if ty.is_non_null() {
             return Err(InvalidInputValue(format!(
                 "missing {}: for required GraphQL type `{ty}`",
-                fmt_path(),
+                fmt_path(path),
             )));
         } else {
             return Ok(());
@@ -141,7 +144,7 @@ fn validate_input_value(
     let invalid = || {
         InvalidInputValue(format!(
             "invalid {}: found JSON {} for GraphQL type `{ty}`",
-            fmt_path(),
+            fmt_path(path),
             describe_json_value(value)
         ))
     };
@@ -205,7 +208,36 @@ fn validate_input_value(
         (schema::ExtendedType::Enum(_), _) => Err(invalid()),
 
         (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
-            // TODO: check keys in `obj` but not in `def.fields`?
+            // Check for extra/unknown fields in obj vs def
+            let response_object_field_names: HashSet<&str, RandomState> =
+                HashSet::from_iter(obj.keys().map(|k| k.as_str()));
+
+            let query_type_field_names: HashSet<&str, RandomState> =
+                HashSet::from_iter(def.fields.values().map(|field| field.name.as_str()));
+    
+            let diff: HashSet<_> = response_object_field_names
+                .difference(&query_type_field_names)
+                .collect();
+
+            let unknown_variable = | field_name | {
+                let path_string = JsonValuePath::ObjectKey {
+                    key: field_name,
+                    parent: path,
+                };
+                InvalidInputValue(format!(
+                    "unknown field {} found for GraphQL type `{def}`",
+                    fmt_path(&path_string),
+                ))
+            };
+
+            if !diff.is_empty() {
+                if let Some(next) = diff.iter().next() {
+                    let err = unknown_variable(next);
+                    return Err(err);
+                }
+            }
+
+            // Validate all fields present on def
             def.fields.values().try_for_each(|field| {
                 let path = JsonValuePath::ObjectKey {
                     key: &field.name,

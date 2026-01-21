@@ -2914,6 +2914,28 @@ fn variable_validation() {
         }})
     );
 
+    assert_validation_error!(
+        "input MessageInput {
+            content: String
+            author: String
+          }
+          type Receipt {
+              id: ID!
+          }
+          type Query{
+              send(message: MessageInput): Receipt}",
+        "query($msg: MessageInput) {
+            send(message: $msg) {
+                id
+            }}",
+        json!({"msg":  {
+            "content": "Hello",
+            "author": "Me",
+            "unknownField": "unknown",
+        }})
+    );
+    
+
     let schema = r#"
         schema
              @link(url: "https://specs.apollo.dev/link/v1.0")
