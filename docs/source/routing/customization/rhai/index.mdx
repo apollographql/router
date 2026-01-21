@@ -450,14 +450,14 @@ fn process_request(request) {
 
 By default, the router doesn't propagate the root-level `extensions` field from subgraph responses to the final client response. This is because merging extensions from multiple subgraphs can lead to conflicts when different subgraphs use the same extension keys.
 
-However, you can use Rhai to propagate extensions from subgraph responses to the client response. This example shows how to safely collect extensions from subgraph responses and merge them into the final response.
+Use Rhai to propagate extensions from subgraph responses to the client response. The following example demonstrates how to safely collect extensions from subgraph responses and merge them into the final response.
 
 <Note>
 
 **Important considerations:**
 
-- **Race conditions**: Subgraph requests execute in parallel, so their responses may arrive in any order. Use defensive coding to handle concurrent updates.
-- **Key conflicts**: Different subgraphs may use the same extension keys. The last subgraph response to complete will overwrite earlier values for conflicting keys.
+- **Race conditions**: Subgraph requests execute in parallel, so their responses might arrive in any order. Use defensive coding to handle concurrent updates.
+- **Key conflicts**: Different subgraphs might use the same extension keys. The last subgraph response to complete will overwrite earlier values for conflicting keys.
 - **Data types**: Extension values can be any valid JSON type (objects, arrays, strings, numbers, booleans).
 
 </Note>
@@ -465,7 +465,7 @@ However, you can use Rhai to propagate extensions from subgraph responses to the
 ```rhai
 fn supergraph_service(service) {
   let f = |response| {
-    // Check if we collected any extensions from subgraphs
+    // Check if the router collected any extensions from subgraphs
     // The safe navigation operator (?.) returns () if the key doesn't exist
     if response.context["extensions"]?.len > 0 {
       // Merge all collected extensions into the response body
@@ -502,13 +502,13 @@ fn subgraph_service(service, subgraph) {
 **How it works:**
 
 1. The `subgraph_service` hook intercepts each subgraph response and checks for the presence of `extensions`.
-2. If extensions are found, they're stored in the request context (which is shared across all services).
-3. The `supergraph_service` hook runs after all subgraph responses are collected and merged.
+2. If the hook finds extensions, it stores them in the request context (shared across all services).
+3. The `supergraph_service` hook runs after the router collects and merges all subgraph responses.
 4. It retrieves all stored extensions from the context and adds them to the final response's `extensions` field.
 
-**Customization options:**
+### Customization options
 
-If you need more control over extension merging (for example, to handle key conflicts differently or to filter specific extensions), you can modify the script:
+Modify the script to control extension merging, handle key conflicts, or filter specific extensions:
 
 ```rhai
 fn supergraph_service(service) {
@@ -523,7 +523,7 @@ fn supergraph_service(service) {
       for extension_map in response.context["extensions"] {
         for key in extension_map.keys() {
           // Example: Prefix keys with subgraph name to avoid conflicts
-          // Or: Implement your own conflict resolution logic here
+          // Or: Add your own conflict resolution logic here
           response.body.extensions[key] = extension_map[key];
         }
       }
@@ -534,19 +534,19 @@ fn supergraph_service(service) {
 }
 
 fn subgraph_service(service, subgraph) {
-    let f = |response| {
-      if response.body.extensions != () {
-        if response.context["extensions"] == () {
-          response.context.extensions = [];
-        }
-        
-        // Store the subgraph name with the extensions if needed
-        // for conflict resolution or debugging
-        response.context.extensions += response.body.extensions;
+  let f = |response| {
+    if response.body.extensions != () {
+      if response.context["extensions"] == () {
+        response.context.extensions = [];
       }
-    };
+      
+      // Store the subgraph name with the extensions if needed
+      // for conflict resolution or debugging
+      response.context.extensions += response.body.extensions;
+    }
+  };
 
-    service.map_response(f);
+  service.map_response(f);
 }
 ```
 
