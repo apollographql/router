@@ -868,6 +868,96 @@ async fn complex_entity_key_response_cache() {
 }
 
 #[tokio::test]
+async fn test_cache_keys_nullable_data() {
+    // GIVEN:
+    //   * that graphOS is enabled
+    //   * that we have a supergraph with:
+    //     * join__type with a complex key (ie, using an array)
+    //     * a complex key with a nullable field
+    //   * a router running the above
+    if !graph_os_enabled() {
+        return;
+    }
+
+    // NOTE: nulls here to represent nullable data to cache
+    let subgraphs = json!({
+        "stuff": {
+            "query": {
+                "getStatus": {
+                    "id": "1",
+                    "items": [{"id": "i1", "name": null}],
+                    "stuffDetails": "stuff we have"
+                }
+            }
+        },
+        "status": {
+            "entities": [{
+                "__typename": "Status",
+                "id": "1",
+                "items": [{"id": "i1", "name": null}],
+                "statusDetails": "status details"
+            }]
+        }
+    });
+
+    let mut config = base_config();
+    {
+        let config_mut = config.as_object_mut().unwrap();
+        config_mut.insert("experimental_mock_subgraphs".into(), subgraphs);
+        config_mut
+            .get_mut("response_cache")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert("debug".into(), true.into());
+    }
+
+    let router = apollo_router::TestHarness::builder()
+        .schema(include_str!(
+            "./fixtures/entity_key_with_null_fields.graphql"
+        ))
+        .configuration_json(config)
+        .unwrap()
+        .build_http_service()
+        .await
+        .unwrap();
+
+    let mut router = router;
+
+    // WHEN:
+    //   * a query for the Status type but with data from both the stuff and
+    //     status subgraphs
+
+    let query = r#"{
+        getStatus(id: "1") {
+            id
+            items { id name }
+            stuffDetails
+            statusDetails
+        }
+    }"#;
+
+    let mut http_req: http::Request<RouterBody> = graphql_request(query).into();
+    http_req.headers_mut().insert(
+        HeaderName::from_static("apollo-cache-debugging"),
+        HeaderValue::from_static("true"),
+    );
+    let (_, body) = make_http_request::<graphql::Response>(&mut router, http_req).await;
+
+    // THEN:
+    //   * no errors emitted! The key parses correctly
+    //   * we get data from both subgraphs
+    assert!(body.errors.is_empty());
+
+    // NOTE: nulls here are what we're testing
+    let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name": null}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
+    assert_eq!(body.data, Some(expectation));
+    insta::assert_json_snapshot!(body.extensions, {
+        ".apolloCacheDebugging.data[].cacheControl.created" => 0
+    });
+}
+
+#[tokio::test]
 async fn cache_control_merging_multi_fetch() {
     if !graph_os_enabled() {
         return;
