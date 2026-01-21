@@ -43,7 +43,8 @@ pub(crate) struct RouterInstrumentsConfig {
     pub(crate) http_server_response_body_size:
         DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
 
-    /// Histogram of router overhead (time not spent in subgraph requests)
+    /// Histogram of router overhead (time not spent in subgraph requests). The default unit is
+    /// seconds, but this can be changed with selectors
     #[serde(rename = "apollo.router.overhead")]
     pub(crate) router_overhead:
         DefaultedStandardInstrument<Extendable<RouterOverheadAttributes, RouterSelector>>,
