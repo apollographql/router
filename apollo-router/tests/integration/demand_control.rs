@@ -142,7 +142,7 @@ mod basic_fragments_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[rstest::rstest]
-    async fn requests_within_max_are_accepted_with_static_estimated_by_subgraph_strategy(
+    async fn requests_within_max_are_accepted(
         #[values(12.0, 15.0)] max_cost: f64,
     ) -> Result<(), BoxError> {
         // query total cost is 12.0; max_cost >= 12.0 should result in query being accepted
@@ -150,7 +150,7 @@ mod basic_fragments_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated_by_subgraph": {
+                "static_estimated": {
                     "list_size": 10,
                     "max": max_cost
                 }
@@ -163,7 +163,7 @@ mod basic_fragments_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_strategy(&context), "static_estimated");
         assert_eq!(&get_result(&context), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
 
@@ -193,8 +193,7 @@ mod basic_fragments_tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn requests_exceeding_max_are_rejected_with_static_estimated_by_subgraph_strategy()
-    -> Result<(), BoxError> {
+    async fn requests_exceeding_max_are_rejected() -> Result<(), BoxError> {
         let max_cost = 10.0;
 
         // query total cost is 12.0 for list_size = 10; since `max_cost` value is less than this,
@@ -203,7 +202,7 @@ mod basic_fragments_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated_by_subgraph": {
+                "static_estimated": {
                     "list_size": 10,
                     "max": max_cost
                 }
@@ -216,7 +215,7 @@ mod basic_fragments_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_strategy(&context), "static_estimated");
         assert_eq!(&get_result(&context), CODE_TOO_EXPENSIVE);
         assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
 
@@ -241,15 +240,14 @@ mod basic_fragments_tests {
     }
 
     #[tokio::test]
-    async fn requests_which_exceed_subgraph_limit_are_partially_accepted_with_static_estimated_by_subgraph_strategy()
-    -> Result<(), BoxError> {
+    async fn requests_which_exceed_subgraph_limit_are_partially_accepted() -> Result<(), BoxError> {
         // query checks products once; query should be accepted based on max but products subgraph
         // should not be called.
         let demand_control = serde_json::json!({
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated_by_subgraph": {
+                "static_estimated": {
                     "list_size": 10,
                     "max": 15,
                     "subgraphs": {
@@ -270,7 +268,7 @@ mod basic_fragments_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_strategy(&context), "static_estimated");
         assert_eq!(&get_result(&context), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
         assert_eq!(
@@ -303,12 +301,14 @@ mod basic_fragments_tests {
         Ok(())
     }
 
-    // Duplicates `requests_within_max_are_accepted_with_static_estimated_by_subgraph_strategy` but
-    // uses old `static_estimated` strategy.
     #[tokio::test(flavor = "multi_thread")]
     #[rstest::rstest]
-    async fn requests_within_max_are_accepted_with_static_estimated_strategy(
-        #[values(12.0, 15.0)] max_cost: f64,
+    #[case::new_cost_mode("by_subgraph", 2.0, true)]
+    #[case::legacy_cost_mode("legacy", 2.0, false)]
+    async fn actual_cost_computation_can_vary_based_on_mode(
+        #[case] computation_mode: &str,
+        #[case] expected_actual_cost: f64,
+        #[case] should_have_per_subgraph_actuals: bool,
     ) -> Result<(), BoxError> {
         // query total cost is 12.0; max_cost >= 12.0 should result in query being accepted
         let demand_control = serde_json::json!({
@@ -317,7 +317,8 @@ mod basic_fragments_tests {
             "strategy": {
                 "static_estimated": {
                     "list_size": 10,
-                    "max": max_cost
+                    "actual_cost_computation_mode": computation_mode,
+                    "max": 20.0
                 }
             }
         });
@@ -332,8 +333,14 @@ mod basic_fragments_tests {
         assert_eq!(&get_result(&context), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
 
-        assert!(get_result_by_subgraph(&context).is_none());
-        assert!(get_estimated_cost_by_subgraph(&context).is_none());
+        assert_eq!(
+            get_result_by_subgraph(&context).unwrap(),
+            serde_json::json!({ "products": CODE_OK })
+        );
+        assert_eq!(
+            get_estimated_cost_by_subgraph(&context).unwrap(),
+            serde_json::json!({ "products": 12.0 })
+        );
 
         // actuals
         assert!(body.data.is_some());
@@ -342,55 +349,11 @@ mod basic_fragments_tests {
         let subgraph_call_count = get_subgraph_call_count(&context).unwrap();
         assert_eq!(subgraph_call_count["products"], 1);
 
-        assert_eq!(get_actual_cost(&context).unwrap(), 2.0);
-        assert!(get_actual_cost_by_subgraph(&context).is_none(),);
-
-        Ok(())
-    }
-
-    // Duplicates `requests_exceeding_max_are_rejected_with_static_estimated_by_subgraph_strategy` but
-    // uses old `static_estimated` strategy.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn requests_exceeding_max_are_rejected_with_static_estimated_strategy()
-    -> Result<(), BoxError> {
-        let max_cost = 10.0;
-
-        // query total cost is 12.0 for list_size = 10; since `max_cost` value is less than this,
-        // the response should be an error
-        let demand_control = serde_json::json!({
-            "enabled": true,
-            "mode": "enforce",
-            "strategy": {
-                "static_estimated": {
-                    "list_size": 10,
-                    "max": max_cost
-                }
-            }
-        });
-
-        let response = query_supergraph_service(demand_control).await?;
-
-        let context = response.context;
-        let body = response.response.into_body().next().await.unwrap();
-
-        // estimates
-        assert_eq!(&get_strategy(&context), "static_estimated");
-        assert_eq!(&get_result(&context), CODE_TOO_EXPENSIVE);
-        assert_eq!(get_estimated_cost(&context).unwrap(), 12.0);
-
-        assert!(get_estimated_cost_by_subgraph(&context).is_none());
-
-        // actuals
-        assert!(body.data.is_none());
-
-        let error = body.errors.iter().find(estimated_too_expensive).unwrap();
-        assert_eq!(error.extensions["cost.estimated"], 12.0);
-        assert_eq!(error.extensions["cost.max"], max_cost);
-
-        assert!(get_subgraph_call_count(&context).is_none());
-
-        assert!(get_actual_cost(&context).is_none());
-        assert!(get_actual_cost_by_subgraph(&context).is_none());
+        assert_eq!(get_actual_cost(&context).unwrap(), expected_actual_cost);
+        assert_eq!(
+            get_actual_cost_by_subgraph(&context).is_some(),
+            should_have_per_subgraph_actuals
+        );
 
         Ok(())
     }
@@ -482,7 +445,7 @@ mod federated_ships_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[rstest::rstest]
-    async fn requests_within_max_are_accepted_with_static_estimated_by_subgraph_strategy(
+    async fn requests_within_max_are_accepted(
         #[values(10400.0, 10500.0)] max_cost: f64,
     ) -> Result<(), BoxError> {
         // query total cost is 10400 for list_size = 100; all `max_cost` values are geq than this,
@@ -491,7 +454,7 @@ mod federated_ships_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated_by_subgraph": {
+                "static_estimated": {
                     "list_size": 100,
                     "max": max_cost
                 }
@@ -504,7 +467,7 @@ mod federated_ships_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_strategy(&context), "static_estimated");
         assert_eq!(&get_result(&context), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
 
@@ -535,8 +498,7 @@ mod federated_ships_tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn requests_exceeding_max_are_rejected_with_static_estimated_by_subgraph_strategy()
-    -> Result<(), BoxError> {
+    async fn requests_exceeding_max_are_rejected() -> Result<(), BoxError> {
         let max_cost = 10000.0;
 
         // query total cost is 10400 for list_size = 100; since `max_cost` value is less than this,
@@ -545,7 +507,7 @@ mod federated_ships_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated_by_subgraph": {
+                "static_estimated": {
                     "list_size": 100,
                     "max": max_cost
                 }
@@ -558,7 +520,7 @@ mod federated_ships_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_strategy(&context), "static_estimated");
         assert_eq!(&get_result(&context), CODE_TOO_EXPENSIVE);
         assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
 
@@ -583,8 +545,7 @@ mod federated_ships_tests {
     }
 
     #[tokio::test]
-    async fn requests_which_exceed_subgraph_limit_are_partially_accepted_with_static_estimated_by_subgraph_strategy()
-    -> Result<(), BoxError> {
+    async fn requests_which_exceed_subgraph_limit_are_partially_accepted() -> Result<(), BoxError> {
         // query checks vehicles, then users, then vehicles.
         // interrupting the users check via a demand control limit should still permit both vehicles
         // checks.
@@ -592,7 +553,7 @@ mod federated_ships_tests {
             "enabled": true,
             "mode": "enforce",
             "strategy": {
-                "static_estimated_by_subgraph": {
+                "static_estimated": {
                     "list_size": 100,
                     "max": 15000.0,
                     "subgraphs": {
@@ -613,7 +574,7 @@ mod federated_ships_tests {
         let body = response.response.into_body().next().await.unwrap();
 
         // estimates
-        assert_eq!(&get_strategy(&context), "static_estimated_by_subgraph");
+        assert_eq!(&get_strategy(&context), "static_estimated");
         assert_eq!(&get_result(&context), CODE_OK);
         assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
         assert_eq!(
@@ -650,22 +611,25 @@ mod federated_ships_tests {
         Ok(())
     }
 
-    // Duplicates `requests_within_max_are_accepted_with_static_estimated_by_subgraph_strategy` but
-    // uses old `static_estimated` strategy.
     #[tokio::test(flavor = "multi_thread")]
     #[rstest::rstest]
-    async fn requests_within_max_are_accepted_with_static_estimated_strategy(
-        #[values(10400.0, 10500.0)] max_cost: f64,
+    #[case::new_cost_mode("by_subgraph", 15.0, true)]
+    #[case::legacy_cost_mode("legacy", 3.0, false)]
+    async fn actual_cost_computation_can_vary_based_on_mode(
+        #[case] computation_mode: &str,
+        #[case] expected_actual_cost: f64,
+        #[case] should_have_per_subgraph_actuals: bool,
     ) -> Result<(), BoxError> {
-        // query total cost is 10400 for list_size = 100; all `max_cost` values are geq than this,
-        // so the response should be OK
+        // estimated cost is 140 because list_size is 10, in contrast to tests above which use
+        // list_size 100 and therefore have estimated cost 10400
         let demand_control = serde_json::json!({
             "enabled": true,
             "mode": "enforce",
             "strategy": {
                 "static_estimated": {
-                    "list_size": 100,
-                    "max": max_cost
+                    "list_size": 10,
+                    "actual_cost_computation_mode": computation_mode,
+                    "max": 150.0
                 }
             }
         });
@@ -678,10 +642,16 @@ mod federated_ships_tests {
         // estimates
         assert_eq!(&get_strategy(&context), "static_estimated");
         assert_eq!(&get_result(&context), CODE_OK);
-        assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
+        assert_eq!(get_estimated_cost(&context).unwrap(), 140.0);
 
-        assert!(get_result_by_subgraph(&context).is_none());
-        assert!(get_estimated_cost_by_subgraph(&context).is_none());
+        assert_eq!(
+            get_result_by_subgraph(&context).unwrap(),
+            serde_json::json!({ "users": CODE_OK, "vehicles": CODE_OK })
+        );
+        assert_eq!(
+            get_estimated_cost_by_subgraph(&context).unwrap(),
+            serde_json::json!({ "users": 110.0, "vehicles": 30.0 })
+        );
 
         // actuals
         assert!(body.data.is_some());
@@ -691,57 +661,11 @@ mod federated_ships_tests {
         assert_eq!(subgraph_call_count["users"], 1);
         assert_eq!(subgraph_call_count["vehicles"], 2);
 
-        // NOTE: this differs from the value in the static_estimated_by_subgraph strategy because
-        // this strategy sums up the result structure, not all the work from the partial responses
-        assert_eq!(get_actual_cost(&context).unwrap(), 3.0);
-        assert!(get_actual_cost_by_subgraph(&context).is_none());
-
-        Ok(())
-    }
-
-    // Duplicates `requests_exceeded_max_are_rejected_with_static_estimated_by_subgraph_strategy` but
-    // uses old `static_estimated` strategy.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn requests_exceeding_max_are_rejected_with_static_estimated_strategy()
-    -> Result<(), BoxError> {
-        let max_cost = 10000.0;
-
-        // query total cost is 10400 for list_size = 100; since `max_cost` value is less than this,
-        // the response should be an error
-        let demand_control = serde_json::json!({
-            "enabled": true,
-            "mode": "enforce",
-            "strategy": {
-                "static_estimated": {
-                    "list_size": 100,
-                    "max": max_cost
-                }
-            }
-        });
-
-        let response = query_supergraph_service(demand_control).await?;
-
-        let context = response.context;
-        let body = response.response.into_body().next().await.unwrap();
-
-        // estimates
-        assert_eq!(&get_strategy(&context), "static_estimated");
-        assert_eq!(&get_result(&context), CODE_TOO_EXPENSIVE);
-        assert_eq!(get_estimated_cost(&context).unwrap(), 10400.0);
-
-        assert!(get_estimated_cost_by_subgraph(&context).is_none());
-
-        // actuals
-        assert!(body.data.is_none());
-
-        let error = body.errors.iter().find(estimated_too_expensive).unwrap();
-        assert_eq!(error.extensions["cost.estimated"], 10400.0);
-        assert_eq!(error.extensions["cost.max"], max_cost);
-
-        assert!(get_subgraph_call_count(&context).is_none());
-
-        assert!(get_actual_cost(&context).is_none());
-        assert!(get_actual_cost_by_subgraph(&context).is_none());
+        assert_eq!(get_actual_cost(&context).unwrap(), expected_actual_cost);
+        assert_eq!(
+            get_actual_cost_by_subgraph(&context).is_some(),
+            should_have_per_subgraph_actuals
+        );
 
         Ok(())
     }

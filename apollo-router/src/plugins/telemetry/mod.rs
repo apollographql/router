@@ -1479,6 +1479,10 @@ impl Telemetry {
                             .get_estimated_cost_by_subgraph()
                             .ok()
                             .flatten(),
+                        cost_by_subgraph_actual: context
+                            .get_actual_cost_by_subgraph()
+                            .ok()
+                            .flatten(),
 
                         // These limits are related to the Traffic Shaping feature, unrelated to the Demand Control plugin
                         depth: query_limits.map_or(0, |ql| ql.depth as u64),

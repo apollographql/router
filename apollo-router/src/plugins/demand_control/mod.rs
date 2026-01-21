@@ -83,26 +83,17 @@ pub(crate) enum StrategyConfig {
         list_size: u32,
         /// The maximum cost of a query
         max: f64,
-    },
 
-    /// A simple, statically-defined cost mapping for operations and types.
-    ///
-    /// Operation costs:
-    /// - Mutation: 10
-    /// - Query: 0
-    /// - Subscription 0
-    ///
-    /// Type costs:
-    /// - Object: 1
-    /// - Interface: 1
-    /// - Union: 1
-    /// - Scalar: 0
-    /// - Enum: 0
-    StaticEstimatedBySubgraph {
-        /// The assumed length of lists returned by the operation.
-        list_size: u32,
-        /// The maximum cost of a query
-        max: f64,
+        /// The strategy used to calculate the actual cost incurred by an operation.
+        ///
+        /// * `by_subgraph` (default) computes the cost of each subgraph response and sums them
+        ///   to get the total query cost.
+        /// * `legacy` computes the cost based on the final structure of the composed response, not
+        ///   including any interim structures from subgraph responses that did not make it to the
+        ///   composed response.
+        #[serde(default)]
+        actual_cost_computation_mode: ActualCostComputationMode,
+
         /// Cost control by subgraph
         #[serde(default)]
         subgraphs: SubgraphConfiguration<SubgraphStrategyLimit>,
@@ -113,6 +104,17 @@ pub(crate) enum StrategyConfig {
         stage: test::TestStage,
         error: test::TestError,
     },
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ActualCostComputationMode {
+    #[default]
+    BySubgraph,
+
+    #[deprecated(since = "TBD", note = "use `BySubgraph` instead")]
+    #[warn(deprecated_in_future)]
+    Legacy,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
@@ -133,10 +135,26 @@ impl StrategyConfig {
         }
 
         #[allow(irrefutable_let_patterns)]
-        // need to destructure StrategyConfig::StaticEstimatedBySubgraph and ignore the others
-        let StrategyConfig::StaticEstimatedBySubgraph { subgraphs, .. } = self else {
+        // need to destructure StrategyConfig::StaticEstimated and ignore StrategyConfig::Test
+        let StrategyConfig::StaticEstimated {
+            subgraphs,
+            actual_cost_computation_mode,
+            ..
+        } = self
+        else {
             return Ok(());
         };
+
+        #[allow(deprecated_in_future)]
+        if matches!(
+            actual_cost_computation_mode,
+            ActualCostComputationMode::Legacy
+        ) {
+            tracing::warn!(
+                "Actual cost computation mode `{}` will be deprecated in the future; migrate to `{}` when possible",
+                actual_cost_computation_mode
+            );
+        }
 
         if subgraphs.all.max.is_some_and(|s| s < 0.0) {
             return Err(Error::NegativeQueryCost("all".to_string()).into());

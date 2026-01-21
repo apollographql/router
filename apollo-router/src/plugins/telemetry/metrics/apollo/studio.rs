@@ -374,8 +374,9 @@ impl From<SingleLimitsStats> for LimitsStats {
 pub(crate) struct SingleLimitsStats {
     pub(crate) strategy: Option<String>,
     pub(crate) cost_estimated: Option<f64>,
-    pub(crate) cost_by_subgraph_estimated: Option<CostBySubgraph>,
     pub(crate) cost_actual: Option<f64>,
+    pub(crate) cost_by_subgraph_estimated: Option<CostBySubgraph>,
+    pub(crate) cost_by_subgraph_actual: Option<CostBySubgraph>,
     pub(crate) depth: u64,
     pub(crate) height: u64,
     pub(crate) alias_count: u64,
@@ -623,11 +624,15 @@ mod test {
                         limits_stats: SingleLimitsStats {
                             strategy: Some("test".to_string()),
                             cost_estimated: Some(10.0),
+                            cost_actual: Some(7.0),
                             cost_by_subgraph_estimated: Some(CostBySubgraph::new(
                                 "products".to_string(),
                                 10.0,
                             )),
-                            cost_actual: Some(7.0),
+                            cost_by_subgraph_actual: Some(CostBySubgraph::new(
+                                "products".to_string(),
+                                7.0,
+                            )),
                             depth: 2,
                             height: 4,
                             alias_count: 0,
