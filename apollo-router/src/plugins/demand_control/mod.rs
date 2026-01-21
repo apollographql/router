@@ -1,7 +1,6 @@
 //! Demand control plugin.
 //! This plugin will use the cost calculation algorithm to determine if a query should be allowed to execute.
 //! On the request path it will use estimated
-use std::collections::HashSet;
 use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -35,6 +34,7 @@ use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::demand_control::cost_calculator::CostBySubgraph;
 use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
@@ -51,6 +51,9 @@ pub(crate) const COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_c
 pub(crate) const COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
 pub(crate) const COST_RESULT_KEY: &str = "apollo::demand_control::result";
 pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
+
+pub(crate) const COST_BY_SUBGRAPH_ACTUAL_KEY: &str =
+    "apollo::demand_control::actual_cost_by_subgraph";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -312,6 +315,30 @@ impl Context {
         Ok(estimated.zip(actual).map(|(est, act)| est - act))
     }
 
+    pub(crate) fn get_actual_cost_by_subgraph(
+        &self,
+    ) -> Result<Option<CostBySubgraph>, DemandControlError> {
+        self.get::<&str, CostBySubgraph>(COST_BY_SUBGRAPH_ACTUAL_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn update_actual_cost_by_subgraph(
+        &self,
+        subgraph: &str,
+        cost: f64,
+    ) -> Result<(), DemandControlError> {
+        // combine this cost with the cost that already exists in the context
+        self.upsert(
+            COST_BY_SUBGRAPH_ACTUAL_KEY,
+            |mut existing_cost: CostBySubgraph| {
+                existing_cost.add_or_insert(subgraph, cost);
+                existing_cost
+            },
+        )
+        .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
     pub(crate) fn insert_cost_result(&self, result: String) -> Result<(), DemandControlError> {
         self.insert(COST_RESULT_KEY, result)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
@@ -547,7 +574,7 @@ impl Plugin for DemandControl {
                     |(subgraph_name, req): (String, Arc<Valid<ExecutableDocument>>), fut| async move {
                         let resp: subgraph::Response = fut.await?;
                         let strategy = resp.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
-                        Ok(match strategy.on_subgraph_response(req.as_ref(), &resp) {
+                        Ok(match strategy.on_subgraph_response(req.as_ref(), &resp, &subgraph_name) {
                             Ok(_) => resp,
                             Err(err) => subgraph::Response::builder()
                                 .errors(
