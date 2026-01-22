@@ -2646,6 +2646,14 @@ expression: "&schema"
           "description": "When true, cooperative cancellation is enabled.",
           "type": "boolean"
         },
+        "memory_limit": {
+          "default": null,
+          "description": "Enable memory limit for query planning.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "mode": {
           "allOf": [
             {
@@ -7597,6 +7605,7 @@ expression: "&schema"
           ],
           "default": {
             "enabled": true,
+            "memory_limit": null,
             "mode": "measure",
             "timeout": null
           },
@@ -10683,6 +10692,7 @@ expression: "&schema"
             },
             "experimental_cooperative_cancellation": {
               "enabled": true,
+              "memory_limit": null,
               "mode": "measure",
               "timeout": null
             },
@@ -12239,6 +12249,7 @@ expression: "&schema"
           },
           "experimental_cooperative_cancellation": {
             "enabled": true,
+            "memory_limit": null,
             "mode": "measure",
             "timeout": null
           },
