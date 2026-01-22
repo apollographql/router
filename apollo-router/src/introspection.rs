@@ -171,14 +171,14 @@ impl IntrospectionCache {
                 return Ok(graphql::Response::builder().error(error).build());
             }
         };
-        
+
         let cache_key = Self::introspection_cache_key(&key.filtered_query, variables.clone());
         if let Some(cache_key) = &cache_key {
             if let Some(response) = storage.get(cache_key, |_| unreachable!()).await {
                 return Ok(response);
             }
         }
-        
+
         let schema = schema.clone();
         let doc = doc.clone();
         let response = compute_job::execute(ComputeJobType::Introspection, move |_| {
@@ -256,7 +256,8 @@ mod tests {
         let key = IntrospectionCache::introspection_cache_key(
             "query { __typename }",
             variables.as_object().unwrap().clone(),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(
             key,
             "query { __typename }:de9b6428db82b324ea84fb6b7368dba2a296b49aed6c3e66cdaca8908e5a879f"
