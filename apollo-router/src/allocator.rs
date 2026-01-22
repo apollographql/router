@@ -8,14 +8,33 @@ use std::future::Future;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
+use std::sync::OnceLock;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
-#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 use std::sync::atomic::Ordering;
 use std::task::Context;
 use std::task::Poll;
 
 #[cfg(feature = "dhat-heap")]
 use parking_lot::Mutex;
+
+#[allow(dead_code)] // some fields are only used if feature global-allocator is enabled
+pub(crate) struct AllocationLimit {
+    bytes: usize,
+    on_exceeded: Box<dyn Fn(usize) + Send + Sync>,
+    exceeded: AtomicBool,
+}
+
+impl std::fmt::Debug for AllocationLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AllocationLimit {{ bytes: {}, exceeded: {} }}",
+            self.bytes,
+            self.exceeded.load(Ordering::Relaxed)
+        )
+    }
+}
 
 /// Thread-local allocation statistics that can be shared across threads.
 ///
@@ -27,7 +46,7 @@ use parking_lot::Mutex;
 /// that share the same Arc<AllocationStats>. This is critical for performance in the global
 /// allocator hot path where even an uncontended Mutex would add significant overhead.
 #[derive(Debug)]
-#[allow(dead_code)] // bytes_* fields are only read if feature global-allocator is enabled
+#[allow(dead_code)] // some fields are only used if feature global-allocator is enabled
 pub(crate) struct AllocationStats {
     /// Context name used for metric labeling
     name: &'static str,
@@ -37,6 +56,7 @@ pub(crate) struct AllocationStats {
     bytes_deallocated: AtomicUsize,
     bytes_zeroed: AtomicUsize,
     bytes_reallocated: AtomicUsize,
+    allocation_limit: Arc<OnceLock<AllocationLimit>>,
 }
 
 impl AllocationStats {
@@ -49,11 +69,13 @@ impl AllocationStats {
             bytes_deallocated: AtomicUsize::new(0),
             bytes_zeroed: AtomicUsize::new(0),
             bytes_reallocated: AtomicUsize::new(0),
+            allocation_limit: Arc::new(OnceLock::new()),
         }
     }
 
     /// Create a new child allocation stats context that tracks to a parent.
     fn with_parent(name: &'static str, parent: Arc<AllocationStats>) -> Self {
+        let allocation_limit = parent.allocation_limit.clone();
         Self {
             name,
             parent: Some(parent),
@@ -61,6 +83,7 @@ impl AllocationStats {
             bytes_deallocated: AtomicUsize::new(0),
             bytes_zeroed: AtomicUsize::new(0),
             bytes_reallocated: AtomicUsize::new(0),
+            allocation_limit,
         }
     }
 
@@ -155,6 +178,19 @@ impl AllocationStats {
         let zeroed = self.bytes_zeroed();
         let deallocated = self.bytes_deallocated();
         allocated.saturating_add(zeroed).saturating_sub(deallocated)
+    }
+
+    /// Set the allocation limit for this allocation stats context.
+    pub(crate) fn set_allocation_limit(
+        &self,
+        bytes: usize,
+        on_exceeded: Box<dyn Fn(usize) + Send + Sync>,
+    ) {
+        let _ = self.allocation_limit.set(AllocationLimit {
+            bytes,
+            on_exceeded,
+            exceeded: AtomicBool::new(false),
+        });
     }
 }
 
@@ -353,6 +389,7 @@ struct CustomAllocator {
 
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 impl CustomAllocator {
+    #[allow(dead_code)] // only used if feature global-allocator is enabled
     const fn new() -> Self {
         Self {
             inner: tikv_jemallocator::Jemalloc,
@@ -379,6 +416,17 @@ unsafe impl GlobalAlloc for CustomAllocator {
                 CURRENT_TASK_STATS.with(|cell| {
                     if let Some(stats_ptr) = cell.get() {
                         stats_ptr.as_ref().track_alloc(layout.size());
+
+                        #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+                        if let Some(limit) = stats_ptr.as_ref().allocation_limit.get() {
+                            let bytes_allocated = stats_ptr.as_ref().bytes_allocated();
+                            if bytes_allocated > limit.bytes
+                                && !limit.exceeded.load(Ordering::Relaxed)
+                            {
+                                limit.exceeded.store(true, Ordering::Relaxed);
+                                (limit.on_exceeded)(bytes_allocated);
+                            }
+                        }
                     }
                 });
             }
@@ -495,6 +543,7 @@ static malloc_conf: Option<&'static libc::c_char> = Some(unsafe {
 #[cfg(test)]
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 mod tests {
+
     use std::ffi::CStr;
     use std::thread;
 

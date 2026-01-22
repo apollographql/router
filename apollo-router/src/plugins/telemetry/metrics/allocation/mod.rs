@@ -98,6 +98,7 @@ where
             async move {
                 let result = fut.await;
 
+                // Record allocation metrics if stats are available
                 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
                 if let Some(stats) = crate::allocator::current() {
                     record_metrics(&stats);
