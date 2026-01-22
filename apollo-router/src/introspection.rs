@@ -3,7 +3,6 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use apollo_compiler::executable::Selection;
-use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use sha2::Digest;
 use sha2::Sha256;
@@ -142,29 +141,8 @@ impl IntrospectionCache {
         graphql::Response::builder().error(error).build()
     }
 
-    fn normalize_variables(value: Value) -> Value {
-        match value {
-            // Object keys need to be sorted.
-            Value::Object(map) => {
-                let mut sorted = map
-                    .into_iter()
-                    .map(|(k, v)| (k, Self::normalize_variables(v)))
-                    .collect::<Vec<_>>();
-                sorted.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-                Value::Object(sorted.into_iter().collect())
-            }
-            // Normalize array values in case it contains objects
-            Value::Array(arr) => {
-                Value::Array(arr.into_iter().map(Self::normalize_variables).collect())
-            }
-            other => other,
-        }
-    }
-
     fn introspection_cache_key(query: &str, variables: Object) -> Option<String> {
-        let normalized_variables = Self::normalize_variables(Value::Object(variables));
-        if let Ok(variable_key) = serde_json::to_string(&normalized_variables) {
+        if let Ok(variable_key) = serde_json::to_string(&variables) {
             let mut hasher = Sha256::new();
             hasher.update(variable_key);
             Some(format!("{query}:{:x}", hasher.finalize()))
@@ -259,37 +237,6 @@ mod tests {
     use serde_json_bytes::json;
 
     use crate::introspection::IntrospectionCache;
-
-    #[test]
-    fn test_variable_normalization() {
-        let variables = json!({
-            "e": true,
-            "a": "John Doe",
-            "b": 30,
-            "f": null,
-            "d": {
-                "a": "123 Main St",
-                "c": "CA",
-            },
-            "c": [1, "Hello", { "d": "World","a": 3 }],
-        });
-        let normalized = IntrospectionCache::normalize_variables(variables);
-        assert_eq!(
-            serde_json::to_string(&normalized).unwrap_or_default(),
-            serde_json::to_string(&json!({
-                "a": "John Doe",
-                "b": 30,
-                "c": [1, "Hello", { "a": 3, "d": "World" }],
-                "d": {
-                    "a": "123 Main St",
-                    "c": "CA",
-                },
-                "e": true,
-                "f": null,
-            }))
-            .unwrap_or_default(),
-        );
-    }
 
     #[test]
     fn test_variable_normalization_key() {
