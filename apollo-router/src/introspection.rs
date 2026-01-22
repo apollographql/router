@@ -173,11 +173,10 @@ impl IntrospectionCache {
         };
 
         let cache_key = Self::introspection_cache_key(&key.filtered_query, variables.clone());
-        if let Some(cache_key) = &cache_key {
-            if let Some(response) = storage.get(cache_key, |_| unreachable!()).await {
+        if let Some(cache_key) = &cache_key
+            && let Some(response) = storage.get(cache_key, |_| unreachable!()).await {
                 return Ok(response);
             }
-        }
 
         let schema = schema.clone();
         let doc = doc.clone();
