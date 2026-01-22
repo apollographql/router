@@ -206,15 +206,16 @@ async fn requests_within_max_are_accepted(
 
 #[tokio::test(flavor = "multi_thread")]
 #[rstest::rstest]
-#[case(basic_fragments(), 100.0)]
-#[case(basic_mutation(), 5.0)]
-#[case(federated_ships_required(), 10000.0)]
-#[case(custom_costs(), 100.0)]
 async fn requests_exceeding_max_are_rejected(
-    #[case] test_parameters: TestSetupParameters,
-    #[case] max_cost: f64,
+    #[values(
+        basic_fragments(),
+        basic_mutation(),
+        federated_ships_required(),
+        custom_costs()
+    )]
+    test_parameters: TestSetupParameters,
 ) -> Result<(), BoxError> {
-    set_snapshot_suffix!("{}_{}", test_parameters.name, max_cost);
+    set_snapshot_suffix!("{}", test_parameters.name);
 
     let demand_control = serde_json::json!({
         "enabled": true,
@@ -222,7 +223,7 @@ async fn requests_exceeding_max_are_rejected(
         "strategy": {
             "static_estimated": {
                 "list_size": 100,
-                "max": max_cost
+                "max": 1.0
             }
         }
     });
@@ -235,17 +236,15 @@ async fn requests_exceeding_max_are_rejected(
 
 #[tokio::test(flavor = "multi_thread")]
 #[rstest::rstest]
-#[case(basic_fragments(), "by_subgraph")]
-#[case(basic_fragments(), "legacy")]
-#[case(basic_mutation(), "by_subgraph")]
-#[case(basic_mutation(), "legacy")]
-#[case(federated_ships_required(), "by_subgraph")]
-#[case(federated_ships_required(), "legacy")]
-#[case(custom_costs(), "by_subgraph")]
-#[case(custom_costs(), "legacy")]
 async fn actual_cost_can_vary_based_on_mode(
-    #[case] test_parameters: TestSetupParameters,
-    #[case] mode: &str,
+    #[values(
+        basic_fragments(),
+        basic_mutation(),
+        federated_ships_required(),
+        custom_costs()
+    )]
+    test_parameters: TestSetupParameters,
+    #[values("by_subgraph", "legacy")] mode: &str,
 ) -> Result<(), BoxError> {
     set_snapshot_suffix!("{}_{}", test_parameters.name, mode);
 

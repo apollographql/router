@@ -15,9 +15,9 @@ expression: parse_result_for_snapshot(response).await
         "extensions": {
           "code": "COST_ESTIMATED_TOO_EXPENSIVE",
           "cost.estimated": 102.0,
-          "cost.max": 100.0
+          "cost.max": 1.0
         },
-        "message": "query estimated cost 102 exceeded configured maximum 100"
+        "message": "query estimated cost 102 exceeded configured maximum 1"
       }
     ]
   }
