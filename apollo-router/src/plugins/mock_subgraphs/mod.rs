@@ -131,6 +131,8 @@ impl PluginPrivate for MockSubgraphsPlugin {
                     })
                     .unwrap();
 
+                dbg!(request.subgraph_request.body());
+
                 let mut response = http::Response::builder();
                 let body = if let Some(config) = &config {
                     *response.headers_mut().unwrap() = config.headers.0.clone();

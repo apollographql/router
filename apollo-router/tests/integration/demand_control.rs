@@ -98,6 +98,45 @@ fn federated_ships_required() -> TestSetupParameters {
 }
 
 #[rstest::fixture]
+fn federated_ships_fragment() -> TestSetupParameters {
+    TestSetupParameters {
+        name: "federated_ships_fragment",
+        query: include_str!(
+            "../../src/plugins/demand_control/cost_calculator/fixtures/federated_ships_fragment_query.graphql"
+        ),
+        schema: include_str!(
+            "../../src/plugins/demand_control/cost_calculator/fixtures/federated_ships_schema.graphql"
+        ),
+        subgraphs: serde_json::json!({
+            "vehicles": {
+                "query": {
+                    "ships": [
+                        {"__typename": "Ship", "id": 1, "name": "Ship1", "owner": {"__typename": "User", "licenseNumber": 100}},
+                        {"__typename": "Ship", "id": 2, "name": "Ship2", "owner": {"__typename": "User", "licenseNumber": 110}},
+                        {"__typename": "Ship", "id": 3, "name": "Ship3", "owner": {"__typename": "User", "licenseNumber": 120}},
+                        {"__typename": "Ship", "id": 4, "name": "Ship4", "owner": {"__typename": "User", "licenseNumber": 120}},
+                        {"__typename": "Ship", "id": 5, "name": "Ship5", "owner": {"__typename": "User", "licenseNumber": 120}},
+                    ],
+                },
+            },
+            "users": {
+                "query": {
+                    "users": [
+                        {"__typename": "User", "name": "User10", "licenseNumber": 10},
+                        {"__typename": "User", "name": "User11", "licenseNumber": 11},
+                    ]
+                },
+                "entities": [
+                    {"__typename": "User", "name": "User100", "licenseNumber": 100},
+                    {"__typename": "User", "name": "User110", "licenseNumber": 110},
+                    {"__typename": "User", "name": "User120", "licenseNumber": 120},
+                ],
+            }
+        }),
+    }
+}
+
+#[rstest::fixture]
 fn custom_costs() -> TestSetupParameters {
     TestSetupParameters {
         name: "custom_costs",
@@ -179,6 +218,8 @@ async fn parse_result_for_snapshot(response: supergraph::Response) -> serde_json
 #[case::lt(basic_mutation(), 15.0)]
 #[case::eq(federated_ships_required(), 140.0)]
 #[case::lt(federated_ships_required(), 150.0)]
+#[case::eq(federated_ships_fragment(), 40.0)]
+#[case::lt(federated_ships_fragment(), 50.0)]
 #[case::eq(custom_costs(), 127.0)]
 #[case::lt(custom_costs(), 130.0)]
 async fn requests_within_max_are_accepted(
@@ -211,6 +252,7 @@ async fn requests_exceeding_max_are_rejected(
         basic_fragments(),
         basic_mutation(),
         federated_ships_required(),
+        federated_ships_fragment(),
         custom_costs()
     )]
     test_parameters: TestSetupParameters,
@@ -241,6 +283,7 @@ async fn actual_cost_can_vary_based_on_mode(
         basic_fragments(),
         basic_mutation(),
         federated_ships_required(),
+        federated_ships_fragment(),
         custom_costs()
     )]
     test_parameters: TestSetupParameters,
