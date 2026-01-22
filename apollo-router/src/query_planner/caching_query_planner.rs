@@ -1329,7 +1329,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default()
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1607,7 +1607,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default()
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1684,7 +1684,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default()
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1762,7 +1762,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default()
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1843,7 +1843,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default()
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1923,7 +1923,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
-                Default::default()
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
