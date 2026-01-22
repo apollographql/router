@@ -1,0 +1,152 @@
+---
+title: Adding proxy certificates to router containers
+subtitle: Configure the router to trust your proxy's root certificate
+description: Learn how to add your corporate proxy's root certificate to Apollo Router containers to enable TLS inspection in enterprise environments.
+---
+
+import ElasticNotice from '../../../../shared/elastic-notice.mdx';
+
+If your organization uses a corporate proxy that performs TLS inspection (also known as SSL inspection or HTTPS interception), you need to add the proxy's root certificate to your router container. Without this, the router cannot establish secure connections to GraphOS or your subgraphs.
+
+<ElasticNotice />
+
+## Why proxy certificates are required
+
+Corporate proxies often intercept HTTPS traffic for security monitoring. When they do, they decrypt and re-encrypt traffic using their own certificate. For the router to trust these connections, it must have the proxy's root certificate authority (CA) certificate installed in its trust store.
+
+Common symptoms of a missing proxy certificate include:
+- Connection failures to Apollo Uplink
+- TLS handshake errors when fetching the supergraph schema
+- Certificate verification failures when connecting to subgraphs
+
+## Adding certificates to Docker containers
+
+The Apollo Router container images are based on Debian and use the system CA certificate store at `/etc/ssl/certs/`.
+
+### Option 1: Mount the certificate at runtime
+
+Mount your proxy's root certificate and update the CA store when starting the container:
+
+```bash title="Docker"
+docker run -p 4000:4000 \
+  --env APOLLO_GRAPH_REF="<your-graph-ref>" \
+  --env APOLLO_KEY="<your-graph-api-key>" \
+  -v /path/to/proxy-ca.crt:/usr/local/share/ca-certificates/proxy-ca.crt:ro \
+  --user root \
+  --entrypoint /bin/bash \
+  ghcr.io/apollographql/router:<router-image-version> \
+  -c "update-ca-certificates && su -s /bin/bash router -c '/dist/router_wrapper.sh'"
+```
+
+### Option 2: Build a custom image with the certificate
+
+For production deployments, build a custom image that includes your proxy's root certificate:
+
+```dockerfile title="Dockerfile"
+FROM ghcr.io/apollographql/router:<router-image-version>
+
+# Switch to root to install the certificate
+USER root
+
+# Copy the proxy's root certificate
+COPY proxy-ca.crt /usr/local/share/ca-certificates/proxy-ca.crt
+
+# Update the CA certificate store
+RUN update-ca-certificates
+
+# Switch back to the router user
+USER router
+```
+
+Build and run the custom image:
+
+```bash
+docker build -t router-with-proxy-cert .
+docker run -p 4000:4000 \
+  --env APOLLO_GRAPH_REF="<your-graph-ref>" \
+  --env APOLLO_KEY="<your-graph-api-key>" \
+  router-with-proxy-cert
+```
+
+## Adding certificates in Kubernetes
+
+When deploying with Kubernetes, you can use a ConfigMap or Secret to provide the certificate and an init container to install it.
+
+### Using an init container
+
+1. Create a ConfigMap with your proxy certificate:
+
+    ```bash
+    kubectl create configmap proxy-ca-cert --from-file=proxy-ca.crt=/path/to/proxy-ca.crt
+    ```
+
+2. Configure your deployment to use an init container that installs the certificate:
+
+    ```yaml title="values.yaml"
+    router:
+      extraVolumes:
+        - name: proxy-ca-cert
+          configMap:
+            name: proxy-ca-cert
+        - name: ca-certs
+          emptyDir: {}
+
+      extraVolumeMounts:
+        - name: ca-certs
+          mountPath: /etc/ssl/certs
+
+      initContainers:
+        - name: install-proxy-cert
+          image: ghcr.io/apollographql/router:<router-image-version>
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              cp -r /etc/ssl/certs/* /ca-certs/
+              cp /proxy-cert/proxy-ca.crt /usr/local/share/ca-certificates/
+              update-ca-certificates
+              cp -r /etc/ssl/certs/* /ca-certs/
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: proxy-ca-cert
+              mountPath: /proxy-cert
+            - name: ca-certs
+              mountPath: /ca-certs
+    ```
+
+### Building a custom image for Kubernetes
+
+Alternatively, build a custom Docker image with the certificate included (as shown above) and reference it in your Helm values:
+
+```yaml title="values.yaml"
+router:
+  image:
+    repository: your-registry/router-with-proxy-cert
+    tag: <your-tag>
+```
+
+## Adding certificates for cloud deployments
+
+For cloud deployments (AWS ECS, Azure Container Apps, GCP Cloud Run), the recommended approach is to build a custom Docker image that includes your proxy's root certificate, then push that image to your cloud provider's container registry.
+
+Follow the [custom image instructions above](#option-2-build-a-custom-image-with-the-certificate), then push the image to your registry before deploying.
+
+## Verifying the certificate is installed
+
+To verify the certificate is correctly installed, you can check the container's CA store:
+
+```bash
+docker run --entrypoint /bin/bash -it router-with-proxy-cert -c "ls /etc/ssl/certs | grep proxy"
+```
+
+Or test connectivity to a service through the proxy:
+
+```bash
+docker run --entrypoint /bin/bash -it router-with-proxy-cert -c "curl -v https://uplink.api.apollographql.com/"
+```
+
+## Related topics
+
+- [TLS configuration](/graphos/routing/security/tls) - Configure TLS settings for the router
+- [Docker deployment](/graphos/routing/self-hosted/containerization/docker) - Deploy the Apollo Runtime in Docker
+- [Kubernetes deployment](/graphos/routing/self-hosted/containerization/kubernetes/quickstart) - Deploy the router with Helm charts
