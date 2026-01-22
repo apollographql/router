@@ -260,7 +260,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             key,
-            "query { __typename }:de9b6428db82b324ea84fb6b7368dba2a296b49aed6c3e66cdaca8908e5a879f"
+            "query { __typename }:618d257f0ab1069a2374274c8c6e56f6b6528a839045647cedcfd147bc5dd9cf"
         );
     }
 }
