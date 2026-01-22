@@ -1082,10 +1082,6 @@ impl FederationSchema {
         Ok(result)
     }
 
-    // pub(crate) fn authenticated_directive_applications(
-    //     &self,
-    // ) -> FallibleDirectiveIterator<AuthenticatedDirective<>>
-
     pub(crate) fn is_interface(&self, type_name: &Name) -> bool {
         self.referencers().interface_types.contains_key(type_name)
     }
@@ -1255,11 +1251,6 @@ pub(crate) struct CacheTagDirective<'schema> {
     /// The schema position to which this directive is applied
     target: DirectiveTargetPosition,
 }
-
-// pub(crate) struct RequiresScopesDirective<'schema> {
-//     arguments: RequiresScopesArguments<'schema>,
-//     target:
-// }
 
 pub(crate) trait HasFields {
     fn fields(&self) -> &str;
