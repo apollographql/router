@@ -162,13 +162,16 @@ impl IntrospectionCache {
         }
     }
 
-    fn introspection_cache_key(query: &str, variables: Object) -> String {
+    fn introspection_cache_key(query: &str, variables: Object) -> Option<String> {
         let normalized_variables = Self::normalize_variables(Value::Object(variables));
-        let variable_key = serde_json::to_string(&normalized_variables).unwrap_or_default();
-
-        let mut hasher = Sha256::new();
-        hasher.update(variable_key);
-        format!("{query}:{:x}", hasher.finalize())
+        if let Ok(variable_key) = serde_json::to_string(&normalized_variables) {
+            let mut hasher = Sha256::new();
+            hasher.update(variable_key);
+            Some(format!("{query}:{:x}", hasher.finalize()))
+        } else {
+            // TODO: warning for missed cache
+            None
+        }
     }
 
     async fn cached_introspection(
@@ -188,10 +191,14 @@ impl IntrospectionCache {
                 return Ok(graphql::Response::builder().error(error).build());
             }
         };
+        
         let cache_key = Self::introspection_cache_key(&key.filtered_query, variables.clone());
-        if let Some(response) = storage.get(&cache_key, |_| unreachable!()).await {
-            return Ok(response);
+        if let Some(cache_key) = &cache_key {
+            if let Some(response) = storage.get(cache_key, |_| unreachable!()).await {
+                return Ok(response);
+            }
         }
+        
         let schema = schema.clone();
         let doc = doc.clone();
         let response = compute_job::execute(ComputeJobType::Introspection, move |_| {
@@ -203,7 +210,10 @@ impl IntrospectionCache {
         // * The panic handler in `apollo-router/src/executable.rs` exits the process
         //   so this error case should never be reached.
         .await;
-        storage.insert(cache_key, response.clone()).await;
+
+        if let Some(cache_key) = cache_key {
+            storage.insert(cache_key, response.clone()).await;
+        }
         Ok(response)
     }
 
@@ -297,7 +307,7 @@ mod tests {
         let key = IntrospectionCache::introspection_cache_key(
             "query { __typename }",
             variables.as_object().unwrap().clone(),
-        );
+        ).unwrap();
         assert_eq!(
             key,
             "query { __typename }:de9b6428db82b324ea84fb6b7368dba2a296b49aed6c3e66cdaca8908e5a879f"
