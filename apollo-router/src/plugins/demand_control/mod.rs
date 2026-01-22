@@ -1,6 +1,8 @@
 //! Demand control plugin.
 //! This plugin will use the cost calculation algorithm to determine if a query should be allowed to execute.
 //! On the request path it will use estimated
+
+use std::collections::HashSet;
 use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -27,6 +29,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::Context;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::error::Error;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
@@ -87,6 +90,10 @@ pub(crate) enum StrategyConfig {
         ///   make it to the composed response.
         #[serde(default)]
         actual_cost_mode: ActualCostMode,
+
+        /// Cost control by subgraph
+        #[serde(default)]
+        subgraph: SubgraphConfiguration<SubgraphStrategyConfig>,
     },
 
     #[cfg(test)]
@@ -110,12 +117,23 @@ pub(crate) enum ActualCostMode {
     ResponseShape,
 }
 
+#[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
+pub(crate) struct SubgraphStrategyConfig {
+    /// The assumed length of lists returned by the operation for this subgraph.
+    list_size: Option<u32>,
+
+    /// The maximum query cost routed to this subgraph.
+    max: Option<f64>,
+}
+
 impl StrategyConfig {
-    fn validate(&self) -> Result<(), BoxError> {
-        let actual_cost_mode = match self {
+    fn validate(&self, subgraph_names: HashSet<&String>) -> Result<(), BoxError> {
+        let (actual_cost_mode, subgraphs) = match self {
             StrategyConfig::StaticEstimated {
-                actual_cost_mode, ..
-            } => actual_cost_mode,
+                actual_cost_mode,
+                subgraph,
+                ..
+            } => (actual_cost_mode, subgraph),
             #[cfg(test)]
             StrategyConfig::Test { .. } => return Ok(()),
         };
@@ -125,6 +143,26 @@ impl StrategyConfig {
             tracing::warn!(
                 "Actual cost computation mode `response_shape` will be deprecated in the future; migrate to `by_subgraph` when possible",
             );
+        }
+
+        if subgraphs.all.max.is_some_and(|s| s < 0.0) {
+            return Err("Maximum per-subgraph query cost for `all` is negative".into());
+        }
+
+        for (subgraph_name, subgraph_config) in subgraphs.subgraphs.iter() {
+            if !subgraph_names.contains(subgraph_name) {
+                tracing::warn!(
+                    "Subgraph `{subgraph_name}` missing from schema but was specified in per-subgraph demand cost; it will be ignored"
+                );
+                continue;
+            }
+
+            if subgraph_config.max.is_some_and(|s| s < 0.0) {
+                return Err(format!(
+                    "Maximum per-subgraph query cost for `{subgraph_name}` is negative"
+                )
+                .into());
+            }
         }
 
         Ok(())
@@ -421,7 +459,8 @@ impl Plugin for DemandControl {
                 .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
         }
 
-        init.config.strategy.validate()?;
+        let subgraph_names = init.subgraph_schemas.keys().collect();
+        init.config.strategy.validate(subgraph_names)?;
 
         Ok(DemandControl {
             strategy_factory: StrategyFactory::new(

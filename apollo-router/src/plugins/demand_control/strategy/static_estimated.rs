@@ -1,5 +1,6 @@
 use apollo_compiler::ExecutableDocument;
 
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::plugins::demand_control::ActualCostMode;
 use crate::plugins::demand_control::DemandControlError;
@@ -12,8 +13,15 @@ use crate::services::subgraph;
 pub(crate) struct StaticEstimated {
     // The estimated value of the demand
     pub(crate) max: f64,
+    pub(crate) subgraph_maxes: SubgraphConfiguration<Option<f64>>,
     pub(crate) actual_cost_mode: ActualCostMode,
     pub(crate) cost_calculator: StaticCostCalculator,
+}
+
+impl StaticEstimated {
+    fn subgraph_max(&self, subgraph_name: &str) -> Option<f64> {
+        *self.subgraph_maxes.get(subgraph_name)
+    }
 }
 
 impl StrategyImpl for StaticEstimated {
@@ -24,6 +32,7 @@ impl StrategyImpl for StaticEstimated {
                 &request.supergraph_request.body().variables,
             )
             .and_then(|cost| {
+                // TODO: compute cost by subgraph and store that in the context as well.
                 request
                     .context
                     .insert_cost_strategy("static_estimated".to_string())?;
@@ -46,6 +55,7 @@ impl StrategyImpl for StaticEstimated {
     }
 
     fn on_subgraph_request(&self, _request: &subgraph::Request) -> Result<(), DemandControlError> {
+        // TODO: reject subgraph requests when the total subgraph cost exceeds the subgraph max.
         Ok(())
     }
 
@@ -103,5 +113,82 @@ impl StrategyImpl for StaticEstimated {
 
         context.insert_actual_cost(cost)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tower::BoxError;
+
+    use super::StaticEstimated;
+    use crate::plugins::demand_control::DemandControl;
+    use crate::plugins::demand_control::StrategyConfig;
+    use crate::plugins::test::PluginTestHarness;
+
+    async fn load_config_and_extract_strategy(
+        config: &'static str,
+    ) -> Result<StaticEstimated, BoxError> {
+        let schema_str =
+            include_str!("../cost_calculator/fixtures/basic_supergraph_schema.graphql");
+        let plugin = PluginTestHarness::<DemandControl>::builder()
+            .config(config)
+            .schema(schema_str)
+            .build()
+            .await?;
+
+        let StrategyConfig::StaticEstimated {
+            list_size,
+            max,
+            actual_cost_mode,
+            ref subgraph,
+        } = plugin.config.strategy
+        else {
+            panic!("must provide static_estimated config");
+        };
+
+        let strategy = plugin.strategy_factory.create_static_estimated_strategy(
+            list_size,
+            max,
+            actual_cost_mode,
+            subgraph,
+        );
+        Ok(strategy)
+    }
+
+    #[tokio::test]
+    async fn test_per_subgraph_configuration_inheritance() {
+        let config = include_str!("../fixtures/per_subgraph_inheritance.yaml");
+
+        let strategy = load_config_and_extract_strategy(config).await.unwrap();
+        assert_eq!(strategy.subgraph_max("reviews").unwrap(), 2.0);
+        assert_eq!(strategy.subgraph_max("products").unwrap(), 5.0);
+        assert_eq!(strategy.subgraph_max("users").unwrap(), 5.0);
+    }
+
+    #[tokio::test]
+    async fn test_per_subgraph_configuration_no_inheritance() {
+        let config = include_str!("../fixtures/per_subgraph_no_inheritance.yaml");
+
+        let strategy = load_config_and_extract_strategy(config).await.unwrap();
+        assert_eq!(strategy.subgraph_max("reviews").unwrap(), 2.0);
+        assert!(strategy.subgraph_max("products").is_none());
+        assert!(strategy.subgraph_max("users").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_invalid_per_subgraph_configuration() {
+        let config = include_str!("../fixtures/per_subgraph_invalid.yaml");
+        let strategy_result = load_config_and_extract_strategy(config).await;
+
+        match strategy_result {
+            Ok(strategy) => {
+                eprintln!("{:?}", strategy.subgraph_maxes);
+                panic!("Expected error")
+            }
+            Err(err) => assert_eq!(
+                &err.to_string(),
+                "Maximum per-subgraph query cost for `products` is negative"
+            ),
+        };
     }
 }

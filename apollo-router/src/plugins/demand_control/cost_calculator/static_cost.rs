@@ -19,6 +19,7 @@ use super::directives::IncludeDirective;
 use super::directives::SkipDirective;
 use super::schema::DemandControlledSchema;
 use super::schema::InputDefinition;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
@@ -31,6 +32,7 @@ use crate::spec::TYPENAME;
 
 pub(crate) struct StaticCostCalculator {
     list_size: u32,
+    subgraph_list_sizes: Arc<SubgraphConfiguration<Option<u32>>>,
     supergraph_schema: Arc<DemandControlledSchema>,
     subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
 }
@@ -148,13 +150,19 @@ impl StaticCostCalculator {
     pub(crate) fn new(
         supergraph_schema: Arc<DemandControlledSchema>,
         subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
+        subgraph_list_sizes: Arc<SubgraphConfiguration<Option<u32>>>,
         list_size: u32,
     ) -> Self {
         Self {
             list_size,
+            subgraph_list_sizes,
             supergraph_schema,
             subgraph_schemas,
         }
+    }
+
+    fn subgraph_list_size(&self, subgraph_name: &str) -> Option<u32> {
+        *self.subgraph_list_sizes.get(subgraph_name)
     }
 
     /// Scores a field within a GraphQL operation, handling some expected cases where
@@ -689,7 +697,12 @@ mod tests {
             .unwrap_or_default();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
-        let calculator = StaticCostCalculator::new(Arc::new(schema), Default::default(), 100);
+        let calculator = StaticCostCalculator::new(
+            Arc::new(schema),
+            Default::default(),
+            Default::default(),
+            100,
+        );
 
         calculator
             .estimated(
@@ -717,7 +730,12 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
-        let calculator = StaticCostCalculator::new(Arc::new(schema), Default::default(), 100);
+        let calculator = StaticCostCalculator::new(
+            Arc::new(schema),
+            Default::default(),
+            Default::default(),
+            100,
+        );
 
         calculator
             .estimated(&query, &calculator.supergraph_schema, &variables, true)
@@ -771,6 +789,7 @@ mod tests {
         let calculator = StaticCostCalculator::new(
             Arc::new(schema),
             Arc::new(demand_controlled_subgraph_schemas),
+            Default::default(),
             100,
         );
 
@@ -806,6 +825,7 @@ mod tests {
         let calculator = StaticCostCalculator::new(
             Arc::new(schema),
             Arc::new(demand_controlled_subgraph_schemas),
+            Default::default(),
             100,
         );
 
@@ -828,9 +848,14 @@ mod tests {
         let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
-        StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
-            .actual(&query.executable, &response, &variables)
-            .unwrap()
+        StaticCostCalculator::new(
+            Arc::new(schema),
+            Default::default(),
+            Default::default(),
+            100,
+        )
+        .actual(&query.executable, &response, &variables)
+        .unwrap()
     }
 
     /// Actual cost of an operation on a plain, non-federated schema.
@@ -856,9 +881,14 @@ mod tests {
         let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
-        StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
-            .actual(&query, &response, &variables)
-            .unwrap()
+        StaticCostCalculator::new(
+            Arc::new(schema),
+            Default::default(),
+            Default::default(),
+            100,
+        )
+        .actual(&query, &response, &variables)
+        .unwrap()
     }
 
     #[test]
@@ -1055,7 +1085,8 @@ mod tests {
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap(),
         );
 
-        let calculator = StaticCostCalculator::new(schema.clone(), Default::default(), 100);
+        let calculator =
+            StaticCostCalculator::new(schema.clone(), Default::default(), Default::default(), 100);
         let conservative_estimate = calculator
             .estimated(
                 &query.executable,
@@ -1065,7 +1096,8 @@ mod tests {
             )
             .unwrap();
 
-        let calculator = StaticCostCalculator::new(schema.clone(), Default::default(), 5);
+        let calculator =
+            StaticCostCalculator::new(schema.clone(), Default::default(), Default::default(), 5);
         let narrow_estimate = calculator
             .estimated(
                 &query.executable,

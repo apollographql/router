@@ -9170,6 +9170,21 @@ expression: "&schema"
                   "description": "The maximum cost of a query",
                   "format": "double",
                   "type": "number"
+                },
+                "subgraph": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/SubgraphSubgraphStrategyConfigConfiguration"
+                    }
+                  ],
+                  "default": {
+                    "all": {
+                      "list_size": null,
+                      "max": null
+                    },
+                    "subgraphs": {}
+                  },
+                  "description": "Cost control by subgraph"
                 }
               },
               "required": [
@@ -10441,6 +10456,28 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphStrategyConfig": {
+      "properties": {
+        "list_size": {
+          "description": "The assumed length of lists returned by the operation for this subgraph.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max": {
+          "description": "The maximum query cost routed to this subgraph.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "SubgraphSubgraphApqConfiguration": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
@@ -10516,6 +10553,32 @@ expression: "&schema"
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/Subgraph2"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphSubgraphStrategyConfigConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphStrategyConfig"
+            }
+          ],
+          "default": {
+            "list_size": null,
+            "max": null
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphStrategyConfig"
           },
           "default": {},
           "description": "per subgraph options",
