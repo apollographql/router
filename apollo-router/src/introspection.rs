@@ -150,6 +150,7 @@ impl IntrospectionCache {
             tracing::warn!(
                 "Failed to serialize variables for introspection cache key, skipping cache"
             );
+            tracing::debug!("Variables: {:?}", variables);
             None
         }
     }
