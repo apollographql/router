@@ -148,9 +148,9 @@ impl IntrospectionCache {
             Some(format!("{query}:{:x}", hasher.finalize()))
         } else {
             tracing::warn!(
-                "Failed to serialize variables for introspection cache key, skipping cache"
+                "Failed to serialize variables for introspection cache key, skipping cache: {:?}",
+                variables
             );
-            tracing::debug!("Variables: {:?}", variables);
             None
         }
     }
