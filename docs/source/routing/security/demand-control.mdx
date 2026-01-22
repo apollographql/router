@@ -228,13 +228,14 @@ When `demand_control` is enabled, the router measures the cost of each operation
 
 Customize `demand_control` with the following settings:
 
-| Option                       | Valid values         | Default value | Description                                                                                                                        |
-| ---------------------------- | -------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`                    | boolean              | `false`       | Set `true` to measure operation costs or enforce operation cost limits.                                                            |
-| `mode`                       | `measure`, `enforce` | --            | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
-| `strategy`                   | `static_estimated`   | --            | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                                              |
-| `static_estimated.list_size` | integer              | --            | The assumed maximum size of a list for fields that return lists.                                                                   |
-| `static_estimated.max`       | integer              | --            | The maximum cost of an accepted operation. An operation with a higher cost than this is rejected.                                  |
+| Option                              | Valid values            | Default value | Description                                                                                                                        |
+| ----------------------------------- | ----------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                           | boolean                 | `false`       | Set `true` to measure operation costs or enforce operation cost limits.                                                            |
+| `mode`                              | `measure`, `enforce`    | --            | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
+| `strategy`                          | `static_estimated`      | --            | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                                              |
+| `static_estimated.actual_cost_mode` | `by_subgraph`, `legacy` | `by_subgraph` | `by_subgraph` calculates the cost of an operation as the sum of the cost of each subgraph response; `legacy` calculates the cost based on only the final shape of the response |
+| `static_estimated.list_size`        | integer                 | --            | The assumed maximum size of a list for fields that return lists.                                                                   |
+| `static_estimated.max`              | integer                 | --            | The maximum cost of an accepted operation. An operation with a higher cost than this is rejected.                                  |
 
 When enabling `demand_control` for the first time, set it to `measure` mode. This will allow you to observe the cost of your operations before setting your maximum cost.
 
