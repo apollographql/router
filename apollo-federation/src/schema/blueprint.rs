@@ -28,6 +28,7 @@ use crate::schema::ValidFederationSchema;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use crate::schema::validators::access_control::validate_no_access_control_on_interfaces;
 use crate::schema::validators::context::validate_context_directives;
 use crate::schema::validators::cost::validate_cost_directives;
 use crate::schema::validators::external::validate_external_directives;
@@ -139,6 +140,7 @@ impl FederationBlueprint {
         validate_cost_directives(schema, &mut error_collector)?;
         validate_list_size_directives(schema, &mut error_collector)?;
         validate_tag_directives(schema, &mut error_collector)?;
+        validate_no_access_control_on_interfaces(schema, meta, &mut error_collector)?;
 
         error_collector.into_result()
     }
@@ -305,7 +307,7 @@ impl FederationBlueprint {
                 // definition to re-add the "correct" version, we'd have to re-attach existing applications (doable but not
                 // done). This assert is so we notice it quickly if that ever happens (again, unlikely, because fed1 schema
                 // is a backward compatibility thing and there is no reason to expand that too much in the future).
-                if schema.referencers().get_directive(directive_name)?.len() > 0 {
+                if schema.referencers().get_directive(directive_name).len() > 0 {
                     bail!(
                         "Subgraph has applications of @{directive_name} but we are trying to remove the definition."
                     );

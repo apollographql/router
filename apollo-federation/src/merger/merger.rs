@@ -293,13 +293,14 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name()
-                    && let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
+                    let referencers = subgraph
                         .schema()
                         .referencers()
-                        .get_directive(&directive_name)
-                {
-                    acc.extend(referencers);
+                        .get_directive(&directive_name);
+                    if referencers.len() > 0 {
+                        acc.extend(referencers);
+                    }
                 }
                 acc
             })
@@ -311,13 +312,14 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.override_directive_name()
-                    && let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
+                    let referencers = subgraph
                         .schema()
                         .referencers()
-                        .get_directive(&directive_name)
-                {
-                    acc.extend(referencers);
+                        .get_directive(&directive_name);
+                    if referencers.len() > 0 {
+                        acc.extend(referencers);
+                    }
                 }
                 acc
             })
@@ -2489,7 +2491,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         let graph_enum_values: Vec<Name> = graph_enum.values.keys().cloned().collect();
 
         let referencers = self.merged.referencers();
-        let field_positions = referencers.get_directive(&join_field_directive_name)?;
+        let field_positions = referencers.get_directive(&join_field_directive_name);
         let positions_to_process: Vec<DirectiveTargetPosition> = field_positions.iter().collect();
 
         for pos in positions_to_process {
