@@ -14,6 +14,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use serde_json_bytes::Value;
 
+use super::CostBySubgraph;
 use super::DemandControlError;
 use super::directives::IncludeDirective;
 use super::directives::SkipDirective;
@@ -189,6 +190,7 @@ impl StaticCostCalculator {
         field: &Field,
         parent_type: &NamedType,
         list_size_from_upstream: Option<i32>,
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         // When we pre-process the schema, __typename isn't included. So, we short-circuit here to avoid failed lookups.
         if field.name == TYPENAME {
@@ -221,6 +223,8 @@ impl StaticCostCalculator {
             .and_then(|dir| dir.expected_size)
         {
             expected_size
+        } else if let Some(subgraph_list_size) = self.subgraph_list_size(subgraph) {
+            subgraph_list_size as i32
         } else {
             self.list_size as i32
         };
@@ -242,6 +246,7 @@ impl StaticCostCalculator {
             &field.selection_set,
             field.ty().inner_named_type(),
             list_size_directive.as_ref(),
+            subgraph,
         )?;
 
         let mut arguments_cost = 0.0;
@@ -273,6 +278,7 @@ impl StaticCostCalculator {
                     selection_set,
                     parent_type,
                     list_size_directive.as_ref(),
+                    subgraph,
                 )?;
             }
         }
@@ -296,6 +302,7 @@ impl StaticCostCalculator {
         ctx: &ScoringContext,
         fragment_spread: &FragmentSpread,
         list_size_directive: Option<&ListSizeDirective>,
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
@@ -308,6 +315,7 @@ impl StaticCostCalculator {
             &fragment.selection_set,
             fragment.type_condition(),
             list_size_directive,
+            subgraph,
         )
     }
 
@@ -317,6 +325,7 @@ impl StaticCostCalculator {
         inline_fragment: &InlineFragment,
         parent_type: &NamedType,
         list_size_directive: Option<&ListSizeDirective>,
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         self.score_selection_set(
             ctx,
@@ -326,6 +335,7 @@ impl StaticCostCalculator {
                 .as_ref()
                 .unwrap_or(parent_type),
             list_size_directive,
+            subgraph,
         )
     }
 
@@ -333,6 +343,7 @@ impl StaticCostCalculator {
         &self,
         operation: &Operation,
         ctx: &ScoringContext,
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
 
@@ -343,7 +354,13 @@ impl StaticCostCalculator {
             )));
         };
 
-        cost += self.score_selection_set(ctx, &operation.selection_set, root_type_name, None)?;
+        cost += self.score_selection_set(
+            ctx,
+            &operation.selection_set,
+            root_type_name,
+            None,
+            subgraph,
+        )?;
 
         Ok(cost)
     }
@@ -354,6 +371,7 @@ impl StaticCostCalculator {
         selection: &Selection,
         parent_type: &NamedType,
         list_size_directive: Option<&ListSizeDirective>,
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         match selection {
             Selection::Field(f) => self.score_field(
@@ -361,10 +379,13 @@ impl StaticCostCalculator {
                 f,
                 parent_type,
                 list_size_directive.and_then(|dir| dir.size_of(f)),
+                subgraph,
             ),
-            Selection::FragmentSpread(s) => self.score_fragment_spread(ctx, s, list_size_directive),
+            Selection::FragmentSpread(s) => {
+                self.score_fragment_spread(ctx, s, list_size_directive, subgraph)
+            }
             Selection::InlineFragment(i) => {
-                self.score_inline_fragment(ctx, i, parent_type, list_size_directive)
+                self.score_inline_fragment(ctx, i, parent_type, list_size_directive, subgraph)
             }
         }
     }
@@ -375,10 +396,17 @@ impl StaticCostCalculator {
         selection_set: &SelectionSet,
         parent_type_name: &NamedType,
         list_size_directive: Option<&ListSizeDirective>,
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
-            cost += self.score_selection(ctx, selection, parent_type_name, list_size_directive)?;
+            cost += self.score_selection(
+                ctx,
+                selection,
+                parent_type_name,
+                list_size_directive,
+                subgraph,
+            )?;
         }
         Ok(cost)
     }
@@ -401,7 +429,7 @@ impl StaticCostCalculator {
         &self,
         plan_node: &PlanNode,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
+    ) -> Result<CostBySubgraph, DemandControlError> {
         match plan_node {
             PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, variables),
             PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, variables),
@@ -432,7 +460,7 @@ impl StaticCostCalculator {
         subgraph: &str,
         operation: &SerializableDocument,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
+    ) -> Result<CostBySubgraph, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
         let schema = self.subgraph_schemas.get(subgraph).ok_or_else(|| {
@@ -444,7 +472,8 @@ impl StaticCostCalculator {
         let operation = operation
             .as_parsed()
             .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
-        self.estimated(operation, schema, variables, false)
+        let cost = self.estimated(operation, schema, variables, false, subgraph)?;
+        Ok(CostBySubgraph::new(subgraph, cost))
     }
 
     fn max_score_of_nodes(
@@ -452,15 +481,15 @@ impl StaticCostCalculator {
         left: &Option<Box<PlanNode>>,
         right: &Option<Box<PlanNode>>,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
+    ) -> Result<CostBySubgraph, DemandControlError> {
         match (left, right) {
-            (None, None) => Ok(0.0),
+            (None, None) => Ok(CostBySubgraph::default()),
             (None, Some(right)) => self.score_plan_node(right, variables),
             (Some(left), None) => self.score_plan_node(left, variables),
             (Some(left), Some(right)) => {
                 let left_score = self.score_plan_node(left, variables)?;
                 let right_score = self.score_plan_node(right, variables)?;
-                Ok(left_score.max(right_score))
+                Ok(CostBySubgraph::maximum(left_score, right_score))
             }
         }
     }
@@ -470,8 +499,8 @@ impl StaticCostCalculator {
         primary: &Primary,
         deferred: &Vec<DeferredNode>,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
-        let mut score = 0.0;
+    ) -> Result<CostBySubgraph, DemandControlError> {
+        let mut score = CostBySubgraph::default();
         if let Some(node) = &primary.node {
             score += self.score_plan_node(node, variables)?;
         }
@@ -487,20 +516,22 @@ impl StaticCostCalculator {
         &self,
         nodes: &Vec<PlanNode>,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
-        let mut sum = 0.0;
+    ) -> Result<CostBySubgraph, DemandControlError> {
+        let mut sum = CostBySubgraph::default();
         for node in nodes {
             sum += self.score_plan_node(node, variables)?;
         }
         Ok(sum)
     }
 
+    /// Determine cost for a single-subgraph operation.
     pub(crate) fn estimated(
         &self,
         query: &ExecutableDocument,
         schema: &DemandControlledSchema,
         variables: &Object,
         should_estimate_requires: bool,
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         let ctx = ScoringContext {
@@ -510,19 +541,20 @@ impl StaticCostCalculator {
             should_estimate_requires,
         };
         if let Some(op) = &query.operations.anonymous {
-            cost += self.score_operation(op, &ctx)?;
+            cost += self.score_operation(op, &ctx, subgraph)?;
         }
         for (_name, op) in query.operations.named.iter() {
-            cost += self.score_operation(op, &ctx)?;
+            cost += self.score_operation(op, &ctx, subgraph)?;
         }
         Ok(cost)
     }
 
+    /// Determine cost for an operation which may span multiple subgraphs.
     pub(crate) fn planned(
         &self,
         query_plan: &QueryPlan,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
+    ) -> Result<CostBySubgraph, DemandControlError> {
         self.score_plan_node(&query_plan.root, variables)
     }
 
@@ -672,7 +704,7 @@ mod tests {
             variables: &Object,
         ) -> Result<f64, DemandControlError> {
             let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
-            self.score_plan_node(&js_planner_node, variables)
+            Ok(self.score_plan_node(&js_planner_node, variables)?.total())
         }
     }
 
@@ -687,6 +719,9 @@ mod tests {
     }
 
     /// Estimate cost of an operation executed on a supergraph.
+    ///
+    /// Does not consider cost-by-subgraph or make use of `StaticCostCalculator::subgraph_list_size`,
+    /// which are only available when estimating the cost against a query plan.
     fn estimated_cost(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
@@ -710,11 +745,15 @@ mod tests {
                 &calculator.supergraph_schema,
                 &variables,
                 true,
+                "",
             )
             .unwrap()
     }
 
     /// Estimate cost of an operation on a plain, non-federated schema.
+    ///
+    /// Does not consider cost-by-subgraph or make use of `StaticCostCalculator::subgraph_list_size`,
+    /// which are only available when estimating the cost against a query plan.
     fn basic_estimated_cost(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let schema =
             apollo_compiler::Schema::parse_and_validate(schema_str, "schema.graphqls").unwrap();
@@ -738,7 +777,7 @@ mod tests {
         );
 
         calculator
-            .estimated(&query, &calculator.supergraph_schema, &variables, true)
+            .estimated(&query, &calculator.supergraph_schema, &variables, true, "")
             .unwrap()
     }
 
@@ -792,7 +831,7 @@ mod tests {
             100,
         );
 
-        calculator.planned(&query_plan, &variables).unwrap()
+        calculator.planned(&query_plan, &variables).unwrap().total()
     }
 
     fn planned_cost_rust(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
@@ -1077,6 +1116,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn federated_query_with_adjustable_list_cost() {
+        // NB: does not consider cost-by-subgraph or make use of `StaticCostCalculator::subgraph_list_size`,
+        // which are only available when estimating the cost against a query plan.
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
         let (schema, query) = parse_schema_and_operation(schema, query, &Default::default());
@@ -1092,6 +1133,7 @@ mod tests {
                 &calculator.supergraph_schema,
                 &Default::default(),
                 true,
+                "",
             )
             .unwrap();
 
@@ -1103,6 +1145,7 @@ mod tests {
                 &calculator.supergraph_schema,
                 &Default::default(),
                 true,
+                "",
             )
             .unwrap();
 
