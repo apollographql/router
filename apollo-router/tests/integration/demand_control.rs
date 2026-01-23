@@ -384,3 +384,57 @@ async fn requests_exceeding_one_subgraph_cost_are_accepted(
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[rstest::rstest]
+#[case(basic_fragments(), "products")]
+#[case(basic_mutation(), "products")]
+#[case(federated_ships_required(), "users")]
+#[case(federated_ships_fragment(), "vehicles")]
+async fn list_size_subgraph_inheritance_changes_estimates(
+    #[case] test_parameters: TestSetupParameters,
+    #[case] subgraph_name: &str,
+    #[values(1, 10)] list_size: u64,
+    #[values(None, Some(2))] all_list_size: Option<u64>,
+    #[values(None, Some(3))] subgraph_list_size: Option<u64>,
+) -> Result<(), BoxError> {
+    set_snapshot_suffix!(
+        "{}_{}_{}_{}",
+        test_parameters.name,
+        list_size,
+        all_list_size.map_or_else(|| "null".to_string(), |s| s.to_string()),
+        subgraph_list_size.map_or_else(|| "null".to_string(), |s| s.to_string())
+    );
+
+    let mut demand_control = serde_json::json!({
+        "enabled": true,
+        "mode": "enforce",
+        "strategy": {
+            "static_estimated": {
+                "list_size": list_size,
+                "max": MAX_COST,
+                "subgraph": {
+                    "all": {},
+                    "subgraphs": {
+                        subgraph_name: {}
+                    }
+                }
+            }
+        }
+    });
+
+    if let Some(list_size) = all_list_size {
+        let path = "/strategy/static_estimated/subgraph/all";
+        *demand_control.pointer_mut(path).unwrap() = serde_json::json!({"list_size": list_size});
+    }
+
+    if let Some(list_size) = subgraph_list_size {
+        let path = format!("/strategy/static_estimated/subgraph/subgraphs/{subgraph_name}");
+        *demand_control.pointer_mut(&path).unwrap() = serde_json::json!({"list_size": list_size});
+    }
+
+    let response = query_supergraph_service(test_parameters, demand_control).await?;
+    insta::assert_json_snapshot!(parse_result_for_snapshot(response).await);
+
+    Ok(())
+}
