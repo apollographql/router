@@ -4,6 +4,9 @@ use tokio_stream::StreamExt;
 use tower::BoxError;
 use tower::ServiceExt;
 
+// Reasonable default max that should not be exceeded by any of these tests.
+const MAX_COST: f64 = 10_000_000.0;
+
 macro_rules! set_snapshot_suffix {
     ($($expr:expr),*) => {
         let mut settings = insta::Settings::clone_current();
@@ -84,6 +87,9 @@ fn federated_ships_required() -> TestSetupParameters {
                     {"__typename": "Ship", "id": 1, "owner": {"addresses": [{"zipCode": 18263}]}, "registrationFee": 129.2},
                     {"__typename": "Ship", "id": 2, "owner": {"addresses": [{"zipCode": 61027}]}, "registrationFee": 14.0},
                     {"__typename": "Ship", "id": 3, "owner": {"addresses": [{"zipCode": 86204}]}, "registrationFee": 97.15},
+                    {"__typename": "Ship", "id": 1, "owner": null, "registrationFee": null},
+                    {"__typename": "Ship", "id": 2, "owner": null, "registrationFee": null},
+                    {"__typename": "Ship", "id": 3, "owner": null, "registrationFee": null},
                 ]
             },
             "users": {
@@ -298,7 +304,7 @@ async fn actual_cost_can_vary_based_on_mode(
             "static_estimated": {
                 "list_size": 10,
                 "actual_cost_mode": mode,
-                "max": 10000000
+                "max": MAX_COST
             }
         }
     });
@@ -332,8 +338,42 @@ async fn requests_exceeding_max_are_rejected_regardless_of_subgraph_config(
                 "max": 1.0,
                 "subgraph": {
                     "all": {
-                        "max": 10000000
+                        "max": MAX_COST
                     }
+                }
+            }
+        }
+    });
+
+    let response = query_supergraph_service(test_parameters, demand_control).await?;
+    insta::assert_json_snapshot!(parse_result_for_snapshot(response).await);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[rstest::rstest]
+#[case(basic_fragments(), serde_json::json!({"products": {"max": 1.0}}))]
+#[case(basic_mutation(), serde_json::json!({"products": {"max": 1.0}}))]
+#[case(federated_ships_required(), serde_json::json!({"users": {"max": 1.0}}))]
+#[case(federated_ships_fragment(), serde_json::json!({"vehicles": {"max": 1.0}}))]
+#[case(custom_costs(), serde_json::json!({"subgraphWithListSize": {"max": 1.0}}))]
+async fn requests_exceeding_one_subgraph_cost_are_accepted(
+    #[case] test_parameters: TestSetupParameters,
+    #[case] subgraphs: serde_json::Value,
+) -> Result<(), BoxError> {
+    set_snapshot_suffix!("{}", test_parameters.name);
+
+    let demand_control = serde_json::json!({
+        "enabled": true,
+        "mode": "enforce",
+        "strategy": {
+            "static_estimated": {
+                "list_size": 10,
+                "max": MAX_COST,
+                "subgraph": {
+                    // no `all` value
+                    "subgraphs": subgraphs
                 }
             }
         }
