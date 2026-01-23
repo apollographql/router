@@ -33,6 +33,8 @@ The router supports three URL schemes for coprocessors:
 - **HTTPS**: `https://coprocessor.example.com:8443/webhook`
 - **Unix Domain Socket**: `unix:///path/to/socket.sock`
 
+**Note:** Unix socket paths must be absolute (starting with `/`). The URL format is `unix://` followed by the absolute path, resulting in three slashes for root paths: `unix:///var/run/coprocessor.sock`.
+
 ## Coprocessor Implementation
 
 Your coprocessor must listen on the specified Unix socket path. Here's a Node.js example:
