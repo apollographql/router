@@ -9,7 +9,15 @@ expression: parse_result_for_snapshot(response).await
     "vehicles": 10.0
   },
   "apollo::demand_control::estimated_cost": 8.0,
+  "apollo::demand_control::estimated_cost_by_subgraph": {
+    "users": 4.0,
+    "vehicles": 4.0
+  },
   "apollo::demand_control::result": "COST_OK",
+  "apollo::demand_control::result_by_subgraph": {
+    "users": "COST_OK",
+    "vehicles": "COST_OK"
+  },
   "apollo::demand_control::strategy": "static_estimated",
   "apollo::experimental_mock_subgraphs::subgraph_call_count": {
     "users": 2,
