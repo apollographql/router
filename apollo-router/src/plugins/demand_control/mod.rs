@@ -109,13 +109,12 @@ pub(crate) enum ActualCostMode {
 
 impl StrategyConfig {
     fn validate(&self) -> Result<(), BoxError> {
-        // need to destructure StrategyConfig::StaticEstimated and ignore StrategyConfig::Test
-        #[allow(irrefutable_let_patterns)]
-        let StrategyConfig::StaticEstimated {
-            actual_cost_mode, ..
-        } = self
-        else {
-            return Ok(());
+        let actual_cost_mode = match self {
+            StrategyConfig::StaticEstimated {
+                actual_cost_mode, ..
+            } => actual_cost_mode,
+            #[cfg(test)]
+            StrategyConfig::Test { .. } => return Ok(()),
         };
 
         #[allow(deprecated_in_future)]
