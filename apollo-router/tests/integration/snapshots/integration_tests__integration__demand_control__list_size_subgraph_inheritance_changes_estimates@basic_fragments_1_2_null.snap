@@ -8,7 +8,13 @@ expression: parse_result_for_snapshot(response).await
     "products": 2.0
   },
   "apollo::demand_control::estimated_cost": 4.0,
+  "apollo::demand_control::estimated_cost_by_subgraph": {
+    "products": 4.0
+  },
   "apollo::demand_control::result": "COST_OK",
+  "apollo::demand_control::result_by_subgraph": {
+    "products": "COST_OK"
+  },
   "apollo::demand_control::strategy": "static_estimated",
   "apollo::experimental_mock_subgraphs::subgraph_call_count": {
     "products": 1

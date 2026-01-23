@@ -202,7 +202,9 @@ async fn parse_result_for_snapshot(response: supergraph::Response) -> serde_json
         "apollo::demand_control::actual_cost",
         "apollo::demand_control::actual_cost_by_subgraph",
         "apollo::demand_control::estimated_cost",
+        "apollo::demand_control::estimated_cost_by_subgraph",
         "apollo::demand_control::result",
+        "apollo::demand_control::result_by_subgraph",
         "apollo::demand_control::strategy",
         "apollo::experimental_mock_subgraphs::subgraph_call_count",
     ] {
