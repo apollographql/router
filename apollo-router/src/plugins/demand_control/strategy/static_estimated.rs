@@ -37,7 +37,6 @@ impl StrategyImpl for StaticEstimated {
                 request
                     .context
                     .insert_cost_strategy("static_estimated".to_string())?;
-                request.context.insert_cost_result("COST_OK".to_string())?;
                 request.context.insert_estimated_cost(cost)?;
 
                 if cost > self.max {
@@ -50,6 +49,7 @@ impl StrategyImpl for StaticEstimated {
                         .insert_cost_result(error.code().to_string())?;
                     Err(error)
                 } else {
+                    request.context.insert_cost_result("COST_OK".to_string())?;
                     Ok(())
                 }
             })
