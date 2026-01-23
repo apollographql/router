@@ -308,3 +308,39 @@ async fn actual_cost_can_vary_based_on_mode(
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[rstest::rstest]
+async fn requests_exceeding_max_are_rejected_regardless_of_subgraph_config(
+    #[values(
+        basic_fragments(),
+        basic_mutation(),
+        federated_ships_required(),
+        federated_ships_fragment(),
+        custom_costs()
+    )]
+    test_parameters: TestSetupParameters,
+) -> Result<(), BoxError> {
+    set_snapshot_suffix!("{}", test_parameters.name);
+
+    let demand_control = serde_json::json!({
+        "enabled": true,
+        "mode": "enforce",
+        "strategy": {
+            "static_estimated": {
+                "list_size": 10,
+                "max": 1.0,
+                "subgraph": {
+                    "all": {
+                        "max": 10000000
+                    }
+                }
+            }
+        }
+    });
+
+    let response = query_supergraph_service(test_parameters, demand_control).await?;
+    insta::assert_json_snapshot!(parse_result_for_snapshot(response).await);
+
+    Ok(())
+}
