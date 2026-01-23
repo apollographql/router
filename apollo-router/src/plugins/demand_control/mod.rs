@@ -427,6 +427,17 @@ impl Context {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn insert_actual_cost_by_subgraph(
+        &self,
+        cost: CostBySubgraph,
+    ) -> Result<(), DemandControlError> {
+        // combine this cost with the cost that already exists in the context
+        self.insert(COST_BY_SUBGRAPH_ACTUAL_KEY, cost)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
     pub(crate) fn insert_cost_result(&self, result: String) -> Result<(), DemandControlError> {
         self.insert(COST_RESULT_KEY, result)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;

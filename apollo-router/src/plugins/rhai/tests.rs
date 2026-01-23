@@ -36,6 +36,7 @@ use crate::plugin::test::MockExecutionService;
 use crate::plugin::test::MockRouterService;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugin::test::MockSupergraphService;
+use crate::plugins::demand_control::cost_calculator::CostBySubgraph;
 use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
 use crate::plugins::rhai::engine::RhaiExecutionResponse;
 use crate::plugins::rhai::engine::RhaiRouterChunkedResponse;
@@ -825,31 +826,42 @@ async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
         .insert_cost_strategy("test_strategy".to_string())
         .unwrap();
     context.insert_cost_result("COST_OK".to_string()).unwrap();
+    let estimated_cost_by_subgraph =
+        CostBySubgraph::from(&[("products", 40.0), ("users", 10.0)][..]);
+    context.insert_estimated_cost_by_subgraph(estimated_cost_by_subgraph)?;
+    let actual_cost_by_subgraph = CostBySubgraph::from(&[("products", 29.0), ("users", 6.0)][..]);
+    context.insert_actual_cost_by_subgraph(actual_cost_by_subgraph)?;
+    context.insert_cost_by_subgraph_result("products".to_string(), "COST_OK".to_string())?;
+    context.insert_cost_by_subgraph_result("users".to_string(), "COST_OK".to_string())?;
+
     let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
 
     let service_response = router_service.ready().await?.call(supergraph_req).await?;
     assert_eq!(StatusCode::OK, service_response.response.status());
 
-    let headers = service_response.response.headers().clone();
-    let demand_control_header = headers
-        .get("demand-control-estimate")
-        .map(|h| h.to_str().unwrap());
-    assert_eq!(demand_control_header, Some("50.0"));
-
-    let demand_control_header = headers
-        .get("demand-control-actual")
-        .map(|h| h.to_str().unwrap());
-    assert_eq!(demand_control_header, Some("35.0"));
-
-    let demand_control_header = headers
-        .get("demand-control-strategy")
-        .map(|h| h.to_str().unwrap());
-    assert_eq!(demand_control_header, Some("test_strategy"));
-
-    let demand_control_header = headers
-        .get("demand-control-result")
-        .map(|h| h.to_str().unwrap());
-    assert_eq!(demand_control_header, Some("COST_OK"));
+    let headers = service_response.response.headers();
+    for (key, expected_value) in [
+        ("demand-control-estimate", "50.0"),
+        ("demand-control-actual", "35.0"),
+        ("demand-control-strategy", "test_strategy"),
+        ("demand-control-result", "COST_OK"),
+        ("demand-control-estimate-subgraph-products", "40.0"),
+        ("demand-control-estimate-subgraph-users", "10.0"),
+        ("demand-control-estimate-subgraphs", "2"),
+        ("demand-control-actual-subgraph-products", "29.0"),
+        ("demand-control-actual-subgraph-users", "6.0"),
+        ("demand-control-actual-subgraphs", "2"),
+        ("demand-control-result-subgraph-products", "COST_OK"),
+        ("demand-control-result-subgraph-users", "COST_OK"),
+        ("demand-control-result-subgraphs", "2"),
+    ] {
+        let header_value = headers
+            .get(key)
+            .expect(&format!("headers should have value for key `{key}`"))
+            .to_str()
+            .expect(&format!("value for key `{key}` should be a string"));
+        assert_eq!(header_value, expected_value, "key = `{key}`");
+    }
 
     Ok(())
 }
