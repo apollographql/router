@@ -400,6 +400,8 @@ async fn list_size_subgraph_inheritance_changes_estimates(
     #[values(None, Some(2))] all_list_size: Option<u64>,
     #[values(None, Some(3))] subgraph_list_size: Option<u64>,
 ) -> Result<(), BoxError> {
+    // Tests various permutations of list_sizes (both specified and null) to ensure that those
+    // list size defaults are being properly accounted for.
     set_snapshot_suffix!(
         "{}_{}_{}_{}",
         test_parameters.name,
