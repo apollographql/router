@@ -32,12 +32,14 @@ impl StrategyImpl for StaticEstimated {
                 &request.supergraph_request.body().variables,
             )
             .and_then(|cost_by_subgraph| {
-                // TODO: store cost_by_subgraph in the context as well.
                 let cost = cost_by_subgraph.total();
                 request
                     .context
                     .insert_cost_strategy("static_estimated".to_string())?;
                 request.context.insert_estimated_cost(cost)?;
+                request
+                    .context
+                    .insert_estimated_cost_by_subgraph(cost_by_subgraph)?;
 
                 if cost > self.max {
                     let error = DemandControlError::EstimatedCostTooExpensive {
