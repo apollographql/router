@@ -57,9 +57,31 @@ impl StrategyImpl for StaticEstimated {
             })
     }
 
-    fn on_subgraph_request(&self, _request: &subgraph::Request) -> Result<(), DemandControlError> {
-        // TODO: reject subgraph requests when the total subgraph cost exceeds the subgraph max.
-        Ok(())
+    fn on_subgraph_request(&self, request: &subgraph::Request) -> Result<(), DemandControlError> {
+        let cost_by_subgraph = request.context.get_estimated_cost_by_subgraph()?;
+
+        let subgraph = request.subgraph_name.clone();
+
+        if let Some(cost) = cost_by_subgraph.and_then(|c| c.get(&subgraph))
+            && let Some(max) = self.subgraph_max(&subgraph)
+            && cost > max
+        {
+            // reject subgraph request when the total subgraph cost exceeds the subgraph max
+            let error = DemandControlError::EstimatedSubgraphCostTooExpensive {
+                subgraph: subgraph.clone(),
+                estimated_cost: cost,
+                max_cost: max,
+            };
+            request
+                .context
+                .insert_cost_by_subgraph_result(subgraph, error.code().to_string())?;
+            Err(error)
+        } else {
+            request
+                .context
+                .insert_cost_by_subgraph_result(subgraph, "COST_OK".to_string())?;
+            Ok(())
+        }
     }
 
     fn on_subgraph_response(

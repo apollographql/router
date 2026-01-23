@@ -22,6 +22,10 @@ impl CostBySubgraph {
         }
     }
 
+    pub(crate) fn get(&self, subgraph: &str) -> Option<f64> {
+        self.0.get(subgraph).copied()
+    }
+
     pub(crate) fn total(&self) -> f64 {
         self.0.values().sum()
     }
