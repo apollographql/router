@@ -272,6 +272,10 @@ impl tower::Service<HttpRequest> for HttpClientService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // WARN: we only check http_client, not unix_client, because we don't know which one will
+        // be used and both the http client and the unix client use hyper_util's legacy client,
+        // which is always ready (it queues internally); if that changes, we probably need to
+        // update this to wait for both to be ready
         self.http_client
             .poll_ready(cx)
             .map(|res| res.map_err(|e| Box::new(e) as BoxError))
