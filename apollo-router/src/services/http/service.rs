@@ -228,6 +228,7 @@ impl HttpClientService {
                     hyper_util::client::legacy::Client::builder(
                         hyper_util::rt::TokioExecutor::new(),
                     )
+                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                     .build(UnixConnector),
                 ),
             service: Arc::new(service.into()),
