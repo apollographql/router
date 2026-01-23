@@ -1,0 +1,36 @@
+---
+source: apollo-router/tests/integration/demand_control.rs
+expression: parse_result_for_snapshot(response).await
+---
+{
+  "apollo::demand_control::actual_cost": 15.0,
+  "apollo::demand_control::actual_cost_by_subgraph": {
+    "users": 6.0,
+    "vehicles": 9.0
+  },
+  "apollo::demand_control::estimated_cost": 42.0,
+  "apollo::demand_control::result": "COST_OK",
+  "apollo::demand_control::strategy": "static_estimated",
+  "apollo::experimental_mock_subgraphs::subgraph_call_count": {
+    "users": 1,
+    "vehicles": 2
+  },
+  "body": {
+    "data": {
+      "ships": [
+        {
+          "name": "Ship1",
+          "registrationFee": 129.2
+        },
+        {
+          "name": "Ship2",
+          "registrationFee": 14.0
+        },
+        {
+          "name": "Ship3",
+          "registrationFee": 97.15
+        }
+      ]
+    }
+  }
+}
