@@ -4065,9 +4065,8 @@ mod tests {
             let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
                 let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client
-                    .expect_call()
-                    .returning(move |req: crate::services::http::HttpRequest| {
+                mock_http_client.expect_call().returning(
+                    move |req: crate::services::http::HttpRequest| {
                         let context = req.context.clone();
                         let fut = callback(req.http_request);
                         Box::pin(async move {
@@ -4077,7 +4076,8 @@ mod tests {
                                 context,
                             })
                         })
-                    });
+                    },
+                );
                 mock_http_client
             });
             mock_http_client
@@ -4099,9 +4099,8 @@ mod tests {
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
                     let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client
-                        .expect_call()
-                        .returning(move |req: crate::services::http::HttpRequest| {
+                    mock_http_client.expect_call().returning(
+                        move |req: crate::services::http::HttpRequest| {
                             let context = req.context.clone();
                             let fut = callback(req.http_request);
                             Box::pin(async move {
@@ -4111,7 +4110,8 @@ mod tests {
                                     context,
                                 })
                             })
-                        });
+                        },
+                    );
                     mock_http_client
                 });
                 mock_http_client

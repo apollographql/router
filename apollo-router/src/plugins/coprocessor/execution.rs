@@ -392,7 +392,11 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload
-        .call(http_client.clone(), &coprocessor_url, response.context.clone())
+        .call(
+            http_client.clone(),
+            &coprocessor_url,
+            response.context.clone(),
+        )
         .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
@@ -565,9 +569,8 @@ mod tests {
 
             mock_http_client.expect_clone().returning(move || {
                 let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client
-                    .expect_call()
-                    .returning(move |req: crate::services::http::HttpRequest| {
+                mock_http_client.expect_call().returning(
+                    move |req: crate::services::http::HttpRequest| {
                         let context = req.context.clone();
                         let fut = callback(req.http_request);
                         Box::pin(async move {
@@ -577,7 +580,8 @@ mod tests {
                                 context,
                             })
                         })
-                    });
+                    },
+                );
                 mock_http_client
             });
             mock_http_client
@@ -599,9 +603,8 @@ mod tests {
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
                     let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client
-                        .expect_call()
-                        .returning(move |req: crate::services::http::HttpRequest| {
+                    mock_http_client.expect_call().returning(
+                        move |req: crate::services::http::HttpRequest| {
                             let context = req.context.clone();
                             let fut = callback(req.http_request);
                             Box::pin(async move {
@@ -611,7 +614,8 @@ mod tests {
                                     context,
                                 })
                             })
-                        });
+                        },
+                    );
                     mock_http_client
                 });
                 mock_http_client

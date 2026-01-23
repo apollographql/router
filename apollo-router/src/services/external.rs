@@ -315,7 +315,9 @@ where
         // Add Unix socket path as an extension so HttpClientService can use it for span attributes
         // We use Arc<str> so HttpClientService can share the path without cloning the string data
         if let Some(socket_path) = unix_socket_path {
-            http_request.extensions_mut().insert(UnixSocketPath(socket_path));
+            http_request
+                .extensions_mut()
+                .insert(UnixSocketPath(socket_path));
         }
 
         let request = HttpRequest {

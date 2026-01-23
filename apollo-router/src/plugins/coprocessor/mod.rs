@@ -503,9 +503,8 @@ fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(), BoxError
         }
     } else {
         // Validate HTTP/HTTPS URLs can be parsed
-        url.parse::<http::Uri>().map_err(|e| {
-            format!("{config_path}: invalid URL '{url}': {e}")
-        })?;
+        url.parse::<http::Uri>()
+            .map_err(|e| format!("{config_path}: invalid URL '{url}': {e}"))?;
     }
     Ok(())
 }
@@ -1071,7 +1070,11 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload
-        .call(http_client.clone(), &coprocessor_url, response.context.clone())
+        .call(
+            http_client.clone(),
+            &coprocessor_url,
+            response.context.clone(),
+        )
         .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
