@@ -336,7 +336,7 @@ where
 pub(crate) fn externalize_header_map(
     input: &HeaderMap<HeaderValue>,
 ) -> HashMap<String, Vec<String>> {
-    let mut output = HashMap::new();
+    let mut output = HashMap::with_capacity(input.keys_len());
     for (k, v) in input {
         let k = k.as_str().to_owned();
         match String::from_utf8(v.as_bytes().to_vec()) {
