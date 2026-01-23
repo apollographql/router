@@ -57,6 +57,8 @@ pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
 
 pub(crate) const COST_BY_SUBGRAPH_ACTUAL_KEY: &str =
     "apollo::demand_control::actual_cost_by_subgraph";
+pub(crate) const COST_BY_SUBGRAPH_ESTIMATED_KEY: &str =
+    "apollo::demand_control::estimated_cost_by_subgraph";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -350,6 +352,15 @@ impl Context {
         let estimated = self.get_estimated_cost()?;
         let actual = self.get_actual_cost()?;
         Ok(estimated.zip(actual).map(|(est, act)| est - act))
+    }
+
+    pub(crate) fn insert_estimated_cost_by_subgraph(
+        &self,
+        cost: CostBySubgraph,
+    ) -> Result<(), DemandControlError> {
+        self.insert(COST_BY_SUBGRAPH_ESTIMATED_KEY, cost)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
     }
 
     pub(crate) fn get_actual_cost_by_subgraph(
