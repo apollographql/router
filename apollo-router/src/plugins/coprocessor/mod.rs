@@ -50,6 +50,8 @@ use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::externalize_header_map;
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
@@ -64,52 +66,8 @@ pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-// Adapter service to convert HttpClientService to coprocessor-compatible interface
-#[derive(Clone)]
-struct CoprocessorHttpClientAdapter {
-    inner: tower::timeout::Timeout<crate::services::http::HttpClientService>,
-}
-
-impl CoprocessorHttpClientAdapter {
-    fn new(
-        http_client_service: crate::services::http::HttpClientService,
-        timeout: Duration,
-    ) -> Self {
-        Self {
-            inner: TimeoutLayer::new(timeout).layer(http_client_service),
-        }
-    }
-}
-
-impl Service<http::Request<RouterBody>> for CoprocessorHttpClientAdapter {
-    type Response = http::Response<RouterBody>;
-    type Error = BoxError;
-    type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: http::Request<RouterBody>) -> Self::Future {
-        let http_request = crate::services::http::HttpRequest {
-            http_request: req,
-            context: Context::new(),
-        };
-
-        let future = self.inner.call(http_request);
-
-        Box::pin(async move {
-            let response = future.await?;
-            Ok(response.http_response)
-        })
-    }
-}
-
-// Use HttpClientService for all coprocessor HTTP communication
-type HTTPClientService = CoprocessorHttpClientAdapter;
+// Type alias for coprocessor HTTP client - uses HttpClientService with timeout
+type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClientService>;
 
 #[async_trait::async_trait]
 impl Plugin for CoprocessorPlugin<HTTPClientService> {
@@ -219,7 +177,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
                 client_config,
             )?;
 
-        let client = CoprocessorHttpClientAdapter::new(http_client_service, init.config.timeout);
+        let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
 
         CoprocessorPlugin::new(client, init.config, init.supergraph_sdl)
     }
@@ -267,12 +225,12 @@ register_plugin!(
 #[derive(Debug)]
 struct CoprocessorPlugin<C>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     http_client: C,
     configuration: Conf,
@@ -281,12 +239,12 @@ where
 
 impl<C> CoprocessorPlugin<C>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     fn new(http_client: C, configuration: Conf, sdl: Arc<String>) -> Result<Self, BoxError> {
         Ok(Self {
@@ -631,15 +589,12 @@ impl RouterStage {
         response_validation: bool,
     ) -> router::BoxService
     where
-        C: Service<
-                http::Request<RouterBody>,
-                Response = http::Response<RouterBody>,
-                Error = BoxError,
-            > + Clone
+        C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
+            + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+        <C as tower::Service<HttpRequest>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -765,15 +720,12 @@ impl SubgraphStage {
         response_validation: bool,
     ) -> subgraph::BoxService
     where
-        C: Service<
-                http::Request<RouterBody>,
-                Response = http::Response<RouterBody>,
-                Error = BoxError,
-            > + Clone
+        C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
+            + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+        <C as tower::Service<HttpRequest>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -888,12 +840,12 @@ async fn process_router_request_stage<C>(
     executed: &mut bool,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     let should_be_executed = request_config
         .condition
@@ -940,7 +892,9 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, request.context.clone())
+        .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
     let duration = start.elapsed();
@@ -1057,12 +1011,12 @@ async fn process_router_response_stage<C>(
     executed: &mut bool,
 ) -> Result<router::Response, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
@@ -1116,7 +1070,9 @@ where
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    let co_processor_result = payload
+        .call(http_client.clone(), &coprocessor_url, response.context.clone())
+        .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
     let duration = start.elapsed();
@@ -1192,7 +1148,11 @@ where
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
                 let co_processor_result = payload
-                    .call(generator_client, &generator_coprocessor_url)
+                    .call(
+                        generator_client,
+                        &generator_coprocessor_url,
+                        generator_map_context.clone(),
+                    )
                     .await;
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
@@ -1255,12 +1215,12 @@ async fn process_subgraph_request_stage<C>(
     executed: &mut bool,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if request_config.condition.evaluate_request(&request) != Some(true) {
         return Ok(ControlFlow::Continue(request));
@@ -1302,7 +1262,9 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, request.context.clone())
+        .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
     let duration = start.elapsed();
@@ -1416,12 +1378,12 @@ async fn process_subgraph_response_stage<C>(
     executed: &mut bool,
 ) -> Result<subgraph::Response, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
@@ -1462,7 +1424,9 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, response.context.clone())
+        .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
     let duration = start.elapsed();

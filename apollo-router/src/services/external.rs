@@ -25,8 +25,9 @@ use tower::Service;
 use super::subgraph::SubgraphRequestId;
 use crate::Context;
 use crate::query_planner::QueryPlan;
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -275,13 +276,15 @@ where
         }
     }
 
-    pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
+    pub(crate) async fn call<C>(
+        self,
+        mut client: C,
+        uri: &str,
+        context: Context,
+    ) -> Result<Self, BoxError>
     where
-        C: Service<
-                http::Request<RouterBody>,
-                Response = http::Response<RouterBody>,
-                Error = BoxError,
-            > + Clone
+        C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
+            + Clone
             + Send
             + Sync
             + 'static,
@@ -302,7 +305,7 @@ where
         #[cfg(not(unix))]
         let (converted_uri, unix_socket_path): (http::Uri, Option<Arc<str>>) = (uri.parse()?, None);
 
-        let mut request = http::Request::builder()
+        let mut http_request = http::Request::builder()
             .uri(converted_uri)
             .method(Method::POST)
             .header(ACCEPT, "application/json")
@@ -312,11 +315,16 @@ where
         // Add Unix socket path as an extension so HttpClientService can use it for span attributes
         // We use Arc<str> so HttpClientService can share the path without cloning the string data
         if let Some(socket_path) = unix_socket_path {
-            request.extensions_mut().insert(UnixSocketPath(socket_path));
+            http_request.extensions_mut().insert(UnixSocketPath(socket_path));
         }
 
+        let request = HttpRequest {
+            http_request,
+            context,
+        };
+
         let response = client.call(request).await?;
-        router::body::into_bytes(response.into_body())
+        router::body::into_bytes(response.http_response.into_body())
             .await
             .map_err(BoxError::from)
             .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
