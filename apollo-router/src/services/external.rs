@@ -335,14 +335,16 @@ where
 /// Convert a HeaderMap into a HashMap
 pub(crate) fn externalize_header_map(
     input: &HeaderMap<HeaderValue>,
-) -> Result<HashMap<String, Vec<String>>, BoxError> {
+) -> HashMap<String, Vec<String>> {
     let mut output = HashMap::new();
     for (k, v) in input {
         let k = k.as_str().to_owned();
-        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
-        output.entry(k).or_insert_with(Vec::new).push(v)
+        match String::from_utf8(v.as_bytes().to_vec()) {
+            Ok(v) => output.entry(k).or_insert_with(Vec::new).push(v),
+            Err(e) => tracing::warn!("unable to externalize header value for {}: {}", k, e),
+        }
     }
-    Ok(output)
+    output
 }
 
 #[cfg(test)]
@@ -353,6 +355,7 @@ mod test {
 
     use super::*;
     use crate::assert_snapshot_subscriber;
+    use crate::test_harness::tracing_test;
 
     #[test]
     fn it_will_build_router_externalizable_correctly() {
@@ -444,5 +447,32 @@ mod test {
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await;
+    }
+
+    #[test]
+    fn it_will_externalize_headers_correctly() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        let mut headers = HeaderMap::new();
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
+        // Hyper uses this function internally to create HeaderValue structs
+        headers.insert("x-test-header", unsafe {
+            HeaderValue::from_maybe_shared_unchecked(b"invalid\xc0\xaf")
+        });
+
+        let externalized = externalize_header_map(&headers);
+
+        // x-test-header should be dropped because it is not valid UTF-8
+        assert_eq!(
+            externalized,
+            HashMap::from([(
+                "content-type".to_string(),
+                vec!["application/json".to_string()]
+            )])
+        );
+
+        assert!(tracing_test::logs_contain(
+            "unable to externalize header value for x-test-header: invalid utf-8 sequence of 1 bytes from index 7"
+        ));
     }
 }
