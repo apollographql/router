@@ -59,6 +59,7 @@ pub(crate) const COST_BY_SUBGRAPH_ACTUAL_KEY: &str =
     "apollo::demand_control::actual_cost_by_subgraph";
 pub(crate) const COST_BY_SUBGRAPH_ESTIMATED_KEY: &str =
     "apollo::demand_control::estimated_cost_by_subgraph";
+pub(crate) const COST_BY_SUBGRAPH_RESULT_KEY: &str = "apollo::demand_control::result_by_subgraph";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -201,6 +202,15 @@ pub(crate) enum DemandControlError {
         /// The maximum cost of the query
         max_cost: f64,
     },
+    /// query estimated cost {estimated_cost} exceeded configured maximum {max_cost} for subgraph {subgraph}
+    EstimatedSubgraphCostTooExpensive {
+        /// The name of the subgraph
+        subgraph: String,
+        /// The estimated total cost of the subgraph queries
+        estimated_cost: f64,
+        /// The maximum total cost of the subgraph queries
+        max_cost: f64,
+    },
     /// auery actual cost {actual_cost} exceeded configured maximum {max_cost}
     #[allow(dead_code)]
     ActualCostTooExpensive {
@@ -229,6 +239,23 @@ impl IntoGraphQLErrors for DemandControlError {
                 let mut extensions = Object::new();
                 extensions.insert("cost.estimated", estimated_cost.into());
                 extensions.insert("cost.max", max_cost.into());
+                Ok(vec![
+                    graphql::Error::builder()
+                        .extension_code(self.code())
+                        .extensions(extensions)
+                        .message(self.to_string())
+                        .build(),
+                ])
+            }
+            DemandControlError::EstimatedSubgraphCostTooExpensive {
+                ref subgraph,
+                estimated_cost,
+                max_cost,
+            } => {
+                let mut extensions = Object::new();
+                extensions.insert("cost.subgraph", subgraph.as_str().into());
+                extensions.insert("cost.subgraph.estimated", estimated_cost.into());
+                extensions.insert("cost.subgraph.max", max_cost.into());
                 Ok(vec![
                     graphql::Error::builder()
                         .extension_code(self.code())
@@ -284,6 +311,9 @@ impl DemandControlError {
     fn code(&self) -> &'static str {
         match self {
             DemandControlError::EstimatedCostTooExpensive { .. } => "COST_ESTIMATED_TOO_EXPENSIVE",
+            DemandControlError::EstimatedSubgraphCostTooExpensive { .. } => {
+                "SUBGRAPH_COST_ESTIMATED_TOO_EXPENSIVE"
+            }
             DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
             DemandControlError::SubgraphOperationNotInitialized(_) => {
@@ -366,6 +396,13 @@ impl Context {
         Ok(())
     }
 
+    pub(crate) fn get_estimated_cost_by_subgraph(
+        &self,
+    ) -> Result<Option<CostBySubgraph>, DemandControlError> {
+        self.get::<&str, CostBySubgraph>(COST_BY_SUBGRAPH_ESTIMATED_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
     pub(crate) fn get_actual_cost_by_subgraph(
         &self,
     ) -> Result<Option<CostBySubgraph>, DemandControlError> {
@@ -399,6 +436,22 @@ impl Context {
     pub(crate) fn get_cost_result(&self) -> Result<Option<String>, DemandControlError> {
         self.get::<&str, String>(COST_RESULT_KEY)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_cost_by_subgraph_result(
+        &self,
+        subgraph: String,
+        result: String,
+    ) -> Result<(), DemandControlError> {
+        self.upsert::<_, HashMap<String, String>>(
+            COST_BY_SUBGRAPH_RESULT_KEY,
+            |mut current_results| {
+                current_results.insert(subgraph, result);
+                current_results
+            },
+        )
+        .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
     }
 
     pub(crate) fn insert_cost_strategy(&self, strategy: String) -> Result<(), DemandControlError> {
