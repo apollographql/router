@@ -4951,4 +4951,99 @@ mod tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn test_empty_unix_socket_path_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix://"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(result.is_err(), "Empty Unix socket path should be rejected");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("must include a path"),
+            "Error should mention missing path: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relative_unix_socket_path_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix://relative/path.sock"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_err(),
+            "Relative Unix socket path should be rejected"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("should be absolute"),
+            "Error should mention absolute path requirement: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_invalid_http_url_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "not a valid url"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(result.is_err(), "Invalid HTTP URL should be rejected");
+    }
+
+    #[tokio::test]
+    async fn test_stage_specific_empty_unix_socket_path_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8080",
+                "router": {
+                    "request": {
+                        "url": "unix://",
+                        "headers": true
+                    }
+                }
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_err(),
+            "Empty Unix socket path in stage config should be rejected"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("router.request.url"),
+            "Error should mention the specific config path: {err}"
+        );
+    }
 }

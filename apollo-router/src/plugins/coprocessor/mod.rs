@@ -183,6 +183,33 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             );
         }
 
+        // Validate all coprocessor URLs
+        validate_coprocessor_url(&init.config.url, "coprocessor.url")?;
+        if let Some(ref url) = init.config.router.request.url {
+            validate_coprocessor_url(url, "coprocessor.router.request.url")?;
+        }
+        if let Some(ref url) = init.config.router.response.url {
+            validate_coprocessor_url(url, "coprocessor.router.response.url")?;
+        }
+        if let Some(ref url) = init.config.supergraph.request.url {
+            validate_coprocessor_url(url, "coprocessor.supergraph.request.url")?;
+        }
+        if let Some(ref url) = init.config.supergraph.response.url {
+            validate_coprocessor_url(url, "coprocessor.supergraph.response.url")?;
+        }
+        if let Some(ref url) = init.config.execution.request.url {
+            validate_coprocessor_url(url, "coprocessor.execution.request.url")?;
+        }
+        if let Some(ref url) = init.config.execution.response.url {
+            validate_coprocessor_url(url, "coprocessor.execution.response.url")?;
+        }
+        if let Some(ref url) = init.config.subgraph.all.request.url {
+            validate_coprocessor_url(url, "coprocessor.subgraph.all.request.url")?;
+        }
+        if let Some(ref url) = init.config.subgraph.all.response.url {
+            validate_coprocessor_url(url, "coprocessor.subgraph.all.response.url")?;
+        }
+
         // Use shared HttpClientService infrastructure instead of duplicated client creation
         let tls_root_store =
             crate::services::http::service::HttpClientService::native_roots_store();
@@ -497,6 +524,32 @@ fn default_timeout() -> Duration {
 
 fn default_response_validation() -> bool {
     true
+}
+
+/// Validate a coprocessor URL.
+/// Returns an error if the URL is invalid or if it's a Unix socket URL with an empty path.
+fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(), BoxError> {
+    if let Some(path) = url.strip_prefix("unix://") {
+        if path.is_empty() {
+            return Err(format!(
+                "{config_path}: Unix socket URL must include a path (e.g., 'unix:///var/run/coprocessor.sock')"
+            )
+            .into());
+        }
+        // Basic sanity check - path should be absolute
+        if !path.starts_with('/') {
+            return Err(format!(
+                "{config_path}: Unix socket path should be absolute (e.g., 'unix:///var/run/coprocessor.sock'), got 'unix://{path}'"
+            )
+            .into());
+        }
+    } else {
+        // Validate HTTP/HTTPS URLs can be parsed
+        url.parse::<http::Uri>().map_err(|e| {
+            format!("{config_path}: invalid URL '{url}': {e}")
+        })?;
+    }
+    Ok(())
 }
 
 /// Update the target context based on the context returned from the coprocessor.
