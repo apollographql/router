@@ -217,20 +217,26 @@ impl HttpClientService {
                 .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                 .http2_only(http2 == Http2Config::Http2Only)
                 .build(connector);
+
+        #[cfg(unix)]
+        let unix_client = {
+            let unix_client_inner =
+                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                    .http2_only(http2 == Http2Config::Http2Only)
+                    .build(UnixConnector);
+
+            ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .service(unix_client_inner)
+        };
+
         Ok(Self {
             http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
                 .service(http_client),
             #[cfg(unix)]
-            unix_client: ServiceBuilder::new()
-                .layer(DecompressionLayer::new())
-                .service(
-                    hyper_util::client::legacy::Client::builder(
-                        hyper_util::rt::TokioExecutor::new(),
-                    )
-                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                    .build(UnixConnector),
-                ),
+            unix_client,
             service: Arc::new(service.into()),
         })
     }
