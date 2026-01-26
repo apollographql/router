@@ -857,9 +857,9 @@ async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
     ] {
         let header_value = headers
             .get(key)
-            .expect(&format!("headers should have value for key `{key}`"))
+            .unwrap_or_else(|| panic!("headers should have value for key `{key}`"))
             .to_str()
-            .expect(&format!("value for key `{key}` should be a string"));
+            .unwrap_or_else(|_| panic!("value for key `{key}` should be a string"));
         assert_eq!(header_value, expected_value, "key = `{key}`");
     }
 

@@ -72,7 +72,7 @@ impl From<&[(&str, f64)]> for CostBySubgraph {
     fn from(values: &[(&str, f64)]) -> Self {
         let mut cost = Self(HashMap::default());
         for (subgraph, value) in values {
-            cost.add_or_insert(*subgraph, *value);
+            cost.add_or_insert(subgraph, *value);
         }
         cost
     }
