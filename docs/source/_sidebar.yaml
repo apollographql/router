@@ -17,6 +17,8 @@ items:
     children:
       - label: "Overview"
         href: "./configuration/overview"
+      - label: "Hot Reload"
+        href: "./configuration/hot-reload-schema"
       - label: "Environment Variable Reference"
         href: "./configuration/envvars"
       - label: "CLI Reference"
