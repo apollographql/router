@@ -1293,3 +1293,262 @@ async fn test_alpn_negotiates_http2_for_connectors() {
     let body = std::str::from_utf8(&body_bytes).unwrap();
     assert_eq!(body, r#"{"my_field": "abc"}"#);
 }
+
+#[cfg(unix)]
+/// Tracks the HTTP version used in requests (HTTP/1.1 vs HTTP/2)
+#[derive(Debug, Clone)]
+struct HttpVersionTracker {
+    version: Arc<Mutex<Option<Version>>>,
+}
+
+#[cfg(unix)]
+impl HttpVersionTracker {
+    fn new() -> Self {
+        Self {
+            version: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn set(&self, version: Version) {
+        *self.version.lock().unwrap() = Some(version);
+    }
+
+    fn get(&self) -> Option<Version> {
+        *self.version.lock().unwrap()
+    }
+
+    fn is_http2(&self) -> bool {
+        self.get().is_some_and(|v| v == Version::HTTP_2)
+    }
+
+    fn is_http11(&self) -> bool {
+        self.get().is_some_and(|v| v == Version::HTTP_11)
+    }
+}
+
+#[cfg(unix)]
+async fn serve_unix_with_version_tracking<Handler, Fut>(
+    listener: UnixListener,
+    handle: Handler,
+    version_tracker: HttpVersionTracker,
+) -> std::io::Result<()>
+where
+    Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Sync + Send + 'static,
+    Fut: std::future::Future<Output = Result<http::Response<Body>, Infallible>> + Send + 'static,
+{
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let io = TokioIo::new(stream);
+        let handle = handle.clone();
+        let version_tracker = version_tracker.clone();
+        tokio::spawn(async move {
+            let svc = hyper::service::service_fn(|request: Request<Incoming>| {
+                // Capture the HTTP version before processing
+                version_tracker.set(request.version());
+                handle(request.map(Body::new))
+            });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("server error: {err}");
+            }
+        });
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_unix_socket_uses_http2_when_http2only_configured() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("coprocessor_h2only.sock");
+
+    let version_tracker = HttpVersionTracker::new();
+    let version_tracker_clone = version_tracker.clone();
+
+    async fn handle(mut req: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+        let _data = router::body::into_bytes(req.body_mut()).await.unwrap();
+        let response = http::Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .body(Body::from(r#"{"data": "success"}"#))
+            .unwrap();
+        Ok(response)
+    }
+
+    let listener = UnixListener::bind(&path).unwrap();
+    tokio::task::spawn(serve_unix_with_version_tracking(
+        listener,
+        handle,
+        version_tracker_clone,
+    ));
+
+    let subgraph_service = HttpClientService::from_config_for_subgraph(
+        "test",
+        &Configuration::default(),
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .build(),
+    )
+    .expect("created http client");
+
+    // Convert Unix socket path to hyperlocal URI format
+    let hyperlocal_uri: http::Uri = hyperlocal::Uri::new(path.to_str().unwrap(), "/").into();
+    let response = subgraph_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(hyperlocal_uri)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{"query":"{ test }"}"#))
+                .unwrap(),
+            context: Context::new(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.http_response.status(), StatusCode::OK);
+
+    // Verify HTTP/2 was used
+    assert!(
+        version_tracker.is_http2(),
+        "Expected HTTP/2 when http2only is configured, got: {:?}",
+        version_tracker.get()
+    );
+
+    let body_bytes = router::body::into_bytes(response.http_response.into_parts().1)
+        .await
+        .unwrap();
+    let body = std::str::from_utf8(&body_bytes).unwrap();
+    assert_eq!(body, r#"{"data": "success"}"#);
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_unix_socket_supports_http2_when_enabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("coprocessor_h2_enable.sock");
+
+    let version_tracker = HttpVersionTracker::new();
+    let version_tracker_clone = version_tracker.clone();
+
+    async fn handle(mut req: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+        let _data = router::body::into_bytes(req.body_mut()).await.unwrap();
+        let response = http::Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .body(Body::from(r#"{"data": "success"}"#))
+            .unwrap();
+        Ok(response)
+    }
+
+    let listener = UnixListener::bind(&path).unwrap();
+    tokio::task::spawn(serve_unix_with_version_tracking(
+        listener,
+        handle,
+        version_tracker_clone,
+    ));
+
+    let subgraph_service = HttpClientService::from_config_for_subgraph(
+        "test",
+        &Configuration::default(),
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::builder()
+            .experimental_http2(Http2Config::Enable)
+            .build(),
+    )
+    .expect("created http client");
+
+    // Convert Unix socket path to hyperlocal URI format
+    let hyperlocal_uri: http::Uri = hyperlocal::Uri::new(path.to_str().unwrap(), "/").into();
+    let response = subgraph_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(hyperlocal_uri)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{"query":"{ test }"}"#))
+                .unwrap(),
+            context: Context::new(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.http_response.status(), StatusCode::OK);
+
+    // With Enable mode, HTTP/2 is supported but not required
+    // The actual version depends on negotiation, but we expect HTTP/2 support
+    let version = version_tracker.get();
+    assert!(version.is_some(), "Expected a version to be captured");
+
+    let body_bytes = router::body::into_bytes(response.http_response.into_parts().1)
+        .await
+        .unwrap();
+    let body = std::str::from_utf8(&body_bytes).unwrap();
+    assert_eq!(body, r#"{"data": "success"}"#);
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_unix_socket_uses_http11_when_http2_disabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("coprocessor_h2_disable.sock");
+
+    let version_tracker = HttpVersionTracker::new();
+    let version_tracker_clone = version_tracker.clone();
+
+    async fn handle(mut req: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+        let _data = router::body::into_bytes(req.body_mut()).await.unwrap();
+        let response = http::Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .body(Body::from(r#"{"data": "success"}"#))
+            .unwrap();
+        Ok(response)
+    }
+
+    let listener = UnixListener::bind(&path).unwrap();
+    tokio::task::spawn(serve_unix_with_version_tracking(
+        listener,
+        handle,
+        version_tracker_clone,
+    ));
+
+    let subgraph_service = HttpClientService::from_config_for_subgraph(
+        "test",
+        &Configuration::default(),
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::builder()
+            .experimental_http2(Http2Config::Disable)
+            .build(),
+    )
+    .expect("created http client");
+
+    // Convert Unix socket path to hyperlocal URI format
+    let hyperlocal_uri: http::Uri = hyperlocal::Uri::new(path.to_str().unwrap(), "/").into();
+    let response = subgraph_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(hyperlocal_uri)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{"query":"{ test }"}"#))
+                .unwrap(),
+            context: Context::new(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.http_response.status(), StatusCode::OK);
+
+    // Verify HTTP/1.1 was used when HTTP/2 is disabled
+    assert!(
+        version_tracker.is_http11(),
+        "Expected HTTP/1.1 when HTTP/2 is disabled, got: {:?}",
+        version_tracker.get()
+    );
+
+    let body_bytes = router::body::into_bytes(response.http_response.into_parts().1)
+        .await
+        .unwrap();
+    let body = std::str::from_utf8(&body_bytes).unwrap();
+    assert_eq!(body, r#"{"data": "success"}"#);
+}

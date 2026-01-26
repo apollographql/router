@@ -4878,6 +4878,75 @@ mod tests {
         // Test passes if the plugin loads successfully with a Unix socket URL
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_and_h2c_http2only() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock",
+                "client": {
+                    "experimental_http2": "http2only"
+                }
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs work with h2c http2only configuration
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with Unix socket + h2c http2only configuration
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_and_h2c_enable() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock",
+                "client": {
+                    "experimental_http2": "enable"
+                }
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs work with h2c enable configuration
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with Unix socket + h2c enable configuration
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_and_h2c_disable() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock",
+                "client": {
+                    "experimental_http2": "disable"
+                }
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs work with HTTP/2 disabled
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with Unix socket + HTTP/2 disabled
+    }
+
     #[tokio::test]
     async fn test_coprocessor_http_url_configuration() {
         let config = serde_json::json!({
