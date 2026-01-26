@@ -29,6 +29,7 @@ use tower::util::Either;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
+use tracing::Span;
 
 use super::HttpRequest;
 use super::HttpResponse;
@@ -37,9 +38,7 @@ use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
-use crate::plugins::telemetry::HttpClientAttributes;
 use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
-use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::otel::prepare_context;
@@ -510,6 +509,7 @@ mod tests {
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::otel;
     use crate::plugins::telemetry::otel::OtelData;
+    use crate::services::http::BoxService;
     use crate::services::http::HttpClientService;
     use crate::services::http::HttpRequest;
     use crate::services::router;
@@ -518,6 +518,22 @@ mod tests {
         crate::services::http::tests::serve(listener, move |_| async move {
             Ok(http::Response::builder()
                 .status(status_code)
+                .body(r#"{}"#.into())
+                .unwrap())
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn emulate_subgraph_with_header(
+        listener: TcpListener,
+        key: &'static str,
+        value: &'static str,
+    ) {
+        crate::services::http::tests::serve(listener, move |_| async move {
+            Ok(http::Response::builder()
+                .status(StatusCode::OK)
+                .header(key, value)
                 .body(r#"{}"#.into())
                 .unwrap())
         })
@@ -568,7 +584,42 @@ mod tests {
         (guard, recording_layer)
     }
 
-    #[tokio::test]
+    async fn make_telemetry_http_client(service_name: &str) -> BoxService {
+        let full_config = serde_json::json!({
+            "telemetry": {}
+        });
+        let telemetry_config = full_config
+            .as_object()
+            .expect("must be an object")
+            .get("telemetry")
+            .expect("telemetry must be a root key");
+        let init = crate::plugin::PluginInit::fake_builder()
+            .config(telemetry_config.clone())
+            .full_config(full_config)
+            .build()
+            .with_deserialized_config()
+            .expect("unable to deserialize telemetry config");
+        let plugin = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.telemetry")
+            .expect("Plugin not found")
+            .create_instance(init)
+            .await
+            .expect("unable to create telemetry plugin");
+
+        let http_client_service = HttpClientService::new(
+            service_name,
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("Able to load native roots")
+                .with_no_client_auth(),
+            crate::configuration::shared::Client::builder().build(),
+        )
+        .expect("can create a HttpClientService");
+
+        plugin.http_client_service(service_name, BoxService::new(http_client_service))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_http_client_adds_status_code_and_error_type_attributes_to_500_span() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
@@ -578,20 +629,12 @@ mod tests {
             StatusCode::INTERNAL_SERVER_ERROR,
         ));
 
-        let http_client_service = HttpClientService::new(
-            "test",
-            rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("Able to load native roots")
-                .with_no_client_auth(),
-            crate::configuration::shared::Client::builder().build(),
-        )
-        .expect("can create a HttpClientService");
+        let telemetry_wrapped_service = make_telemetry_http_client("test").await;
 
         let (_guard, recording_layer) = setup_tracing();
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-        let response = http_client_service
+        let response = telemetry_wrapped_service
             .oneshot(HttpRequest {
                 http_request: http::Request::builder()
                     .uri(url)
@@ -618,27 +661,19 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_http_client_adds_status_code_attributes_to_200_span() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
 
         tokio::task::spawn(emulate_subgraph_with_status_code(listener, StatusCode::OK));
 
-        let http_client_service = HttpClientService::new(
-            "test",
-            rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("Able to load native roots")
-                .with_no_client_auth(),
-            crate::configuration::shared::Client::builder().build(),
-        )
-        .expect("can create a HttpClientService");
+        let telemetry_wrapped_service = make_telemetry_http_client("test").await;
 
         let (_guard, recording_layer) = setup_tracing();
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-        let response = http_client_service
+        let response = telemetry_wrapped_service
             .oneshot(HttpRequest {
                 http_request: http::Request::builder()
                     .uri(url)
@@ -657,5 +692,118 @@ mod tests {
             Some(opentelemetry::Value::I64(200))
         );
         assert_eq!(recording_layer.get("error.type"), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_http_client_span_attributes_from_config() {
+        fn setup_tracing() -> (DefaultGuard, RecordingLayer) {
+            let recording_layer = RecordingLayer::default();
+            let layer = DynAttributeLayer;
+            let subscriber = tracing_subscriber::Registry::default()
+                .with(layer)
+                .with(otel::layer().force_sampling())
+                .with(recording_layer.clone());
+            let guard = tracing::subscriber::set_default(subscriber);
+            (guard, recording_layer)
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        tokio::task::spawn(emulate_subgraph_with_header(
+            listener,
+            "x-response-header",
+            "response-value",
+        ));
+
+        let full_config = serde_json::json!({
+            "telemetry": {
+                "instrumentation": {
+                    "spans": {
+                        "http_client": {
+                            "attributes": {
+                                "custom_request_header": {
+                                    "request_header": "x-request-header"
+                                },
+                                "custom_response_header": {
+                                    "response_header": "x-response-header"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        let telemetry_config = full_config
+            .as_object()
+            .expect("must be an object")
+            .get("telemetry")
+            .expect("telemetry must be a root key");
+        let init = crate::plugin::PluginInit::fake_builder()
+            .config(telemetry_config.clone())
+            .full_config(full_config)
+            .build()
+            .with_deserialized_config()
+            .expect("unable to deserialize telemetry config");
+
+        let plugin = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.telemetry")
+            .expect("Plugin not found")
+            .create_instance(init)
+            .await
+            .expect("unable to create telemetry plugin");
+
+        // Create HTTP client service
+        let http_client_service = HttpClientService::new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("Able to load native roots")
+                .with_no_client_auth(),
+            crate::configuration::shared::Client::builder().build(),
+        )
+        .expect("can create a HttpClientService");
+
+        // Wrap with telemetry plugin
+        let mut telemetry_wrapped_service =
+            plugin.http_client_service("test", BoxService::new(http_client_service));
+
+        let (_guard, recording_layer) = setup_tracing();
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = telemetry_wrapped_service
+            .ready()
+            .await
+            .unwrap()
+            .oneshot(HttpRequest {
+                http_request: http::Request::builder()
+                    .uri(url)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .header("x-request-header", "request-value")
+                    .body(router::body::from_bytes(r#"{"query":"{ me { name } }"#))
+                    .unwrap(),
+                context: Context::new(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+
+        // Assert that the configured request header attribute is present
+        assert_eq!(
+            recording_layer.get("custom_request_header"),
+            Some(opentelemetry::Value::String(
+                "request-value".to_string().into()
+            ))
+        );
+
+        // Assert that the configured response header attribute is present
+        assert_eq!(
+            recording_layer.get("custom_response_header"),
+            Some(opentelemetry::Value::String(
+                "response-value".to_string().into()
+            ))
+        );
     }
 }
