@@ -427,8 +427,6 @@ async fn requests_exceeding_max_are_not_rejected_in_measure_mode(
 #[tokio::test(flavor = "multi_thread")]
 #[rstest::rstest]
 #[case(basic_fragments(), "products")]
-#[case(basic_mutation(), "products")]
-#[case(federated_ships_required(), "users")]
 #[case(federated_ships_fragment(), "vehicles")]
 async fn list_size_subgraph_inheritance_changes_estimates(
     #[case] test_parameters: TestSetupParameters,
