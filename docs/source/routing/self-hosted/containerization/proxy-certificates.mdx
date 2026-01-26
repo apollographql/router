@@ -6,7 +6,7 @@ description: Learn how to add your corporate proxy's root certificate to Apollo 
 
 import ElasticNotice from '../../../../shared/elastic-notice.mdx';
 
-If your organization uses a corporate proxy that performs TLS inspection (also known as SSL inspection or HTTPS interception), you need to add the proxy's root certificate to your router container. Without this, the router cannot establish secure connections to GraphOS or your subgraphs.
+If your organization uses a corporate proxy that performs TLS inspection (also known as SSL inspection or HTTPS interception), add the proxy's root certificate to your router container. Without this certificate, the router cannot establish secure connections to GraphOS or your subgraphs.
 
 <ElasticNotice />
 
@@ -15,9 +15,9 @@ If your organization uses a corporate proxy that performs TLS inspection (also k
 Corporate proxies often intercept HTTPS traffic for security monitoring. When they do, they decrypt and re-encrypt traffic using their own certificate. For the router to trust these connections, it must have the proxy's root certificate authority (CA) certificate installed in its trust store.
 
 Common symptoms of a missing proxy certificate include:
-- Connection failures to Apollo Uplink
-- TLS handshake errors when fetching the supergraph schema
-- Certificate verification failures when connecting to subgraphs
+- Connection failures to Apollo Uplink.
+- TLS handshake errors when fetching the supergraph schema.
+- Certificate verification failures when connecting to subgraphs.
 
 ## Adding certificates to Docker containers
 
@@ -116,7 +116,7 @@ When deploying with Kubernetes, you can use a ConfigMap or Secret to provide the
 
 ### Building a custom image for Kubernetes
 
-Alternatively, build a custom Docker image with the certificate included (as shown above) and reference it in your Helm values:
+Alternatively, build a custom Docker image with the certificate included as described in [Option 2](#option-2-build-a-custom-image-with-the-certificate) and reference it in your Helm values:
 
 ```yaml title="values.yaml"
 router:
@@ -133,19 +133,19 @@ Follow the [custom image instructions above](#option-2-build-a-custom-image-with
 
 ## Verifying the certificate is installed
 
-To verify the certificate is correctly installed, you can check the container's CA store:
+To verify the certificate is correctly installed, check the container's CA store:
 
 ```bash
 docker run --entrypoint /bin/bash -it router-with-proxy-cert -c "ls /etc/ssl/certs | grep proxy"
 ```
 
-Or test connectivity to a service through the proxy:
+Test connectivity to a service through the proxy:
 
 ```bash
 docker run --entrypoint /bin/bash -it router-with-proxy-cert -c "curl -v https://uplink.api.apollographql.com/"
 ```
 
-## Related topics
+## Related Topics
 
 - [TLS configuration](/graphos/routing/security/tls) - Configure TLS settings for the router
 - [Docker deployment](/graphos/routing/self-hosted/containerization/docker) - Deploy the Apollo Runtime in Docker
