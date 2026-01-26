@@ -24,6 +24,12 @@ For each version of the Apollo Router, Apollo provides:
 - [A Docker image](#container)
 - [A binary](#local-binary)
 
+<Note>
+
+If your organization uses a transparent or egress proxy (such as Zscaler, Netskope, or similar), [add your proxy's root CA certificate to your container image](/graphos/routing/self-hosted/containerization/proxy-certificates). Without it, the router cannot establish TLS connections to Apollo Uplink, resulting in certificate validation errors or "invalid license" failures.
+
+</Note>
+
 ## Kubernetes
 
 ### Apollo GraphOS Operator
