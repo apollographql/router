@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use apollo_compiler::Node;
@@ -138,12 +139,12 @@ fn support_any_array(ty: &Type) -> Result<(), String> {
     }
 }
 
-/// Support for doubly nested non-nullable list types of any non-nullable type `[[Foo!]!]!`
+/// Support for doubly nested non-nullable list types of any non-nullable type `[[Foo!]!]!`.
+/// PORT_NOTE: This differs slightly from JS behavior, which would allow the innermost type to be
+/// nullable.
 fn support_any_non_null_nested_array(ty: &Type) -> Result<(), String> {
-    if ty.is_non_null()
-        && ty.is_list()
-        && ty.item_type().is_non_null()
-        && ty.item_type().is_list()
+    if matches!(ty, Type::NonNullList(_))
+        && matches!(ty.item_type(), Type::NonNullList(_))
         && ty.item_type().item_type().is_non_null()
     {
         Ok(())
@@ -224,85 +225,69 @@ fn merge_nullable_values(
 ///  * calculate cartesian product of the arrays to find all possible combinations
 ///    * simplify combinations by dropping duplicate conditions (i.e. p ^ p = p, p ^ q = q ^ p)
 ///  * eliminate entries that are subsumed by others (i.e. (p ^ q) subsumes (p ^ q ^ r))
+///
+/// PORT_NOTE: While JS has a poor representation for sets, that's not true in Rust, and accordingly
+/// data structures here have been changed to account for that. As part of this change, this
+/// function will now always deduplicate elements of a conjunction, whereas the JS code would only
+/// sometimes deduplicate that.
 fn dnf_conjunction(values: &[Value]) -> Value {
-    // should never be the case
-    if values.is_empty() {
-        return Value::List(vec![]);
-    }
-
-    // copy the 2D arrays, as we'll be modifying them below (due to sorting)
-    let mut candidates: Vec<Value> = vec![];
-    for value in values.iter() {
-        if let Value::List(disjunctions) = value {
+    // Copy the 2D arrays to sort them and remove duplicates. Note that we assume the arrays here
+    // are lists-of-lists-of-values, as GraphQL validation should have already verified this.
+    let mut filtered = values
+        .iter()
+        .flat_map(Value::as_list)
+        .map(|disjunction| {
             // Normally for DNF, you'd consider [] to be always false and [[]] to be always true,
             // and code that uses any()/all() needs no special-casing to work with these
             // definitions. However, router special-cases [] to also mean true, and so if we're
             // about to do any evaluation on DNFs, we need to do these conversions beforehand.
-            if disjunctions.is_empty() {
-                candidates.push(Value::List(vec![Node::new(Value::List(vec![]))]));
+            if disjunction.is_empty() {
+                std::iter::once(Default::default()).collect()
             } else {
-                candidates.push(value.clone());
+                disjunction
+                    .iter()
+                    .map(Node::as_ref)
+                    .flat_map(Value::as_list)
+                    .map(|conjunction| conjunction.iter().cloned().map(DnfMember::from).collect())
+                    .collect()
             }
-        }
-    }
+        })
+        .collect::<IndexSet<BTreeSet<BTreeSet<DnfMember>>>>()
+        .into_iter();
 
-    // we first filter out duplicate values from candidates
-    // this avoids exponential computation of exactly the same conditions
-    sort_nested_array(&mut candidates);
-    let mut filtered = candidates.into_iter().unique();
-
-    // initialize with first entry
-    let mut result = filtered
+    // Initialize with the first entry.
+    let Some(first) = filtered
         .next()
-        .expect("At least a single DNF conjunction value should exist");
+        .map(|first| first.into_iter().collect::<IndexSet<BTreeSet<DnfMember>>>())
+    else {
+        // Should never be the case this is empty, but if it occurs, we effectively echo the input.
+        return Value::List(vec![]);
+    };
 
-    // perform cartesian product to find all possible entries
-    for current in filtered {
-        let mut accumulator: Vec<Node<Value>> = Vec::new();
-        let mut seen: HashSet<Value> = HashSet::default();
-
-        if let (Value::List(final_disjunctions), Value::List(current_disjunctions)) =
-            (&result, &current)
-        {
-            for final_disjunction in final_disjunctions {
-                for current_disjunction in current_disjunctions {
-                    if let (Value::List(final_conjunctions), Value::List(current_conjunctions)) =
-                        (final_disjunction.as_ref(), current_disjunction.as_ref())
-                    {
-                        // filter out elements that are already present in final_disjunction
-                        let filtered_conjunctions = current_conjunctions
-                            .iter()
-                            .filter(|e| !final_conjunctions.contains(e));
-                        let mut candidate = final_conjunctions.clone();
-                        candidate.extend(filtered_conjunctions.cloned());
-                        candidate.sort_by_key(|c| c.to_string());
-
-                        let candidate_value = Value::List(candidate);
-                        // only add entries which has not been seen yet
-                        if seen.insert(candidate_value.clone()) {
-                            accumulator.push(Node::new(candidate_value));
-                        }
-                    }
-                }
-            }
-            // now we need to deduplicate the results to avoid unnecessary computations
-            result = deduplicate_subsumed_values(Value::List(accumulator));
-        }
-    }
-    result
-}
-
-fn sort_nested_array(values: &mut [Value]) {
-    values.iter_mut().for_each(|value| {
-        if let Value::List(disjunctions) = value {
-            disjunctions.iter_mut().for_each(|disjunction| {
-                if let Value::List(conjunctions) = disjunction.make_mut() {
-                    conjunctions.sort_by_key(|c| c.to_string());
-                }
-            });
-            disjunctions.sort_by_key(|c| c.to_string());
-        }
+    // Perform cartesian product to find all possible entries
+    let result = filtered.fold(first, |result_disjunction, current_disjunction| {
+        let accumulated = result_disjunction
+            .into_iter()
+            .cartesian_product(current_disjunction.iter())
+            .map(|(result_conjunction, current_conjunction)| {
+                result_conjunction
+                    .union(current_conjunction)
+                    .cloned()
+                    .collect()
+            })
+            .collect::<IndexSet<BTreeSet<DnfMember>>>();
+        deduplicate_subsumed_values(accumulated)
     });
+    Value::List(
+        result
+            .into_iter()
+            .map(|conjunction| {
+                Node::new(Value::List(
+                    conjunction.into_iter().map(Node::<Value>::from).collect(),
+                ))
+            })
+            .collect(),
+    )
 }
 
 /// Deduplicate subsumed values from 2D arrays.
@@ -311,45 +296,64 @@ fn sort_nested_array(values: &mut [Value]) {
 /// - outer array implies OR requirements
 /// - inner array implies AND requirements
 ///
-/// We can filter out any inner arrays that fully contain other inner arays, i.e.
+/// We can filter out any inner arrays that fully contain other inner arrays, i.e.
 ///   A OR B OR (A AND B) OR (A AND B AND C) => A OR B
-fn deduplicate_subsumed_values(value: Value) -> Value {
-    let mut result: Vec<Node<Value>> = Vec::new();
+fn deduplicate_subsumed_values(
+    mut value: IndexSet<BTreeSet<DnfMember>>,
+) -> IndexSet<BTreeSet<DnfMember>> {
+    // We first sort by length as the longer ones might be dropped
+    value.sort_by_key(BTreeSet::len);
 
-    if let Value::List(mut disjunctions) = value {
-        // we first sort by length as the longer ones might be dropped
-        disjunctions.sort_by_key(|d| {
-            if let Value::List(conjunctions) = d.as_ref() {
-                conjunctions.len()
-            } else {
-                0
+    value
+        .into_iter()
+        .fold(Default::default(), |mut result, candidate| {
+            // if `r` is a subset of a `candidate` then it means `candidate` is redundant
+            if !result.iter().any(|r| r.is_subset(&candidate)) {
+                result.insert(candidate);
             }
-        });
+            result
+        })
+}
 
-        for candidate in disjunctions {
-            let mut redundant = false;
-            if let Value::List(candidate_disjunctions) = candidate.as_ref() {
-                let candidate_set: HashSet<&Node<Value>> =
-                    HashSet::from_iter(candidate_disjunctions);
+#[derive(Clone, Debug)]
+struct DnfMember(Node<str>, Node<Value>);
 
-                for existing_entry in &result {
-                    // if `existing_entry` is a subset of a `candidate` then it means `candidate` is redundant
-                    if let Value::List(existing_disjunctions) = existing_entry.as_ref()
-                        && existing_disjunctions
-                            .iter()
-                            .all(|e| candidate_set.contains(e))
-                    {
-                        redundant = true;
-                        break;
-                    }
-                }
-            }
-            if !redundant {
-                result.push(candidate);
-            }
-        }
+impl PartialEq for DnfMember {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
     }
-    Value::List(result)
+}
+
+impl Eq for DnfMember {}
+
+impl std::hash::Hash for DnfMember {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl PartialOrd for DnfMember {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DnfMember {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl From<Node<Value>> for DnfMember {
+    fn from(node: Node<Value>) -> Self {
+        Self(node.to_string().into(), node)
+    }
+}
+
+impl From<DnfMember> for Node<Value> {
+    fn from(node: DnfMember) -> Self {
+        node.1
+    }
 }
 
 // MAX
@@ -615,12 +619,16 @@ impl ArgumentComposition for DnfConjunctionArgumentCompositionStrategy {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use apollo_compiler::Node;
     use apollo_compiler::ast::Type;
     use apollo_compiler::ast::Value;
+    use apollo_compiler::collections::IndexSet;
 
     use crate::schema::argument_composition_strategies::ArgumentComposition;
     use crate::schema::argument_composition_strategies::DnfConjunctionArgumentCompositionStrategy;
+    use crate::schema::argument_composition_strategies::DnfMember;
     use crate::schema::argument_composition_strategies::deduplicate_subsumed_values;
     use crate::schema::argument_composition_strategies::support_any_non_null_nested_array;
 
@@ -653,11 +661,18 @@ mod tests {
 
     #[test]
     fn verify_deduplicate_subsumed_values() {
-        let value = parse_into_ast_value_list(vec![vec!["A", "B", "C"], vec!["A", "B"], vec!["A"]]);
+        let value = parse_for_deduplicate_subsumed_values(vec![
+            vec!["A", "B", "C"],
+            vec!["A", "B"],
+            vec!["A"],
+        ]);
         let result = deduplicate_subsumed_values(value);
-        assert_eq!(parse_into_ast_value_list(vec![vec!["A"]]), result);
+        assert_eq!(
+            parse_for_deduplicate_subsumed_values(vec![vec!["A"]]),
+            result
+        );
 
-        let value = parse_into_ast_value_list(vec![
+        let value = parse_for_deduplicate_subsumed_values(vec![
             vec!["A", "B"],
             vec!["A", "B", "C"],
             vec!["A", "B", "C", "D"],
@@ -668,7 +683,7 @@ mod tests {
         ]);
         let result = deduplicate_subsumed_values(value);
         assert_eq!(
-            parse_into_ast_value_list(vec![vec!["A", "B"], vec!["A", "D"]]),
+            parse_for_deduplicate_subsumed_values(vec![vec!["A", "B"], vec!["A", "D"]]),
             result
         );
     }
@@ -724,5 +739,18 @@ mod tests {
             disjunctions.push(Node::new(Value::List(conjunctions)));
         }
         Value::List(disjunctions)
+    }
+
+    fn parse_for_deduplicate_subsumed_values(
+        value: Vec<Vec<&str>>,
+    ) -> IndexSet<BTreeSet<DnfMember>> {
+        parse_into_ast_value_list(value)
+            .as_list()
+            .expect("Test unexpectedly provided a non-list value")
+            .iter()
+            .map(Node::as_ref)
+            .flat_map(Value::as_list)
+            .map(|conjunction| conjunction.iter().cloned().map(DnfMember::from).collect())
+            .collect()
     }
 }
