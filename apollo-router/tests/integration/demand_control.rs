@@ -390,6 +390,42 @@ async fn requests_exceeding_one_subgraph_cost_are_accepted(
 
 #[tokio::test(flavor = "multi_thread")]
 #[rstest::rstest]
+async fn requests_exceeding_max_are_not_rejected_in_measure_mode(
+    #[values(
+        basic_fragments(),
+        basic_mutation(),
+        federated_ships_required(),
+        federated_ships_fragment(),
+        custom_costs()
+    )]
+    test_parameters: TestSetupParameters,
+) -> Result<(), BoxError> {
+    set_snapshot_suffix!("{}", test_parameters.name);
+
+    let demand_control = serde_json::json!({
+        "enabled": true,
+        "mode": "measure",
+        "strategy": {
+            "static_estimated": {
+                "list_size": 100,
+                "max": 1.0,
+                "subgraph": {
+                    "all": {
+                        "max": 1.0
+                    }
+                }
+            }
+        }
+    });
+
+    let response = query_supergraph_service(test_parameters, demand_control).await?;
+    insta::assert_json_snapshot!(parse_result_for_snapshot(response).await);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[rstest::rstest]
 #[case(basic_fragments(), "products")]
 #[case(basic_mutation(), "products")]
 #[case(federated_ships_required(), "users")]
