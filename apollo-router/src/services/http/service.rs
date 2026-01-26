@@ -28,7 +28,6 @@ use tower::ServiceBuilder;
 use tower::util::Either;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
-use tracing::Instrument;
 use tracing::Span;
 
 use super::HttpRequest;
@@ -295,42 +294,6 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let schema_uri = http_request.uri();
 
-        // Check if this is a Unix socket request by looking for the Arc<str> extension
-        // This avoids hex decoding by using the original path stored in external.rs
-        let unix_socket_path = http_request
-            .extensions()
-            .get::<crate::services::external::UnixSocketPath>()
-            .map(|usp| usp.0.clone());
-
-        // Determine transport type and host/port
-        let (transport, host, port) = if let Some(socket_path) = unix_socket_path {
-            // Unix socket: use the original path from the Arc extension (coprocessor case)
-            ("unix", socket_path.to_string(), 0u16)
-        } else if schema_uri.scheme_str() == Some("unix") {
-            // Unix socket without extension (subgraph case)
-            // Hyperlocal encodes the socket path as hex in the host portion - decode it
-            let hex_host = schema_uri.host().unwrap_or("");
-            let socket_path = hex::decode(hex_host)
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes).ok())
-                .unwrap_or_else(|| hex_host.to_string());
-            ("unix", socket_path, 0u16)
-        } else {
-            // Regular HTTP/HTTPS
-            let host = schema_uri.host().unwrap_or_default();
-            let port = schema_uri.port_u16().unwrap_or_else(|| {
-                let scheme = schema_uri.scheme_str();
-                if scheme == Some("https") {
-                    443
-                } else if scheme == Some("http") {
-                    80
-                } else {
-                    0
-                }
-            });
-            ("ip_tcp", host.to_string(), port)
-        };
-
         #[cfg(unix)]
         let client = match schema_uri.scheme().map(|s| s.as_str()) {
             Some("unix") => {
@@ -353,27 +316,10 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let service_name = self.service.clone();
 
-        let path = schema_uri.path();
-
-        let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
-            "otel.kind" = "CLIENT",
-            "net.peer.name" = %host,
-            "net.peer.port" = %port,
-            "http.route" = %path,
-            "http.url" = %schema_uri,
-            "net.transport" = %transport,
-        );
-
-        // Apply any attributes that were stored by telemetry middleware
-        if let Some(client_attributes) = context
-            .extensions()
-            .with_lock(|lock| lock.get::<HttpClientAttributes>().cloned())
-        {
-            http_req_span.set_span_dyn_attributes(client_attributes.attributes);
-        }
+        // Inject trace context into outgoing request headers
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
-                &prepare_context(http_req_span.context()),
+                &prepare_context(Span::current().context()),
                 &mut crate::otel_compat::HeaderInjector(http_request.headers_mut()),
             );
         });
@@ -408,9 +354,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
                 http_request
             };
 
-            let http_response = do_fetch(client, &service_name, http_request)
-                .instrument(http_req_span)
-                .await?;
+            let http_response = do_fetch(client, &service_name, http_request).await?;
 
             Ok(HttpResponse {
                 http_response,
