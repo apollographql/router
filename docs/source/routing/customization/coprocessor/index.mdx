@@ -196,6 +196,21 @@ coprocessor:
   url: unix:///tmp/coprocessor.sock
 ```
 
+You can specify a custom HTTP path using the `path` query parameter:
+
+```yaml title="router.yaml"
+coprocessor:
+  url: unix:///tmp/coprocessor.sock?path=/api/v1
+```
+
+UDS also supports HTTP/2:
+
+```yaml title="router.yaml"
+coprocessor:
+  url: unix:///tmp/coprocessor.sock
+  client:
+    experimental_http2: http2only
+```
 
 <HttpConnection type="coprocessor" />
 

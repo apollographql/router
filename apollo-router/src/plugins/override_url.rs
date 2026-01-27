@@ -49,13 +49,28 @@ impl Plugin for OverrideSubgraphUrl {
                     // trying to figure out why a socket is returning a bunch of connection errors,
                     // this might be why. In implementing coprocessor uds support, we make sure
                     // that the paths are absolute
-                    if let Some(path) = url.strip_prefix("unix://") {
+                    if let Some(url_path) = url.strip_prefix("unix://") {
                         // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
                         // so a unix:// URL will not be parsed by http::Uri
                         // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
                         // It hides the socket path in a hex encoded authority that the unix socket connector will
                         // know how to decode
-                        Ok((k, hyperlocal::Uri::new(path, "/").into()))
+                        //
+                        // supports optional `path` query parameter for downstream HTTP paths (eg,
+                        // when using a coprocessor). That looks like this: unix:///tmp/socket.sock?path=/api/v1
+                        let (socket_path, http_path) = if let Some(query_start) = url_path.find('?')
+                        {
+                            let socket = &url_path[..query_start];
+                            let query = &url_path[query_start + 1..];
+                            let path = query
+                                .split('&')
+                                .find_map(|param| param.strip_prefix("path="))
+                                .unwrap_or("/");
+                            (socket, path)
+                        } else {
+                            (url_path, "/")
+                        };
+                        Ok((k, hyperlocal::Uri::new(socket_path, http_path).into()))
                     } else {
                         Uri::from_str(&url).map(|url| (k, url))
                     }
