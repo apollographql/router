@@ -216,9 +216,6 @@ fn coerce_value(
         // Custom scalars accept any value, even objects and lists.
         (Value::Object(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::List(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
-        // Enum tokens can be coerced to ID (like JS) or custom scalars.
-        (Value::Enum(_), Some(ExtendedType::Scalar(scalar)))
-            if !scalar.is_built_in() || scalar.name == "ID" => {}
         // Enums must match the type.
         (Value::Enum(value), Some(ExtendedType::Enum(enum_)))
             if enum_.values.contains_key(value) => {}
