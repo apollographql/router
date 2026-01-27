@@ -1,5 +1,7 @@
-### Hot Reload OCI Artifacts
+### Reload OCI artifacts when a tag reference changes ([PR #8805](https://github.com/apollographql/router/pull/8805))
 
-We now allow tag based OCI references to be configured in the router. When using a tag reference such as `artifacts.apollographql.com/my-org/my-graph:prod` router will automatically poll and reload when the artifact referenced by this tag changes. This applies for the automatically generated variant tags as well as any custom tags that may be created.
+You can now configure tag-based OCI references in the router. When you use a tag reference such as `artifacts.apollographql.com/my-org/my-graph:prod`, the router polls and reloads when that tag points to a new artifact.
+
+This also applies to automatically generated variant tags and custom tags.
 
 By [@graytonio](https://github.com/graytonio) in https://github.com/apollographql/router/pull/8805

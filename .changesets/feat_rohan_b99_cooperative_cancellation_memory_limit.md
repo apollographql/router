@@ -1,17 +1,15 @@
-### feat: add memory limit option for cooperative cancellation  ([PR #8808](https://github.com/apollographql/router/pull/8808))
+### Add memory limit option for cooperative cancellation ([PR #8808](https://github.com/apollographql/router/pull/8808))
 
-Adds a `memory_limit` option to the `experimental_cooperative_cancellation` configuration that allows you to set a maximum memory allocation limit for query planning operations. When the memory limit is exceeded during query planning, the router will:
+The router now supports a `memory_limit` option on `experimental_cooperative_cancellation` to cap memory allocations during query planning. When the memory limit is exceeded, the router:
 
-- **In enforce mode**: Cancel the query planning task and return an error to the client
-- **In measure mode**: Record the cancellation outcome in metrics but allow the query planning to complete
+- In `enforce` mode, cancels query planning and returns an error to the client.
+- In `measure` mode, records the cancellation outcome in metrics and allows query planning to complete.
 
-In both modes, the query will be logged in a warn message.
+The memory limit works alongside the existing `timeout` option. Whichever limit is reached first triggers cancellation.
 
-The memory limit works alongside the existing `timeout` option, and whichever limit is reached first will trigger cancellation. This feature helps prevent excessive memory usage from complex queries or query planning operations that consume too much memory.
+This feature is only available on Unix platforms when the `global-allocator` feature is enabled and `dhat-heap` is not enabled.
 
-**Platform requirements**: This feature is only available on Unix platforms when the `global-allocator` feature is enabled and `dhat-heap` is not enabled (same requirements as memory tracking metrics).
-
-**Example configuration:**
+Example configuration:
 
 ```yaml
 supergraph:

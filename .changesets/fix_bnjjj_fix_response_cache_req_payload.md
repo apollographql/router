@@ -1,6 +1,5 @@
-### Response cache: do not accept unknown fields in request payload for invalidation ([PR #8752](https://github.com/apollographql/router/pull/8752))
+### Reject invalidation requests with unknown fields ([PR #8752](https://github.com/apollographql/router/pull/8752))
 
-- **Response Cache**: Reject invalid invalidation requests with unknown fields
-  - Returns HTTP 400 (Bad Request) when unknown fields are present in invalidation requests
+The response cache invalidation endpoint now rejects request payloads that include unknown fields. When unknown fields are present, the router returns HTTP `400` (Bad Request).
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8752

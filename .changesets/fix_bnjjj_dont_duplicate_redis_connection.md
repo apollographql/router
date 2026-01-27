@@ -1,8 +1,7 @@
-### Response cache: don't duplicate redis connection if we specify custom config for a subgraph ([PR #8764](https://github.com/apollographql/router/pull/8764))
+### Reuse response cache Redis connections for identical subgraph configuration ([PR #8764](https://github.com/apollographql/router/pull/8764))
 
+The response cache now reuses Redis connection pools when subgraph-level configuration resolves to the same Redis configuration as the global `all` setting. Previously, the router could create redundant Redis connections even when the effective configuration was identical.
 
-Fixed an issue where the response cache would create duplicate Redis connections when a custom configuration was specified for individual subgraphs (without any specific Redis configuration). Previously, if a subgraph inherited the same Redis configuration from the global `all` setting, the router would unnecessarily establish a redundant connection. Now, the router correctly reuses the existing connection pool when the configuration is identical, improving resource efficiency and reducing connection overhead.
-
-**Impact**: Users with response caching enabled who specify Redis configurations at both the global and subgraph levels will see reduced Redis connection usage, leading to better resource utilization.
+Impact: If you configure response caching at both the global and subgraph levels, you should see fewer Redis connections and lower connection overhead.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8764
