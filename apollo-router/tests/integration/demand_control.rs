@@ -356,14 +356,14 @@ async fn requests_exceeding_max_are_rejected_regardless_of_subgraph_config(
 
 #[tokio::test(flavor = "multi_thread")]
 #[rstest::rstest]
-#[case(basic_fragments(), serde_json::json!({"products": {"max": 1.0}}))]
-#[case(basic_mutation(), serde_json::json!({"products": {"max": 1.0}}))]
-#[case(federated_ships_required(), serde_json::json!({"users": {"max": 1.0}}))]
-#[case(federated_ships_fragment(), serde_json::json!({"vehicles": {"max": 1.0}}))]
-#[case(custom_costs(), serde_json::json!({"subgraphWithListSize": {"max": 1.0}}))]
+#[case(basic_fragments(), "products")]
+#[case(basic_mutation(), "products")]
+#[case(federated_ships_required(), "users")]
+#[case(federated_ships_fragment(), "vehicles")]
+#[case(custom_costs(), "subgraphWithListSize")]
 async fn requests_exceeding_one_subgraph_cost_are_accepted(
     #[case] test_parameters: TestSetupParameters,
-    #[case] subgraphs: serde_json::Value,
+    #[case] subgraph: &str,
 ) -> Result<(), BoxError> {
     set_snapshot_suffix!("{}", test_parameters.name);
 
@@ -375,8 +375,11 @@ async fn requests_exceeding_one_subgraph_cost_are_accepted(
                 "list_size": 10,
                 "max": MAX_COST,
                 "subgraph": {
-                    // no `all` value
-                    "subgraphs": subgraphs
+                    "subgraphs": {
+                        subgraph: {
+                            "max": 1.0
+                        }
+                    }
                 }
             }
         }
