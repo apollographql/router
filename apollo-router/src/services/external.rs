@@ -472,7 +472,7 @@ mod test {
         );
 
         assert!(tracing_test::logs_contain(
-            "unable to externalize header value for x-test-header: invalid utf-8 sequence of 1 bytes from index 7"
+            "unable to convert header value to utf-8 for x-test-header: invalid utf-8 sequence of 1 bytes from index 7"
         ));
     }
 }
