@@ -341,7 +341,7 @@ pub(crate) fn externalize_header_map(
         let k = k.as_str().to_owned();
         match String::from_utf8(v.as_bytes().to_vec()) {
             Ok(v) => output.entry(k).or_insert_with(Vec::new).push(v),
-            Err(e) => tracing::warn!("unable to externalize header value for {}: {}", k, e),
+            Err(e) => tracing::warn!("unable to convert header value to utf-8 for {}: {}", k, e),
         }
     }
     output
