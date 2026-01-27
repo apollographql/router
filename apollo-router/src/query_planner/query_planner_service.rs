@@ -271,7 +271,7 @@ impl QueryPlannerService {
         let executable = &doc.executable;
         crate::spec::operation_limits::check(
             query_metrics_in,
-            &self.configuration,
+            &self.configuration.limits,
             &query,
             executable,
             operation_name,
