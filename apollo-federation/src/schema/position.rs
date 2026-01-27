@@ -31,6 +31,7 @@ use serde::Serialize;
 use strum::IntoEnumIterator;
 
 use crate::bail;
+use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
@@ -91,6 +92,14 @@ pub(crate) struct PositionConvertError<T: Debug + Display> {
 impl<T: Debug + Display> From<PositionConvertError<T>> for FederationError {
     fn from(value: PositionConvertError<T>) -> Self {
         FederationError::internal(value.to_string())
+    }
+}
+
+impl<T: Debug + Display> From<PositionConvertError<T>> for CompositionError {
+    fn from(value: PositionConvertError<T>) -> Self {
+        CompositionError::InternalError {
+            message: value.to_string(),
+        }
     }
 }
 
@@ -632,6 +641,444 @@ impl HasMutableDirectives for InputObjectFieldDefinitionPosition {
     }
 }
 
+pub(crate) trait HasAppliedDirectives {
+    type AppliedDirective: AsRef<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Self::AppliedDirective>;
+}
+
+impl HasAppliedDirectives for SchemaDefinitionPosition {
+    type AppliedDirective = Component<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        let schema_def = self.get(&schema.schema);
+        schema_def
+            .directives
+            .iter()
+            .filter(|d| d.name == *directive_name)
+            .collect()
+    }
+}
+
+impl HasAppliedDirectives for TypeDefinitionPosition {
+    type AppliedDirective = Component<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            TypeDefinitionPosition::Object(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            TypeDefinitionPosition::Interface(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            TypeDefinitionPosition::Union(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            TypeDefinitionPosition::Enum(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            TypeDefinitionPosition::InputObject(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+        }
+    }
+}
+
+impl HasAppliedDirectives for CompositeTypeDefinitionPosition {
+    type AppliedDirective = Component<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        match self {
+            CompositeTypeDefinitionPosition::Object(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            CompositeTypeDefinitionPosition::Interface(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            CompositeTypeDefinitionPosition::Union(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+        }
+    }
+}
+
+impl HasAppliedDirectives for FieldDefinitionPosition {
+    type AppliedDirective = Node<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        match self {
+            FieldDefinitionPosition::Object(field) => {
+                field.get_applied_directives(schema, directive_name)
+            }
+            FieldDefinitionPosition::Interface(field) => {
+                field.get_applied_directives(schema, directive_name)
+            }
+            FieldDefinitionPosition::Union(_) => vec![],
+        }
+    }
+}
+
+impl HasAppliedDirectives for ObjectOrInterfaceFieldDefinitionPosition {
+    type AppliedDirective = Node<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        match self {
+            Self::Object(field) => field.get_applied_directives(schema, directive_name),
+            Self::Interface(field) => field.get_applied_directives(schema, directive_name),
+        }
+    }
+}
+
+impl HasAppliedDirectives for ObjectOrInterfaceTypeDefinitionPosition {
+    type AppliedDirective = Component<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        match self {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
+                type_.get_applied_directives(schema, directive_name)
+            }
+        }
+    }
+}
+
+impl HasAppliedDirectives for ScalarTypeDefinitionPosition {
+    type AppliedDirective = Component<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for ObjectTypeDefinitionPosition {
+    type AppliedDirective = Component<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for ObjectFieldDefinitionPosition {
+    type AppliedDirective = Node<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for ObjectFieldArgumentDefinitionPosition {
+    type AppliedDirective = Node<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(arg) = self.try_get(&schema.schema) {
+            arg.directives
+                .iter()
+                .filter(|d| &d.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for InterfaceTypeDefinitionPosition {
+    type AppliedDirective = Component<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for InterfaceFieldDefinitionPosition {
+    type AppliedDirective = Node<Directive>;
+
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for InterfaceFieldArgumentDefinitionPosition {
+    type AppliedDirective = Node<Directive>;
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(arg) = self.try_get(&schema.schema) {
+            arg.directives
+                .iter()
+                .filter(|d| &d.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for UnionTypeDefinitionPosition {
+    type AppliedDirective = Component<Directive>;
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for EnumTypeDefinitionPosition {
+    type AppliedDirective = Component<Directive>;
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for EnumValueDefinitionPosition {
+    type AppliedDirective = Node<Directive>;
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(val) = self.try_get(&schema.schema) {
+            val.directives
+                .iter()
+                .filter(|d| &d.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for InputObjectTypeDefinitionPosition {
+    type AppliedDirective = Component<Directive>;
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Component<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for InputObjectFieldDefinitionPosition {
+    type AppliedDirective = Node<Directive>;
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|d| &d.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for DirectiveArgumentDefinitionPosition {
+    type AppliedDirective = Node<Directive>;
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(argument) = self.try_get(&schema.schema) {
+            argument
+                .directives
+                .iter()
+                .filter(|d| &d.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl HasAppliedDirectives for DirectiveTargetPosition {
+    type AppliedDirective = Node<Directive>;
+    fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        match self {
+            Self::Schema(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::ScalarType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::ObjectType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::ObjectField(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::ObjectFieldArgument(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::InterfaceType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::InterfaceField(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::InterfaceFieldArgument(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::UnionType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::EnumType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::EnumValue(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::InputObjectType(pos) => pos
+                .get_applied_directives(schema, directive_name)
+                .iter()
+                .map(|d| &d.node)
+                .collect(),
+            Self::InputObjectField(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::DirectiveArgument(pos) => pos.get_applied_directives(schema, directive_name),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
@@ -816,33 +1263,6 @@ impl TypeDefinitionPosition {
             }
             TypeDefinitionPosition::InputObject(type_) => {
                 type_.has_applied_directive(schema, directive_name)
-            }
-        }
-    }
-
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
-        match self {
-            TypeDefinitionPosition::Scalar(type_) => {
-                type_.get_applied_directives(schema, directive_name)
-            }
-            TypeDefinitionPosition::Object(type_) => {
-                type_.get_applied_directives(schema, directive_name)
-            }
-            TypeDefinitionPosition::Interface(type_) => {
-                type_.get_applied_directives(schema, directive_name)
-            }
-            TypeDefinitionPosition::Union(type_) => {
-                type_.get_applied_directives(schema, directive_name)
-            }
-            TypeDefinitionPosition::Enum(type_) => {
-                type_.get_applied_directives(schema, directive_name)
-            }
-            TypeDefinitionPosition::InputObject(type_) => {
-                type_.get_applied_directives(schema, directive_name)
             }
         }
     }
@@ -1221,24 +1641,6 @@ impl CompositeTypeDefinitionPosition {
         }
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
-        match self {
-            CompositeTypeDefinitionPosition::Object(type_) => {
-                type_.get_applied_directives(schema, directive_name)
-            }
-            CompositeTypeDefinitionPosition::Interface(type_) => {
-                type_.get_applied_directives(schema, directive_name)
-            }
-            CompositeTypeDefinitionPosition::Union(type_) => {
-                type_.get_applied_directives(schema, directive_name)
-            }
-        }
-    }
-
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
@@ -1459,22 +1861,6 @@ impl FieldDefinitionPosition {
         }
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Node<Directive>> {
-        match self {
-            FieldDefinitionPosition::Object(field) => {
-                field.get_applied_directives(schema, directive_name)
-            }
-            FieldDefinitionPosition::Interface(field) => {
-                field.get_applied_directives(schema, directive_name)
-            }
-            FieldDefinitionPosition::Union(_) => vec![],
-        }
-    }
-
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -1603,14 +1989,8 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         schema: &FederationSchema,
         directive_name: &Name,
     ) -> bool {
-        match self {
-            Self::Object(field) => !field
-                .get_applied_directives(schema, directive_name)
-                .is_empty(),
-            Self::Interface(field) => !field
-                .get_applied_directives(schema, directive_name)
-                .is_empty(),
-        }
+        self.get_applied_directives(schema, directive_name)
+            .is_empty()
     }
 
     /// Remove a directive application from this field.
@@ -1712,18 +2092,6 @@ impl SchemaDefinitionPosition {
         self.get(&schema.schema).directives.iter()
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
-        let schema_def = self.get(&schema.schema);
-        schema_def
-            .directives
-            .iter()
-            .filter(|d| d.name == *directive_name)
-            .collect()
-    }
     pub(crate) fn get<'schema>(&self, schema: &'schema Schema) -> &'schema Node<SchemaDefinition> {
         &schema.schema_definition
     }
@@ -2484,22 +2852,6 @@ impl ScalarTypeDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
-
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -3049,22 +3401,6 @@ impl ObjectTypeDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
-
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -3332,22 +3668,6 @@ impl ObjectFieldDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Node<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
-
     /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(field) = self.try_make_mut(&mut schema.schema) else {
@@ -3589,20 +3909,6 @@ impl ObjectFieldArgumentDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Node<Directive>> {
-        if let Some(arg) = self.try_get(&schema.schema) {
-            arg.directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
     pub(crate) fn parent(&self) -> ObjectFieldDefinitionPosition {
         ObjectFieldDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -4421,22 +4727,6 @@ impl InterfaceTypeDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
-
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -4661,22 +4951,6 @@ impl InterfaceFieldDefinitionPosition {
         schema: &'schema FederationSchema,
     ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
         Ok(self.get(&schema.schema)?.directives.iter())
-    }
-
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Node<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
     }
 
     /// Remove a directive application from this position by name.
@@ -4925,20 +5199,6 @@ impl InterfaceFieldArgumentDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Node<Directive>> {
-        if let Some(arg) = self.try_get(&schema.schema) {
-            arg.directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
     pub(crate) fn parent(&self) -> InterfaceFieldDefinitionPosition {
         InterfaceFieldDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -5618,22 +5878,6 @@ impl UnionTypeDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
-
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -6044,22 +6288,6 @@ impl EnumTypeDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
-
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -6099,20 +6327,6 @@ impl EnumValueDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Node<Directive>> {
-        if let Some(val) = self.try_get(&schema.schema) {
-            val.directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
     pub(crate) fn parent(&self) -> EnumTypeDefinitionPosition {
         EnumTypeDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -6626,22 +6840,6 @@ impl InputObjectTypeDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
-
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -6679,22 +6877,6 @@ impl InputObjectFieldDefinitionPosition {
         schema: &'schema FederationSchema,
     ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
         Ok(self.get(&schema.schema)?.directives.iter())
-    }
-
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Node<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
     }
 
     pub(crate) fn has_applied_directive(
@@ -7273,22 +7455,6 @@ impl DirectiveArgumentDefinitionPosition {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Node<Directive>> {
-        if let Some(argument) = self.try_get(&schema.schema) {
-            argument
-                .directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
-
     pub(crate) fn parent(&self) -> DirectiveDefinitionPosition {
         DirectiveDefinitionPosition {
             directive_name: self.directive_name.clone(),
@@ -7650,57 +7816,6 @@ impl DirectiveTargetPosition {
                 .get_all_applied_directives(schema)
                 .map(|it| it.collect())
                 .unwrap_or_default(),
-        }
-    }
-
-    pub(crate) fn get_applied_directives<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        directive_name: &Name,
-    ) -> Vec<&'schema Node<Directive>> {
-        match self {
-            Self::Schema(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
-            Self::ScalarType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
-            Self::ObjectType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
-            Self::ObjectField(pos) => pos.get_applied_directives(schema, directive_name),
-            Self::ObjectFieldArgument(pos) => pos.get_applied_directives(schema, directive_name),
-            Self::InterfaceType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
-            Self::InterfaceField(pos) => pos.get_applied_directives(schema, directive_name),
-            Self::InterfaceFieldArgument(pos) => pos.get_applied_directives(schema, directive_name),
-            Self::UnionType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
-            Self::EnumType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
-            Self::EnumValue(pos) => pos.get_applied_directives(schema, directive_name),
-            Self::InputObjectType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
-            Self::InputObjectField(pos) => pos.get_applied_directives(schema, directive_name),
-            Self::DirectiveArgument(pos) => pos.get_applied_directives(schema, directive_name),
         }
     }
 

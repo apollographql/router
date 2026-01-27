@@ -120,6 +120,7 @@ mod tests {
 
     use super::*;
     use crate::merger::merge_enum::tests::create_test_merger;
+    use crate::schema::position::HasAppliedDirectives;
     use crate::schema::position::ObjectTypeDefinitionPosition;
 
     // Helper function to create a union type for testing
