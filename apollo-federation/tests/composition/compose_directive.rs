@@ -1089,7 +1089,7 @@ mod composition {
             directive @auth(scope: [String!]) repeatable on FIELD_DEFINITION
 
             type Query {
-              shared: String @shareable @auth(scope: "VIEWER")
+              shared: String @shareable @auth(scope: ["VIEWER"])
             }
         "#).unwrap();
         let subgraph_b = Subgraph::parse("subgraphB", "", r#"
@@ -1119,7 +1119,10 @@ mod composition {
             "Expected 2 @auth directives on Query.shared"
         );
 
-        assert_eq!(auth_directives[0].to_string(), r#"@auth(scope: "VIEWER")"#);
+        assert_eq!(
+            auth_directives[0].to_string(),
+            r#"@auth(scope: ["VIEWER"])"#
+        );
         assert_eq!(auth_directives[1].to_string(), "@auth");
     }
 }

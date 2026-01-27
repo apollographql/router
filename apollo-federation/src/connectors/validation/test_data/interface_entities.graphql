@@ -1,0 +1,44 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.12")
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+  @source(
+    name: "people-api"
+    http: { baseURL: "http://localhost:3001" }
+  )
+
+interface Person {
+  id: ID!
+}
+
+type Named implements Person @key(fields: "id") {
+  id: ID!
+  name: String
+}
+
+type Anon implements Person @key(fields: "id") {
+  id: ID!
+}
+
+type Query {
+  people: [Person] @connect(
+    source: "people-api"
+    http: { GET: "/people" }
+    selection: "id"
+  )
+
+  person(id: ID!): Person @connect(
+    source: "people-api"
+    http: { GET: "/users/{$args.id}" }
+    entity: true
+    selection: """
+      id
+      ... $(name ?? null)->match(
+        [null, { __typename: "Anon" }],
+        [@, { __typename: "Named", name: name }],
+      )
+    """
+  )
+}

@@ -97,6 +97,10 @@ The left chart shows cache hits per subgraph and type. No cache hits appear beca
 ### Integrate with your schema
 Consider an example with two subgraphs: users and posts.
 
+<Note>
+    This example uses a simple, non-nullable `@key`. Simple, non-nullable `@key`s improve reliability and performance, but the router also supports compound, non-nullable `@key`s. For details, see the [FAQ](/routing/performance/caching/response-caching/faq)
+</Note>
+
 ```graphql title="users.graphql"
 extend schema
   @link(

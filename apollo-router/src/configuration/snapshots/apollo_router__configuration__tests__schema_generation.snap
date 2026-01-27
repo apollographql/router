@@ -226,6 +226,22 @@ expression: "&schema"
           ],
           "description": "Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses."
         },
+        "library_name_header": {
+          "default": "apollographql-library-name",
+          "description": "The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "library_version_header": {
+          "default": "apollographql-library-version",
+          "description": "The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "metrics": {
           "allOf": [
             {
@@ -2629,6 +2645,14 @@ expression: "&schema"
           "default": true,
           "description": "When true, cooperative cancellation is enabled.",
           "type": "boolean"
+        },
+        "memory_limit": {
+          "default": null,
+          "description": "Enable memory limit for query planning.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "mode": {
           "allOf": [
@@ -7581,6 +7605,7 @@ expression: "&schema"
           ],
           "default": {
             "enabled": true,
+            "memory_limit": null,
             "mode": "measure",
             "timeout": null
           },
@@ -8580,6 +8605,10 @@ expression: "&schema"
             "header_read_timeout": {
               "nanos": 0,
               "secs": 10
+            },
+            "tls_handshake_timeout": {
+              "nanos": 0,
+              "secs": 10
             }
           },
           "description": "The server http configuration"
@@ -8597,6 +8626,14 @@ expression: "&schema"
             "secs": 10
           },
           "description": "Header read timeout in human-readable format; defaults to 10s",
+          "type": "string"
+        },
+        "tls_handshake_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "TLS handshake timeout in human-readable format; defaults to 10s",
           "type": "string"
         }
       },
@@ -10655,6 +10692,7 @@ expression: "&schema"
             },
             "experimental_cooperative_cancellation": {
               "enabled": true,
+              "memory_limit": null,
               "mode": "measure",
               "timeout": null
             },
@@ -12171,6 +12209,10 @@ expression: "&schema"
           "header_read_timeout": {
             "nanos": 0,
             "secs": 10
+          },
+          "tls_handshake_timeout": {
+            "nanos": 0,
+            "secs": 10
           }
         }
       },
@@ -12207,6 +12249,7 @@ expression: "&schema"
           },
           "experimental_cooperative_cancellation": {
             "enabled": true,
+            "memory_limit": null,
             "mode": "measure",
             "timeout": null
           },

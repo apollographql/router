@@ -17,6 +17,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
 use opentelemetry::global;
+use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_STATUS_CODE;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
@@ -37,6 +38,7 @@ use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::HttpClientAttributes;
+use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
@@ -406,6 +408,7 @@ async fn do_fetch(
     service_name: &str,
     request: Request<RouterBody>,
 ) -> Result<http::Response<RouterBody>, FetchError> {
+    let span = tracing::Span::current();
     let (parts, body) = client
         .call(request)
         .await
@@ -418,8 +421,195 @@ async fn do_fetch(
             }
         })?
         .into_parts();
+
+    span.set_span_dyn_attribute(
+        opentelemetry::Key::new(HTTP_RESPONSE_STATUS_CODE),
+        opentelemetry::Value::I64(parts.status.as_u16() as i64),
+    );
+
+    if !parts.status.is_success() {
+        span.set_span_dyn_attribute(
+            opentelemetry::Key::new(ERROR_TYPE),
+            opentelemetry::Value::String(parts.status.as_str().to_owned().into()),
+        );
+    }
+
     Ok(http::Response::from_parts(
         parts,
         RouterBody::new(body.map_err(axum::Error::new)),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::str::FromStr;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    use http::StatusCode;
+    use http::Uri;
+    use http::header::CONTENT_TYPE;
+    use hyper_rustls::ConfigBuilderExt;
+    use mime::APPLICATION_JSON;
+    use tokio::net::TcpListener;
+    use tower::ServiceExt;
+    use tracing::Subscriber;
+    use tracing::subscriber::DefaultGuard;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::registry::LookupSpan;
+
+    use crate::Context;
+    use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
+    use crate::plugins::telemetry::otel;
+    use crate::plugins::telemetry::otel::OtelData;
+    use crate::services::http::HttpClientService;
+    use crate::services::http::HttpRequest;
+    use crate::services::router;
+
+    async fn emulate_subgraph_with_status_code(listener: TcpListener, status_code: StatusCode) {
+        crate::services::http::tests::serve(listener, move |_| async move {
+            Ok(http::Response::builder()
+                .status(status_code)
+                .body(r#"{}"#.into())
+                .unwrap())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[derive(Default, Clone)]
+    struct RecordingLayer {
+        pub values: Arc<Mutex<HashMap<String, opentelemetry::Value>>>,
+    }
+
+    impl RecordingLayer {
+        fn get(&self, key: &str) -> Option<opentelemetry::Value> {
+            self.values.lock().unwrap().get(key).cloned()
+        }
+    }
+
+    impl<S> Layer<S> for RecordingLayer
+    where
+        S: Subscriber + for<'span> LookupSpan<'span>,
+    {
+        fn on_exit(
+            &self,
+            id: &tracing_core::span::Id,
+            ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut map = self.values.lock().unwrap();
+            if let Some(span) = ctx.span(id)
+                && let Some(otel_data) = span.extensions().get::<OtelData>()
+                && let Some(attributes) = otel_data.builder.attributes.as_ref()
+            {
+                for attribute in attributes {
+                    map.insert(attribute.key.to_string(), attribute.value.clone());
+                }
+            }
+        }
+    }
+
+    fn setup_tracing() -> (DefaultGuard, RecordingLayer) {
+        let recording_layer = RecordingLayer::default();
+        let layer = DynAttributeLayer;
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(layer)
+            .with(otel::layer().force_sampling())
+            .with(recording_layer.clone());
+        let guard = tracing::subscriber::set_default(subscriber);
+        (guard, recording_layer)
+    }
+
+    #[tokio::test]
+    async fn test_http_client_adds_status_code_and_error_type_attributes_to_500_span() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        tokio::task::spawn(emulate_subgraph_with_status_code(
+            listener,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ));
+
+        let http_client_service = HttpClientService::new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("Able to load native roots")
+                .with_no_client_auth(),
+            crate::configuration::shared::Client::builder().build(),
+        )
+        .expect("can create a HttpClientService");
+
+        let (_guard, recording_layer) = setup_tracing();
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = http_client_service
+            .oneshot(HttpRequest {
+                http_request: http::Request::builder()
+                    .uri(url)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .body(router::body::from_bytes(r#"{"query":"{ me { name } }"#))
+                    .unwrap(),
+                context: Context::new(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.http_response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        assert_eq!(
+            recording_layer.get("http.response.status_code"),
+            Some(opentelemetry::Value::I64(500))
+        );
+        assert_eq!(
+            recording_layer.get("error.type"),
+            Some(opentelemetry::Value::String("500".to_string().into())),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_http_client_adds_status_code_attributes_to_200_span() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        tokio::task::spawn(emulate_subgraph_with_status_code(listener, StatusCode::OK));
+
+        let http_client_service = HttpClientService::new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("Able to load native roots")
+                .with_no_client_auth(),
+            crate::configuration::shared::Client::builder().build(),
+        )
+        .expect("can create a HttpClientService");
+
+        let (_guard, recording_layer) = setup_tracing();
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = http_client_service
+            .oneshot(HttpRequest {
+                http_request: http::Request::builder()
+                    .uri(url)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .body(router::body::from_bytes(r#"{"query":"{ me { name } }"#))
+                    .unwrap(),
+                context: Context::new(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+
+        assert_eq!(
+            recording_layer.get("http.response.status_code"),
+            Some(opentelemetry::Value::I64(200))
+        );
+        assert_eq!(recording_layer.get("error.type"), None);
+    }
 }

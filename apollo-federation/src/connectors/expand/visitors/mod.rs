@@ -4,7 +4,7 @@
 //! adding needed types to a mutable schema.
 
 pub(crate) mod input;
-mod selection;
+pub(crate) mod selection;
 
 use std::collections::VecDeque;
 
@@ -30,7 +30,8 @@ where
 }
 
 /// Try to pre-insert into a schema, ignoring the operation if the type already exists
-/// and matches the existing type
+/// and matches the existing type. Idempotent for v0.4+ code paths where types may be
+/// visited multiple times during shape-driven expansion.
 macro_rules! try_pre_insert {
     ($schema:expr, $pos:expr) => {{
         if let Some(old_pos) = $schema.try_get_type($pos.type_name.clone()) {
@@ -44,6 +45,9 @@ macro_rules! try_pre_insert {
             } else {
                 Ok(())
             }
+        } else if $schema.referencers().contains_type_name(&$pos.type_name) {
+            // Already pre-inserted but not yet inserted - idempotent
+            Ok(())
         } else {
             $pos.pre_insert($schema)
         }

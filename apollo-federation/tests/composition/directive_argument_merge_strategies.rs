@@ -122,7 +122,7 @@ mod tests {
 
             type T
               @key(fields: "k")
-              @requiresScopes(scopes: ["foo", "bar"])
+              @requiresScopes(scopes: [["foo"], ["bar"]])
             {
               k: ID @requiresScopes(scopes: [])
             }
@@ -134,11 +134,11 @@ mod tests {
             type_defs: r#"
             type T
               @key(fields: "k")
-              @requiresScopes(scopes: ["foo"])
+              @requiresScopes(scopes: [["foo"]])
             {
-              k: ID @requiresScopes(scopes: ["v1", "v2"])
+              k: ID @requiresScopes(scopes: [["v1"], ["v2"]])
               a: Int
-              b: String @requiresScopes(scopes: ["x"])
+              b: String @requiresScopes(scopes: [["x"]])
             }
             "#,
         };
@@ -182,7 +182,7 @@ mod tests {
             .expect("@requiresScopes directive should be present on T");
         assert_eq!(
             t_requires_scopes_directive.to_string(),
-            r#"@requiresScopes(scopes: ["foo", "bar"])"#
+            r#"@requiresScopes(scopes: [["foo"], ["bar"]])"#
         );
 
         let k = coord!(T.k)
@@ -195,7 +195,7 @@ mod tests {
             .expect("@requiresScopes directive should be present on T.k");
         assert_eq!(
             k_requires_scopes_directive.to_string(),
-            r#"@requiresScopes(scopes: ["v1", "v2"])"#
+            r#"@requiresScopes(scopes: [["v1"], ["v2"]])"#
         );
 
         let b = coord!(T.b)
@@ -208,7 +208,7 @@ mod tests {
             .expect("@requiresScopes directive should be present on T.b");
         assert_eq!(
             b_requires_scopes_directive.to_string(),
-            r#"@requiresScopes(scopes: ["x"])"#
+            r#"@requiresScopes(scopes: [["x"]])"#
         )
     }
 
