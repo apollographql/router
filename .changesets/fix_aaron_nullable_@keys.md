@@ -1,5 +1,7 @@
-### Allow nullable `@key`s for response caching 
+### Support nullable `@key` fields in response caching ([PR #8767](https://github.com/apollographql/router/pull/8767))
 
-`@key`s can be nullable, but there was a bug in the response caching feature that blocked nullable `@key`s from being used. This fixes that behavior. Be careful when caching nullable data because it can be null! Docs added to call that out, but be very sure of what you're caching and write cache keys to be as simple and non-nullable as possible.
+Response caching can now use nullable `@key` fields. Previously, the response caching feature rejected nullable `@key` fields, which prevented caching in schemas that use them.
+
+When you cache data keyed by nullable fields, keep your cache keys simple and avoid ambiguous `null` values.
 
 By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8767

@@ -1,15 +1,15 @@
-### Implement memory tracking metrics for requests ([PR #8717](https://github.com/apollographql/router/pull/8717))
+### Add memory tracking metrics for requests ([PR #8717](https://github.com/apollographql/router/pull/8717))
 
-Adds two histogram metrics to track memory allocation patterns during request processing:
+The router now emits two histogram metrics to track memory allocation activity during request processing:
 
-- `apollo.router.request.memory` - Tracks memory allocations for the entire request lifecycle, including GraphQL parsing, validation, query planning, response composition, and plugin execution
-- `apollo.router.query_planner.memory` - Tracks memory allocations specifically for query planning operations executed in the compute job thread pool
+- `apollo.router.request.memory`: Memory activity across the full request lifecycle (including parsing, validation, query planning, and plugins)
+- `apollo.router.query_planner.memory`: Memory activity for query planning work in the compute job thread pool
 
-Both metrics record four types of memory operations (allocated, deallocated, zeroed, reallocated) with histogram buckets at 1KB, 10KB, 100KB, 1MB, 10MB, and 100MB. Each metric includes attributes:
-- `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
-- `context`: The context name where the allocation occurred (e.g., `router.request`, `query_planning`)
+Each metric includes:
 
-The implementation uses a custom allocator wrapper over jemalloc that tracks allocations via thread-local storage with task-local propagation, supporting nested tracking contexts. This feature is only available on Unix platforms when the `global-allocator` feature is enabled and `dhat-heap` is not enabled.
+- `allocation.type`: `allocated`, `deallocated`, `zeroed`, or `reallocated`
+- `context`: The tracking context name (for example, `router.request` or `query_planning`)
 
+This feature is only available on Unix platforms when the `global-allocator` feature is enabled and `dhat-heap` is not enabled.
 
 By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8717
