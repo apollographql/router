@@ -1,6 +1,3 @@
-use std::collections::HashSet;
-
-use ahash::random_state::RandomState;
 use apollo_compiler::Name;
 use apollo_compiler::schema;
 use serde::Deserialize;
@@ -209,17 +206,7 @@ fn validate_input_value(
 
         (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
             // Check for extra/unknown fields in obj vs def
-            let response_object_field_names: HashSet<&str, RandomState> =
-                HashSet::from_iter(obj.keys().map(|k| k.as_str()));
-
-            let query_type_field_names: HashSet<&str, RandomState> =
-                HashSet::from_iter(def.fields.values().map(|field| field.name.as_str()));
-
-            let diff: HashSet<_> = response_object_field_names
-                .difference(&query_type_field_names)
-                .collect();
-
-            let unknown_variable = |field_name| {
+            let unknown_field = |field_name| {
                 let path_string = JsonValuePath::ObjectKey {
                     key: field_name,
                     parent: path,
@@ -230,11 +217,17 @@ fn validate_input_value(
                 ))
             };
 
-            if !diff.is_empty()
-                && let Some(next) = diff.iter().next()
-            {
-                let err = unknown_variable(next);
-                return Err(err);
+            let unknown = obj.keys().find_map(|k| {
+                let k = k.as_str();
+                if !def.fields.contains_key(k) {
+                    Some(k)
+                } else {
+                    None
+                }
+            });
+
+            if let Some(unknown) = unknown {
+                return Err(unknown_field(unknown));
             }
 
             // Validate all fields present on def
