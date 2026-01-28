@@ -498,6 +498,13 @@ impl PlanNode {
                 }
             }
 
+            tracing::trace!(
+                ?current_dir,
+                ?parent_value,
+                ?value,
+                plan = ?self,
+                "end of execute_recursively"
+            );
             (value, errors)
         })
     }
