@@ -217,6 +217,7 @@ impl Variables {
             });
 
             if values.is_empty() {
+                tracing::trace!("values is empty!");
                 return None;
             }
 

@@ -356,6 +356,7 @@ impl PlanNode {
                                 );
                             }
                             None => {
+                                tracing::trace!("unable to create variables");
                                 value = Value::Object(Object::default());
                                 errors = Vec::new();
                             }
