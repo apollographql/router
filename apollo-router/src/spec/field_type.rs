@@ -127,7 +127,7 @@ fn validate_input_value(
     schema: &Schema,
     path: &JsonValuePath<'_>,
 ) -> Result<(), InvalidInputValue> {
-    let fmt_path = | var_path: &JsonValuePath<'_>    | match var_path {
+    let fmt_path = |var_path: &JsonValuePath<'_>| match var_path {
         JsonValuePath::Variable { .. } => format!("variable `{var_path}`"),
         _ => format!("input value at `{var_path}`"),
     };
@@ -214,12 +214,12 @@ fn validate_input_value(
 
             let query_type_field_names: HashSet<&str, RandomState> =
                 HashSet::from_iter(def.fields.values().map(|field| field.name.as_str()));
-    
+
             let diff: HashSet<_> = response_object_field_names
                 .difference(&query_type_field_names)
                 .collect();
 
-            let unknown_variable = | field_name | {
+            let unknown_variable = |field_name| {
                 let path_string = JsonValuePath::ObjectKey {
                     key: field_name,
                     parent: path,
@@ -230,12 +230,11 @@ fn validate_input_value(
                 ))
             };
 
-            if !diff.is_empty() {
-                if let Some(next) = diff.iter().next() {
+            if !diff.is_empty()
+                && let Some(next) = diff.iter().next() {
                     let err = unknown_variable(next);
                     return Err(err);
                 }
-            }
 
             // Validate all fields present on def
             def.fields.values().try_for_each(|field| {

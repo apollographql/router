@@ -2933,7 +2933,7 @@ fn variable_validation() {
             "author": "Me",
             "unknownField": "unknown",
         }})
-    );    
+    );
 
     assert_validation_error!(
         "input MessageInput {
@@ -2959,7 +2959,7 @@ fn variable_validation() {
             "canvas": [{"input": 3}, {"input": 4}, {"input": 5, "unknownField": "unknown"}],
         }})
     );
-    
+
     let schema = r#"
         schema
              @link(url: "https://specs.apollo.dev/link/v1.0")
