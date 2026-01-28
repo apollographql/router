@@ -2933,9 +2933,33 @@ fn variable_validation() {
             "author": "Me",
             "unknownField": "unknown",
         }})
+    );    
+
+    assert_validation_error!(
+        "input MessageInput {
+            content: String
+            author: String
+            canvas: [CanvasInput]
+          }
+        input CanvasInput {
+            input: Int
+          }
+          type Receipt {
+              id: ID!
+          }
+          type Query{
+              send(message: MessageInput): Receipt}",
+        "query($msg: MessageInput) {
+            send(message: $msg) {
+                id
+            }}",
+        json!({"msg":  {
+            "content": "Hello",
+            "author": "Me",
+            "canvas": [{"input": 3}, {"input": 4}, {"input": 5, "unknownField": "unknown"}],
+        }})
     );
     
-
     let schema = r#"
         schema
              @link(url: "https://specs.apollo.dev/link/v1.0")
