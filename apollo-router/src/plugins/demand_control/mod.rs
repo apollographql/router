@@ -433,8 +433,14 @@ impl Context {
         cost: CostBySubgraph,
     ) -> Result<(), DemandControlError> {
         // combine this cost with the cost that already exists in the context
-        self.insert(COST_BY_SUBGRAPH_ACTUAL_KEY, cost)
-            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        self.upsert(
+            COST_BY_SUBGRAPH_ACTUAL_KEY,
+            |mut existing_cost: CostBySubgraph| {
+                existing_cost += cost;
+                existing_cost
+            },
+        )
+        .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
         Ok(())
     }
 
