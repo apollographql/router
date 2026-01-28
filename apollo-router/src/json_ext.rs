@@ -175,6 +175,7 @@ impl ValueExt for Value {
     fn deep_merge(&mut self, other: Self) {
         match (self, other) {
             (Value::Object(a), Value::Object(b)) => {
+                tracing::trace!("deep_merge: object to object");
                 for (key, value) in b.into_iter() {
                     match a.entry(key) {
                         Entry::Vacant(e) => {
@@ -187,13 +188,16 @@ impl ValueExt for Value {
                 }
             }
             (Value::Array(a), Value::Array(mut b)) => {
+                tracing::trace!("deep_merge: array to array");
                 for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
                     a_value.deep_merge(b_value);
                 }
 
                 a.extend(b);
             }
-            (_, Value::Null) => {}
+            (_, Value::Null) => {
+                tracing::trace!("deep_merge: something to null");
+            }
             (Value::Object(_), Value::Array(_)) => {
                 failfast_debug!("trying to replace an object with an array");
             }
@@ -211,6 +215,7 @@ impl ValueExt for Value {
     fn type_aware_deep_merge(&mut self, other: Self, schema: &Schema) {
         match (self, other) {
             (Value::Object(a), Value::Object(b)) => {
+                tracing::trace!("type_aware_deep_merge: object to object");
                 for (key, value) in b.into_iter() {
                     let k = key.clone();
                     match a.entry(key) {
@@ -234,13 +239,16 @@ impl ValueExt for Value {
                 }
             }
             (Value::Array(a), Value::Array(mut b)) => {
+                tracing::trace!("type_aware_deep_merge: array to array");
                 for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
                     a_value.type_aware_deep_merge(b_value, schema);
                 }
 
                 a.extend(b);
             }
-            (_, Value::Null) => {}
+            (_, Value::Null) => {
+                tracing::trace!("type_aware_deep_merge: something to null");
+            }
             (Value::Object(_), Value::Array(_)) => {
                 failfast_debug!("trying to replace an object with an array");
             }

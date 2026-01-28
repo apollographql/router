@@ -94,6 +94,8 @@ impl QueryPlan {
                 sender,
             )
             .await;
+        tracing::trace!("end of execute - have value {value:?}");
+
         if !deferred_fetches.is_empty() {
             u64_counter!(
                 "apollo.router.operations.defer",
@@ -137,7 +139,16 @@ impl PlanNode {
         sender: mpsc::Sender<Response>,
     ) -> future::BoxFuture<'a, (Value, Vec<Error>)> {
         Box::pin(async move {
-            tracing::trace!("executing plan:\n{:#?}", self);
+            let node_type = match &self {
+                PlanNode::Sequence { .. } => "Sequence",
+                PlanNode::Parallel { .. } => "Parallel",
+                PlanNode::Fetch(_) => "Fetch",
+                PlanNode::Flatten(_) => "Flatten",
+                PlanNode::Defer { .. } => "Defer",
+                PlanNode::Subscription { .. } => "Subscription",
+                PlanNode::Condition { .. } => "Condition",
+            };
+            tracing::trace!("executing {node_type} plan:\n{:#?}", self);
             let mut value;
             let mut errors;
 
@@ -511,7 +522,7 @@ impl PlanNode {
                 ?parent_value,
                 ?value,
                 plan = ?self,
-                "end of execute_recursively"
+                "end of {node_type} execute_recursively"
             );
             (value, errors)
         })
