@@ -423,33 +423,61 @@ type Country {
 
 If you need to set cache tags programmatically (for example, if the tag depends on neither root field arguments nor entity keys), create the cache tags in your subgraph and set them in the response extensions.
 
-For cache tags on _entities_, set `apolloEntityCacheTags` in `extensions`. The following example shows a response payload that sets cache tags for entities returned by a subgraph:
+For cache tags on _entities_, set `apolloEntityCacheTags` in `extensions`. This field must be an array of arrays, where:
+- The outer array corresponds **positionally** to the entities in the `_entities` array
+- Each inner array contains string cache tags for that specific entity
+
+The following example shows a response payload that sets cache tags for entities returned by a subgraph:
 
 ```json
 {
    "data": {"_entities": [
-       {"__typename": "User", "id": 42, ...},
-       {"__typename": "User", "id": 1023, ...},
-       {"__typename": "User", "id": 7, ...},
+       {"__typename": "User", "id": 42, "name": "Alice"},
+       {"__typename": "User", "id": 1023, "name": "Bob"},
+       {"__typename": "User", "id": 7, "name": "Charlie"}
    ]},
    "extensions": {"apolloEntityCacheTags": [
-       ["products", "product-42"],
-       ["products", "product-1023"],
-       ["products", "product-7"]
+       ["users", "user-42"],
+       ["users", "user-1023"],
+       ["users", "user-7"]
    ]}
 }
 ```
 
-For cache tags on _root fields_, set `apolloCacheTags` in `extensions`. The following example shows a response payload that sets cache tags for root fields returned by a subgraph:
+In this example:
+- The first entity (User with id 42) is tagged with `["users", "user-42"]`
+- The second entity (User with id 1023) is tagged with `["users", "user-1023"]`
+- The third entity (User with id 7) is tagged with `["users", "user-7"]`
+
+Because each entity is cached separately with its own tags, you can invalidate individual entities. For example, invalidating by tag `user-42` only removes User 42 from the cache, while invalidating by tag `users` removes all three users.
+
+To invalidate using these programmatically-set tags, send a request to the invalidation endpoint:
+
+```json
+[{
+  "kind": "cache_tag",
+  "subgraphs": ["your-subgraph-name"],
+  "cache_tag": "user-42"
+}]
+```
+
+For cache tags on _root fields_, set `apolloCacheTags` in `extensions`. This field is a flat array of strings that are applied as cache tags for all root fields in the response.
+
+The following example shows a response payload that sets cache tags for a `homepage` query:
 
 ```json
 {
    "data": {
-       "someField": {...}
+       "homepage": {
+           "featuredProducts": [...],
+           "currentUser": {"id": 9001, "name": "Jane"}
+       }
    },
    "extensions": {"apolloCacheTags": ["homepage", "user-9001-homepage"]}
 }
 ```
+
+In this example, both tags (`homepage` and `user-9001-homepage`) are applied to the cached response. Later, you can invalidate this cached response by targeting either tag.
 
 ### Invalidation HTTP endpoint
 
