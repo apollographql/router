@@ -244,6 +244,7 @@ impl Variables {
                     .map(|value| value.is_null())
                     .unwrap_or(true)
             {
+                tracing::trace!("should not perform next fetch");
                 return None;
             }
 

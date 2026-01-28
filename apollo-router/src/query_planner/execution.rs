@@ -280,6 +280,7 @@ impl PlanNode {
                         .extensions()
                         .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
                     {
+                        tracing::trace!("request is cancelled");
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
@@ -314,6 +315,12 @@ impl PlanNode {
                                         Ok(r) => r,
                                         Err(e) => (Value::default(), vec![e]),
                                     };
+
+                                tracing::trace!(
+                                    has_errors = !raw_errors.is_empty(),
+                                    ?value,
+                                    "end of fetch"
+                                );
 
                                 // When a subgraph returns an unexpected response (ie not a body with
                                 // at least one of errors or data), the errors surfaced by the router
