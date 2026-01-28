@@ -341,7 +341,11 @@ pub(crate) fn externalize_header_map(
         let k = k.as_str().to_owned();
         match String::from_utf8(v.as_bytes().to_vec()) {
             Ok(v) => output.entry(k).or_insert_with(Vec::new).push(v),
-            Err(e) => tracing::warn!("unable to convert header value to utf-8 for {}: {}", k, e),
+            Err(e) => tracing::warn!(
+                "unable to convert header value to utf-8 for {}, will not be sent to coprocessor: {}",
+                k,
+                e
+            ),
         }
     }
     output
@@ -472,7 +476,7 @@ mod test {
         );
 
         assert!(tracing_test::logs_contain(
-            "unable to convert header value to utf-8 for x-test-header: invalid utf-8 sequence of 1 bytes from index 7"
+            "unable to convert header value to utf-8 for x-test-header, will not be sent to coprocessor: invalid utf-8 sequence of 1 bytes from index 7"
         ));
     }
 }
