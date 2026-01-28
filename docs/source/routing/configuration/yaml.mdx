@@ -841,6 +841,13 @@ headers:
 
 Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.
 
+### Escaping special characters
+
+To include a literal `$` character, double it as `$$`. The router converts each `$$` to a single `$`:
+
+- Config value: `prefix$$suffix`
+- Result: `prefix$suffix`
+
 ## Related topics
 
 - [Checklist for configuring the router for production](/technotes/TN0008-production-readiness-checklist/#apollo-router)
