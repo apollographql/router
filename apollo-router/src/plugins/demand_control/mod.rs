@@ -727,6 +727,7 @@ mod test {
     use futures::StreamExt;
     use schemars::JsonSchema;
     use serde::Deserialize;
+    use tokio::task::JoinSet;
 
     use crate::Context;
     use crate::graphql;
@@ -954,5 +955,96 @@ mod test {
                 },
             }
         }
+    }
+
+    // sanity check that our actuals calculation is always accumulative and based on safe data
+    // structures (like its current implementation, using DashMap, which functions similarly to a
+    // RwLock) -- this test looks at the same subgraph updates
+    #[tokio::test]
+    async fn test_concurrent_actual_cost_updates_to_same_subgraph() {
+        let ctx = Arc::new(Context::new());
+        let num_tasks = 100;
+        let cost_per_update = 1.5;
+
+        // multiple updates to the SAME subgraph
+        let mut join_set = JoinSet::new();
+        for _ in 0..num_tasks {
+            let ctx = ctx.clone();
+            join_set.spawn(async move {
+                ctx.update_actual_cost_by_subgraph("products", cost_per_update)
+                    .expect("update should succeed");
+            });
+        }
+
+        while let Some(result) = join_set.join_next().await {
+            result.expect("painicked waiting to join tasks");
+        }
+
+        let cost_by_subgraph = ctx
+            .get_actual_cost_by_subgraph()
+            .expect("should deserialize")
+            .expect("should have value");
+
+        let products_cost = cost_by_subgraph
+            .get("products")
+            .expect("should have products");
+        let expected_cost = num_tasks as f64 * cost_per_update;
+
+        assert_eq!(
+            products_cost, expected_cost,
+            "Expected products cost {expected_cost}, got {products_cost}"
+        );
+    }
+
+    // sanity check that our actuals calculation is always accumulative and based on safe data
+    // structures (like its current implementation, using DashMap, which functions similarly to a
+    // RwLock) -- this test looks at different subgraph updates
+    #[tokio::test]
+    async fn test_concurrent_actual_cost_multiple_subgraphs() {
+        // multiple updates to DIFFERENT subgraphs
+        let ctx = Arc::new(Context::new());
+        let subgraphs = ["users", "products", "reviews", "inventory", "pricing"];
+        let updates_per_subgraph = 20;
+        let cost_per_update = 1.5;
+
+        let mut join_set = JoinSet::new();
+        for subgraph in subgraphs.iter() {
+            for _ in 0..updates_per_subgraph {
+                let ctx = ctx.clone();
+                let subgraph = subgraph.to_string();
+                join_set.spawn(async move {
+                    ctx.update_actual_cost_by_subgraph(&subgraph, cost_per_update)
+                        .expect("update should succeed");
+                });
+            }
+        }
+
+        while let Some(result) = join_set.join_next().await {
+            result.expect("task should not panic");
+        }
+
+        let cost_by_subgraph = ctx
+            .get_actual_cost_by_subgraph()
+            .expect("should deserialize")
+            .expect("should have value");
+
+        for subgraph in subgraphs.iter() {
+            let cost = cost_by_subgraph
+                .get(subgraph)
+                .expect("should have subgraph");
+            let expected = updates_per_subgraph as f64 * cost_per_update;
+
+            assert_eq!(
+                cost, expected,
+                "Expected {subgraph} cost {expected}, got {cost}"
+            );
+        }
+
+        let total = cost_by_subgraph.total();
+        let expected_total = subgraphs.len() as f64 * updates_per_subgraph as f64 * cost_per_update;
+        assert_eq!(
+            total, expected_total,
+            "Expected total cost {expected_total}, got {total}"
+        );
     }
 }
