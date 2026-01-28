@@ -1,6 +1,6 @@
-use ahash::random_state::RandomState;
 use std::collections::HashSet;
 
+use ahash::random_state::RandomState;
 use apollo_compiler::Name;
 use apollo_compiler::schema;
 use serde::Deserialize;
@@ -231,10 +231,11 @@ fn validate_input_value(
             };
 
             if !diff.is_empty()
-                && let Some(next) = diff.iter().next() {
-                    let err = unknown_variable(next);
-                    return Err(err);
-                }
+                && let Some(next) = diff.iter().next()
+            {
+                let err = unknown_variable(next);
+                return Err(err);
+            }
 
             // Validate all fields present on def
             def.fields.values().try_for_each(|field| {
