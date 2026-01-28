@@ -423,6 +423,12 @@ type Country {
 
 If you need to set cache tags programmatically (for example, if the tag depends on neither root field arguments nor entity keys), create the cache tags in your subgraph and set them in the response extensions.
 
+The router uses two different extensions because entities and root fields are cached differently:
+- **Entities** are cached individually—each entity in an `_entities` response gets its own cache entry. Use `apolloEntityCacheTags` with an array of arrays to assign different tags to different entities.
+- **Root fields** are cached as a single unit—the entire subgraph response is one cache entry. Use `apolloCacheTags` with a flat array of tags that apply to the whole response.
+
+#### Entity cache tags
+
 For cache tags on _entities_, set `apolloEntityCacheTags` in `extensions`. This field must be an array of arrays, where:
 - The outer array corresponds **positionally** to the entities in the `_entities` array
 - Each inner array contains string cache tags for that specific entity
@@ -461,7 +467,9 @@ To invalidate using these programmatically-set tags, send a request to the inval
 }]
 ```
 
-For cache tags on _root fields_, set `apolloCacheTags` in `extensions`. This field is a flat array of strings that are applied as cache tags for all root fields in the response.
+#### Root field cache tags
+
+For cache tags on _root fields_, set `apolloCacheTags` in `extensions`. This field is a flat array of strings because the entire root field response is cached as a single entry—all tags apply to that one cache entry.
 
 The following example shows a response payload that sets cache tags for a `homepage` query:
 
