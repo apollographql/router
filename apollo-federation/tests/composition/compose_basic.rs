@@ -1,3 +1,4 @@
+use apollo_compiler::coord;
 use insta::assert_snapshot;
 use test_log::test;
 
@@ -287,4 +288,66 @@ fn merges_default_arguments_when_they_are_arrays() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let _supergraph = result.expect("Expected composition to succeed");
+}
+
+#[test]
+fn removes_redundant_join_field_directives() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+        type Query {
+          product(id: ID!): Product
+        }
+
+        type Product @key(fields: "id") {
+          id: ID!
+          name: String! @shareable
+          price: Float! @shareable
+        }
+        "#,
+    };
+
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+        type Product @key(fields: "id") {
+          id: ID!
+          name: String! @shareable
+          price: Float! @shareable
+          description: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let schema = supergraph.schema().schema();
+
+    // Fields in both subgraphs should not have @join__field
+    for field_coord in [
+        coord!(Product.id),
+        coord!(Product.name),
+        coord!(Product.price),
+    ] {
+        let field = field_coord.lookup_field(schema).expect("Field exists");
+        let has_join_field = field.directives.iter().any(|d| d.name == "join__field");
+        assert!(
+            !has_join_field,
+            "Field {} should not have @join__field directives",
+            field_coord
+        );
+    }
+
+    // Field only in one subgraph should have @join__field
+    let description_field = coord!(Product.description)
+        .lookup_field(schema)
+        .expect("Field exists");
+    let has_join_field = description_field
+        .directives
+        .iter()
+        .any(|d| d.name == "join__field");
+    assert!(
+        has_join_field,
+        "Field Product.description should have @join__field directive"
+    );
 }

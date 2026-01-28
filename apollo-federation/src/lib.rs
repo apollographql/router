@@ -466,8 +466,7 @@ mod test_supergraph {
                 .map(|err| err.to_string())
                 .collect::<Vec<String>>(),
             vec![
-                "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.upc}\" on type \"Product\"",
-                "@cacheTag format references a nullable argument \"first\""
+                "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.upc}\" on type \"Product\""
             ]
         );
 

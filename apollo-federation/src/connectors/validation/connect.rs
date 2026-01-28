@@ -9,7 +9,6 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::ObjectType;
 use hashbrown::HashSet;
 use itertools::Itertools;
 use multi_try::MultiTry;
@@ -25,6 +24,7 @@ use crate::connectors::Namespace;
 use crate::connectors::SourceName;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
+use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::spec::connect::CONNECT_ID_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
@@ -40,18 +40,21 @@ pub(super) fn fields_seen_by_all_connects(
     schema: &SchemaInfo,
     all_source_names: &[SourceName],
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
-    let mut messages = Vec::new();
-    let mut connects = Vec::new();
-
-    for extended_type in schema.types.values().filter(|ty| !ty.is_built_in()) {
-        let ExtendedType::Object(node) = extended_type else {
-            continue;
-        };
-        let (connects_for_type, messages_for_type) =
-            Connect::find_on_type(node, schema, all_source_names);
-        connects.extend(connects_for_type);
-        messages.extend(messages_for_type);
-    }
+    let (connects, messages): (Vec<_>, Vec<_>) = schema
+        .types
+        .iter()
+        .filter(|(_, ty)| !ty.is_built_in())
+        .filter(|(_, ty)| {
+            matches!(
+                ty,
+                ExtendedType::Object(_) | ExtendedType::Interface(_) | ExtendedType::Union(_)
+            )
+        })
+        .filter_map(|(type_name, _)| SchemaTypeRef::new(schema.schema, type_name))
+        .map(|type_ref| Connect::find_on_type(type_ref, schema, all_source_names))
+        .unzip();
+    let connects: Vec<_> = connects.into_iter().flatten().collect();
+    let mut messages: Vec<_> = messages.into_iter().flatten().collect();
 
     let mut seen_fields = Vec::new();
     let mut valid_id_names: HashMap<_, Vec<_>> = HashMap::new();
@@ -136,7 +139,7 @@ struct Connect<'schema> {
 impl<'schema> Connect<'schema> {
     /// Find and parse any `@connect` directives on this type or its fields.
     fn find_on_type(
-        object: &'schema Node<ObjectType>,
+        type_ref: SchemaTypeRef<'schema>,
         schema: &'schema SchemaInfo,
         source_names: &'schema [SourceName],
     ) -> (Vec<Self>, Vec<Message>) {
@@ -144,43 +147,76 @@ impl<'schema> Connect<'schema> {
             .schema_definition
             .query
             .as_ref()
-            .is_some_and(|query| query.name == object.name)
+            .is_some_and(|query| query.name == *type_ref.name())
         {
             ObjectCategory::Query
         } else if schema
             .schema_definition
             .mutation
             .as_ref()
-            .is_some_and(|mutation| mutation.name == object.name)
+            .is_some_and(|mutation| mutation.name == *type_ref.name())
         {
             ObjectCategory::Mutation
         } else {
             ObjectCategory::Other
         };
 
-        let directives_on_type = object
-            .directives
-            .iter()
-            .filter(|directive| directive.name == *schema.connect_directive_name())
-            .map(|directive| ConnectDirectiveCoordinate {
-                directive,
-                element: ConnectedElement::Type { type_def: object },
-            });
-
-        let directives_on_fields = object.fields.values().flat_map(|field| {
-            field
-                .directives
-                .iter()
-                .filter(|directive| directive.name == *schema.connect_directive_name())
-                .map(|directive| ConnectDirectiveCoordinate {
-                    directive,
-                    element: ConnectedElement::Field {
-                        parent_type: object,
-                        parent_category: object_category,
-                        field_def: field,
-                    },
-                })
+        let directives_on_type = match type_ref.extended() {
+            ExtendedType::Object(obj) => obj.directives.iter(),
+            ExtendedType::Interface(iface) => iface.directives.iter(),
+            ExtendedType::Union(union) => union.directives.iter(),
+            _ => [].iter(), // Other types (scalars, enums, etc.) don't support connectors
+        }
+        .filter(|directive| &directive.name == schema.connect_directive_name())
+        .map(|directive| ConnectDirectiveCoordinate {
+            directive,
+            element: ConnectedElement::Type { type_ref },
         });
+
+        let directives_on_fields = match type_ref.extended() {
+            ExtendedType::Object(obj) => obj
+                .fields
+                .values()
+                .flat_map(|field| {
+                    field
+                        .directives
+                        .iter()
+                        .filter(|directive| &directive.name == schema.connect_directive_name())
+                        .map(|directive| ConnectDirectiveCoordinate {
+                            directive,
+                            element: ConnectedElement::Field {
+                                parent_type: type_ref,
+                                parent_category: object_category,
+                                field_def: field,
+                            },
+                        })
+                })
+                .collect::<Vec<_>>(),
+            ExtendedType::Interface(iface) => iface
+                .fields
+                .values()
+                .flat_map(|field| {
+                    field
+                        .directives
+                        .iter()
+                        .filter(|directive| &directive.name == schema.connect_directive_name())
+                        .map(|directive| ConnectDirectiveCoordinate {
+                            directive,
+                            element: ConnectedElement::Field {
+                                parent_type: type_ref,
+                                parent_category: object_category,
+                                field_def: field,
+                            },
+                        })
+                })
+                .collect::<Vec<_>>(),
+            ExtendedType::Union(_) => {
+                // Unions don't have fields, so no field-level directives
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+        .into_iter();
 
         let (connects, messages): (Vec<Connect>, Vec<Vec<Message>>) = directives_on_type
             .chain(directives_on_fields)
@@ -328,16 +364,16 @@ impl<'schema> Connect<'schema> {
         {
             // mark the field with a @connect directive as seen
             seen.push(ResolvedField {
-                object_name: parent_type.name.clone(),
+                object_name: parent_type.name().clone(),
                 field_name: field_def.name.clone(),
             });
             // direct recursion isn't allowed, like a connector on User.friends: [User]
-            if &parent_type.name == field_def.ty.inner_named_type() {
+            if parent_type.name() == field_def.ty.inner_named_type().as_str() {
                 messages.push(Message {
                     code: Code::CircularReference,
                     message: format!(
                         "Direct circular reference detected in `{}.{}: {}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        parent_type.name,
+                        parent_type.name(),
                         field_def.name,
                         field_def.ty
                     ),

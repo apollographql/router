@@ -1,0 +1,35 @@
+---
+title: Hot Reload
+subtitle: Zero-downtime schema updates
+description: Learn about hot reloading supergraph schemas, including support matrix, performance considerations, and production recommendations.
+redirectFrom:
+  - /graphos/routing/configuration/hot-reload
+---
+
+Hot reloading enables the router to update its supergraph schema without restarting, providing zero-downtime schema updates.
+
+Before enabling hot reload, consult the [support matrix](#hot-reload-support-matrix) to ensure your schema source is supported, and carefully consider the [performance considerations](#performance-considerations).
+
+## Hot reload support matrix
+
+| Schema Source | Hot Reload Support | Notes |
+|---------------|-------------------|-------|
+| Apollo Uplink | 🟢 Yes | Automatically polls every 10 seconds for updates |
+| Local file | 🟢 Yes | Requires `--hot-reload` flag or `APOLLO_ROUTER_HOT_RELOAD=true` |
+| Remote URLs | ❌ No | Schema fetched once at startup |
+
+## Performance considerations
+
+When using hot reloading for supergraph schemas, be aware of the following performance considerations:
+
+- Schema reloading overhead: Each schema reload requires parsing and validation, which temporarily increases CPU usage.
+- Request handling: During reload, new requests might experience slight latency increases while the new schema is being processed.
+- Memory usage: The router maintains both the old and new schema briefly during reload, temporarily increasing memory usage.
+
+## Production recommendations
+
+For production deployments with high traffic:
+
+- Monitor during reloads: If using hot reload, monitor CPU, memory, and latency metrics during schema updates.
+- Schedule updates: Plan schema updates during lower-traffic periods when using hot reload.
+- Use blue/green deployments: For production deployments requiring schema updates, use [blue/green deployment strategies](/graphos/platform/production-readiness/deployment-best-practices#blue-green-with-graph-artifacts) with OCI digest references.

@@ -16,6 +16,7 @@ use tracing::trace;
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
+use crate::compat::coerce_schema_values;
 use crate::ensure;
 use crate::error::FederationError;
 use crate::error::Locations;
@@ -223,6 +224,9 @@ impl Subgraph<Initial> {
 
         // Simulate graphql-js behavior accepting duplicate argument definitions.
         parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
+
+        // Coerce directive argument values based on directive definitions.
+        coerce_schema_values(&mut schema);
 
         Self::new(name, url, schema, orphan_extension_types)
     }
@@ -678,19 +682,8 @@ impl<S: HasMetadata> Subgraph<S> {
     }
 
     pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {
-        let Ok(Some(interface_object)) = self
-            .metadata()
-            .federation_spec_definition()
-            .interface_object_directive_definition(self.schema())
-        else {
-            return false;
-        };
         if let TypeDefinitionPosition::Object(obj) = type_ {
-            let interface_object_referencers = self
-                .schema()
-                .referencers()
-                .get_directive(&interface_object.name);
-            return interface_object_referencers.is_ok_and(|refs| refs.object_types.contains(obj));
+            return self.metadata().is_interface_object_type(&obj.type_name);
         }
         false
     }
