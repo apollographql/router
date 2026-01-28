@@ -184,6 +184,15 @@ impl Variables {
         let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
+            tracing::trace!(
+                ?requires,
+                ?variable_usages,
+                ?data,
+                ?current_dir,
+                ?input_rewrites,
+                ?context_rewrites,
+                "creating new variables"
+            );
             let mut variables = Object::with_capacity(1 + variable_usages.len());
 
             variables.extend(variable_usages.iter().filter_map(|key| {
