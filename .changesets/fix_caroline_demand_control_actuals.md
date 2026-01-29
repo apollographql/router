@@ -11,7 +11,7 @@ accurately reflects the work done per operation and allows a more meaningful com
 between actual and estimated costs.
 
 Note: if you would like to disable the new actual cost computation behavior, you should set the router configuration
-option `demand_control.strategy.static_estimated.actual_cost_mode` to `legacy`.
+option `demand_control.strategy.static_estimated.actual_cost_mode` to `response_shape`.
 
 ```yaml
 demand_control:
@@ -22,7 +22,7 @@ demand_control:
       max: 10
       list_size: 10
       actual_cost_mode: by_subgraph # the default value
-      # actual_cost_mode: legacy # disable new cost calculation mode
+      # actual_cost_mode: response_shape # revert to prior actual cost computation mode
 ```
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8827

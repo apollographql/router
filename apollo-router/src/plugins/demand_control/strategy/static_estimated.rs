@@ -91,7 +91,7 @@ impl StrategyImpl for StaticEstimated {
             ActualCostMode::BySubgraph => context
                 .get_actual_cost_by_subgraph()?
                 .map_or(0.0, |cost| cost.total()),
-            ActualCostMode::Legacy => self.cost_calculator.actual(
+            ActualCostMode::ResponseShape => self.cost_calculator.actual(
                 request,
                 response,
                 &context
