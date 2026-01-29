@@ -211,7 +211,7 @@ pub(crate) enum DemandControlError {
         /// The maximum total cost of the subgraph queries
         max_cost: f64,
     },
-    /// auery actual cost {actual_cost} exceeded configured maximum {max_cost}
+    /// Query actual cost {actual_cost} exceeded configured maximum {max_cost}
     #[allow(dead_code)]
     ActualCostTooExpensive {
         /// The actual cost of the query
