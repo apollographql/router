@@ -275,11 +275,11 @@ When enabling `demand_control` for the first time, set it to `measure` mode. Thi
 
 The `actual_cost_mode` option allows you to choose how the actual cost of an operation is calculated.
 
-* `by_subgraph` (default for Router versions >= v2.12.0) sums the cost of each subgraph response. This method reflects
+* `by_subgraph` (default for Router versions &ge;v2.12.0) sums the cost of each subgraph response. This method reflects
   the total work done per operation and more closely mirrors the cost estimation strategy.
 * `response_shape` uses only the final shape of the response. It does not consider the intermediate work required to
   attain that shape, i.e. fields that were fetched to support federated lookups that were not included in the client
-  response. This behavior was the only option available in Router versions <= v2.11.0.
+  response. This behavior was the only option available in Router versions &le;v2.11.0.
 
 ## Telemetry for demand control
 
