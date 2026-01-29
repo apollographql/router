@@ -50,7 +50,6 @@ Previously, you would only be able to restrict that query via `demand_control.st
 
 * If you set it <= 15, the query would execute
 * If you set it >15, the query would be rejected
-*
 
 This feature allows much more granular control. In addition to `demand_control.static_estimated.max`, which operates as
 before, there are also per subgraph maxes.
