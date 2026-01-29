@@ -705,6 +705,30 @@ async fn invalidate_with_endpoint_by_type() {
     ");
 }
 
+/// Tests cache invalidation by entity cache tags set via the `apolloEntityCacheTags` extension.
+///
+/// The `experimental_mock_subgraphs` plugin generates `apolloEntityCacheTags` from `__cacheTags`
+/// fields in the mock entity data. The extension is an array of arrays where each inner array
+/// corresponds **positionally** to entities in the `_entities` response array.
+///
+/// For example, with this mock configuration in `base_subgraphs()`:
+/// ```json
+/// "entities": [
+///     {"__cacheTags": ["product-1"], "__typename": "Product", "upc": "1", ...},
+///     {"__cacheTags": ["product-2"], "__typename": "Product", "upc": "2", ...},
+/// ]
+/// ```
+///
+/// The subgraph response will include:
+/// ```json
+/// "extensions": {"apolloEntityCacheTags": [["product-1"], ["product-2"]]}
+/// ```
+///
+/// The router associates cache tags positionally: the first entity (upc "1") gets tags
+/// `["product-1"]`, the second entity (upc "2") gets tags `["product-2"]`.
+///
+/// This test verifies that invalidating by cache tag `"product-1"` only invalidates the
+/// first entity's cache, requiring a new fetch from the reviews subgraph.
 #[tokio::test(flavor = "multi_thread")]
 async fn invalidate_with_endpoint_by_entity_cache_tag() {
     if !graph_os_enabled() {

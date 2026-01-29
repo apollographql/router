@@ -750,6 +750,7 @@ mod tests {
                 CacheKeyMetadata::default(),
                 PlanOptions::default(),
                 ComputeJobType::QueryPlanning,
+                variables.clone(),
             ))
             .await
             .unwrap();
