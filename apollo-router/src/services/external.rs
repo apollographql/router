@@ -370,7 +370,6 @@ mod test {
     use super::*;
     use crate::test_harness::tracing_test;
 
-
     #[test]
     fn it_will_build_router_externalizable_correctly() {
         Externalizable::<String>::router_builder()
