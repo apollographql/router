@@ -1763,7 +1763,21 @@ async fn cache_store_entities_from_response(
             None
         };
 
-        // Support cache tags coming from subgraph extensions
+        // cache tags coming from the subgraph response extension allow for granular invalidation
+        // by being very specific about _which_ entities we're invalidating. The nested arrays look
+        // like this:
+        //
+        //   "data": {"_entities": [{"id": 1, ...}, {"id": 2, ...}]}
+        //   "extensions": {"apolloEntityCacheTags": [["tag-1"], ["tag-2"]]}
+        //
+        // where entity with id=1 corresponds to ["tag-1"] and entity with id=2 to ["tag-2"]
+        //
+        // this nested array design was in response to how things were previously: a single flat
+        // array with all the invalidation cache tags, which would invalidate _all_ entities when
+        // any tag was matched. With nested arrays, each array positionally corresponds to a
+        // specific entity and its tags are treated individually to that entity rather than
+        // applying to all entities
+
         let per_entity_surrogate_keys = response
             .response
             .body()
@@ -2453,6 +2467,8 @@ async fn insert_entities_in_result(
     let mut to_insert: Vec<_> = Vec::new();
     let mut debug_ctx_entries = Vec::new();
     let mut entities_it = entities.drain(..).enumerate();
+    // iterate through per-entity cache tags in parallel with entities; tags are matched
+    // positionally, meaning the first tag array applies to the first entity, etc
     let mut per_entity_surrogate_keys_it = per_entity_surrogate_keys.iter();
 
     // insert requested entities and cached entities in the same order as
@@ -2509,6 +2525,8 @@ async fn insert_entities_in_result(
                     has_errors = true;
                 }
 
+                // apply per-entity cache tags from the subgraph's apolloEntityCacheTags extension; these tags
+                // enable targeted cache invalidation for this specific entity
                 if let Some(Value::Array(keys)) = specific_surrogate_keys {
                     invalidation_keys
                         .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
