@@ -19,6 +19,7 @@ use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -580,91 +581,26 @@ fn authenticate(
             }
         };
 
-        if let Some(configured_issuers) = issuers
-            && let Some(token_issuer) = token_data
-                .claims
-                .as_object()
-                .and_then(|o| o.get("iss"))
-                .and_then(|value| value.as_str())
-            && !configured_issuers.contains(token_issuer)
-        {
-            let mut issuers_for_error: Vec<String> = configured_issuers.into_iter().collect();
-            issuers_for_error.sort(); // done to maintain consistent ordering in error message
-            return failure_message(
-                request,
-                config,
-                AuthenticationError::InvalidIssuer {
-                    expected: issuers_for_error
-                        .iter()
-                        .map(|issuer| issuer.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    token: token_issuer.to_string(),
-                },
-                StatusCode::INTERNAL_SERVER_ERROR,
-                source_of_extracted_jwt,
-            );
+        if let Some(configured_issuers) = issuers {
+            let maybe_token_issuers = token_data.claims.as_object().and_then(|o| o.get("iss"));
+            if let Err(err) = validate_issuers(&configured_issuers, maybe_token_issuers) {
+                return failure_message(
+                    request,
+                    config,
+                    err,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    source_of_extracted_jwt,
+                );
+            }
         }
 
         if let Some(configured_audiences) = audiences {
             let maybe_token_audiences = token_data.claims.as_object().and_then(|o| o.get("aud"));
-            let Some(maybe_token_audiences) = maybe_token_audiences else {
-                let mut audiences_for_error: Vec<String> =
-                    configured_audiences.into_iter().collect();
-                audiences_for_error.sort(); // done to maintain consistent ordering in error message
+            if let Err(err) = validate_audiences(&configured_audiences, maybe_token_audiences) {
                 return failure_message(
                     request,
                     config,
-                    AuthenticationError::InvalidAudience {
-                        expected: audiences_for_error
-                            .iter()
-                            .map(|audience| audience.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        actual: "<none>".to_string(),
-                    },
-                    StatusCode::UNAUTHORIZED,
-                    source_of_extracted_jwt,
-                );
-            };
-
-            if let Some(token_audience) = maybe_token_audiences.as_str() {
-                if !configured_audiences.contains(token_audience) {
-                    let mut audiences_for_error: Vec<String> =
-                        configured_audiences.into_iter().collect();
-                    audiences_for_error.sort(); // done to maintain consistent ordering in error message
-                    return failure_message(
-                        request,
-                        config,
-                        AuthenticationError::InvalidAudience {
-                            expected: audiences_for_error
-                                .iter()
-                                .map(|audience| audience.to_string())
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                            actual: token_audience.to_string(),
-                        },
-                        StatusCode::UNAUTHORIZED,
-                        source_of_extracted_jwt,
-                    );
-                }
-            } else {
-                // If the token has incorrectly configured audiences, we cannot validate it against
-                // the configured audiences.
-                let mut audiences_for_error: Vec<String> =
-                    configured_audiences.into_iter().collect();
-                audiences_for_error.sort(); // done to maintain consistent ordering in error message
-                return failure_message(
-                    request,
-                    config,
-                    AuthenticationError::InvalidAudience {
-                        expected: audiences_for_error
-                            .iter()
-                            .map(|audience| audience.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        actual: maybe_token_audiences.to_string(),
-                    },
+                    err,
                     StatusCode::UNAUTHORIZED,
                     source_of_extracted_jwt,
                 );
@@ -719,6 +655,102 @@ fn authenticate(
         StatusCode::UNAUTHORIZED,
         source_of_extracted_jwt,
     )
+}
+
+fn validate_issuers(
+    configured_issuers: &Issuers,
+    token_issuer: Option<&serde_json::Value>,
+) -> Result<(), AuthenticationError> {
+    let issuer_error = |actual: String| {
+        // Standardize issuer - sort it and join the elements with a comma
+        let mut issuers: Vec<String> = configured_issuers.iter().cloned().collect();
+        issuers.sort();
+
+        let expected = issuers.join(", ");
+        Err(AuthenticationError::InvalidIssuer {
+            expected,
+            token: actual,
+        })
+    };
+
+    if configured_issuers.is_empty() {
+        // No issuers to compare against
+        return Ok(());
+    }
+
+    match token_issuer {
+        None | Some(Value::Null) => {
+            // No issuer in token; allow this as well
+            Ok(())
+        }
+
+        Some(Value::String(token_issuer)) => {
+            // Check if this issuer is in our list
+            if configured_issuers.contains(token_issuer) {
+                Ok(())
+            } else {
+                issuer_error(token_issuer.to_string())
+            }
+        }
+
+        Some(unexpected_value) => {
+            // If the token has an incorrectly configured issuer, we cannot validate it against
+            // the configured issuers.
+            issuer_error(unexpected_value.to_string())
+        }
+    }
+}
+
+fn validate_audiences(
+    configured_audiences: &Audiences,
+    token_audiences: Option<&serde_json::Value>,
+) -> Result<(), AuthenticationError> {
+    let audience_error = |actual: String| {
+        // Standardize audience - sort it and join the elements with a comma
+        let mut audiences: Vec<String> = configured_audiences.iter().cloned().collect();
+        audiences.sort();
+
+        let expected = audiences.join(", ");
+        Err(AuthenticationError::InvalidAudience { expected, actual })
+    };
+
+    if configured_audiences.is_empty() {
+        // No audiences to compare against
+        return Ok(());
+    }
+
+    let Some(token_audiences) = token_audiences else {
+        return audience_error("<none>".to_string());
+    };
+
+    match token_audiences {
+        Value::String(token_audience) => {
+            // Check if this audience exists in our list
+            if configured_audiences.contains(token_audience) {
+                Ok(())
+            } else {
+                audience_error(token_audience.to_string())
+            }
+        }
+
+        Value::Array(token_audiences_arr) => {
+            // Check if any of these audiences is in our list
+            for token_audience in token_audiences_arr.iter().filter_map(|aud| aud.as_str()) {
+                if configured_audiences.contains(token_audience) {
+                    return Ok(());
+                }
+            }
+
+            // No matches, so return an error
+            audience_error(token_audiences.to_string())
+        }
+
+        unexpected_value => {
+            // If the token has incorrectly configured audiences, we cannot validate it against
+            // the configured audiences.
+            audience_error(unexpected_value.to_string())
+        }
+    }
 }
 
 // This macro allows us to use it in our plugin registry!

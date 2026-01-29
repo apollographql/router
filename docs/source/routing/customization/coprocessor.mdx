@@ -958,6 +958,8 @@ An object mapping of all HTTP header names and values for the corresponding requ
 
 Ensure headers are handled like HTTP headers in general. For example, normalize header case before your coprocessor operates on them.
 
+Any headers with non-UTF-8 values are omitted from coprocessor requests, and the router logs a warning when this occurs.
+
 If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `headers`, the router replaces the existing headers with that value.
 
 > The router discards any `content-length` headers sent by coprocessors because incorrect `content-length` values can lead to HTTP request failures.

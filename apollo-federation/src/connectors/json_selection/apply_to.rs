@@ -25,6 +25,8 @@ use super::methods::ArrowMethod;
 use super::parser::*;
 use crate::connectors::spec::ConnectSpec;
 
+pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
+
 impl JSONSelection {
     // Applying a selection to a JSON value produces a new JSON value, along
     // with any/all errors encountered in the process. The value is represented
@@ -46,7 +48,7 @@ impl JSONSelection {
         let mut vars_with_paths: VarsWithPathsMap = IndexMap::default();
         for (var_name, var_data) in vars {
             vars_with_paths.insert(
-                KnownVariable::External(var_name.clone()),
+                KnownVariable::External(var_name.as_str().to_string()),
                 (var_data, InputPath::empty().append(json!(var_name))),
             );
         }
@@ -115,8 +117,6 @@ impl JSONSelection {
         }
     }
 }
-
-pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
 
 fn lookup_variable<'a>(
     vars: &'a VarsWithPathsMap,
@@ -694,8 +694,8 @@ impl ApplyToInternal for WithRange<PathList> {
                                 .prepend_errors(errors);
                         }
 
-                        if let Some(result) = result_opt.as_ref() {
-                            tail.apply_to_path(result, vars, &method_path, spec)
+                        if let Some(result) = result_opt {
+                            tail.apply_to_path(&result, vars, &method_path, spec)
                                 .prepend_errors(errors)
                         } else {
                             // If the method produced no output, assume the errors
@@ -737,7 +737,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
-                    input_shape.locations.iter().cloned(),
+                    input_shape.locations().cloned(),
                 );
             }
             ShapeCase::All(shapes) => {
@@ -745,7 +745,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
-                    input_shape.locations.iter().cloned(),
+                    input_shape.locations().cloned(),
                 );
             }
             ShapeCase::Error(error) => {
@@ -753,7 +753,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     Some(partial) => Shape::error_with_partial(
                         error.message.clone(),
                         self.compute_output_shape(context, partial.clone(), dollar_shape),
-                        input_shape.locations.iter().cloned(),
+                        input_shape.locations().cloned(),
                     ),
                     None => input_shape.clone(),
                 };
@@ -1315,7 +1315,7 @@ impl ApplyToInternal for SubSelection {
 
         // Build up the merged object shape using Shape::all to merge the
         // individual named_selection object shapes.
-        let mut all_shape = Shape::none();
+        let mut all_shape = Shape::unknown([]);
 
         for named_selection in self.selections.iter() {
             // Simplifying as we go with Shape::all keeps all_shape relatively
@@ -1342,7 +1342,7 @@ impl ApplyToInternal for SubSelection {
             }
         }
 
-        if all_shape.is_none() {
+        if all_shape.is_unknown() {
             Shape::empty_object(self.shape_location(context.source_id()))
         } else {
             all_shape
@@ -1354,10 +1354,10 @@ impl ApplyToInternal for SubSelection {
 fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
     if let ShapeCase::One(inner) = shape.case() {
         let mut new_fields = Vec::new();
-        for inner_field in inner {
+        for inner_field in inner.iter() {
             new_fields.push(field(inner_field, key, source_id));
         }
-        return Shape::one(new_fields, shape.locations.iter().cloned());
+        return Shape::one(new_fields, shape.locations().cloned());
     }
     if shape.is_none() || shape.is_null() {
         return Shape::none();
@@ -1384,6 +1384,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_apply_to_selection(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
@@ -1548,6 +1549,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_apply_to_errors(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
@@ -1791,6 +1793,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_apply_to_nested_arrays(#[case] spec: ConnectSpec) {
         let data = json!({
             "arrayOfArrays": [
@@ -2024,6 +2027,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_apply_to_variable_expressions(#[case] spec: ConnectSpec) {
         let id_object = selection!("id: $", spec).apply_to(&json!(123));
         assert_eq!(id_object, (Some(json!({"id": 123})), vec![]));
@@ -2350,6 +2354,7 @@ mod tests {
     #[rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_inline_paths_with_subselections(#[case] spec: ConnectSpec) {
         let data = json!({
             "id": 123,
@@ -2982,6 +2987,7 @@ mod tests {
     #[rstest]
     #[case::latest(ConnectSpec::V0_2)]
     #[case::next(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_left_associative_path_evaluation(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("batch.id->first", spec).apply_to(&json!({
@@ -3478,29 +3484,21 @@ mod tests {
 
     #[test]
     fn test_compute_output_shape() {
-        assert_eq!(selection!("").shape().pretty_print(), "{}");
+        let spec = ConnectSpec::V0_3;
+
+        assert_eq!(selection!("", spec).shape().pretty_print(), "{}");
 
         assert_eq!(
-            selection!("id name").shape().pretty_print(),
+            selection!("id name", spec).shape().pretty_print(),
             "{ id: $root.*.id, name: $root.*.name }",
         );
 
-        // // On hold until variadic $(...) is merged (PR #6456).
-        // assert_eq!(
-        //     selection!("$.data { thisOrThat: $(maybe.this, maybe.that) }")
-        //         .shape()
-        //         .pretty_print(),
-        //     // Technically $.data could be an array, so this should be a union
-        //     // of this shape and a list of this shape, except with
-        //     // $root.data.0.maybe.{this,that} shape references.
-        //     //
-        //     // We could try to say that any { ... } shape represents either an
-        //     // object or a list of objects, by policy, to avoid having to write
-        //     // One<{...}, List<{...}>> everywhere a SubSelection appears.
-        //     //
-        //     // But then we don't know where the array indexes should go...
-        //     "{ thisOrThat: One<$root.data.*.maybe.this, $root.data.*.maybe.that> }",
-        // );
+        assert_eq!(
+            selection!("$.data { thisOrThat: $(maybe.this ?? maybe.that) }", spec)
+                .shape()
+                .pretty_print(),
+            "{ thisOrThat: One<$root.data.*.maybe.this?!, $root.data.*.maybe.that> }",
+        );
 
         assert_eq!(
             selection!(
@@ -3510,7 +3508,8 @@ mod tests {
                 friends: friend_ids { id: @ }
                 alias: arrayOfArrays { x y }
                 ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#
+            "#,
+                spec
             )
             .shape()
             .pretty_print(),
@@ -3520,59 +3519,84 @@ mod tests {
             // $root.friend_ids.* }> (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
             // List, rather than the friends field?
-            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
+            r#"{
+  alias: {
+    x: $root.*.arrayOfArrays.*.x,
+    y: $root.*.arrayOfArrays.*.y,
+  },
+  friends: { id: $root.*.friend_ids.* },
+  id: $root.*.id,
+  name: $root.*.name,
+  xs: $root.*.arrayOfArrays.x,
+  ys: $root.*.arrayOfArrays.y,
+}"#,
         );
 
-        // TODO: re-test when method type checking is re-enabled
-        // assert_eq!(
-        //     selection!(r#"
-        //         id
-        //         name
-        //         friends: friend_ids->map({ id: @ })
-        //         alias: arrayOfArrays { x y }
-        //         ys: arrayOfArrays.y xs: arrayOfArrays.x
-        //     "#).shape().pretty_print(),
-        //     "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: List<{ id: $root.*.friend_ids.* }>, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })")
-        //         .shape()
-        //         .pretty_print(),
-        //     "{ thrice: [$root, $root, $root] }",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[{ key: \"thrice\", value: [$root, $root, $root] }]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries.key")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[\"thrice\"]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ thrice: [@, @, @] })->entries.value")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[[$root, $root, $root]]",
-        // );
-        //
-        // assert_eq!(
-        //     selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
-        //         .shape()
-        //         .pretty_print(),
-        //     "[{ k: \"wrapped\", v: $root }]",
-        // );
+        assert_eq!(
+            selection!(
+                r#"
+                id
+                name
+                friends: friend_ids->map({ id: @ })
+                alias: arrayOfArrays { x y }
+                ys: arrayOfArrays.y xs: arrayOfArrays.x
+            "#,
+                spec
+            )
+            .shape()
+            .pretty_print(),
+            r#"{
+  alias: {
+    x: $root.*.arrayOfArrays.*.x,
+    y: $root.*.arrayOfArrays.*.y,
+  },
+  friends: List<{ id: $root.*.friend_ids.* }>,
+  id: $root.*.id,
+  name: $root.*.name,
+  xs: $root.*.arrayOfArrays.x,
+  ys: $root.*.arrayOfArrays.y,
+}"#,
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })", spec)
+                .shape()
+                .pretty_print(),
+            "{ thrice: [$root, $root, $root] }",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries", spec)
+                .shape()
+                .pretty_print(),
+            "[{ key: \"thrice\", value: [$root, $root, $root] }]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.key", spec)
+                .shape()
+                .pretty_print(),
+            "[\"thrice\"]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ thrice: [@, @, @] })->entries.value", spec)
+                .shape()
+                .pretty_print(),
+            "[[$root, $root, $root]]",
+        );
+
+        assert_eq!(
+            selection!("$->echo({ wrapped: @ })->entries { k: key v: value }", spec)
+                .shape()
+                .pretty_print(),
+            "[{ k: \"wrapped\", v: $root }]",
+        );
     }
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_key_access_with_existing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3593,6 +3617,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_key_access_with_null_value(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3609,6 +3634,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_key_access_on_non_object(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3630,6 +3656,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_key_access_with_missing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3653,6 +3680,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_chained_optional_key_access(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3673,6 +3701,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_chained_optional_access_with_null_in_middle(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3691,6 +3720,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_method_on_null(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3707,6 +3737,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_method_with_valid_method(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3723,6 +3754,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_method_with_unknown_method(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3740,6 +3772,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_chaining_with_subselection_on_valid_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3768,6 +3801,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_chaining_with_subselection_on_null_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3784,6 +3818,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_mixed_regular_and_optional_chaining_working_case(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3809,6 +3844,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_mixed_regular_and_optional_chaining_with_null(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3828,6 +3864,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_with_valid_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3853,6 +3890,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_with_null_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3869,6 +3907,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_with_missing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3885,6 +3924,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_with_non_object(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -3922,7 +3962,13 @@ mod tests {
         );
         assert_eq!(
             author_selection.shape().pretty_print(),
-            "{ author: One<{ age: $root.*.author?.*.age, middleName: $root.*.author?.*.middleName? }, None> }",
+            r#"{ author: One<
+    {
+      age: $root.*.author?.*.age,
+      middleName: $root.*.author?.*.middleName?,
+    },
+    None,
+  > }"#,
         );
     }
 
@@ -3978,7 +4024,7 @@ mod tests {
     }
 
     // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
-    // syntax and abstract typs.
+    // syntax and abstract types.
     /** #[cfg(test)]
     mod spread {
         use serde_json_bytes::Value as JSON;
@@ -4044,6 +4090,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_nested_optional_selection_sets(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4086,6 +4133,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_mixed_optional_selection_and_optional_chaining(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4123,6 +4171,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_parsing(#[case] spec: ConnectSpec) {
         // Test that the parser correctly handles optional selection sets
         let selection = JSONSelection::parse_with_spec("$.user? { id name }", spec).unwrap();
@@ -4140,6 +4189,7 @@ mod tests {
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn test_optional_selection_set_with_arrays(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4190,7 +4240,7 @@ mod tests {
 
     // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
     // syntax and abstract types.
-    /**
+    /*
     #[test]
     fn test_spread_syntax_a_spread_b() {
         let spec = ConnectSpec::V0_4;
@@ -4259,7 +4309,14 @@ mod tests {
         );
         assert_eq!(
             sel.shape().pretty_print(),
-            "One<{ after: $root.*.after, before: $root.*.before, matched: true }, { after: $root.*.after, before: $root.*.before }>",
+            r#"One<
+  {
+    after: $root.*.after,
+    before: $root.*.before,
+    matched: true,
+  },
+  { after: $root.*.after, before: $root.*.before },
+>"#,
         );
 
         assert_eq!(
@@ -4342,9 +4399,28 @@ mod tests {
 
             assert_eq!(
                 sel.shape().pretty_print(),
-                // An upcoming Shape library update should improve the readability
-                // of this pretty printing considerably.
-                "One<{ __typename: \"Book\", author: { name: $root.*.author.name }, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Movie\", director: $root.*.director.name, title: $root.*.title, upc: $root.*.upc }, { __typename: \"Magazine\", editor: $root.*.editor.name, title: $root.*.title, upc: $root.*.upc }, { upc: $root.*.upc }, null>"
+                r#"One<
+  {
+    __typename: "Book",
+    author: { name: $root.*.author.name },
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Movie",
+    director: $root.*.director.name,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Magazine",
+    editor: $root.*.editor.name,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  { upc: $root.*.upc },
+  null,
+>"#
             );
 
             sel
@@ -4978,7 +5054,7 @@ mod tests {
 
     // TODO Reenable this test in ConnectSpec::V0_4 when we support ... spread
     // syntax and abstract types.
-    /**
+    /*
     #[test]
     fn none_coalescing_should_allow_defaulting_match() {
         let spec = ConnectSpec::V0_4;
@@ -5059,7 +5135,7 @@ mod tests {
             ]),
         );
     }
-    **/
+    */
 
     #[test]
     fn wtf_operator_should_not_exclude_null_from_nullable_union_shape() {
@@ -5162,21 +5238,13 @@ mod tests {
                 .with_named_shapes(named_shapes)
         };
 
-        let root_shape = shape_context.named_shapes().get("$root").unwrap().clone();
-
-        assert_eq!(
-            root_shape.pretty_print(),
-            "{ stringOrNull: One<String, null> }",
-        );
-
         assert_eq!(
             nullish_string_selection
                 .compute_output_shape(
                     &shape_context,
-                    shape_context.named_shapes().get("$root").unwrap().clone(),
+                    shape_context.named_shapes()["$root"].clone()
                 )
                 .pretty_print(),
-            // Note that null has been replaced with None.
             "One<String, None>",
         );
     }
@@ -5211,6 +5279,52 @@ mod tests {
             (None, vec![]),
         );
         assert_eq!(nested_selection.apply_to(&json!({})), (None, vec![]));
+    }
+
+    #[test]
+    fn question_operator_with_nested_objects_shape() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            let person_shape = Shape::record(
+                {
+                    let mut map = Shape::empty_map();
+                    map.insert("name".to_string(), Shape::string([]));
+                    map.insert("age".to_string(), Shape::int([]));
+                    map
+                },
+                [],
+            );
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert("person".to_string(), person_shape);
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let nested_selection = selection!("$(person?.name)", spec);
+        assert_eq!(
+            nested_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "One<String, None>",
+        );
     }
 
     #[test]
@@ -5274,6 +5388,45 @@ mod tests {
     }
 
     #[test]
+    fn question_operator_with_union_shapes_non_nullable() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "value".to_string(),
+                            Shape::one([Shape::string([]), Shape::int([])], []),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let union_selection = selection!("$(value?)", spec);
+        assert_eq!(
+            union_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "One<String, Int>",
+        );
+    }
+
+    #[test]
     fn question_operator_with_error_shapes() {
         let spec = ConnectSpec::V0_3;
 
@@ -5314,6 +5467,45 @@ mod tests {
         // The question mark should be applied recursively to the partial shape within the error
         assert!(result_shape.pretty_print().contains("Error"));
         assert!(result_shape.pretty_print().contains("None"));
+    }
+
+    #[test]
+    fn question_operator_with_simple_error_shapes() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "error".to_string(),
+                            Shape::error("Something went wrong".to_string(), []),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let error_selection = selection!("$(error?)", spec);
+        assert_eq!(
+            error_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "Error<\"Something went wrong\">",
+        );
     }
 
     #[test]
@@ -5359,6 +5551,45 @@ mod tests {
                 )
                 .pretty_print(),
             "One<String, None>",
+        );
+    }
+
+    #[test]
+    fn question_operator_with_simple_all_shapes() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "intersection".to_string(),
+                            Shape::all([Shape::string([]), Shape::int([])], []),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let all_selection = selection!("$(intersection?)", spec);
+        assert_eq!(
+            all_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "All<String, Int>",
         );
     }
 
@@ -5420,6 +5651,63 @@ mod tests {
     }
 
     #[test]
+    fn question_operator_chained_shape() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "level1".to_string(),
+                            Shape::record(
+                                {
+                                    let mut inner_map = Shape::empty_map();
+                                    inner_map.insert(
+                                        "level2".to_string(),
+                                        Shape::record(
+                                            {
+                                                let mut inner_inner_map = Shape::empty_map();
+                                                inner_inner_map
+                                                    .insert("value".to_string(), Shape::string([]));
+                                                inner_inner_map
+                                            },
+                                            [],
+                                        ),
+                                    );
+                                    inner_map
+                                },
+                                [],
+                            ),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let chained_selection = selection!("$(level1?.level2?.value)", spec);
+        assert_eq!(
+            chained_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "One<String, None>",
+        );
+    }
+
+    #[test]
     fn question_operator_direct_null_input_shape() {
         let spec = ConnectSpec::V0_3;
 
@@ -5452,7 +5740,13 @@ mod tests {
         let sel = selection!("book.author? { name age? }", spec);
         assert_eq!(
             sel.shape().pretty_print(),
-            "One<{ age: $root.book.author?.*.age?, name: $root.book.author?.*.name }, None>",
+            r#"One<
+  {
+    age: $root.book.author?.*.age?,
+    name: $root.book.author?.*.name,
+  },
+  None,
+>"#,
         );
     }
 
@@ -5539,5 +5833,595 @@ mod tests {
             .pretty_print(),
             "One<String, null>",
         );
+    }
+
+    #[test]
+    fn test_none_coalescing_with_literal_fallback() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes([(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "optional".to_string(),
+                            Shape::one([Shape::string([]), Shape::none()], []),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            )]);
+
+        let none_coalesce = selection!("$(optional ?! 'fallback')", spec);
+        assert_eq!(
+            none_coalesce
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes()["$root"].clone()
+                )
+                .pretty_print(),
+            "String",
+        );
+    }
+
+    /// Test that multiple `... ->match()` spreads produce correct shape structure.
+    ///
+    /// When both spreads set __typename, the cartesian product creates
+    /// intersections like All<"Book", "Digital"> which are unsatisfiable.
+    /// This test documents the shape structure before filtering.
+    #[test]
+    fn test_multiple_spreads_shape_with_conflicting_typename() {
+        let spec = ConnectSpec::V0_4;
+
+        // Two spreads both setting __typename - creates conflicts
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... format->match(
+                ['digital', { __typename: $('Digital'), downloadUrl: $.url }],
+                ['physical', { __typename: $('Physical'), weight: $.weight }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // Cartesian product of spreads creates unsatisfiable All<> intersections
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: All<"Book", "Digital">,
+    downloadUrl: $root.*.url,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: All<"Book", "Physical">,
+    title: $root.*.title,
+    upc: $root.*.upc,
+    weight: $root.*.weight,
+  },
+  null,
+  {
+    __typename: All<"Film", "Digital">,
+    director: $root.*.director,
+    downloadUrl: $root.*.url,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: All<"Film", "Physical">,
+    director: $root.*.director,
+    upc: $root.*.upc,
+    weight: $root.*.weight,
+  },
+>"#,
+        );
+    }
+
+    /// Test multiple spreads where only the first sets __typename (valid pattern).
+    ///
+    /// This is the correct pattern: first spread determines __typename,
+    /// second spread adds fields without conflicting.
+    #[test]
+    fn test_multiple_spreads_shape_without_typename_conflict() {
+        let spec = ConnectSpec::V0_4;
+
+        // First spread sets __typename, second adds fields without __typename
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... format->match(
+                ['digital', { downloadUrl: $.url }],
+                ['physical', { weight: $.weight }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // No conflict: second spread adds fields but doesn't override __typename
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: "Book",
+    downloadUrl: $root.*.url,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Book",
+    title: $root.*.title,
+    upc: $root.*.upc,
+    weight: $root.*.weight,
+  },
+  null,
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    downloadUrl: $root.*.url,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    upc: $root.*.upc,
+    weight: $root.*.weight,
+  },
+>"#,
+        );
+    }
+
+    /// Test single spread with ->match() to verify baseline behavior.
+    #[test]
+    fn test_single_spread_shape() {
+        let spec = ConnectSpec::V0_4;
+
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // Single spread produces clean One<> with distinct __typename values
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: "Book",
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    upc: $root.*.upc,
+  },
+  null,
+>"#,
+        );
+    }
+
+    /// Test multiple spreads where both specify the same __typename.
+    ///
+    /// When both spreads set __typename to the same value (e.g., "Book"),
+    /// the second spread matches category->match independently.
+    #[test]
+    fn test_multiple_spreads_same_typename_no_conflict() {
+        let spec = ConnectSpec::V0_4;
+
+        // Both spreads match 'book' and set __typename: "Book"
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { __typename: $('Book'), author: $.author }]
+            )
+            "#,
+            spec
+        );
+
+        // Cartesian product: each first spread case × each second spread case
+        // - Book (first) + Book (second) = Book with both fields
+        // - Book (first) + no match (second) = Book without author
+        // - Film (first) + Book (second) = conflicting All<"Film", "Book">
+        // - Film (first) + no match (second) = Film unchanged
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: "Book",
+    author: $root.*.author,
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Book",
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: All<"Film", "Book">,
+    author: $root.*.author,
+    director: $root.*.director,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    upc: $root.*.upc,
+  },
+  null,
+>"#,
+        );
+    }
+
+    /// Test field shadowing when second spread overwrites a field from first.
+    #[test]
+    fn test_multiple_spreads_field_shadowing() {
+        let spec = ConnectSpec::V0_4;
+
+        // First spread sets greeting: "hello", second sets greeting: "goodbye"
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), greeting: $('hello') }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { __typename: $('Book'), greeting: $('goodbye') }]
+            )
+            "#,
+            spec
+        );
+
+        // Two Book shapes depending on whether second spread matched:
+        // - Both matched: greeting is All<"hello", "goodbye">
+        // - Only first matched: greeting is just "hello"
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: "Book",
+    greeting: All<"hello", "goodbye">,
+    upc: $root.*.upc,
+  },
+  { __typename: "Book", greeting: "hello", upc: $root.*.upc },
+  null,
+>"#,
+        );
+    }
+
+    /// Test that second spread without __typename adds to all shapes.
+    #[test]
+    fn test_second_spread_no_typename_adds_to_all() {
+        let spec = ConnectSpec::V0_4;
+
+        // First spread sets __typename, second spread has no __typename
+        // so its fields merge with ALL shapes from first spread
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book') }],
+                ['film', { __typename: $('Film') }],
+                [@, null]
+            )
+            ... format->match(
+                ['digital', { isDigital: $(true) }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // isDigital field appears on both Book and Film shapes
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  { __typename: "Book", isDigital: true, upc: $root.*.upc },
+  null,
+  { __typename: "Film", isDigital: true, upc: $root.*.upc },
+>"#,
+        );
+    }
+
+    /// Test cartesian product of spreads with different match conditions.
+    ///
+    /// Shape analysis is conservative: it creates all combinations of spread
+    /// results, even when runtime conditions would prevent some combinations.
+    /// Here, the second spread only matches 'book', but shape analysis still
+    /// creates Film × extraField combinations since it doesn't track that
+    /// category='film' would never match ['book', ...].
+    #[test]
+    fn test_spread_cartesian_product_conservative() {
+        let spec = ConnectSpec::V0_4;
+
+        // First spread handles all categories, second only handles 'book'
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { extraField: $('only for books') }]
+            )
+            "#,
+            spec
+        );
+
+        // Shape analysis conservatively creates ALL combinations:
+        // - Book × extraField-matched = Book with extraField
+        // - Book × extraField-unmatched = Book without extraField
+        // - Film × extraField-matched = Film with extraField (even though runtime won't produce this)
+        // - Film × extraField-unmatched = Film without extraField
+        assert_eq!(
+            selection.shape().pretty_print(),
+            r#"One<
+  {
+    __typename: "Book",
+    extraField: "only for books",
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Book",
+    title: $root.*.title,
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    extraField: "only for books",
+    upc: $root.*.upc,
+  },
+  {
+    __typename: "Film",
+    director: $root.*.director,
+    upc: $root.*.upc,
+  },
+  null,
+>"#,
+        );
+    }
+
+    // ==========================================
+    // Runtime tests for multiple spread behavior
+    // ==========================================
+
+    /// Runtime test: Both spreads match 'book', fields are merged.
+    #[test]
+    fn test_multiple_spreads_runtime_both_match_book() {
+        let spec = ConnectSpec::V0_4;
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { __typename: $('Book'), author: $.author }]
+            )
+            "#,
+            spec
+        );
+
+        // Book: both spreads match, fields merge
+        let book_data = json!({
+            "upc": "123",
+            "category": "book",
+            "title": "Great Gatsby",
+            "author": "Fitzgerald"
+        });
+        let (result, errors) = selection.apply_to(&book_data);
+        assert_eq!(errors, vec![]);
+        assert_eq!(
+            result,
+            Some(json!({
+                "upc": "123",
+                "__typename": "Book",
+                "title": "Great Gatsby",
+                "author": "Fitzgerald"
+            }))
+        );
+    }
+
+    /// Runtime test: First spread matches 'film', second doesn't match.
+    #[test]
+    fn test_multiple_spreads_runtime_film_no_second_match() {
+        let spec = ConnectSpec::V0_4;
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { __typename: $('Book'), author: $.author }]
+            )
+            "#,
+            spec
+        );
+
+        // Film: first spread matches, second doesn't (category != 'book')
+        let film_data = json!({
+            "upc": "456",
+            "category": "film",
+            "director": "Nolan"
+        });
+        let (result, errors) = selection.apply_to(&film_data);
+        // Second spread produces no-match error but result is still valid
+        assert!(!errors.is_empty());
+        assert_eq!(
+            result,
+            Some(json!({
+                "upc": "456",
+                "__typename": "Film",
+                "director": "Nolan"
+            }))
+        );
+    }
+
+    /// Runtime test: Field shadowing - second spread overwrites field.
+    #[test]
+    fn test_multiple_spreads_runtime_field_shadowing() {
+        let spec = ConnectSpec::V0_4;
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), greeting: $('hello') }],
+                [@, null]
+            )
+            ... category->match(
+                ['book', { __typename: $('Book'), greeting: $('goodbye') }]
+            )
+            "#,
+            spec
+        );
+
+        // Book: both spreads match, second overwrites 'greeting'
+        let book_data = json!({
+            "upc": "789",
+            "category": "book"
+        });
+        let (result, errors) = selection.apply_to(&book_data);
+        assert_eq!(errors, vec![]);
+        // Second spread's greeting: 'goodbye' shadows first's 'hello'
+        assert_eq!(
+            result,
+            Some(json!({
+                "upc": "789",
+                "__typename": "Book",
+                "greeting": "goodbye"
+            }))
+        );
+    }
+
+    /// Runtime test: Second spread without __typename adds to all types.
+    #[test]
+    fn test_multiple_spreads_runtime_no_typename_adds_to_all() {
+        let spec = ConnectSpec::V0_4;
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book') }],
+                ['film', { __typename: $('Film') }],
+                [@, null]
+            )
+            ... format->match(
+                ['digital', { isDigital: $(true) }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // Book + digital: both spreads match
+        let book_digital = json!({
+            "upc": "111",
+            "category": "book",
+            "format": "digital"
+        });
+        let (result, errors) = selection.apply_to(&book_digital);
+        assert_eq!(errors, vec![]);
+        assert_eq!(
+            result,
+            Some(json!({
+                "upc": "111",
+                "__typename": "Book",
+                "isDigital": true
+            }))
+        );
+
+        // Film + digital: both spreads match
+        let film_digital = json!({
+            "upc": "222",
+            "category": "film",
+            "format": "digital"
+        });
+        let (result, errors) = selection.apply_to(&film_digital);
+        assert_eq!(errors, vec![]);
+        assert_eq!(
+            result,
+            Some(json!({
+                "upc": "222",
+                "__typename": "Film",
+                "isDigital": true
+            }))
+        );
+
+        // Book + physical: first spread matches, second spread hits [@, null] fallback
+        // which returns null for the whole spread, resulting in null for the output
+        let book_physical = json!({
+            "upc": "333",
+            "category": "book",
+            "format": "physical"
+        });
+        let (result, errors) = selection.apply_to(&book_physical);
+        assert_eq!(errors, vec![]);
+        // When second spread returns null via [@, null], the entire result becomes null
+        assert_eq!(result, Some(json!(null)));
+    }
+
+    /// Runtime test: Category doesn't match any case, returns null.
+    #[test]
+    fn test_multiple_spreads_runtime_no_match_returns_null() {
+        let spec = ConnectSpec::V0_4;
+        let selection = selection!(
+            r#"
+            upc
+            ... category->match(
+                ['book', { __typename: $('Book'), title: $.title }],
+                ['film', { __typename: $('Film'), director: $.director }],
+                [@, null]
+            )
+            "#,
+            spec
+        );
+
+        // Unknown category: matches [@, null] fallback
+        let unknown_data = json!({
+            "upc": "999",
+            "category": "unknown"
+        });
+        let (result, errors) = selection.apply_to(&unknown_data);
+        assert_eq!(errors, vec![]);
+        assert_eq!(result, Some(json!(null)));
     }
 }

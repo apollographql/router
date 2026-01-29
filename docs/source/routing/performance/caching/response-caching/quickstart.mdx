@@ -31,6 +31,7 @@ To use response caching in GraphOS Router, you must set up:
 In `router.yaml`, configure `response_cache`:
 - Enable response caching globally
 - Configure Redis using the same conventions described in [distributed caching](/router/configuration/distributed-caching#redis-url-configuration)
+- Configure a TTL either globally in `subgraph.all.ttl` or for each subgraph. The router requires a configured TTL to start. This TTL serves as a fallback. When a subgraph response includes a `Cache-Control` header with `max-age`, that value takes precedence.
 - Configure response caching per subgraph, with overrides per subgraph for disabling response caching and TTL
 
 For example:
@@ -46,6 +47,7 @@ response_cache:
   subgraph:
     all:
       enabled: true
+      ttl: 5m # Required: fallback TTL when responses don't include Cache-Control headers
       # Configure Redis for all subgraphs
       redis:
         urls: ["redis://localhost:6379"]
@@ -96,6 +98,10 @@ The left chart shows cache hits per subgraph and type. No cache hits appear beca
 
 ### Integrate with your schema
 Consider an example with two subgraphs: users and posts.
+
+<Note>
+    This example uses a simple, non-nullable `@key`. Simple, non-nullable `@key`s improve reliability and performance, but the router also supports compound, non-nullable `@key`s. For details, see the [FAQ](/routing/performance/caching/response-caching/faq)
+</Note>
 
 ```graphql title="users.graphql"
 extend schema

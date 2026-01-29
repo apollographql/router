@@ -6,33 +6,77 @@ redirectFrom:
     - /router/configuration/overview 
 ---
 
-Running an Apollo Router instance involves some key steps:
-- Getting the schema of the federated supergraph that your router is running
+Running an Apollo Router instance involves two key steps:
 - Configuring runtime features declaratively in YAML
-- Deploying to different environments (dev, prod, etc.)
-- Providing configuration command-line options, YAML, and environment variables at startup
-
-## Getting supergraph schema
-
-As the runtime for a federated graph, a router needs to know the schema of the graph it's running. We call the schema for a federated graph a _supergraph schema_. 
-
-You need to configure the router at startup to know where to get its supergraph schema. That configuration depends on whether or not its supergraph schema is managed by GraphOS:
-
-- If your supergraph schema is managed by GraphOS, you can configure your router with the GraphOS graph ref and API key as environment variables (`APOLLO_GRAPH_REF` and `APOLLO_KEY`). Based on these, the router can automatically fetch the supergraph schema from GraphOS.
-- Otherwise, you can provide the router a supergraph schema file [via command line or environment variable](/graphos/routing/configuration/cli#-s----supergraph).
+- Setting the supergraph schema for your router
 
 ## Configuring features in YAML
 
 Configuring the router's features happens primarily via a YAML configuration file. Named `router.yaml` by default, the router's YAML configuration file lets you configure all of a router's runtime features declaratively. 
 
-## Passing configuration at startup
+See [Router YAML Configuration](/graphos/routing/configuration/yaml) for more information.
 
-Command-line options, a YAML config, and environment variables are passed to the router at startup. 
+## Setting the supergraph schema
 
-This example command would be for a router with a GraphOS-managed graph and a custom named `myrouter.yaml` config file:
+The router needs to know the supergraph schema for the graph it's running. 
 
-```bash showLineNumbers=false
-APOLLO_KEY="..." APOLLO_GRAPH_REF="..." router --config myrouter.yaml
+The router supports several methods for setting the supergraph schema, each suited for different deployment scenarios.
+
+| | Graph artifacts | Kubernetes Operator | Local files | Uplink |
+|---|:---:|:---:|:---:|:---:|
+| Versioned, immutable schemas | ✅ | ✅ | ✅ | ❌ |
+| Deterministic deployments | ✅ | ✅ | ✅ | ❌ |
+| Blue/green deployment support | ✅ | ✅ | ✅ | ❌ |
+| Works with any infrastructure | ✅ | ❌ | ✅ | ✅ |
+| Automatic schema updates | ❌ | ✅ | ❌ | ✅ |
+| No network dependency | ❌ | ❌ | ✅ | ❌ |
+
+### Graph artifacts
+
+Use graph artifacts for production deployments where you want immutable, versioned schema references with reliable rollbacks to any previous version.
+
+To set graph artifacts as the supergraph schema for your router, use the [`--graph-artifact-reference` command line option](/graphos/routing/configuration/cli#-g----graph-artifact-reference) or [`APOLLO_GRAPH_ARTIFACT_REFERENCE` environment variable](/graphos/routing/configuration/envvars#apollo_graph_artifact_reference).
+
+```bash
+./router --graph-artifact-reference="artifact.api.apollographql.com/my-graph@sha256:6c3c62..."
 ```
 
-> The router can hot-reload updated configuration. When enabled, changes in `router.yaml` trigger the router to reload with the updated configuration.  Existing requests will finish using the existing configuration and new requests will start using the new configuration.
+```bash
+APOLLO_GRAPH_ARTIFACT_REFERENCE="artifact.api.apollographql.com/my-graph@sha256:6c3c62..." router
+```
+
+See [Graph Artifacts](/graphos/platform/schema-management/delivery/graph-artifacts) for more information.
+
+### Apollo GraphOS Operator for Kubernetes
+
+Use the Kubernetes Operator for Kubernetes-native schema management with automatic updates and built-in blue/green deployment support.
+
+See the [Apollo GraphOS Operator](/apollo-operator/) for more information.
+
+### Local schema files
+
+Use local schema files for local development, testing, or production deployments where you manage schema files directly (often combined with CI/CD pipelines).
+
+To set local schema files as the supergraph schema for your router, use the [`--supergraph` command line option](/graphos/routing/configuration/cli#-s----supergraph) or [`APOLLO_ROUTER_SUPERGRAPH_PATH` environment variable](/graphos/routing/configuration/envvars#apollo_router_supergraph_path).
+
+```bash
+router --supergraph ./supergraph.graphql
+```
+
+```bash
+APOLLO_ROUTER_SUPERGRAPH_PATH=./supergraph.graphql router
+```
+
+For zero-downtime schema updates with local files, enable [hot reload](/graphos/routing/configuration/hot-reload-schema).
+
+### Apollo Uplink (GraphOS-managed)
+
+Use Apollo Uplink when application teams don't have access to infrastructure and want automatic schema updates without manual deployment steps.
+
+To set Apollo Uplink as the supergraph schema for your router, use the `APOLLO_GRAPH_REF` environment variable.
+
+```bash
+APOLLO_GRAPH_REF="..." router
+```
+
+See [Apollo Uplink](/graphos/routing/uplink) for more information.

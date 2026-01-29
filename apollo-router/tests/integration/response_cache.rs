@@ -25,6 +25,7 @@ use tower::BoxError;
 use tower::Service as _;
 use tower::ServiceExt as _;
 
+use crate::integration::IntegrationTest;
 use crate::integration::common::graph_os_enabled;
 
 const REDIS_URL: &str = "redis://127.0.0.1:6379";
@@ -85,6 +86,43 @@ fn base_config() -> Value {
                 "listen": "127.0.0.1:4000",
                 "path": INVALIDATION_PATH,
             },
+        },
+    })
+}
+
+fn config_with_subgraph_prometheus() -> Value {
+    json!({
+        "telemetry": {
+          "exporters": {
+              "metrics": {
+                  "prometheus": {
+                      "enabled": true,
+                      "listen": "127.0.0.1:9090",
+                      "path": "/metrics"
+                  }
+              }
+          }
+        },
+        "response_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "pool_size": 3,
+                        "namespace": namespace(),
+                        "required_to_start": true,
+                    },
+                    "ttl": "10m",
+                    "private_id": "private_id"
+                },
+                "subgraphs": {
+                    "user": {
+                        "enabled": true,
+                        "private_id": "user"
+                    }
+                }
+            }
         },
     })
 }
@@ -283,6 +321,28 @@ where
         .collect();
     let body = response.into_body().collect().await.unwrap().to_bytes();
     (headers, serde_json::from_slice(&body).unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dont_duplicate_redis_connections() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config_with_subgraph_prometheus()).unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 3"#,
+            None,
+        )
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -645,6 +705,30 @@ async fn invalidate_with_endpoint_by_type() {
     ");
 }
 
+/// Tests cache invalidation by entity cache tags set via the `apolloEntityCacheTags` extension.
+///
+/// The `experimental_mock_subgraphs` plugin generates `apolloEntityCacheTags` from `__cacheTags`
+/// fields in the mock entity data. The extension is an array of arrays where each inner array
+/// corresponds **positionally** to entities in the `_entities` response array.
+///
+/// For example, with this mock configuration in `base_subgraphs()`:
+/// ```json
+/// "entities": [
+///     {"__cacheTags": ["product-1"], "__typename": "Product", "upc": "1", ...},
+///     {"__cacheTags": ["product-2"], "__typename": "Product", "upc": "2", ...},
+/// ]
+/// ```
+///
+/// The subgraph response will include:
+/// ```json
+/// "extensions": {"apolloEntityCacheTags": [["product-1"], ["product-2"]]}
+/// ```
+///
+/// The router associates cache tags positionally: the first entity (upc "1") gets tags
+/// `["product-1"]`, the second entity (upc "2") gets tags `["product-2"]`.
+///
+/// This test verifies that invalidating by cache tag `"product-1"` only invalidates the
+/// first entity's cache, requiring a new fetch from the reviews subgraph.
 #[tokio::test(flavor = "multi_thread")]
 async fn invalidate_with_endpoint_by_entity_cache_tag() {
     if !graph_os_enabled() {
@@ -801,6 +885,96 @@ async fn complex_entity_key_response_cache() {
     //
     assert!(body.errors.is_empty());
     let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name":"Item"}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
+    assert_eq!(body.data, Some(expectation));
+    insta::assert_json_snapshot!(body.extensions, {
+        ".apolloCacheDebugging.data[].cacheControl.created" => 0
+    });
+}
+
+#[tokio::test]
+async fn test_cache_keys_nullable_data() {
+    // GIVEN:
+    //   * that graphOS is enabled
+    //   * that we have a supergraph with:
+    //     * join__type with a complex key (ie, using an array)
+    //     * a complex key with a nullable field
+    //   * a router running the above
+    if !graph_os_enabled() {
+        return;
+    }
+
+    // NOTE: nulls here to represent nullable data to cache
+    let subgraphs = json!({
+        "stuff": {
+            "query": {
+                "getStatus": {
+                    "id": "1",
+                    "items": [{"id": "i1", "name": null}],
+                    "stuffDetails": "stuff we have"
+                }
+            }
+        },
+        "status": {
+            "entities": [{
+                "__typename": "Status",
+                "id": "1",
+                "items": [{"id": "i1", "name": null}],
+                "statusDetails": "status details"
+            }]
+        }
+    });
+
+    let mut config = base_config();
+    {
+        let config_mut = config.as_object_mut().unwrap();
+        config_mut.insert("experimental_mock_subgraphs".into(), subgraphs);
+        config_mut
+            .get_mut("response_cache")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert("debug".into(), true.into());
+    }
+
+    let router = apollo_router::TestHarness::builder()
+        .schema(include_str!(
+            "./fixtures/entity_key_with_null_fields.graphql"
+        ))
+        .configuration_json(config)
+        .unwrap()
+        .build_http_service()
+        .await
+        .unwrap();
+
+    let mut router = router;
+
+    // WHEN:
+    //   * a query for the Status type but with data from both the stuff and
+    //     status subgraphs
+
+    let query = r#"{
+        getStatus(id: "1") {
+            id
+            items { id name }
+            stuffDetails
+            statusDetails
+        }
+    }"#;
+
+    let mut http_req: http::Request<RouterBody> = graphql_request(query).into();
+    http_req.headers_mut().insert(
+        HeaderName::from_static("apollo-cache-debugging"),
+        HeaderValue::from_static("true"),
+    );
+    let (_, body) = make_http_request::<graphql::Response>(&mut router, http_req).await;
+
+    // THEN:
+    //   * no errors emitted! The key parses correctly
+    //   * we get data from both subgraphs
+    assert!(body.errors.is_empty());
+
+    // NOTE: nulls here are what we're testing
+    let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name": null}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
     assert_eq!(body.data, Some(expectation));
     insta::assert_json_snapshot!(body.extensions, {
         ".apolloCacheDebugging.data[].cacheControl.created" => 0

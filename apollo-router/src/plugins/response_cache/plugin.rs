@@ -310,12 +310,22 @@ impl PluginPrivate for ResponseCache {
             if Self::static_subgraph_enabled(init.config.enabled, &init.config.subgraph, subgraph) {
                 match subgraph_config.redis.clone() {
                     Some(config) => {
-                        let storage = Arc::new(OnceLock::new());
-                        storage_interface
-                            .subgraphs
-                            .insert(subgraph.clone(), storage.clone());
-                        connect_or_spawn_reconnection_task(config, storage, drop_tx.subscribe())
+                        // We need to do this because the subgraph config automatically clones from the `all` config during deserialization.
+                        // We don't want to create a new connection pool if the subgraph just inherits from the `all` config (only if all is enabled).
+                        if Some(&config) != init.config.subgraph.all.redis.as_ref()
+                            || storage_interface.all.is_none()
+                        {
+                            let storage = Arc::new(OnceLock::new());
+                            storage_interface
+                                .subgraphs
+                                .insert(subgraph.clone(), storage.clone());
+                            connect_or_spawn_reconnection_task(
+                                config,
+                                storage,
+                                drop_tx.subscribe(),
+                            )
                             .await?;
+                        }
                     }
                     None => {
                         if storage_interface.all.is_none() {
@@ -1753,7 +1763,21 @@ async fn cache_store_entities_from_response(
             None
         };
 
-        // Support cache tags coming from subgraph extensions
+        // cache tags coming from the subgraph response extension allow for granular invalidation
+        // by being very specific about _which_ entities we're invalidating. The nested arrays look
+        // like this:
+        //
+        //   "data": {"_entities": [{"id": 1, ...}, {"id": 2, ...}]}
+        //   "extensions": {"apolloEntityCacheTags": [["tag-1"], ["tag-2"]]}
+        //
+        // where entity with id=1 corresponds to ["tag-1"] and entity with id=2 to ["tag-2"]
+        //
+        // this nested array design was in response to how things were previously: a single flat
+        // array with all the invalidation cache tags, which would invalidate _all_ entities when
+        // any tag was matched. With nested arrays, each array positionally corresponds to a
+        // specific entity and its tags are treated individually to that entity rather than
+        // applying to all entities
+
         let per_entity_surrogate_keys = response
             .response
             .body()
@@ -2189,6 +2213,15 @@ pub(in crate::plugins) fn matches_selection_set(
                 matches_array_of_objects(arr, &field.selection_set)
             }
 
+            // We allow nullable fields in selection sets (ie, those fields that identify an entity, usually
+            // [if not always] listed in `@key`). That _doesn't_ mean that entities definitively
+            // must allow nullable fields, only that we happen to allow it right now; it's probably
+            // a bit of a schema-development smell to have an entity identifiable by nullable
+            // fields, but it makes practical sense if you're wanting to cache partial responses
+            Value::Null => {
+                return true;
+            }
+
             // scalar values
             _other => {
                 // Mismatch: object or array value was expected.
@@ -2434,6 +2467,8 @@ async fn insert_entities_in_result(
     let mut to_insert: Vec<_> = Vec::new();
     let mut debug_ctx_entries = Vec::new();
     let mut entities_it = entities.drain(..).enumerate();
+    // iterate through per-entity cache tags in parallel with entities; tags are matched
+    // positionally, meaning the first tag array applies to the first entity, etc
     let mut per_entity_surrogate_keys_it = per_entity_surrogate_keys.iter();
 
     // insert requested entities and cached entities in the same order as
@@ -2490,6 +2525,8 @@ async fn insert_entities_in_result(
                     has_errors = true;
                 }
 
+                // apply per-entity cache tags from the subgraph's apolloEntityCacheTags extension; these tags
+                // enable targeted cache invalidation for this specific entity
                 if let Some(Value::Array(keys)) = specific_surrogate_keys {
                     invalidation_keys
                         .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
@@ -3035,7 +3072,7 @@ mod tests {
                 "Redis storage is set globally"
             );
         }
-        if subgraph_enabled {
+        if subgraph_enabled && !all_enabled {
             assert_eq!(
                 response_cache.storage.subgraphs.len(),
                 1,
@@ -3373,6 +3410,52 @@ mod tests {
                 "test.graphql",
             )
             .unwrap();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_set_handles_null() {
+        // Note the nullable type, Nullable; this represents when you have some entity you want to
+        // identify via nullable fields, which is most useful when you're wanting to cache partial
+        // responses (what does it mean to partially identify a thing? Everything is all and only
+        // itself, no more or less--be careful in reading this test as saying something important
+        // about how entities _should_ be identified with respect to nullable fields)
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                nullable: Nullable
+            }
+            type Nullable {
+                id: ID!
+            }
+        "#;
+
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id nullable { id }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Note second location: it's `null`
+        let representation = json!({
+            "id": "TEST123",
+            "nullable": null,
+        })
+        .as_object()
+        .unwrap()
+        .clone();
 
         assert!(
             matches_selection_set(&representation, &field_set.selection_set),

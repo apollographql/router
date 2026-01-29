@@ -1,21 +1,20 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
 expression: "format!(\"{:#?}\", result.errors)"
-input_file: apollo-federation/src/connectors/validation/test_data/headers/expressions_that_evaluate_to_invalid_types.graphql
+input_file: apollo-federation/src/connectors/validation/test_data/headers/expressions_that_evaluate_to_invalid_types_v0_2.graphql
 ---
 [
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: object values aren't valid here",
+        message: "In `@source(http.headers:)`: expected union but received incompatible object\nDetails: `One<Float, Bool, String, null, None>` does not accept `{}`",
         locations: [
             12:45..12:47,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.blah`: array values aren't valid here",
+        message: "In `@connect(http.headers:)` on `Query.blah`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<List<One<String, null>>, null>`",
         locations: [
-            19:10..19:27,
             19:10..19:27,
             21:73..21:80,
         ],

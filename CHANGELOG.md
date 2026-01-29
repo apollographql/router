@@ -2,6 +2,220 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.11.0] - 2026-01-27
+
+## 🚀 Features
+
+### Support client awareness metadata via HTTP headers ([PR #8503](https://github.com/apollographql/router/pull/8503))
+
+Clients can now send library name and version metadata for client awareness and enhanced client awareness using HTTP headers. This provides a consistent transport mechanism instead of splitting values between headers and `request.extensions`.
+
+By [@calvincestari](https://github.com/calvincestari) in https://github.com/apollographql/router/pull/8503
+
+### Reload OCI artifacts when a tag reference changes ([PR #8805](https://github.com/apollographql/router/pull/8805))
+
+You can now configure tag-based OCI references in the router. When you use a tag reference such as `artifacts.apollographql.com/my-org/my-graph:prod`, the router polls and reloads when that tag points to a new artifact.
+
+This also applies to automatically generated variant tags and custom tags.
+
+By [@graytonio](https://github.com/graytonio) in https://github.com/apollographql/router/pull/8805
+
+### Add memory limit option for cooperative cancellation ([PR #8808](https://github.com/apollographql/router/pull/8808))
+
+The router now supports a `memory_limit` option on `experimental_cooperative_cancellation` to cap memory allocations during query planning. When the memory limit is exceeded, the router:
+
+- In `enforce` mode, cancels query planning and returns an error to the client.
+- In `measure` mode, records the cancellation outcome in metrics and allows query planning to complete.
+
+The memory limit works alongside the existing `timeout` option. Whichever limit is reached first triggers cancellation.
+
+This feature is only available on Unix platforms when the `global-allocator` feature is enabled and `dhat-heap` is not enabled.
+
+Example configuration:
+
+```yaml
+supergraph:
+  query_planning:
+    experimental_cooperative_cancellation:
+      enabled: true
+      mode: enforce  # or "measure" to only record metrics
+      memory_limit: 50mb  # Supports formats like "50mb", "1gb", "1024kb", etc.
+      timeout: 5s  # Optional: can be combined with memory_limit
+```
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8808
+
+### Add memory tracking metrics for requests ([PR #8717](https://github.com/apollographql/router/pull/8717))
+
+The router now emits two histogram metrics to track memory allocation activity during request processing:
+
+- `apollo.router.request.memory`: Memory activity across the full request lifecycle (including parsing, validation, query planning, and plugins)
+- `apollo.router.query_planner.memory`: Memory activity for query planning work in the compute job thread pool
+
+Each metric includes:
+
+- `allocation.type`: `allocated`, `deallocated`, `zeroed`, or `reallocated`
+- `context`: The tracking context name (for example, `router.request` or `query_planning`)
+
+This feature is only available on Unix platforms when the `global-allocator` feature is enabled and `dhat-heap` is not enabled.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8717
+
+## 🐛 Fixes
+
+### Support nullable `@key` fields in response caching ([PR #8767](https://github.com/apollographql/router/pull/8767))
+
+Response caching can now use nullable `@key` fields. Previously, the response caching feature rejected nullable `@key` fields, which prevented caching in schemas that use them.
+
+When you cache data keyed by nullable fields, keep your cache keys simple and avoid ambiguous `null` values.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8767
+
+### Return `429` instead of `503` when enforcing a rate limit ([PR #8765](https://github.com/apollographql/router/pull/8765))
+
+In v2.0.0, the router changed the rate-limiting error from `429` (`TOO_MANY_REQUESTS`) to `503` (`SERVICE_UNAVAILABLE`). This change restores `429` to align with the [router error documentation](https://www.apollographql.com/docs/graphos/routing/errors#429).
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8765
+
+### Add status code and error type attributes to `http_request` spans ([PR #8775](https://github.com/apollographql/router/pull/8775))
+
+The router now always adds the `http.response.status_code` attribute to `http_request` spans (for example, for `router -> subgraph` requests). The router also conditionally adds `error.type` for non-success status codes.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8775
+
+### Report response cache invalidation failures as errors ([PR #8813](https://github.com/apollographql/router/pull/8813))
+
+The router now returns an error when response cache invalidation fails. Previously, an invalidation attempt could fail without being surfaced as an error.
+
+After you upgrade, you might see an increase in the `apollo.router.operations.response_cache.invalidation.error` metric.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8813
+
+### Reuse response cache Redis connections for identical subgraph configuration ([PR #8764](https://github.com/apollographql/router/pull/8764))
+
+The response cache now reuses Redis connection pools when subgraph-level configuration resolves to the same Redis configuration as the global `all` setting. Previously, the router could create redundant Redis connections even when the effective configuration was identical.
+
+Impact: If you configure response caching at both the global and subgraph levels, you should see fewer Redis connections and lower connection overhead.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8764
+
+### Prevent TLS connections from hanging when a handshake stalls ([PR #8779](https://github.com/apollographql/router/pull/8779))
+
+The router listener loop no longer blocks while waiting for a TLS handshake to complete. Use `server.http.tls_handshake_timeout` to control how long the router waits before terminating a connection (default: `10s`).
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8779
+
+### Emit cardinality overflow metrics for more OpenTelemetry error formats ([PR #8740](https://github.com/apollographql/router/pull/8740))
+
+The router now emits the `apollo.router.telemetry.metrics.cardinality_overflow` metric for additional OpenTelemetry cardinality overflow error formats.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/8740
+
+### Propagate trace context on WebSocket upgrade requests ([PR #8739](https://github.com/apollographql/router/pull/8739))
+
+The router now injects trace propagation headers into the initial HTTP upgrade request when it opens WebSocket connections to subgraphs. This preserves distributed trace continuity between the router and subgraph services.
+
+Trace propagation happens during the HTTP handshake only. After the WebSocket connection is established, headers cannot be added to individual messages.
+
+By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/8739
+
+### Stop query planning compute jobs when the parent task is canceled ([PR #8741](https://github.com/apollographql/router/pull/8741))
+
+Query planning compute jobs now stop when cooperative cancellation cancels the parent task.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8741
+
+### Reject invalidation requests with unknown fields ([PR #8752](https://github.com/apollographql/router/pull/8752))
+
+The response cache invalidation endpoint now rejects request payloads that include unknown fields. When unknown fields are present, the router returns HTTP `400` (Bad Request).
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8752
+
+### Restore plugin access to `SubscriptionTaskParams` in `execution::Request` builders ([PR #8771](https://github.com/apollographql/router/pull/8771))
+
+Plugins and other external crates can use `SubscriptionTaskParams` with `execution::Request` builders again. This restores compatibility for plugin unit tests that construct subscription requests.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8771
+
+### Support JWT tokens with multiple audiences ([PR #8780](https://github.com/apollographql/router/pull/8780))
+
+When `issuers` or `audiences` is included in the router's JWK configuration, the router will check each request's JWT for `iss` or `aud` and reject requests with mismatches.
+
+Expected behavior:
+- If present, the [`iss`](https://datatracker.ietf.org/doc/html/rfc7519#section-4.1.1) claim must be specified as a string.
+  - ✅  The JWK's `issuers` is empty.
+  - ✅  The `iss` is a string and is present in the JWK's `issuers`.
+  - ✅  The `iss` is null.
+  - ❌  The `iss` is a string but is not present in the JWK's `issuers`.
+  - ❌  The `iss` is not a string or null.
+- If present, the [`aud`](https://datatracker.ietf.org/doc/html/rfc7519#section-4.1.3) claim can be specified as either a string or an array of strings.
+  - ✅  The JWK's `audiences` is empty.
+  - ✅  The `aud` is a string and is present in the JWK's `audiences`.
+  - ✅  The `aud` is an array of strings and at least one of those strings is present in the JWK's `audiences`.
+  - ❌  The `aud` is not a string or array of strings (i.e., null).
+
+Behavior prior to this change:
+- If the `iss` was not null or a string, it was permitted (regardless of its value).
+- If the `aud` was an array, it was rejected (regardless of its value).
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8780
+
+### Enforce feature restrictions for warning-state licenses ([PR #8768](https://github.com/apollographql/router/pull/8768))
+
+The router now enforces license restrictions even when a license is in a warning state. Previously, warning-state licenses could bypass enforcement for restricted features.
+
+If your deployment uses restricted features, the router returns an error instead of continuing to run.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8768
+
+## 🛠 Maintenance
+
+### Warn at startup when `OTEL_EXPORTER_OTLP_ENDPOINT` is set ([PR #8729](https://github.com/apollographql/router/pull/8729))
+
+The router now displays a warning at startup if the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable is set. This variable takes precedence over default configurations and can override trace export to Apollo Studio, so the warning helps you identify when telemetry data might not be sent where expected.
+
+By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/8729
+
+### Increase Redis 'unresponsive' check frequency ([PR #8763](https://github.com/apollographql/router/pull/8763))
+
+Perform the 'unresponsive' check every two seconds. This aligns with the Redis client's guideline that the check interval should be less than half the timeout value.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8763
+
+## 📚 Documentation
+
+### Fix subscription licensing discrepancy in documentation ([PR #8726](https://github.com/apollographql/router/pull/8726))
+
+Corrected the subscription support documentation to reflect that subscriptions are available on all GraphOS plans (Free, Developer, Standard, and Enterprise) with self-hosted routers.
+
+The documentation previously stated that subscription support was an Enterprise-only feature for self-hosted routers, which was incorrect. Subscriptions are a licensed feature available to all GraphOS plans when the router is connected to GraphOS with an API key and graph ref.
+
+Updated both the configuration and overview pages to remove the misleading Enterprise-only requirement and clarify the actual requirements.
+
+By [@the-gigi-apollo](https://github.com/the-gigi-apollo) in https://github.com/apollographql/router/pull/8726
+
+### Clarify traffic shaping compression headers in documentation ([PR #8773](https://github.com/apollographql/router/pull/8773))
+
+The traffic shaping documentation now clearly explains how the router handles HTTP compression headers for subgraph requests. It clarifies that `content-encoding` is set when compression is configured via `traffic_shaping`, while `accept-encoding` is automatically set on all subgraph requests to indicate the router can accept compressed responses (`gzip`, `br`, or `deflate`). The documentation also notes that these headers are added after requests are added to the debug stack, so they won't appear in the Connectors Debugger.
+
+By [@the-gigi-apollo](https://github.com/the-gigi-apollo) in https://github.com/apollographql/router/pull/8773
+
+### Document default histogram buckets and their relationship to timeout settings ([PR #8783](https://github.com/apollographql/router/pull/8783))
+
+The documentation now explains how histogram bucket configuration affects timeout monitoring in Prometheus and other metrics exporters.
+
+The documentation now includes:
+
+- Default bucket values: The router's default histogram buckets (`0.001` to `10.0` seconds)
+- Timeout behavior: Histogram metrics cap values at the highest bucket boundary, which can make timeouts appear ignored if they exceed ten seconds
+- Customization guidance: Configure custom buckets via `telemetry.exporters.metrics.common.buckets` to match your timeout settings
+
+This update helps users understand why their timeout metrics may not behave as expected and provides clear guidance on customizing buckets for applications with longer timeout configurations.
+
+By [@the-gigi-apollo](https://github.com/the-gigi-apollo) in https://github.com/apollographql/router/pull/8783
+
+
+
 # [2.10.0] - 2025-12-11
 
 ## 🚀 Features
