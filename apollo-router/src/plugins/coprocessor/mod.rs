@@ -862,8 +862,7 @@ where
 
     let headers_to_send = request_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
 
     // HTTP GET requests don't have a body
     let body_to_send = request_config
@@ -1046,8 +1045,7 @@ where
     // Encode headers, body, status, context, sdl to create a payload
     let headers_to_send = response_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
     let body_to_send = response_config
         .body
         .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
@@ -1235,8 +1233,7 @@ where
 
     let headers_to_send = request_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
 
     let body_to_send = request_config
         .body
@@ -1399,8 +1396,7 @@ where
 
     let headers_to_send = response_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
 
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
 

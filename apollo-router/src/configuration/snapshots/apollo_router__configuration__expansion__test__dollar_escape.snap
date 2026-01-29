@@ -1,0 +1,9 @@
+---
+source: apollo-router/src/configuration/expansion.rs
+expression: result
+---
+edges: $start and end$
+literal_dollar: some$api$key
+mixed: "https://api.example.com/path?price=$100"
+multiple_escapes: $first $second $third
+plain: no dollars here
