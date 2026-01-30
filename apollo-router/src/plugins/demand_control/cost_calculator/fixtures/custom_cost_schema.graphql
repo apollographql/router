@@ -150,8 +150,49 @@ type Query
       assumedSize: 50
       requireOneSlicingArgument: false
     )
+  search(input: SearchInput!): [A]
+    @join__field(graph: SUBGRAPHWITHLISTSIZE)
+    @listSize(
+      slicingArguments: ["input.pagination.first"]
+      requireOneSlicingArgument: true
+    )
+  searchWithAssumedSize(input: SearchInput): [A]
+    @join__field(graph: SUBGRAPHWITHLISTSIZE)
+    @listSize(
+      slicingArguments: ["input.pagination.first"]
+      assumedSize: 25
+      requireOneSlicingArgument: false
+    )
+  deeplyNested(input: DeeplyNestedInput!): [A]
+    @join__field(graph: SUBGRAPHWITHLISTSIZE)
+    @listSize(
+      slicingArguments: ["input.level1.level2.count"]
+      requireOneSlicingArgument: true
+    )
 }
 
 type SizedField @join__type(graph: SUBGRAPHWITHLISTSIZE) {
   items: [A]
+}
+
+input PaginationInput @join__type(graph: SUBGRAPHWITHLISTSIZE) {
+  first: Int
+  after: String
+}
+
+input SearchInput @join__type(graph: SUBGRAPHWITHLISTSIZE) {
+  pagination: PaginationInput
+  query: String
+}
+
+input DeeplyNestedInput @join__type(graph: SUBGRAPHWITHLISTSIZE) {
+  level1: NestedLevel1Input
+}
+
+input NestedLevel1Input @join__type(graph: SUBGRAPHWITHLISTSIZE) {
+  level2: NestedLevel2Input
+}
+
+input NestedLevel2Input @join__type(graph: SUBGRAPHWITHLISTSIZE) {
+  count: Int
 }
