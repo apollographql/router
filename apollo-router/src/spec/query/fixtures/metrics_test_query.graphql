@@ -1,0 +1,6 @@
+query MetricsTestQuery {
+    user {
+        id
+        name
+    }
+}
