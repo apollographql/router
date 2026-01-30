@@ -94,7 +94,7 @@ impl QueryPlan {
                 sender,
             )
             .await;
-        tracing::trace!("end of execute - have value {value:?}");
+        tracing::debug!("end of execute - have value {value:?}");
 
         if !deferred_fetches.is_empty() {
             u64_counter!(

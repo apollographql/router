@@ -784,7 +784,7 @@ async fn call_http(
                 reason: format!("tx receive failed: {err}"),
             })?
     } else {
-        tracing::debug!("we called http");
+        tracing::trace!("we called http");
         let client = client_factory.create(service_name);
         call_single_http(request, body, context, client, service_name).await
     }
@@ -823,7 +823,7 @@ pub(crate) async fn call_single_http(
 
     let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body)?;
-    tracing::debug!("our JSON body: {body:?}");
+    tracing::trace!("our JSON body: {body:?}");
     let mut request = http::Request::from_parts(parts, router::body::from_bytes(body));
 
     request
