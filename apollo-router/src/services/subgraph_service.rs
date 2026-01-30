@@ -895,6 +895,25 @@ pub(crate) async fn call_single_http(
         );
     }
 
+    // TODO remove me @carodewig
+    // hack: fail a subgraph immediately via a header
+    if let Some(header_value) = request.headers().get("FAIL_ME")
+        && header_value == service_name
+    {
+        return Ok(SubgraphResponse::builder()
+            .subgraph_name(service_name.to_string())
+            .error(
+                graphql::Error::builder()
+                    .message(format!("Manually failed {service_name}."))
+                    .extension_code(StatusCode::INTERNAL_SERVER_ERROR.to_string())
+                    .build(),
+            )
+            .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+            .context(context)
+            .extensions(Object::default())
+            .build());
+    }
+
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     let (parts, content_type, body) = match do_fetch(client, &context, service_name, request)
         .instrument(subgraph_req_span)

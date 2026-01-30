@@ -54,6 +54,7 @@ pub(crate) fn execute_selection_set<'a>(
 
                 match content.get_key_value(selection_name) {
                     None => {
+                        // TODO(@carodewig) suspicious
                         if name == TYPENAME {
                             // if the __typename field was missing but we can infer it, fill it
                             if let Some(ty) = current_type {
