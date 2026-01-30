@@ -33,7 +33,7 @@ pub(super) fn extract(
     let join_directives = supergraph_schema
         .referencers()
         .get_directive(JOIN_DIRECTIVE);
-    if join_directives.len() == 0 {
+    if join_directives.is_empty() {
         // No join directives found, nothing to do.
         return Ok(());
     }

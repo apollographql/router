@@ -298,7 +298,7 @@ impl Merger {
                         .schema()
                         .referencers()
                         .get_directive(&directive_name);
-                    if referencers.len() > 0 {
+                    if !referencers.is_empty() {
                         acc.extend(referencers);
                     }
                 }
@@ -317,7 +317,7 @@ impl Merger {
                         .schema()
                         .referencers()
                         .get_directive(&directive_name);
-                    if referencers.len() > 0 {
+                    if !referencers.is_empty() {
                         acc.extend(referencers);
                     }
                 }

@@ -109,7 +109,7 @@ pub(super) fn carryover_directives(
 
         // because the merge code handles inaccessible, we have to check if the
         // @link and directive definition are already present in the schema
-        if referencers.len() > 0
+        if !referencers.is_empty()
             && to
                 .metadata()
                 .and_then(|m| m.by_identity.get(&Identity::inaccessible_identity()))
@@ -130,7 +130,7 @@ pub(super) fn carryover_directives(
     }) {
         let directive_name = link.directive_name_in_schema(&TAG_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
-        if referencers.len() > 0 {
+        if !referencers.is_empty() {
             SchemaDefinitionPosition
                 .insert_directive(to, link.to_directive_application().into())?;
             copy_directive_definition(from, to, directive_name.clone())?;
@@ -146,7 +146,7 @@ pub(super) fn carryover_directives(
     }) {
         let directive_name = link.directive_name_in_schema(&AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
-        if referencers.len() > 0 {
+        if !referencers.is_empty() {
             SchemaDefinitionPosition
                 .insert_directive(to, link.to_directive_application().into())?;
             copy_directive_definition(from, to, directive_name.clone())?;
@@ -162,7 +162,7 @@ pub(super) fn carryover_directives(
     }) {
         let directive_name = link.directive_name_in_schema(&REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
-        if referencers.len() > 0 {
+        if !referencers.is_empty() {
             SchemaDefinitionPosition
                 .insert_directive(to, link.to_directive_application().into())?;
 
@@ -179,7 +179,7 @@ pub(super) fn carryover_directives(
     }) {
         let directive_name = link.directive_name_in_schema(&POLICY_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
-        if referencers.len() > 0 {
+        if !referencers.is_empty() {
             SchemaDefinitionPosition
                 .insert_directive(to, link.to_directive_application().into())?;
 
@@ -198,7 +198,7 @@ pub(super) fn carryover_directives(
 
         let directive_name = link.directive_name_in_schema(&COST_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
-        if referencers.len() > 0 {
+        if !referencers.is_empty() {
             insert_link = true;
             copy_directive_definition(from, to, directive_name.clone())?;
         }
@@ -206,7 +206,7 @@ pub(super) fn carryover_directives(
 
         let directive_name = link.directive_name_in_schema(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
-        if referencers.len() > 0 {
+        if !referencers.is_empty() {
             insert_link = true;
             copy_directive_definition(from, to, directive_name.clone())?;
         }
@@ -231,7 +231,7 @@ pub(super) fn carryover_directives(
             }
             let directive_name = link.directive_name_in_schema(&import.element);
             let referencers = from.referencers().get_directive(&directive_name);
-            if referencers.len() > 0 {
+            if !referencers.is_empty() {
                 if !SchemaDefinitionPosition
                     .get(to.schema())
                     .directives
@@ -264,7 +264,7 @@ pub(super) fn carryover_directives(
 
         let directive_name = link.directive_name_in_schema(&CONTEXT_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
-        if referencers.len() > 0 {
+        if !referencers.is_empty() {
             insert_link = true;
             copy_directive_definition(from, to, directive_name.clone())?;
         }
@@ -660,6 +660,10 @@ impl DirectiveReferencers {
             + self.input_object_types.len()
             + self.input_object_fields.len()
             + self.directive_arguments.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     fn copy_directives(
