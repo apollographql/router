@@ -293,22 +293,18 @@ fn build_witness_field(
     let args = field_def
         .arguments
         .iter()
-        .filter_map(|arg_def| {
-            // PORT_NOTE: JS implementation didn't skip optional arguments. Rust version skips them
-            //            for brevity.
-            if !arg_def.is_required() {
-                return None;
-            }
+        .map(|arg_def| {
+            // TODO: After the Rust port is validated, we should omit optional arguments here.
             let arg_value = match generate_witness_value(schema, arg_def) {
                 Ok(value) => value,
                 Err(e) => {
-                    return Some(Err(e));
+                    return Err(e);
                 }
             };
-            Some(Ok(Node::new(ast::Argument {
+            Ok(Node::new(ast::Argument {
                 name: arg_def.name.clone(),
                 value: arg_value,
-            })))
+            }))
         })
         .collect::<Result<Vec<_>, _>>()?;
     if args.is_empty() {
@@ -546,7 +542,7 @@ mod tests {
                 format!("{path}: {witness}")
             })
             .collect();
-        assert_snapshot!(result.join("\n\n"), @r###"
+        assert_snapshot!(result.join("\n\n"), @r#"
         Query(test) --[t]--> T(test) (types: [T]): {
           t {
             ...
@@ -561,7 +557,7 @@ mod tests {
 
         Query(test) --[t]--> T(test) --[someField]--> String(test): {
           t {
-            someField(boolArg: true, enumArg: A, floatArg: 3.14, listArg: [], myInputArg: {enumInput: A, intInput: 0}, numArg: 0, strArg: "A string value")
+            someField(boolArg: true, enumArg: A, floatArg: 3.14, listArg: [], myInputArg: {enumInput: A, intInput: 0}, numArg: 0, optionalArg: "A string value", strArg: "A string value")
           }
         }
 
@@ -588,6 +584,6 @@ mod tests {
         Query(test) --[__typename]--> String(test): {
           __typename
         }
-        "###);
+        "#);
     }
 }
