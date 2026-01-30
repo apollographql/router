@@ -17,6 +17,25 @@ use crate::json_ext::Object;
 use crate::json_ext::ValueExt;
 use crate::plugins::demand_control::DemandControlError;
 
+// Traverses a nested AST value by path segments.
+// Given path `["pagination", "count"]`, returns the value at `{pagination: {count: <value>}}`.
+fn traverse_ast_value<'a>(value: &'a AstValue, path: &[&str]) -> Option<&'a AstValue> {
+    path.iter()
+        .try_fold(value, |current, segment| match current {
+            AstValue::Object(fields) => fields
+                .iter()
+                .find(|(name, _)| name.as_str() == *segment)
+                .map(|(_, node)| node.as_ref()),
+            _ => None,
+        })
+}
+
+// Traverses a nested JSON value by path segments.
+fn traverse_json_value<'a>(value: &'a JsonValue, path: &[&str]) -> Option<&'a JsonValue> {
+    path.iter()
+        .try_fold(value, |current, segment| current.get(segment))
+}
+
 // Infers a size value from an AST argument value.
 //
 // Returns:
@@ -41,30 +60,61 @@ fn infer_size_from_variable(value: Option<&JsonValue>) -> Option<i32> {
     }
 }
 
+fn resolve_nested_size(value: &AstValue, path: &[&str], variables: &Object) -> Option<i32> {
+    match value {
+        AstValue::Object(_) => infer_size_from_argument(traverse_ast_value(value, path), variables),
+        AstValue::Variable(var_name) => infer_size_from_variable(
+            variables
+                .get(var_name.as_str())
+                .and_then(|v| traverse_json_value(v, path)),
+        ),
+        _ => None,
+    }
+}
+
+// Resolves a slicing argument path to its size value.
+// Supports nested paths like "input.count" which traverse into input objects.
+fn resolve_slicing_value(
+    args: &HashMap<&str, &AstValue>,
+    slicing_path: &str,
+    variables: &Object,
+) -> Option<i32> {
+    let segments: Vec<&str> = slicing_path.split('.').collect();
+    let (arg_name, nested_path) = segments.split_first()?;
+    let value = args.get(*arg_name)?;
+
+    if nested_path.is_empty() {
+        infer_size_from_argument(Some(*value), variables)
+    } else {
+        resolve_nested_size(value, nested_path, variables)
+    }
+}
+
 // Collects slicing argument sizes from both default values and actual query arguments.
 // Actual values override defaults when both are present.
 fn collect_slicing_sizes<'a>(
-    field: &'a Field,
-    slicing_argument_names: &IndexSet<String>,
+    field: &Field,
+    slicing_argument_names: &'a IndexSet<String>,
     variables: &Object,
 ) -> HashMap<&'a str, i32> {
-    let is_slicing_arg = |name: &str| slicing_argument_names.contains(name);
+    // Merge default and actual argument values (actuals take precedence)
+    let defaults = field
+        .definition
+        .arguments
+        .iter()
+        .filter_map(|arg| arg.default_value.as_deref().map(|v| (arg.name.as_str(), v)));
+    let actuals = field
+        .arguments
+        .iter()
+        .map(|arg| (arg.name.as_str(), arg.value.as_ref()));
+    let args: HashMap<&str, &AstValue> = defaults.chain(actuals).collect();
 
-    let defaults = field.definition.arguments.iter().filter_map(|arg| {
-        is_slicing_arg(arg.name.as_str())
-            .then(|| infer_size_from_argument(arg.default_value.as_deref(), variables))
-            .flatten()
-            .map(|size| (arg.name.as_str(), size))
-    });
-
-    let actuals = field.arguments.iter().filter_map(|arg| {
-        is_slicing_arg(arg.name.as_str())
-            .then(|| infer_size_from_argument(Some(&arg.value), variables))
-            .flatten()
-            .map(|size| (arg.name.as_str(), size))
-    });
-
-    defaults.chain(actuals).collect()
+    slicing_argument_names
+        .iter()
+        .filter_map(|path| {
+            resolve_slicing_value(&args, path, variables).map(|size| (path.as_str(), size))
+        })
+        .collect()
 }
 
 pub(in crate::plugins::demand_control) struct IncludeDirective {
@@ -280,6 +330,178 @@ mod tests {
                 infer_size_from_argument(value.as_ref(), &Object::new()),
                 None
             );
+        }
+    }
+
+    mod traverse_ast_value_tests {
+        use apollo_compiler::Node;
+        use apollo_compiler::ast::Value as AstValue;
+
+        use super::traverse_ast_value;
+
+        fn make_object(fields: Vec<(&str, AstValue)>) -> AstValue {
+            AstValue::Object(
+                fields
+                    .into_iter()
+                    .map(|(name, value)| {
+                        (apollo_compiler::Name::new_unchecked(name), Node::new(value))
+                    })
+                    .collect(),
+            )
+        }
+
+        #[test]
+        fn empty_path_returns_value() {
+            let value = AstValue::Int(apollo_compiler::ast::IntValue::new_parsed("42"));
+            assert!(matches!(
+                traverse_ast_value(&value, &[]),
+                Some(AstValue::Int(_))
+            ));
+        }
+
+        #[test]
+        fn single_level_traversal() {
+            let value = make_object(vec![(
+                "count",
+                AstValue::Int(apollo_compiler::ast::IntValue::new_parsed("10")),
+            )]);
+            let result = traverse_ast_value(&value, ["count"].as_slice());
+            assert!(matches!(result, Some(AstValue::Int(_))));
+        }
+
+        #[test]
+        fn nested_traversal() {
+            let inner = make_object(vec![(
+                "first",
+                AstValue::Int(apollo_compiler::ast::IntValue::new_parsed("5")),
+            )]);
+            let outer = make_object(vec![("pagination", inner)]);
+            let result = traverse_ast_value(&outer, ["pagination", "first"].as_slice());
+            assert!(matches!(result, Some(AstValue::Int(_))));
+        }
+
+        #[test]
+        fn missing_field_returns_none() {
+            let value = make_object(vec![(
+                "other",
+                AstValue::Int(apollo_compiler::ast::IntValue::new_parsed("10")),
+            )]);
+            assert!(traverse_ast_value(&value, &["missing"]).is_none());
+        }
+
+        #[test]
+        fn non_object_with_path_returns_none() {
+            let value = AstValue::Int(apollo_compiler::ast::IntValue::new_parsed("42"));
+            assert!(traverse_ast_value(&value, &["field"]).is_none());
+        }
+
+        /// Edge case: empty segment in path won't match any field
+        #[test]
+        fn empty_segment_returns_none() {
+            let value = make_object(vec![(
+                "count",
+                AstValue::Int(apollo_compiler::ast::IntValue::new_parsed("10")),
+            )]);
+            // An empty string segment won't match "count"
+            assert!(traverse_ast_value(&value, &[""]).is_none());
+        }
+
+        /// Edge case: path with empty segment in middle fails at that point
+        #[test]
+        fn empty_segment_in_middle_returns_none() {
+            let inner = make_object(vec![(
+                "first",
+                AstValue::Int(apollo_compiler::ast::IntValue::new_parsed("5")),
+            )]);
+            let outer = make_object(vec![("pagination", inner)]);
+            assert!(traverse_ast_value(&outer, &["pagination", "", "first"]).is_none());
+        }
+    }
+
+    mod traverse_json_value_tests {
+        use serde_json_bytes::json;
+
+        use super::traverse_json_value;
+
+        #[test]
+        fn empty_path_returns_value() {
+            let value = json!(42);
+            assert_eq!(traverse_json_value(&value, &[]), Some(&value));
+        }
+
+        #[test]
+        fn single_level_traversal() {
+            let value = json!({"count": 10});
+            let result = traverse_json_value(&value, ["count"].as_slice());
+            assert_eq!(result, Some(&json!(10)));
+        }
+
+        #[test]
+        fn nested_traversal() {
+            let value = json!({"pagination": {"first": 5}});
+            let result = traverse_json_value(&value, ["pagination", "first"].as_slice());
+            assert_eq!(result, Some(&json!(5)));
+        }
+
+        #[test]
+        fn deeply_nested_traversal() {
+            let value = json!({"level1": {"level2": {"level3": {"count": 99}}}});
+            let result =
+                traverse_json_value(&value, ["level1", "level2", "level3", "count"].as_slice());
+            assert_eq!(result, Some(&json!(99)));
+        }
+
+        #[test]
+        fn missing_field_returns_none() {
+            let value = json!({"other": 10});
+            assert!(traverse_json_value(&value, &["missing"]).is_none());
+        }
+
+        #[test]
+        fn non_object_with_path_returns_none() {
+            let value = json!(42);
+            assert!(traverse_json_value(&value, &["field"]).is_none());
+        }
+
+        #[test]
+        fn partial_path_missing_returns_none() {
+            let value = json!({"level1": {"other": 5}});
+            assert!(traverse_json_value(&value, &["level1", "level2", "count"]).is_none());
+        }
+
+        /// Edge case: empty segment won't match any field
+        #[test]
+        fn empty_segment_returns_none() {
+            let value = json!({"count": 10});
+            assert!(traverse_json_value(&value, &[""]).is_none());
+        }
+
+        /// Edge case: path with empty segment in middle fails at that point
+        #[test]
+        fn empty_segment_in_middle_returns_none() {
+            let value = json!({"pagination": {"first": 5}});
+            assert!(traverse_json_value(&value, &["pagination", "", "first"]).is_none());
+        }
+
+        /// Edge case: whitespace in segment name won't match trimmed field names
+        #[test]
+        fn whitespace_segment_returns_none() {
+            let value = json!({"count": 10});
+            assert!(traverse_json_value(&value, &[" count"]).is_none());
+        }
+
+        /// Edge case: null values in the path
+        #[test]
+        fn null_value_in_path_returns_none() {
+            let value = json!({"pagination": null});
+            assert!(traverse_json_value(&value, &["pagination", "first"]).is_none());
+        }
+
+        /// Edge case: array in the path (not supported for simple traversal)
+        #[test]
+        fn array_value_in_path_returns_none() {
+            let value = json!({"items": [{"first": 5}]});
+            assert!(traverse_json_value(&value, &["items", "first"]).is_none());
         }
     }
 }
