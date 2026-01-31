@@ -27,6 +27,7 @@ use crate::services::SupergraphResponse;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 const PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY: &str = "apollo_persisted_queries::client_name";
+const PERSISTED_QUERIES_OPERATION_ID_CONTEXT_KEY: &str = "apollo_persisted_queries::operation_id";
 const PERSISTED_QUERIES_SAFELIST_SKIP_ENFORCEMENT_CONTEXT_KEY: &str =
     "apollo_persisted_queries::safelist::skip_enforcement";
 
@@ -181,6 +182,9 @@ impl PersistedQueryLayer {
             ) {
                 let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
+                // Note that we always remove this extension even if the ID was
+                // set in the context by a plugin, so that the request doesn't
+                // look like an APQ register request.
                 body.extensions.remove("persistedQuery");
                 request.context.extensions().with_lock(|lock| {
                     // Record that we actually used our ID, so we can skip the
@@ -661,6 +665,62 @@ mod tests {
         );
         assert_eq!(map_to_query("only-cliented", None), None);
         assert_eq!(map_to_query("only-cliented", Some("not-web")), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn enabled_pq_layer_operation_id_from_context() {
+        let manifest = PersistedQueryManifest::from(vec![
+            ManifestOperation {
+                id: "id-from-context".to_string(),
+                body: "query { id_from_context: __typename }".to_string(),
+                client_name: None,
+            },
+            ManifestOperation {
+                id: "ignored-id-in-body".to_string(),
+                body: "query { ignored_id_in_body: __typename }".to_string(),
+                client_name: None,
+            },
+        ]);
+        let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
+
+        let pq_layer = PersistedQueryLayer::new(
+            &Configuration::fake_builder()
+                .persisted_query(PersistedQueries::builder().enabled(true).build())
+                .uplink(uplink_config)
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .insert(
+                PERSISTED_QUERIES_OPERATION_ID_CONTEXT_KEY,
+                "id-from-context".to_string(),
+            )
+            .unwrap();
+        let incoming_request = SupergraphRequest::fake_builder()
+            .extension(
+                "persistedQuery",
+                json!({"version": 1, "sha256Hash": "ignored-id-in-body".to_string()}),
+            )
+            .context(context)
+            .build()
+            .unwrap();
+
+        let mapped_query = pq_layer
+            .supergraph_request(incoming_request)
+            .expect("pq layer returned response instead of putting the query on the request")
+            .supergraph_request
+            .body()
+            .query
+            .clone();
+
+        assert_eq!(
+            mapped_query,
+            Some("query { id_from_context: __typename }".to_string())
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
