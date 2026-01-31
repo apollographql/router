@@ -34,7 +34,7 @@ expression: response
               "operationKind": "query",
               "operationName": "set_context_rust_qp__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "54f679312d4f2a55540b6f61c2e5edd08730f5fe8144c5a6eb00d70b436f2624",
+              "schemaAwareHash": "81471076fb28b72e2c57f0b0758e79952d2a8707d54f328904a7811793bf1087",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -80,7 +80,7 @@ expression: response
                     "typeCondition": "U"
                   }
                 ],
-                "schemaAwareHash": "6d0ab37ea22f87ec72016e87614235b994299718634744637a5e8c3904a3b6f3",
+                "schemaAwareHash": "10dc2ecbc9f477479a92ebf1124a36b51b8a5a734cf716598f234a27f00714f6",
                 "serviceName": "Subgraph1",
                 "variableUsages": [
                   "contextualArgument_1_0"

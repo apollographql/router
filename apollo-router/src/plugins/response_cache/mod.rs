@@ -4,6 +4,7 @@ pub(crate) mod debugger;
 pub(crate) mod invalidation;
 pub(crate) mod invalidation_endpoint;
 pub(crate) mod metrics;
+pub(crate) mod mutation;
 pub(crate) mod plugin;
 pub(crate) mod serde_blake3;
 mod storage;

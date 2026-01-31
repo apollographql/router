@@ -44,6 +44,8 @@ directive @federation__fromContext(field: federation__ContextFieldValue) on ARGU
 
 directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
 
+directive @federation__cacheInvalidation(cacheTag: String, type: String) repeatable on FIELD_DEFINITION
+
 directive @federation__cacheTag(format: String!) repeatable on INTERFACE | OBJECT | FIELD_DEFINITION
 
 scalar link__Import

@@ -1183,11 +1183,11 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let cache_key = "version:1.1:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let cache_key = "version:1.1:subgraph:products:type:Query:hash:2253c22516befea8a5eb2b997cd875b0b2c67023b1917accc1495d8f318914ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, cache_key, &client);
 
-    let product_cache_key = "version:1.1:subgraph:reviews:type:Product:representation:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
-    check_cache_key!(&namespace, product_cache_key, &client);
+    let cache_key = "version:1.1:subgraph:reviews:type:Product:representation:dd668a3ba05fb2fcd9e372b7063fe717f3ff1c209c29fa8367b8324e49775115:hash:6c7a8d96b2abd576c72c25f4db7094c35f388034a3dbad7e7aed5f82a9f23053:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    check_cache_key!(&namespace, cache_key, &client);
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
@@ -1244,7 +1244,8 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    check_cache_key!(&namespace, product_cache_key, &client);
+    let cache_key = "version:1.1:subgraph:reviews:type:Product:representation:dd668a3ba05fb2fcd9e372b7063fe717f3ff1c209c29fa8367b8324e49775115:hash:6c7a8d96b2abd576c72c25f4db7094c35f388034a3dbad7e7aed5f82a9f23053:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    check_cache_key!(&namespace, cache_key, &client);
 
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
@@ -1338,10 +1339,11 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     assert!(response_status.is_success());
 
     // This should be in error because we invalidated this entity
-    assert!(!cache_key_exists(&namespace, product_cache_key, &client).await?);
+    let cache_key = "version:1.1:subgraph:reviews:type:Product:representation:dd668a3ba05fb2fcd9e372b7063fe717f3ff1c209c29fa8367b8324e49775115:hash:6c7a8d96b2abd576c72c25f4db7094c35f388034a3dbad7e7aed5f82a9f23053:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    assert!(!cache_key_exists(&namespace, cache_key, &client).await?);
 
     // This entry should still be in redis because we didn't invalidate this entry
-    let cache_key = "version:1.1:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let cache_key = "version:1.1:subgraph:products:type:Query:hash:2253c22516befea8a5eb2b997cd875b0b2c67023b1917accc1495d8f318914ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     assert!(cache_key_exists(&namespace, cache_key, &client).await?);
 
     Ok(())
@@ -1427,10 +1429,10 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let query_cache_key = "version:1.1:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let query_cache_key = "version:1.1:subgraph:products:type:Query:hash:30fd7ed5ed7239589d04f378738151c36067d367ecbc98579378df5cc7a9da74:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, query_cache_key, &client);
 
-    let user_cache_key = "version:1.1:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let user_cache_key = "version:1.1:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:052b3263e7d16f8a743353c832464e5131a6aa3676525f02e94ab29c10b740e8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, user_cache_key, &client);
 
     let supergraph = apollo_router::TestHarness::builder()
@@ -1585,7 +1587,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     assert!(!cache_key_exists(&namespace, user_cache_key, &client).await?);
 
     // This entry should still be in redis because we didn't invalidate this entry
-    let cache_key = "version:1.1:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let cache_key = "version:1.1:subgraph:products:type:Query:hash:30fd7ed5ed7239589d04f378738151c36067d367ecbc98579378df5cc7a9da74:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     assert!(cache_key_exists(&namespace, cache_key, &client).await?);
 
     Ok(())

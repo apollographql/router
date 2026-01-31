@@ -20,6 +20,7 @@ use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
+pub(crate) mod cache_invalidation;
 pub(crate) mod cache_tag;
 pub(crate) mod context;
 pub(crate) mod cost;

@@ -151,6 +151,13 @@ impl Identity {
             name: name!("cacheTag"),
         }
     }
+
+    pub fn cache_invalidation_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("cacheInvalidation"),
+        }
+    }
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.
