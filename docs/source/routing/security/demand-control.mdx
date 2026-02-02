@@ -228,12 +228,12 @@ When `demand_control` is enabled, the router measures the cost of each operation
 
 Customize `demand_control` with the following settings:
 
-| Option                              | Valid values                       | Default value | Description                                                                                                                        |
-| ----------------------------------- | ---------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`                           | boolean                            | `false`       | Set `true` to measure operation costs or enforce operation cost limits.                                                            |
-| `mode`                              | `measure`, `enforce`               | --            | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
-| `strategy`                          | `static_estimated`                 | --            | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                                              |
-| `static_estimated.actual_cost_mode` | `by_subgraph`, `by_response_shape` | `by_subgraph` | `by_subgraph` calculates the cost of an operation as the sum of the cost of each subgraph response; `by_response_shape` calculates the cost based on only the final shape of the response |
+| Option                              | Valid values                       | Default value | Description                                                                                                                         |
+| ----------------------------------- | ---------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                           | boolean                            | `false`       | Set to `true` to measure operation costs or enforce operation cost limits.                                                          |
+| `mode`                              | `measure`, `enforce`               | --            | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits. |
+| `strategy`                          | `static_estimated`                 | --            | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                                               |
+| `static_estimated.actual_cost_mode` | `by_subgraph`, `by_response_shape` | `by_subgraph` | - `by_subgraph` calculates the cost of an operation as the sum of the cost of each subgraph response.<br/>- `by_response_shape` calculates the cost based on only the final shape of the response. |
 | `static_estimated.list_size`        | integer                            | --            | The assumed maximum size of a list for fields that return lists.                                                                   |
 | `static_estimated.max`              | integer                            | --            | The maximum cost of an accepted operation. An operation with a higher cost than this is rejected.                                  |
 
@@ -241,14 +241,14 @@ When enabling `demand_control` for the first time, set it to `measure` mode. Thi
 
 ### Actual cost calculation mode
 
-The `actual_cost_mode` option allows you to choose how the actual cost of an operation is calculated.
+The `actual_cost_mode` option enables you to choose how the actual cost of an operation is calculated.
 
-* `by_subgraph` (default for Router versions &ge;v2.12.0) sums the cost of each subgraph response. This method reflects
-  the total work done per operation and more closely mirrors the cost estimation strategy. It should be used unless you
+- `by_subgraph` (default for Router versions v2.12.0 and later) sums the cost of each subgraph response. This method reflects
+  the total work done per operation and more closely mirrors the cost estimation strategy. Use this method unless you
   have pre-existing plugins or coprocessors that make decisions using the actual cost.
-* `by_response_shape` uses only the final shape of the response. It does not consider the intermediate work required to
-  attain that shape, i.e. fields that were fetched to support federated lookups that were not included in the client
-  response. This behavior was the only option available in Router versions &le;v2.11.0.
+- `by_response_shape` uses only the final shape of the response. It doesn't consider the intermediate work required to
+  attain that shape, such as fields that were fetched to support federated lookups that were not included in the client
+  response. This behavior was the only option available in Router versions v2.11.0 and earlier.
 
 ## Telemetry for demand control
 
