@@ -64,7 +64,7 @@ server.listen(SOCKET_PATH, () => {
 });
 ```
 
-## Migration from HTTP
+## Migration to Unix sockets
 
 To migrate from HTTP over TCP to HTTP over Unix sockets:
 
