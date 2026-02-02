@@ -121,7 +121,7 @@ pub(crate) fn validate_merged_schema(
         let requires_referencers = subgraph
             .schema()
             .referencers
-            .get_directive(requires_directive_definition_name)?;
+            .get_directive(requires_directive_definition_name);
         // Note that @requires is only supported on object fields.
         for parent_field_pos in &requires_referencers.object_fields {
             let Some(requires_directive) = parent_field_pos

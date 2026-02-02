@@ -105,23 +105,21 @@ pub(super) fn carryover_directives(
 
     if let Some(link) = metadata.for_identity(&Identity::inaccessible_identity()) {
         let directive_name = link.directive_name_in_schema(&INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC);
-        from.referencers()
-            .get_directive(&directive_name)
-            .and_then(|referencers| {
-                // because the merge code handles inaccessible, we have to check if the
-                // @link and directive definition are already present in the schema
-                if referencers.len() > 0
-                    && to
-                        .metadata()
-                        .and_then(|m| m.by_identity.get(&Identity::inaccessible_identity()))
-                        .is_none()
-                {
-                    SchemaDefinitionPosition
-                        .insert_directive(to, link.to_directive_application().into())?;
-                    copy_directive_definition(from, to, directive_name.clone())?;
-                }
-                referencers.copy_directives(from, to, &directive_name)
-            })?;
+        let referencers = from.referencers().get_directive(&directive_name);
+
+        // because the merge code handles inaccessible, we have to check if the
+        // @link and directive definition are already present in the schema
+        if !referencers.is_empty()
+            && to
+                .metadata()
+                .and_then(|m| m.by_identity.get(&Identity::inaccessible_identity()))
+                .is_none()
+        {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
+            copy_directive_definition(from, to, directive_name.clone())?;
+        }
+        referencers.copy_directives(from, to, &directive_name)?
     }
 
     // @tag
@@ -131,16 +129,13 @@ pub(super) fn carryover_directives(
         name: TAG_DIRECTIVE_NAME_IN_SPEC,
     }) {
         let directive_name = link.directive_name_in_schema(&TAG_DIRECTIVE_NAME_IN_SPEC);
-        from.referencers()
-            .get_directive(&directive_name)
-            .and_then(|referencers| {
-                if referencers.len() > 0 {
-                    SchemaDefinitionPosition
-                        .insert_directive(to, link.to_directive_application().into())?;
-                    copy_directive_definition(from, to, directive_name.clone())?;
-                }
-                referencers.copy_directives(from, to, &directive_name)
-            })?;
+        let referencers = from.referencers().get_directive(&directive_name);
+        if !referencers.is_empty() {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
+            copy_directive_definition(from, to, directive_name.clone())?;
+        }
+        referencers.copy_directives(from, to, &directive_name)?;
     }
 
     // @authenticated
@@ -150,16 +145,13 @@ pub(super) fn carryover_directives(
         name: AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
     }) {
         let directive_name = link.directive_name_in_schema(&AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC);
-        from.referencers()
-            .get_directive(&directive_name)
-            .and_then(|referencers| {
-                if referencers.len() > 0 {
-                    SchemaDefinitionPosition
-                        .insert_directive(to, link.to_directive_application().into())?;
-                    copy_directive_definition(from, to, directive_name.clone())?;
-                }
-                referencers.copy_directives(from, to, &directive_name)
-            })?;
+        let referencers = from.referencers().get_directive(&directive_name);
+        if !referencers.is_empty() {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
+            copy_directive_definition(from, to, directive_name.clone())?;
+        }
+        referencers.copy_directives(from, to, &directive_name)?;
     }
 
     // @requiresScopes
@@ -169,17 +161,14 @@ pub(super) fn carryover_directives(
         name: REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
     }) {
         let directive_name = link.directive_name_in_schema(&REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC);
-        from.referencers()
-            .get_directive(&directive_name)
-            .and_then(|referencers| {
-                if referencers.len() > 0 {
-                    SchemaDefinitionPosition
-                        .insert_directive(to, link.to_directive_application().into())?;
+        let referencers = from.referencers().get_directive(&directive_name);
+        if !referencers.is_empty() {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
 
-                    copy_directive_definition(from, to, directive_name.clone())?;
-                }
-                referencers.copy_directives(from, to, &directive_name)
-            })?;
+            copy_directive_definition(from, to, directive_name.clone())?;
+        }
+        referencers.copy_directives(from, to, &directive_name)?;
     }
 
     // @policy
@@ -189,17 +178,14 @@ pub(super) fn carryover_directives(
         name: POLICY_DIRECTIVE_NAME_IN_SPEC,
     }) {
         let directive_name = link.directive_name_in_schema(&POLICY_DIRECTIVE_NAME_IN_SPEC);
-        from.referencers()
-            .get_directive(&directive_name)
-            .and_then(|referencers| {
-                if referencers.len() > 0 {
-                    SchemaDefinitionPosition
-                        .insert_directive(to, link.to_directive_application().into())?;
+        let referencers = from.referencers().get_directive(&directive_name);
+        if !referencers.is_empty() {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
 
-                    copy_directive_definition(from, to, directive_name.clone())?;
-                }
-                referencers.copy_directives(from, to, &directive_name)
-            })?;
+            copy_directive_definition(from, to, directive_name.clone())?;
+        }
+        referencers.copy_directives(from, to, &directive_name)?;
     }
 
     // @cost
@@ -211,26 +197,20 @@ pub(super) fn carryover_directives(
         let mut insert_link = false;
 
         let directive_name = link.directive_name_in_schema(&COST_DIRECTIVE_NAME_IN_SPEC);
-        from.referencers()
-            .get_directive(&directive_name)
-            .and_then(|referencers| {
-                if referencers.len() > 0 {
-                    insert_link = true;
-                    copy_directive_definition(from, to, directive_name.clone())?;
-                }
-                referencers.copy_directives(from, to, &directive_name)
-            })?;
+        let referencers = from.referencers().get_directive(&directive_name);
+        if !referencers.is_empty() {
+            insert_link = true;
+            copy_directive_definition(from, to, directive_name.clone())?;
+        }
+        referencers.copy_directives(from, to, &directive_name)?;
 
         let directive_name = link.directive_name_in_schema(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC);
-        from.referencers()
-            .get_directive(&directive_name)
-            .and_then(|referencers| {
-                if referencers.len() > 0 {
-                    insert_link = true;
-                    copy_directive_definition(from, to, directive_name.clone())?;
-                }
-                referencers.copy_directives(from, to, &directive_name)
-            })?;
+        let referencers = from.referencers().get_directive(&directive_name);
+        if !referencers.is_empty() {
+            insert_link = true;
+            copy_directive_definition(from, to, directive_name.clone())?;
+        }
+        referencers.copy_directives(from, to, &directive_name)?;
 
         if insert_link {
             SchemaDefinitionPosition
@@ -250,30 +230,27 @@ pub(super) fn carryover_directives(
                 return Ok(());
             }
             let directive_name = link.directive_name_in_schema(&import.element);
-            from.referencers()
-                .get_directive(&directive_name)
-                .and_then(|referencers| {
-                    if referencers.len() > 0 {
-                        if !SchemaDefinitionPosition
-                            .get(to.schema())
-                            .directives
-                            .iter()
-                            .any(|d| {
-                                d.name == DEFAULT_LINK_NAME
-                                    && d.specified_argument_by_name("url")
-                                        .and_then(|url| url.as_str())
-                                        .map(|url| link.url.to_string() == *url)
-                                        .unwrap_or_default()
-                            })
-                        {
-                            SchemaDefinitionPosition
-                                .insert_directive(to, link.to_directive_application().into())?;
-                        }
+            let referencers = from.referencers().get_directive(&directive_name);
+            if !referencers.is_empty() {
+                if !SchemaDefinitionPosition
+                    .get(to.schema())
+                    .directives
+                    .iter()
+                    .any(|d| {
+                        d.name == DEFAULT_LINK_NAME
+                            && d.specified_argument_by_name("url")
+                                .and_then(|url| url.as_str())
+                                .map(|url| link.url.to_string() == *url)
+                                .unwrap_or_default()
+                    })
+                {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
+                }
 
-                        copy_directive_definition(from, to, directive_name.clone())?;
-                    }
-                    referencers.copy_directives(from, to, &directive_name)
-                })?;
+                copy_directive_definition(from, to, directive_name.clone())?;
+            }
+            referencers.copy_directives(from, to, &directive_name)?;
             Ok::<_, FederationError>(())
         })?;
 
@@ -286,15 +263,12 @@ pub(super) fn carryover_directives(
         let mut insert_link = false;
 
         let directive_name = link.directive_name_in_schema(&CONTEXT_DIRECTIVE_NAME_IN_SPEC);
-        from.referencers()
-            .get_directive(&directive_name)
-            .and_then(|referencers| {
-                if referencers.len() > 0 {
-                    insert_link = true;
-                    copy_directive_definition(from, to, directive_name.clone())?;
-                }
-                referencers.copy_directives(from, to, &directive_name)
-            })?;
+        let referencers = from.referencers().get_directive(&directive_name);
+        if !referencers.is_empty() {
+            insert_link = true;
+            copy_directive_definition(from, to, directive_name.clone())?;
+        }
+        referencers.copy_directives(from, to, &directive_name)?;
 
         if insert_link {
             SchemaDefinitionPosition
@@ -309,121 +283,116 @@ pub(super) fn carryover_directives(
     // avoid recreating the logic for constructing the contextArguments
     // argument. This works because @fromContext is not allowed in connector
     // subgraphs, so we can always directly carry over argument values.
-    if let Ok(referencers) = from.referencers().get_directive("join__field") {
-        let fields = referencers
-            .object_fields
-            .iter()
-            .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Object(pos.clone()))
-            .chain(
-                referencers
-                    .interface_fields
-                    .iter()
-                    .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Interface(pos.clone())),
-            )
-            .filter_map(|pos| {
-                let field_def = pos.get(from.schema()).ok()?;
-                let applications = field_def
-                    .directives
-                    .iter()
-                    .filter(|d| d.name == name!("join__field"))
-                    .collect::<Vec<_>>();
-                Some((pos, applications))
-            })
-            .flat_map(|(pos, applications)| {
-                applications
-                    .into_iter()
-                    .map(move |application| (pos.clone(), application))
-            })
-            .filter_map(|(pos, application)| {
-                let argument = application
-                    .arguments
-                    .iter()
-                    .find(|arg| arg.name == name!("contextArguments"))?
-                    .clone();
-                let graph = application
-                    .arguments
-                    .iter()
-                    .find(|arg| arg.name == name!("graph"))
-                    .and_then(|arg| arg.value.as_enum())?
-                    .to_string();
-                Some((pos, graph, argument))
-            });
-
-        for (pos, graph, argument) in fields {
-            let field = pos.get(to.schema())?;
-            let directive_index = field
+    let referencers = from.referencers().get_directive("join__field");
+    let fields = referencers
+        .object_fields
+        .iter()
+        .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Object(pos.clone()))
+        .chain(
+            referencers
+                .interface_fields
+                .iter()
+                .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Interface(pos.clone())),
+        )
+        .filter_map(|pos| {
+            let field_def = pos.get(from.schema()).ok()?;
+            let applications = field_def
                 .directives
                 .iter()
-                .position(|d| {
-                    d.name == name!("join__field")
-                        && d.arguments.iter().any(|a| {
-                            a.name == name!("graph")
-                                && a.value.as_enum().map(|e| e.to_string()).unwrap_or_default()
-                                    == graph
-                        })
-                })
-                .ok_or_else(|| {
-                    FederationError::internal("Cannot find matching directive in new supergraph")
-                })?;
+                .filter(|d| d.name == name!("join__field"))
+                .collect::<Vec<_>>();
+            Some((pos, applications))
+        })
+        .flat_map(|(pos, applications)| {
+            applications
+                .into_iter()
+                .map(move |application| (pos.clone(), application))
+        })
+        .filter_map(|(pos, application)| {
+            let argument = application
+                .arguments
+                .iter()
+                .find(|arg| arg.name == name!("contextArguments"))?
+                .clone();
+            let graph = application
+                .arguments
+                .iter()
+                .find(|arg| arg.name == name!("graph"))
+                .and_then(|arg| arg.value.as_enum())?
+                .to_string();
+            Some((pos, graph, argument))
+        });
 
-            let argument_names = argument
-                .value
-                .as_list()
-                .map(|list| list.iter().flat_map(|v| v.as_object()).flatten())
-                .map(|pairs| {
-                    pairs
-                        .filter(|(name, _)| name == &name!("name"))
-                        .flat_map(|(_, value)| value.as_str())
-                        .flat_map(|s| Name::new(s).ok())
-                        .collect::<HashSet<_>>()
-                })
-                .ok_or_else(|| {
-                    FederationError::internal("Cannot find `name` argument in `contextArguments`")
-                })?;
+    for (pos, graph, argument) in fields {
+        let field = pos.get(to.schema())?;
+        let directive_index = field
+            .directives
+            .iter()
+            .position(|d| {
+                d.name == name!("join__field")
+                    && d.arguments.iter().any(|a| {
+                        a.name == name!("graph")
+                            && a.value.as_enum().map(|e| e.to_string()).unwrap_or_default() == graph
+                    })
+            })
+            .ok_or_else(|| {
+                FederationError::internal("Cannot find matching directive in new supergraph")
+            })?;
 
-            ObjectOrInterfaceFieldDirectivePosition {
-                field: pos.clone(),
-                directive_name: name!("join__field"),
-                directive_index,
-            }
-            .add_argument(to, argument)?;
+        let argument_names = argument
+            .value
+            .as_list()
+            .map(|list| list.iter().flat_map(|v| v.as_object()).flatten())
+            .map(|pairs| {
+                pairs
+                    .filter(|(name, _)| name == &name!("name"))
+                    .flat_map(|(_, value)| value.as_str())
+                    .flat_map(|s| Name::new(s).ok())
+                    .collect::<HashSet<_>>()
+            })
+            .ok_or_else(|| {
+                FederationError::internal("Cannot find `name` argument in `contextArguments`")
+            })?;
 
-            for argument_name in argument_names {
-                // Remove the argument now that it's handled by `@join__field(contextArguments:)`
-                match &pos {
-                    ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
-                        ObjectFieldArgumentDefinitionPosition {
-                            type_name: pos.type_name.clone(),
-                            field_name: pos.field_name.clone(),
-                            argument_name,
-                        }
-                        .remove(to)?;
+        ObjectOrInterfaceFieldDirectivePosition {
+            field: pos.clone(),
+            directive_name: name!("join__field"),
+            directive_index,
+        }
+        .add_argument(to, argument)?;
+
+        for argument_name in argument_names {
+            // Remove the argument now that it's handled by `@join__field(contextArguments:)`
+            match &pos {
+                ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
+                    ObjectFieldArgumentDefinitionPosition {
+                        type_name: pos.type_name.clone(),
+                        field_name: pos.field_name.clone(),
+                        argument_name,
                     }
-                    ObjectOrInterfaceFieldDefinitionPosition::Interface(pos) => {
-                        InterfaceFieldArgumentDefinitionPosition {
-                            type_name: pos.type_name.clone(),
-                            field_name: pos.field_name.clone(),
-                            argument_name,
-                        }
-                        .remove(to)?;
+                    .remove(to)?;
+                }
+                ObjectOrInterfaceFieldDefinitionPosition::Interface(pos) => {
+                    InterfaceFieldArgumentDefinitionPosition {
+                        type_name: pos.type_name.clone(),
+                        field_name: pos.field_name.clone(),
+                        argument_name,
                     }
+                    .remove(to)?;
                 }
             }
         }
-    };
+    }
 
     // @join__directive
-    if let Ok(referencers) = from
-        .referencers()
+    from.referencers()
         .get_directive(&JOIN_DIRECTIVE_DIRECTIVE_NAME)
-    {
-        referencers.copy_join_directive_directives(
+        .copy_join_directive_directives(
             from,
             to,
             &subgraph_enum_replacements,
             &connect_directive_names,
         )?;
-    }
 
     Ok(())
 }
@@ -691,6 +660,10 @@ impl DirectiveReferencers {
             + self.input_object_types.len()
             + self.input_object_fields.len()
             + self.directive_arguments.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     fn copy_directives(

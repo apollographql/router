@@ -285,8 +285,7 @@ mod tests {
         insta::assert_debug_snapshot!(
             subgraph.schema
                 .referencers()
-                .get_directive(SOURCE_DIRECTIVE_NAME_IN_SPEC.as_str())
-                .unwrap(),
+                .get_directive(SOURCE_DIRECTIVE_NAME_IN_SPEC.as_str()),
             @r###"
                 DirectiveReferencers {
                     schema: Some(
@@ -406,8 +405,7 @@ mod tests {
         // Extract the sources from the schema definition and map them to their `Source` equivalent
         let sources = schema
             .referencers()
-            .get_directive(&SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .unwrap();
+            .get_directive(&SOURCE_DIRECTIVE_NAME_IN_SPEC);
 
         let schema_directive_refs = sources.schema.as_ref().unwrap();
         let sources: Result<Vec<_>, _> = schema_directive_refs
