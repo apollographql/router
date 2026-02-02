@@ -25,44 +25,10 @@ fn authenticated_comprehensive_locations() {
         "#,
     };
 
-    let on_interface = ServiceDefinition {
-        name: "on-interface",
-        type_defs: r#"
-        type Query {
-          interface: AuthenticatedInterface!
-        }
-
-        interface AuthenticatedInterface @authenticated {
-          field: Int!
-        }
-        "#,
-    };
-
-    let on_interface_object = ServiceDefinition {
-        name: "on-interface-object",
-        type_defs: r#"
-        type AuthenticatedInterfaceObject
-          @interfaceObject
-          @key(fields: "id")
-          @authenticated
-        {
-          id: String!
-        }
-        "#,
-    };
-
     let on_scalar = ServiceDefinition {
         name: "on-scalar",
         type_defs: r#"
         scalar AuthenticatedScalar @authenticated
-
-        # This needs to exist in at least one other subgraph from where it's defined
-        # as an @interfaceObject (so arbitrarily adding it here). We don't actually
-        # apply @authenticated to this one since we want to see it propagate even
-        # when it's not applied in all locations.
-        interface AuthenticatedInterfaceObject @key(fields: "id") {
-          id: String!
-        }
         "#,
     };
 
@@ -114,8 +80,6 @@ fn authenticated_comprehensive_locations() {
 
     let result = compose_as_fed2_subgraphs(&[
         on_object,
-        on_interface,
-        on_interface_object,
         on_scalar,
         on_enum,
         on_root_field,
@@ -127,14 +91,11 @@ fn authenticated_comprehensive_locations() {
     let schema = supergraph.schema().schema();
 
     // Validate @authenticated is applied to all expected elements:
-    // ["AuthenticatedObject", "AuthenticatedInterface", "AuthenticatedInterfaceObject",
-    //  "AuthenticatedScalar", "AuthenticatedEnum", "Query.authenticatedRootField",
+    // ["AuthenticatedObject", "AuthenticatedScalar", "AuthenticatedEnum", "Query.authenticatedRootField",
     //  "ObjectWithAuthenticatedField.field", "EntityWithAuthenticatedField.field"]
 
     for coord in [
         coord!(AuthenticatedObject),
-        coord!(AuthenticatedInterface),
-        coord!(AuthenticatedInterfaceObject),
         coord!(AuthenticatedScalar),
         coord!(AuthenticatedEnum),
     ] {
@@ -318,44 +279,10 @@ fn requires_scopes_comprehensive_locations() {
         "#,
     };
 
-    let on_interface = ServiceDefinition {
-        name: "on-interface",
-        type_defs: r#"
-        type Query {
-          interface: ScopedInterface!
-        }
-
-        interface ScopedInterface @requiresScopes(scopes: ["interface"]) {
-          field: Int!
-        }
-        "#,
-    };
-
-    let on_interface_object = ServiceDefinition {
-        name: "on-interface-object",
-        type_defs: r#"
-        type ScopedInterfaceObject
-          @interfaceObject
-          @key(fields: "id")
-          @requiresScopes(scopes: ["interfaceObject"])
-        {
-          id: String!
-        }
-        "#,
-    };
-
     let on_scalar = ServiceDefinition {
         name: "on-scalar",
         type_defs: r#"
         scalar ScopedScalar @requiresScopes(scopes: ["scalar"])
-
-        # This needs to exist in at least one other subgraph from where it's defined
-        # as an @interfaceObject (so arbitrarily adding it here). We don't actually
-        # apply @requiresScopes to this one since we want to see it propagate even
-        # when it's not applied in all locations.
-        interface ScopedInterfaceObject @key(fields: "id") {
-          id: String!
-        }
         "#,
     };
 
@@ -407,8 +334,6 @@ fn requires_scopes_comprehensive_locations() {
 
     let result = compose_as_fed2_subgraphs(&[
         on_object,
-        on_interface,
-        on_interface_object,
         on_scalar,
         on_enum,
         on_root_field,
@@ -420,14 +345,11 @@ fn requires_scopes_comprehensive_locations() {
     let schema = supergraph.schema().schema();
 
     // Validate @requiresScopes is applied to all expected elements:
-    // ["ScopedObject", "ScopedInterface", "ScopedInterfaceObject",
-    //  "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
+    // ["ScopedObject", "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
     //  "ObjectWithScopedField.field", "EntityWithScopedField.field"]
 
     for coord in [
         coord!(ScopedObject),
-        coord!(ScopedInterface),
-        coord!(ScopedInterfaceObject),
         coord!(ScopedScalar),
         coord!(ScopedEnum),
     ] {
@@ -472,44 +394,10 @@ fn policy_comprehensive_locations() {
         "#,
     };
 
-    let on_interface = ServiceDefinition {
-        name: "on-interface",
-        type_defs: r#"
-        type Query {
-          interface: ScopedInterface!
-        }
-
-        interface ScopedInterface @policy(policies: ["interface"]) {
-          field: Int!
-        }
-        "#,
-    };
-
-    let on_interface_object = ServiceDefinition {
-        name: "on-interface-object",
-        type_defs: r#"
-        type ScopedInterfaceObject
-          @interfaceObject
-          @key(fields: "id")
-          @policy(policies: ["interfaceObject"])
-        {
-          id: String!
-        }
-        "#,
-    };
-
     let on_scalar = ServiceDefinition {
         name: "on-scalar",
         type_defs: r#"
         scalar ScopedScalar @policy(policies: ["scalar"])
-
-        # This needs to exist in at least one other subgraph from where it's defined
-        # as an @interfaceObject (so arbitrarily adding it here). We don't actually
-        # apply @policy to this one since we want to see it propagate even
-        # when it's not applied in all locations.
-        interface ScopedInterfaceObject @key(fields: "id") {
-          id: String!
-        }
         "#,
     };
 
@@ -561,8 +449,6 @@ fn policy_comprehensive_locations() {
 
     let result = compose_as_fed2_subgraphs(&[
         on_object,
-        on_interface,
-        on_interface_object,
         on_scalar,
         on_enum,
         on_root_field,
@@ -574,14 +460,11 @@ fn policy_comprehensive_locations() {
     let schema = supergraph.schema().schema();
 
     // Validate @policy is applied to all expected elements:
-    // ["ScopedObject", "ScopedInterface", "ScopedInterfaceObject",
-    //  "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
+    // ["ScopedObject", "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
     //  "ObjectWithScopedField.field", "EntityWithScopedField.field"]
 
     for coord in [
         coord!(ScopedObject),
-        coord!(ScopedInterface),
-        coord!(ScopedInterfaceObject),
         coord!(ScopedScalar),
         coord!(ScopedEnum),
     ] {

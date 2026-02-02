@@ -4561,7 +4561,7 @@ expression: "&schema"
               "$ref": "#/definitions/StandardInstrumentExtendedRouterOverheadAttributesWithRouterSelector"
             }
           ],
-          "description": "Histogram of router overhead (time not spent in subgraph requests)"
+          "description": "Histogram of router overhead (time not spent in subgraph requests). The default unit is\nseconds, but this can be changed with selectors"
         },
         "http.server.active_requests": {
           "allOf": [

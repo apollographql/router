@@ -3462,7 +3462,7 @@ mod tests {
 
         external_form.append(ACCEPT, HeaderValue::from_static(TEXT_HTML.essence_str()));
 
-        let actual = externalize_header_map(&external_form).expect("externalized header map");
+        let actual = externalize_header_map(&external_form);
 
         assert_eq!(expected, actual);
     }
