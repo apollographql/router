@@ -1,6 +1,6 @@
 # Coprocessor Unix Domain Socket Example
 
-This example demonstrates how to configure the Apollo Router to communicate with a coprocessor using Unix Domain Sockets (UDS) instead of HTTP. UDS provides lower latency and reduced overhead compared to HTTP networking.
+This example demonstrates how to configure the Apollo Router to communicate with a coprocessor using Unix Domain Sockets (UDS) instead of HTTP. UDS provides lower latency and reduced overhead compared to the TCP/IP network stack.
 
 ## Benefits of Unix Domain Sockets
 
