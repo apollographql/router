@@ -238,7 +238,7 @@ impl SpecDefinition for ConnectSpecDefinition {
     }
 
     fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        directive_specifications()
+        directive_specifications(&self.url.version)
     }
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {

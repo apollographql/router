@@ -660,11 +660,13 @@ impl NamedSelection {
     }
 
     /// Parse a type name (identifier starting with uppercase letter) for ...TypeName spread syntax.
+    /// Follows GraphQL Name spec: [A-Z][_0-9A-Za-z]* (uppercase start for type names)
     fn parse_spread_type_name(input: Span) -> ParseResult<WithRange<String>> {
-        // Parse identifier that starts with uppercase letter
+        // Parse identifier that starts with uppercase ASCII letter
+        // Following characters must be ASCII letter, digit, or underscore (GraphQL Name spec)
         let (remainder, name) = recognize(tuple((
             satisfy(|c: char| c.is_ascii_uppercase()),
-            take_while(|c: char| c.is_alphanumeric() || c == '_'),
+            take_while(|c: char| c.is_ascii_alphanumeric() || c == '_'),
         )))(input)?;
 
         let name_str = name.fragment().to_string();
@@ -830,6 +832,12 @@ impl NamedSelection {
 
     // NamedSelection ::= (Alias | "..." | "...TypeName")? PathSelection | Alias SubSelection
     // V0_5 adds support for ...TypeName spread syntax for @mapping directive references.
+    //
+    // MIGRATION NOTE: In v0.4, `...User` would be an anonymous spread starting with path `User`.
+    // In v0.5, `...User` (uppercase) is interpreted as a named spread referencing a @mapping.
+    // This is an intentional semantic change - users must explicitly upgrade their @link URL
+    // from v0.4 to v0.5 to opt into this behavior. The uppercase convention for type names
+    // distinguishes mapping references from lowercase path identifiers.
     fn parse_v0_5(input: Span) -> ParseResult<Self> {
         let (after_alias, alias) = opt(Alias::parse)(input.clone())?;
 
@@ -4642,5 +4650,25 @@ mod tests {
         }
 
         assert_debug_snapshot!(ext);
+    }
+
+    #[test]
+    fn test_spread_named_rejects_non_ascii_type_names() {
+        // SpreadNamed should reject non-ASCII characters to follow GraphQL Name spec
+        // Valid GraphQL names are: [A-Z][_0-9A-Za-z]* for type names
+
+        // Non-ASCII characters like emoji should be rejected
+        assert!(JSONSelection::parse_with_spec("...User🚀", ConnectSpec::V0_5).is_err());
+
+        // Non-Latin characters should be rejected
+        assert!(JSONSelection::parse_with_spec("...Пользователь", ConnectSpec::V0_5).is_err());
+
+        // Chinese characters should be rejected
+        assert!(JSONSelection::parse_with_spec("...用户", ConnectSpec::V0_5).is_err());
+
+        // Valid ASCII type names should work
+        assert!(JSONSelection::parse_with_spec("...User", ConnectSpec::V0_5).is_ok());
+        assert!(JSONSelection::parse_with_spec("...UserProfile123", ConnectSpec::V0_5).is_ok());
+        assert!(JSONSelection::parse_with_spec("...User_Profile", ConnectSpec::V0_5).is_ok());
     }
 }

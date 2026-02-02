@@ -511,12 +511,20 @@ fn mapping_directive_spec() -> DirectiveSpecification {
     )
 }
 
-pub(crate) fn directive_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-    vec![
+pub(crate) fn directive_specifications(
+    version: &crate::link::spec::Version,
+) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+    let mut specs: Vec<Box<dyn TypeAndDirectiveSpecification>> = vec![
         Box::new(connect_directive_spec()),
         Box::new(source_directive_spec()),
-        Box::new(mapping_directive_spec()),
-    ]
+    ];
+
+    // @mapping directive is only available in v0.5+
+    if version.major > 0 || version.minor >= 5 {
+        specs.push(Box::new(mapping_directive_spec()));
+    }
+
+    specs
 }
 
 #[cfg(test)]
@@ -563,8 +571,6 @@ mod tests {
         directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
-
-        directive @connect__mapping(selection: connect__JSONSelection, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -651,8 +657,6 @@ mod tests {
         directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
-
-        directive @connect__mapping(selection: connect__JSONSelection, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -744,8 +748,6 @@ mod tests {
         directive @connect(source: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, isSuccess: Mapping, selection: Mapping!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @api(name: String!, http: connect__SourceHTTP, errors: ErrorMappings, isSuccess: Mapping) repeatable on SCHEMA
-
-        directive @connect__mapping(selection: Mapping, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -839,8 +841,6 @@ mod tests {
         directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!) repeatable on FIELD_DEFINITION
 
         directive @connect__source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
-
-        directive @connect__mapping(selection: connect__JSONSelection, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String

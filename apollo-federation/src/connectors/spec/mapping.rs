@@ -47,13 +47,8 @@ pub(crate) fn extract_mapping_directive_arguments(
 ) -> Result<Vec<MappingDirectiveArguments>, FederationError> {
     let connect_spec = connect_spec_from_schema(schema).unwrap_or(DEFAULT_CONNECT_SPEC);
 
-    // Only allow @mapping in V0_5+
-    if connect_spec < ConnectSpec::V0_5 {
-        // Return empty list for older versions - @mapping is not supported
-        return Ok(Vec::new());
-    }
-
     let mut results = Vec::new();
+    let mut seen_aliases: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Iterate over Object types
     for (type_name, ty) in &schema.types {
@@ -65,11 +60,27 @@ pub(crate) fn extract_mapping_directive_arguments(
                 .iter()
                 .filter(|d| d.name == *directive_name)
             {
-                results.push(extract_single_mapping(
-                    type_name.clone(),
-                    directive,
-                    &field_names,
-                )?);
+                // Fix #1: Error if @mapping is used with connect spec < V0_5
+                if connect_spec < ConnectSpec::V0_5 {
+                    return Err(FederationError::internal(format!(
+                        "@mapping directive on type `{}` requires connect spec v0.5 or later, \
+                         but schema uses v{}",
+                        type_name,
+                        connect_spec.as_str()
+                    )));
+                }
+
+                let mapping = extract_single_mapping(type_name.clone(), directive, &field_names)?;
+
+                // Fix #4: Error on duplicate aliases
+                if !seen_aliases.insert(mapping.alias.to_string()) {
+                    return Err(FederationError::internal(format!(
+                        "Duplicate @mapping alias `{}`. Each mapping must have a unique alias.",
+                        mapping.alias
+                    )));
+                }
+
+                results.push(mapping);
             }
         }
 
@@ -82,11 +93,27 @@ pub(crate) fn extract_mapping_directive_arguments(
                 .iter()
                 .filter(|d| d.name == *directive_name)
             {
-                results.push(extract_single_mapping(
-                    type_name.clone(),
-                    directive,
-                    &field_names,
-                )?);
+                // Fix #1: Error if @mapping is used with connect spec < V0_5
+                if connect_spec < ConnectSpec::V0_5 {
+                    return Err(FederationError::internal(format!(
+                        "@mapping directive on interface `{}` requires connect spec v0.5 or later, \
+                         but schema uses v{}",
+                        type_name,
+                        connect_spec.as_str()
+                    )));
+                }
+
+                let mapping = extract_single_mapping(type_name.clone(), directive, &field_names)?;
+
+                // Fix #4: Error on duplicate aliases
+                if !seen_aliases.insert(mapping.alias.to_string()) {
+                    return Err(FederationError::internal(format!(
+                        "Duplicate @mapping alias `{}`. Each mapping must have a unique alias.",
+                        mapping.alias
+                    )));
+                }
+
+                results.push(mapping);
             }
         }
     }
@@ -114,9 +141,13 @@ fn extract_single_mapping(
             })?;
             alias = Some(Name::new(as_value)?);
         } else if arg_name == "selection" {
-            if let Some(selection_value) = arg.value.as_str() {
-                selection = Some(selection_value.to_string());
-            }
+            // Fix #2: Hard error for non-string selection
+            let selection_value = arg.value.as_str().ok_or_else(|| {
+                FederationError::internal(format!(
+                    "`selection` argument in `@mapping` directive on type `{type_name}` is not a string"
+                ))
+            })?;
+            selection = Some(selection_value.to_string());
         }
         // Unknown arguments are silently ignored (schema validation catches these)
     }
@@ -316,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mapping_ignored_in_v0_4() {
+    fn test_mapping_errors_in_v0_4() {
         let schema = Schema::parse(
             r#"
             extend schema @link(url: "https://specs.apollo.dev/connect/v0.4", import: ["@mapping"])
@@ -331,8 +362,35 @@ mod tests {
         )
         .unwrap();
 
-        let mappings = extract_mapping_directive_arguments(&schema, &name!(mapping)).unwrap();
-        // Should return empty because @mapping requires v0.5+
-        assert!(mappings.is_empty());
+        let result = extract_mapping_directive_arguments(&schema, &name!(mapping));
+        // Should error because @mapping requires v0.5+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("requires connect spec v0.5 or later"));
+        assert!(err.contains("v0.4"));
+    }
+
+    #[test]
+    fn test_duplicate_alias_error() {
+        let schema = Schema::parse(
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@mapping"])
+            directive @link(url: String, import: [link__Import]) repeatable on SCHEMA
+            scalar link__Import
+            directive @mapping(selection: String, as: String) repeatable on OBJECT | INTERFACE
+
+            type User @mapping(as: "SharedAlias") { id: ID! }
+            type Post @mapping(as: "SharedAlias") { id: ID! }
+            type Query { user: User, post: Post }
+            "#,
+            "test.graphql",
+        )
+        .unwrap();
+
+        let result = extract_mapping_directive_arguments(&schema, &name!(mapping));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Duplicate @mapping alias"));
+        assert!(err.contains("SharedAlias"));
     }
 }

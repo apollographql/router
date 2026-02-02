@@ -14,6 +14,7 @@ pub use apply_to::*;
 pub(crate) use location::Ranged;
 pub(crate) use location::WithRange;
 pub use parser::*;
+#[cfg(test)]
 pub(crate) use pretty::*;
 pub(crate) use selection_trie::SelectionTrie;
 #[cfg(test)]
@@ -61,7 +62,7 @@ mod test {
         #[case] selection: &str,
         #[case] expected: Option<Value>,
         #[case] minimum_version: &str,
-        #[values(ConnectSpec::V0_2, ConnectSpec::V0_3, ConnectSpec::V0_4)] version: ConnectSpec,
+        #[values(ConnectSpec::V0_2, ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5)] version: ConnectSpec,
     ) {
         // We're effectively skipping the test but it will be reported as passed because Rust has no runtime "mark as skipped" capability
         if version.as_str() < minimum_version {

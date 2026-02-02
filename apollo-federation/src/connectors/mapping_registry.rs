@@ -5,6 +5,10 @@
 
 use std::collections::HashSet;
 
+/// Maximum depth for mapping expansion to prevent stack overflow on deeply nested chains.
+/// This is intentionally conservative - typical use cases have 1-3 levels of nesting.
+const MAX_EXPANSION_DEPTH: usize = 32;
+
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use indexmap::IndexMap;
@@ -48,21 +52,26 @@ impl MappingRegistry {
 
     /// Build a registry from a schema by extracting all @mapping directives
     pub fn from_schema(schema: &Schema) -> Result<Self, FederationError> {
-        let mut registry = Self::new();
-
-        // Get the mapping directive name from the ConnectLink if available
-        let directive_name = if let Some(Ok(link)) = ConnectLink::new(schema) {
-            link.mapping_directive_name.clone()
-        } else {
-            // No connect link, return empty registry
-            return Ok(registry);
+        // Get the mapping directive name and spec from the ConnectLink
+        let (directive_name, spec) = match ConnectLink::new(schema) {
+            Some(Ok(link)) => (link.mapping_directive_name.clone(), link.spec),
+            Some(Err(e)) => {
+                // Propagate errors from ConnectLink creation (e.g., unknown spec version)
+                return Err(FederationError::internal(e.message));
+            }
+            None => {
+                // No connect link at all, return empty registry
+                return Ok(Self::default());
+            }
         };
+
+        let mut registry = Self::new();
 
         // Extract all @mapping directive arguments
         let mapping_args = extract_mapping_directive_arguments(schema, &directive_name)?;
 
         for args in mapping_args {
-            let definition = Self::build_mapping_definition(&args)?;
+            let definition = Self::build_mapping_definition(&args, spec)?;
             registry.mappings.insert(args.alias.clone(), definition);
         }
 
@@ -72,16 +81,16 @@ impl MappingRegistry {
     /// Build a MappingDefinition from directive arguments
     fn build_mapping_definition(
         args: &MappingDirectiveArguments,
+        spec: ConnectSpec,
     ) -> Result<MappingDefinition, FederationError> {
         let selection = if let Some(selection_str) = &args.selection {
-            // Explicit selection - parse it
-            let parsed = JSONSelection::parse_with_spec(selection_str, ConnectSpec::V0_5)
-                .map_err(|e| {
-                    FederationError::internal(format!(
-                        "Failed to parse @mapping selection on type `{}`: {}",
-                        args.type_name, e
-                    ))
-                })?;
+            // Explicit selection - parse it using the schema's actual spec version
+            let parsed = JSONSelection::parse_with_spec(selection_str, spec).map_err(|e| {
+                FederationError::internal(format!(
+                    "Failed to parse @mapping selection on type `{}`: {}",
+                    args.type_name, e
+                ))
+            })?;
 
             // Extract the SubSelection from the parsed result
             match parsed.inner {
@@ -95,7 +104,7 @@ impl MappingRegistry {
             }
         } else {
             // Auto-map mode: generate selection from field names
-            Self::generate_auto_map_selection(&args.field_names)?
+            Self::generate_auto_map_selection(&args.field_names, spec)?
         };
 
         Ok(MappingDefinition {
@@ -105,7 +114,10 @@ impl MappingRegistry {
     }
 
     /// Generate an auto-map SubSelection from field names
-    fn generate_auto_map_selection(field_names: &[Name]) -> Result<SubSelection, FederationError> {
+    fn generate_auto_map_selection(
+        field_names: &[Name],
+        spec: ConnectSpec,
+    ) -> Result<SubSelection, FederationError> {
         // Generate a simple selection string like "field1 field2 field3"
         let selection_str = field_names
             .iter()
@@ -119,10 +131,9 @@ impl MappingRegistry {
             ));
         }
 
-        let parsed =
-            JSONSelection::parse_with_spec(&selection_str, ConnectSpec::V0_5).map_err(|e| {
-                FederationError::internal(format!("Failed to generate auto-map selection: {}", e))
-            })?;
+        let parsed = JSONSelection::parse_with_spec(&selection_str, spec).map_err(|e| {
+            FederationError::internal(format!("Failed to generate auto-map selection: {}", e))
+        })?;
 
         match parsed.inner {
             TopLevelSelection::Named(sub) => Ok(sub),
@@ -151,7 +162,7 @@ impl MappingRegistry {
         selection: &JSONSelection,
     ) -> Result<JSONSelection, FederationError> {
         let mut expanding: HashSet<String> = HashSet::new();
-        let expanded_inner = self.expand_top_level(&selection.inner, &mut expanding)?;
+        let expanded_inner = self.expand_top_level(&selection.inner, &mut expanding, 0)?;
 
         Ok(JSONSelection {
             inner: expanded_inner,
@@ -164,14 +175,23 @@ impl MappingRegistry {
         &self,
         top_level: &TopLevelSelection,
         expanding: &mut HashSet<String>,
+        depth: usize,
     ) -> Result<TopLevelSelection, FederationError> {
+        if depth > MAX_EXPANSION_DEPTH {
+            return Err(FederationError::internal(format!(
+                "Mapping expansion exceeded maximum depth of {}. \
+                 This may indicate an overly complex mapping chain.",
+                MAX_EXPANSION_DEPTH
+            )));
+        }
+
         match top_level {
             TopLevelSelection::Named(sub) => {
-                let expanded = self.expand_sub_selection(sub, expanding)?;
+                let expanded = self.expand_sub_selection(sub, expanding, depth)?;
                 Ok(TopLevelSelection::Named(expanded))
             }
             TopLevelSelection::Path(path) => {
-                let expanded = self.expand_path_selection(path, expanding)?;
+                let expanded = self.expand_path_selection(path, expanding, depth)?;
                 Ok(TopLevelSelection::Path(expanded))
             }
         }
@@ -182,6 +202,7 @@ impl MappingRegistry {
         &self,
         sub: &SubSelection,
         expanding: &mut HashSet<String>,
+        depth: usize,
     ) -> Result<SubSelection, FederationError> {
         let mut new_selections = Vec::new();
 
@@ -203,8 +224,9 @@ impl MappingRegistry {
                         // Mark as expanding to detect cycles
                         expanding.insert(type_name.to_string());
 
-                        // Recursively expand the mapping's selection
-                        let expanded = self.expand_sub_selection(&mapping.selection, expanding)?;
+                        // Recursively expand the mapping's selection (increment depth)
+                        let expanded =
+                            self.expand_sub_selection(&mapping.selection, expanding, depth + 1)?;
 
                         // Remove from expanding set
                         expanding.remove(type_name);
@@ -221,7 +243,7 @@ impl MappingRegistry {
                 }
                 _ => {
                     // Recursively expand any nested selections
-                    let expanded_named = self.expand_named_selection(named, expanding)?;
+                    let expanded_named = self.expand_named_selection(named, expanding, depth)?;
                     new_selections.push(expanded_named);
                 }
             }
@@ -238,8 +260,9 @@ impl MappingRegistry {
         &self,
         named: &NamedSelection,
         expanding: &mut HashSet<String>,
+        depth: usize,
     ) -> Result<NamedSelection, FederationError> {
-        let expanded_path = self.expand_path_selection(&named.path, expanding)?;
+        let expanded_path = self.expand_path_selection(&named.path, expanding, depth)?;
 
         Ok(NamedSelection {
             prefix: named.prefix.clone(),
@@ -252,8 +275,9 @@ impl MappingRegistry {
         &self,
         path: &PathSelection,
         expanding: &mut HashSet<String>,
+        depth: usize,
     ) -> Result<PathSelection, FederationError> {
-        let expanded_path_list = self.expand_path_list(path.path.as_ref(), expanding)?;
+        let expanded_path_list = self.expand_path_list(path.path.as_ref(), expanding, depth)?;
 
         Ok(PathSelection {
             path: WithRange::new(expanded_path_list, path.path.range()),
@@ -265,28 +289,29 @@ impl MappingRegistry {
         &self,
         path_list: &PathList,
         expanding: &mut HashSet<String>,
+        depth: usize,
     ) -> Result<PathList, FederationError> {
         match path_list {
             PathList::Selection(sub) => {
-                let expanded = self.expand_sub_selection(sub, expanding)?;
+                let expanded = self.expand_sub_selection(sub, expanding, depth)?;
                 Ok(PathList::Selection(expanded))
             }
             PathList::Key(key, tail) => {
-                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding)?;
+                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
                 Ok(PathList::Key(
                     key.clone(),
                     WithRange::new(expanded_tail, tail.range()),
                 ))
             }
             PathList::Var(var, tail) => {
-                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding)?;
+                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
                 Ok(PathList::Var(
                     var.clone(),
                     WithRange::new(expanded_tail, tail.range()),
                 ))
             }
             PathList::Method(method, args, tail) => {
-                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding)?;
+                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
                 Ok(PathList::Method(
                     method.clone(),
                     args.clone(),
@@ -294,14 +319,14 @@ impl MappingRegistry {
                 ))
             }
             PathList::Expr(expr, tail) => {
-                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding)?;
+                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
                 Ok(PathList::Expr(
                     expr.clone(),
                     WithRange::new(expanded_tail, tail.range()),
                 ))
             }
             PathList::Question(tail) => {
-                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding)?;
+                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
                 Ok(PathList::Question(WithRange::new(
                     expanded_tail,
                     tail.range(),
@@ -332,7 +357,8 @@ mod tests {
         use apollo_compiler::name;
 
         let field_names = vec![name!(id), name!(name), name!(email)];
-        let sub = MappingRegistry::generate_auto_map_selection(&field_names).unwrap();
+        let sub =
+            MappingRegistry::generate_auto_map_selection(&field_names, ConnectSpec::V0_5).unwrap();
 
         assert_eq!(sub.selections.len(), 3);
     }
@@ -349,7 +375,7 @@ mod tests {
             field_names: vec![name!(id), name!(name)],
         };
 
-        let result = MappingRegistry::build_mapping_definition(&args);
+        let result = MappingRegistry::build_mapping_definition(&args, ConnectSpec::V0_5);
         assert!(
             result.is_ok(),
             "Methods should be allowed in @mapping selections"
@@ -733,7 +759,7 @@ mod tests {
     #[test]
     fn test_auto_map_empty_fields_error() {
         // Auto-map with no fields should fail
-        let result = MappingRegistry::generate_auto_map_selection(&[]);
+        let result = MappingRegistry::generate_auto_map_selection(&[], ConnectSpec::V0_5);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("no fields"));
     }
@@ -749,7 +775,7 @@ mod tests {
             field_names: vec![name!(id)],
         };
 
-        let result = MappingRegistry::build_mapping_definition(&args);
+        let result = MappingRegistry::build_mapping_definition(&args, ConnectSpec::V0_5);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Failed to parse"));
     }
@@ -766,7 +792,7 @@ mod tests {
             field_names: vec![name!(id)],
         };
 
-        let result = MappingRegistry::build_mapping_definition(&args);
+        let result = MappingRegistry::build_mapping_definition(&args, ConnectSpec::V0_5);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
