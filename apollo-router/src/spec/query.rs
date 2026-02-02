@@ -285,11 +285,10 @@ impl Query {
         let token_limit = parser.tokens_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
+        observe_query_recursion(recursion_limit);
+        observe_query_lexical_token(token_limit);
+
         let hash = schema.schema_id.operation_hash(query, operation_name);
-
-        observe_query_recursion(recursion_limit, &hash, operation_name);
-        observe_query_lexical_token(token_limit, &hash, operation_name);
-
         ParsedDocumentInner::new(
             ast,
             Arc::new(executable_document),
