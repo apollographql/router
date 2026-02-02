@@ -454,3 +454,31 @@ subscription:
 ```
 
 If a client attempts to execute a subscription on your router when it's already at `max_open_subscriptions`, the router rejects the client's request with an error.
+
+### Subscription end reason telemetry
+
+The router records an `apollo.subscription.end_reason` attribute on the `router` span for subscription operations. This attribute indicates why a subscription ended, which is useful for debugging and monitoring subscription lifecycle in your observability tools.
+
+The possible values for `apollo.subscription.end_reason` are:
+
+| Value | Description |
+|-------|-------------|
+| `complete` | The subscription completed normally. The subgraph sent a final response indicating the subscription has completed. |
+| `server_close` | The server (subgraph) closed the connection gracefully. This occurs when the subgraph sends an empty response to signal intentional closure. |
+| `stream_end` | The underlying data stream ended. This typically happens when the subgraph closes the WebSocket connection or the stream source terminates. |
+| `heartbeat_delivery_failed` | A heartbeat message could not be delivered to the client. This usually indicates the client disconnected unexpectedly while the router was sending a keepalive heartbeat. |
+| `client_disconnect` | The client disconnected after receiving subscription data (not during a heartbeat). This indicates the client closed the connection mid-subscription. |
+
+<Note>
+
+The `apollo.subscription.end_reason` attribute only appears on subscription operations using the [HTTP multipart protocol](/router/executing-operations/subscription-multipart-protocol/). WebSocket passthrough subscriptions to subgraphs have their own connection lifecycle managed by the WebSocket protocol.
+
+</Note>
+
+#### Example: Monitoring subscription health
+
+You can use the `apollo.subscription.end_reason` attribute to monitor the health of your subscriptions:
+
+- A high rate of `heartbeat_delivery_failed` or `client_disconnect` may indicate network instability between clients and your router.
+- Frequent `stream_end` values without corresponding `complete` values may indicate issues with your subgraph subscription sources.
+- The `complete` value indicates healthy subscription lifecycles where the subgraph properly signals completion.
