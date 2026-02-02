@@ -4,6 +4,8 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 
+use crate::plugins::telemetry::config_new::http_client::attributes::HttpClientAttributes;
+use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use ::serde::Deserialize;
 use futures::future::BoxFuture;
 use global::get_text_map_propagator;
@@ -355,28 +357,28 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let path = schema_uri.path();
 
-        let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
-            "otel.kind" = "CLIENT",
-            "net.peer.name" = %host,
-            "net.peer.port" = %port,
-            "http.route" = %path,
-            "http.url" = %schema_uri,
-            "net.transport" = %transport,
-        );
+        //let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
+        //    "otel.kind" = "CLIENT",
+        //    "net.peer.name" = %host,
+        //    "net.peer.port" = %port,
+        //    "http.route" = %path,
+        //    "http.url" = %schema_uri,
+        //    "net.transport" = %transport,
+        //);
 
         // Apply any attributes that were stored by telemetry middleware
-        if let Some(client_attributes) = context
-            .extensions()
-            .with_lock(|lock| lock.get::<HttpClientAttributes>().cloned())
-        {
-            http_req_span.set_span_dyn_attributes(client_attributes.attributes);
-        }
-        get_text_map_propagator(|propagator| {
-            propagator.inject_context(
-                &prepare_context(http_req_span.context()),
-                &mut crate::otel_compat::HeaderInjector(http_request.headers_mut()),
-            );
-        });
+        //if let Some(client_attributes) = context
+        //    .extensions()
+        //    .with_lock(|lock| lock.get::<HttpClientAttributes>().cloned())
+        //{
+        //    http_req_span.set_span_dyn_attributes(client_attributes.attributes);
+        //}
+        //get_text_map_propagator(|propagator| {
+        //    propagator.inject_context(
+        //        &prepare_context(http_req_span.context()),
+        //        &mut crate::otel_compat::HeaderInjector(http_request.headers_mut()),
+        //    );
+        //});
 
         let (parts, body) = http_request.into_parts();
 
@@ -409,7 +411,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
             };
 
             let http_response = do_fetch(client, &service_name, http_request)
-                .instrument(http_req_span)
+                //.instrument(http_req_span)
                 .await?;
 
             Ok(HttpResponse {
