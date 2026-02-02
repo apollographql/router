@@ -34,6 +34,11 @@ pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs
 /// Version of our externalised data. Rev this if it changes
 pub(crate) const EXTERNALIZABLE_VERSION: u8 = 1;
 
+/// Extension to pass Unix socket path information to HttpClientService for proper span attributes.
+/// Uses Arc<str> for efficient sharing without cloning the actual string data.
+#[derive(Clone, Debug)]
+pub(crate) struct UnixSocketPath(pub(crate) Arc<str>);
+
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub(crate) enum PipelineStep {
     RouterRequest,
@@ -290,7 +295,7 @@ where
         // Standard http::Uri doesn't support unix:// URLs, so we need to convert them
         // using hyperlocal which encodes the socket path in a way the Unix connector understands
         #[cfg(unix)]
-        let (converted_uri, _unix_socket_path) = if let Some(path) = uri.strip_prefix("unix://") {
+        let (converted_uri, unix_socket_path) = if let Some(path) = uri.strip_prefix("unix://") {
             let (socket_path, http_path) = parse_unix_socket_url(path);
             let socket_path: Arc<str> = socket_path.into();
             let hyperlocal_uri: http::Uri =
@@ -302,12 +307,20 @@ where
         #[cfg(not(unix))]
         let (converted_uri, unix_socket_path): (http::Uri, Option<Arc<str>>) = (uri.parse()?, None);
 
-        let http_request = http::Request::builder()
+        let mut http_request = http::Request::builder()
             .uri(converted_uri)
             .method(Method::POST)
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
             .body(router::body::from_bytes(serde_json::to_vec(&self)?))?;
+
+        // Add Unix socket path as an extension so HttpClientService can use it for span attributes
+        // We use Arc<str> so HttpClientService can share the path without cloning the string data
+        if let Some(socket_path) = unix_socket_path {
+            http_request
+                .extensions_mut()
+                .insert(UnixSocketPath(socket_path));
+        }
 
         let request = HttpRequest {
             http_request,
