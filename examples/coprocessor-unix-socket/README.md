@@ -66,7 +66,7 @@ server.listen(SOCKET_PATH, () => {
 
 ## Migration from HTTP
 
-To migrate from HTTP to Unix sockets:
+To migrate from HTTP over TCP to HTTP over Unix sockets:
 
 1. Update your coprocessor to listen on a Unix socket
 2. Change the router configuration URL from `http://...` to `unix://...`
