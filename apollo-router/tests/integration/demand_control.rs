@@ -287,7 +287,7 @@ async fn actual_cost_can_vary_based_on_mode(
         custom_costs()
     )]
     test_parameters: TestSetupParameters,
-    #[values("by_subgraph", "response_shape")] mode: &str,
+    #[values("by_subgraph", "by_response_shape")] mode: &str,
 ) -> Result<(), BoxError> {
     set_snapshot_suffix!("{}_{}", test_parameters.name, mode);
 

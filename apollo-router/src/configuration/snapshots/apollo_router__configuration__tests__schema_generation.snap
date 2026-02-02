@@ -123,7 +123,7 @@ expression: "&schema"
           "type": "string"
         },
         {
-          "const": "response_shape",
+          "const": "by_response_shape",
           "deprecated": true,
           "description": "Computes the cost based on the final structure of the composed response, not including any\ninterim structures from subgraph responses that did not make it to the composed response.",
           "type": "string"
@@ -9158,7 +9158,7 @@ expression: "&schema"
                       "$ref": "#/definitions/ActualCostMode"
                     }
                   ],
-                  "description": "The strategy used to calculate the actual cost incurred by an operation.\n\n* `by_subgraph` (default) computes the cost of each subgraph response and sums them\n  to get the total query cost.\n* `response_shape` computes the cost based on the final structure of the composed\n  response, not including any interim structures from subgraph responses that did not\n  make it to the composed response."
+                  "description": "The strategy used to calculate the actual cost incurred by an operation.\n\n* `by_subgraph` (default) computes the cost of each subgraph response and sums them\n  to get the total query cost.\n* `by_response_shape` computes the cost based on the final structure of the composed\n  response, not including any interim structures from subgraph responses that did not\n  make it to the composed response."
                 },
                 "list_size": {
                   "description": "The assumed length of lists returned by the operation.",
