@@ -828,6 +828,14 @@ pub enum SingleFederationError {
     InvalidTagName { message: String },
     #[error("{message}")]
     QueryRootMissing { message: String },
+    #[error(
+        "Invalid use of @{directive_name} on {kind} \"{coordinate}\": @{directive_name} cannot be applied on interfaces, interface fields and interface objects"
+    )]
+    AuthRequirementsAppliedOnInterface {
+        directive_name: String,
+        kind: String,
+        coordinate: String,
+    },
 }
 
 impl SingleFederationError {
@@ -1053,6 +1061,9 @@ impl SingleFederationError {
             SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
             SingleFederationError::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
+            SingleFederationError::AuthRequirementsAppliedOnInterface { .. } => {
+                ErrorCode::AuthRequirementsAppliedOnInterface
+            }
         }
     }
 
@@ -2372,6 +2383,19 @@ static QUERY_ROOT_MISSING: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
+        "AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE".to_owned(),
+        "The @authenticated, @requiresScopes and @policy directive cannot be applied on interface, interface object or their fields.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.4",
+            replaces: &[],
+        }),
+    )
+    },
+);
+
 #[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
     ErrorCodeMissing,
@@ -2474,6 +2498,7 @@ pub enum ErrorCode {
     OverrideLabelInvalid,
     ContextualArgumentNotContextualInAllSubgraphs,
     QueryRootMissing,
+    AuthRequirementsAppliedOnInterface,
 }
 
 impl ErrorCode {
@@ -2597,6 +2622,9 @@ impl ErrorCode {
                 &CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS
             }
             ErrorCode::QueryRootMissing => &QUERY_ROOT_MISSING,
+            ErrorCode::AuthRequirementsAppliedOnInterface => {
+                &AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE
+            }
         }
     }
 }

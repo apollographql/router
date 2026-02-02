@@ -65,7 +65,7 @@ impl Merger {
                 let Some(linked_elem) = features.source_link_of_directive(directive) else {
                     continue;
                 };
-                if referencers.len() == 0 {
+                if referencers.is_empty() {
                     continue;
                 }
                 let source = linked_elem.link;
