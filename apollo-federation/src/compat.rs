@@ -217,6 +217,11 @@ fn coerce_value(
         (Value::Object(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::List(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::Enum(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
+        (Value::Enum(_), Some(ExtendedType::Scalar(scalar)))
+            if scalar.is_built_in() && matches!(scalar.name.as_str(), "String") =>
+        {
+            *target.make_mut() = Value::String(target.as_enum().unwrap().to_string());
+        }
         // Enums must match the type.
         (Value::Enum(value), Some(ExtendedType::Enum(enum_)))
             if enum_.values.contains_key(value) => {}
@@ -553,7 +558,7 @@ mod tests {
         }
         "#), @r###"
         {
-          test(string: enumVal1, strings: enumVal2, custom: enumVal1, customList: [enumVal2])
+          test(string: "enumVal1", strings: ["enumVal2"], custom: enumVal1, customList: [enumVal2])
         }
         "###);
     }
