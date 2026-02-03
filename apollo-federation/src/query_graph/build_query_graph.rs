@@ -116,7 +116,7 @@ pub fn build_supergraph_api_query_graph(
     let join_field_definition = join_spec.field_directive_definition(&supergraph_schema)?;
     let join_field_applications = supergraph_schema
         .referencers()
-        .get_directive_applications(&supergraph_schema, &join_field_definition.name)?;
+        .get_directive_applications(&supergraph_schema, &join_field_definition.name);
 
     let mut override_labels_by_field = IndexMap::default();
     for (pos, node) in join_field_applications {
@@ -2251,7 +2251,7 @@ impl FederatedQueryGraphBuilder {
             let subgraph_data = self.subgraphs.get(source)?;
             for type_pos in &schema
                 .referencers()
-                .get_directive(&subgraph_data.interface_object_directive_definition_name)?
+                .get_directive(&subgraph_data.interface_object_directive_definition_name)
                 .object_types
             {
                 // This method is run after handling @provides, so there may be multiple nodes here
