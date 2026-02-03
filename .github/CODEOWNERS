@@ -3,6 +3,7 @@
 /apollo-federation/ @apollographql/orchestration-language
 /apollo-router/ @apollographql/router-core
 /apollo-router/src/plugins/connectors @apollographql/orchestration-language
-/apollo-router-benchmarks/ @apollographql/router-core
+/apollo-router/src/plugins/fleet_detector.rs @apollographql/runtime-readiness
+/apollo-router-benchmarks/ @apollographql/router-core @apollographql/orchestration-language
 /examples/ @apollographql/router-core
 /.github/CODEOWNERS @apollographql/router-core @apollographql/fed-core
