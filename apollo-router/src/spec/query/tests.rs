@@ -468,6 +468,82 @@ fn reformat_response_data_fragment_spread() {
 }
 
 #[test]
+fn reformat_response_data_nested_fragment_spread_with_unions() {
+    let schema = "\
+        type Query {
+            thing: T
+        }
+
+        type T {
+          collection: U
+        }
+
+        union U = A | B
+
+        type A {
+          id: ID!
+          a: String
+        }
+
+        type B {
+          id: ID!
+          b: String!
+        }";
+
+    let query = "query { thing { __typename ...AFragment ...BFragment } }
+        fragment AFragment on T {
+          __typename
+          collection {
+            __typename
+            ...AInnerFragment
+          }
+        }
+        fragment BFragment on T {
+          __typename
+          collection {
+            __typename
+            ...BInnerFragment
+          }
+        }
+
+        fragment AInnerFragment on A {
+          __typename
+          id
+          a
+        }
+
+        fragment BInnerFragment on B {
+          __typename
+          id
+          b
+        }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            {"thing": {"__typename": "T", "id": "1", "collection": {"__typename": "A", "id": "a1"}}}
+        })
+        .expected(json! {
+            {"thing": {"__typename": "T", "collection": {"__typename": "A", "id": "a1", "a": null}}}
+        })
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            {"thing": {"__typename": "T", "id": "1", "collection": {"__typename": "A"}}} // missing id, so collection should be nullified
+        })
+        .expected(json! {
+            {"thing": {"__typename": "T", "collection": null}}
+            // we currently get:
+            //  {"thing": {"__typename": "T", "collection": {"__typename": "A"}}}
+        })
+        .test();
+}
+
+#[test]
 fn reformat_response_data_abstract_fragment_spread() {
     let schema = "type Query {
   dog: Dog
