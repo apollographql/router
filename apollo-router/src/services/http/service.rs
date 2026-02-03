@@ -4,11 +4,8 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 
-use crate::plugins::telemetry::config_new::http_client::attributes::HttpClientAttributes;
-use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use ::serde::Deserialize;
 use futures::future::BoxFuture;
-use global::get_text_map_propagator;
 use http::HeaderValue;
 use http::Request;
 use http::header::ACCEPT_ENCODING;
@@ -18,7 +15,6 @@ use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
-use opentelemetry::global;
 use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_STATUS_CODE;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
@@ -30,8 +26,6 @@ use tower::ServiceBuilder;
 use tower::util::Either;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
-use tracing::Instrument;
-use tracing::Span;
 
 use super::HttpRequest;
 use super::HttpResponse;
@@ -42,8 +36,6 @@ use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
-use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::hickory_dns_connector::new_async_http_connector;
@@ -290,48 +282,12 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
     fn call(&mut self, request: HttpRequest) -> Self::Future {
         let HttpRequest {
-            mut http_request,
+            http_request,
             context,
             ..
         } = request;
 
         let schema_uri = http_request.uri();
-
-        // Check if this is a Unix socket request by looking for the Arc<str> extension
-        // This avoids hex decoding by using the original path stored in external.rs
-        let unix_socket_path = http_request
-            .extensions()
-            .get::<crate::services::external::UnixSocketPath>()
-            .map(|usp| usp.0.clone());
-
-        // Determine transport type and host/port
-        let (transport, host, port) = if let Some(socket_path) = unix_socket_path {
-            // Unix socket: use the original path from the Arc extension (coprocessor case)
-            ("unix", socket_path.to_string(), 0u16)
-        } else if schema_uri.scheme_str() == Some("unix") {
-            // Unix socket without extension (subgraph case)
-            // Hyperlocal encodes the socket path as hex in the host portion - decode it
-            let hex_host = schema_uri.host().unwrap_or("");
-            let socket_path = hex::decode(hex_host)
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes).ok())
-                .unwrap_or_else(|| hex_host.to_string());
-            ("unix", socket_path, 0u16)
-        } else {
-            // Regular HTTP/HTTPS
-            let host = schema_uri.host().unwrap_or_default();
-            let port = schema_uri.port_u16().unwrap_or_else(|| {
-                let scheme = schema_uri.scheme_str();
-                if scheme == Some("https") {
-                    443
-                } else if scheme == Some("http") {
-                    80
-                } else {
-                    0
-                }
-            });
-            ("ip_tcp", host.to_string(), port)
-        };
 
         #[cfg(unix)]
         let client = match schema_uri.scheme().map(|s| s.as_str()) {
@@ -346,6 +302,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
                 Either::Left(std::mem::replace(&mut self.http_client, clone))
             }
         };
+
         #[cfg(not(unix))]
         let client = {
             // Because we clone our inner service, we'd better swap the readied one
@@ -354,35 +311,9 @@ impl tower::Service<HttpRequest> for HttpClientService {
         };
 
         let service_name = self.service.clone();
-
-        let path = schema_uri.path();
-
-        //let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
-        //    "otel.kind" = "CLIENT",
-        //    "net.peer.name" = %host,
-        //    "net.peer.port" = %port,
-        //    "http.route" = %path,
-        //    "http.url" = %schema_uri,
-        //    "net.transport" = %transport,
-        //);
-
-        // Apply any attributes that were stored by telemetry middleware
-        //if let Some(client_attributes) = context
-        //    .extensions()
-        //    .with_lock(|lock| lock.get::<HttpClientAttributes>().cloned())
-        //{
-        //    http_req_span.set_span_dyn_attributes(client_attributes.attributes);
-        //}
-        //get_text_map_propagator(|propagator| {
-        //    propagator.inject_context(
-        //        &prepare_context(http_req_span.context()),
-        //        &mut crate::otel_compat::HeaderInjector(http_request.headers_mut()),
-        //    );
-        //});
-
         let (parts, body) = http_request.into_parts();
-
         let content_encoding = parts.headers.get(&CONTENT_ENCODING);
+
         let opt_compressor = content_encoding
             .as_ref()
             .and_then(|value| value.to_str().ok())
