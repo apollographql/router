@@ -219,8 +219,8 @@ existing global cost limit for the whole supergraph. This helps you protect spec
 capacity or cost profiles from being overwhelmed by expensive operations.
 
 When a subgraph‑specific cost limit is exceeded, the router:
-* Still runs the rest of the operation, including other subgraphs whose cost is within limits.
-* Skips calls to only the over‑budget subgraph, and composes the response as if that subgraph had returned null, instead
+- Still runs the rest of the operation, including other subgraphs whose cost is within limits.
+- Skips calls to only the over‑budget subgraph, and composes the response as if that subgraph had returned null, instead
   of rejecting the entire query.
 
 Per‑subgraph limits apply to the total work for that subgraph in a single operation. For each request, the router tracks
