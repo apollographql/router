@@ -463,8 +463,7 @@ The possible values for `apollo.subscription.end_reason` are:
 
 | Value | Description |
 |-------|-------------|
-| `complete` | The subscription completed normally. The subgraph sent a final response indicating the subscription has completed. |
-| `server_close` | The server (subgraph) closed the connection gracefully. This occurs when the subgraph sends an empty response to signal intentional closure. |
+| `server_close` | The server (subgraph) closed the connection gracefully. This occurs when the subgraph ends the subscription. |
 | `stream_end` | The underlying data stream ended. This typically happens when the subgraph closes the WebSocket connection or the stream source terminates. |
 | `heartbeat_delivery_failed` | A heartbeat message could not be delivered to the client. This usually indicates the client disconnected unexpectedly while the router was sending a keepalive heartbeat. |
 | `client_disconnect` | The client disconnected after receiving subscription data (not during a heartbeat). This indicates the client closed the connection mid-subscription. |
@@ -479,6 +478,5 @@ The `apollo.subscription.end_reason` attribute only appears on subscription oper
 
 You can use the `apollo.subscription.end_reason` attribute to monitor the health of your subscriptions:
 
-- A high rate of `heartbeat_delivery_failed` or `client_disconnect` may indicate network instability between clients and your router.
-- Frequent `stream_end` values without corresponding `complete` values may indicate issues with your subgraph subscription sources.
-- The `complete` value indicates healthy subscription lifecycles where the subgraph properly signals completion.
+- Frequent `stream_end` values may indicate issues with your subgraph subscription sources closing unexpectedly.
+- The `server_close` value indicates healthy subscription lifecycles where the subgraph properly signals closure.

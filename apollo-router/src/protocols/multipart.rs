@@ -89,8 +89,6 @@ impl Multipart {
 /// Reasons why a subscription ended
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SubscriptionEndReason {
-    /// Subscription completed normally after receiving all data
-    Complete,
     /// Server closed the connection gracefully
     ServerClose,
     /// Stream source ended (e.g., subgraph closed the connection)
@@ -105,7 +103,6 @@ impl SubscriptionEndReason {
     /// Returns the string representation of the end reason
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
-            Self::Complete => "complete",
             Self::ServerClose => "server_close",
             Self::StreamEnd => "stream_end",
             Self::HeartbeatDeliveryFailed => "heartbeat_delivery_failed",
@@ -228,7 +225,7 @@ impl Stream for Multipart {
                         if self.mode == ProtocolMode::Subscription {
                             self.span.record(
                                 "apollo.subscription.end_reason",
-                                SubscriptionEndReason::Complete.as_str(),
+                                SubscriptionEndReason::ServerClose.as_str(),
                             );
                         }
                         buf.extend_from_slice(b"\r\n--graphql--\r\n");
@@ -329,40 +326,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_end_reason_complete() {
-        // Test: Subscription completes normally with subscribed=false
-        let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!(
-            "test_span",
-            "apollo.subscription.end_reason" = tracing::field::Empty
-        );
-        let _span_guard = span.enter();
-        let responses = vec![
-            graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("data")))
-                .subscribed(true)
-                .build(),
-            graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("final")))
-                .subscribed(false) // This marks completion
-                .build(),
-        ];
-        let gql_responses = stream::iter(responses);
-        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
-
-        // Consume all messages
-        while protocol.next().await.is_some() {}
-
-        let reason = layer.captured_reason.lock().unwrap().clone();
-
-        assert_eq!(
-            reason,
-            Some(SubscriptionEndReason::Complete.as_str().to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn test_end_reason_server_close() {
+    async fn test_end_reason_server_close_empty_response() {
         // Test: Server closes connection gracefully (empty response)
         let (_guard, layer) = setup_tracing();
         let span = tracing::info_span!(
@@ -377,6 +341,37 @@ mod tests {
                 .build(),
             // Empty response signals server-side graceful close
             graphql::Response::builder().build(),
+        ];
+        let gql_responses = stream::iter(responses);
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+
+        // Consume all messages
+        while protocol.next().await.is_some() {}
+        let reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            reason,
+            Some(SubscriptionEndReason::ServerClose.as_str().to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_end_reason_server_close_with_final_data() {
+        // Test: Server closes normally with final data (subscribed=false, no errors)
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!(
+            "test_span",
+            "apollo.subscription.end_reason" = tracing::field::Empty
+        );
+        let _span_guard = span.enter();
+        let responses = vec![
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                .subscribed(true)
+                .build(),
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("final")))
+                .subscribed(false) // Graceful close with final data
+                .build(),
         ];
         let gql_responses = stream::iter(responses);
         let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
