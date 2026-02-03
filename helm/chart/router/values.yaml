@@ -4,7 +4,7 @@
 
 replicaCount: 1
 
-# -- For YAML structure, https://www.apollographql.com/docs/graphos/routing/configuration/yaml
+# -- For YAML structure, see https://www.apollographql.com/docs/graphos/routing/configuration/yaml
 router:
   configuration:
     supergraph:
@@ -19,10 +19,10 @@ managedFederation:
   # -- If using managed federation, the graph API key to identify router to Studio
   apiKey:
   # -- If using managed federation, use an existing Kubernetes Secret which stores the graph API key instead of creating a new one.
-  # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name
+  # If set along with `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as the secret name
   existingSecret:
   # -- If using managed federation, the name of the key within the existing Secret which stores the graph API key.
-  # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as key, defaults to using a key of `managedFederationApiKey`
+  # If set along with `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as the key name, defaults to `managedFederationApiKey`
   existingSecretKeyRefKey:
   # -- If using managed federation, the variant of which graph to use
   graphRef: ""
@@ -31,7 +31,7 @@ managedFederation:
 # e.g.: helm ... --set-file supergraphFile="location of your supergraph file"
 supergraphFile:
 
-# An array of extra environmental variables
+# -- An array of extra environmental variables
 # Example:
 # extraEnvVars:
 #   - name: APOLLO_ROUTER_SUPERGRAPH_PATH
@@ -40,10 +40,12 @@ supergraphFile:
 #     value: debug
 #
 extraEnvVars: []
+# -- ConfigMap name containing additional environment variables
 extraEnvVarsCM: ""
+# -- Secret name containing sensitive environment variables
 extraEnvVarsSecret: ""
 
-# An array of extra VolumeMounts
+# -- An array of extra VolumeMounts
 # Example:
 # extraVolumeMounts:
 #   - name: rhai-volume
@@ -51,7 +53,7 @@ extraEnvVarsSecret: ""
 #     readonly: true
 extraVolumeMounts: []
 
-# An array of extra Volumes
+# -- An array of extra Volumes
 # Example:
 # extraVolumes:
 #   - name: rhai-volume
@@ -106,6 +108,7 @@ lifecycle: {}
 #        - -c
 #        - sleep 10
 
+# -- Array of imagePullSecret references for private container registries
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
@@ -119,12 +122,15 @@ serviceAccount:
   # If not set and create is true, a name is generated using the fullname template
   name: ""
 
+# -- Annotations to add to the router pod
 podAnnotations: {}
 
+# -- Pod-level security context settings
 podSecurityContext:
   {}
   # fsGroup: 2000
 
+# -- Container-level security context settings
 securityContext:
   {}
   # capabilities:
@@ -137,6 +143,7 @@ securityContext:
 service:
   type: ClusterIP
   port: 80
+  # -- Annotations to add to the Service (e.g., for load balancer configuration)
   annotations: {}
   targetport: http
 
@@ -224,7 +231,7 @@ autoscaling:
   #     type: cpu
   #     targetUtilizationPercentage: 75
 
-# -- Sets the [rolling update strategy parameters](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment). Can take absolute values or % values.
+# -- Sets the [rolling update strategy parameters](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment). Can take absolute values or percentage values.
 rollingUpdate:
   {}
 # Defaults if not set are:
