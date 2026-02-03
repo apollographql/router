@@ -392,7 +392,9 @@ pub(super) struct SubgraphResponseConf {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "CoprocessorConfig")]
 struct Conf {
-    /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs.
+    /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs
+    ///
+    /// Unix Domain Sockets also support an optional `path`: `unix:///path/to/socket.sock?path=some_path`. The `.sock` file extension isn't required, meaning that we can't tell if we have a path coming after the base URL. So, we need to explicitly point to the `path` part of a socket to make sure we're distinguishing the right component parts
     url: String,
     client: Option<Client>,
     /// The timeout for external requests

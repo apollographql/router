@@ -35,6 +35,10 @@ The router supports three URL schemes for coprocessors:
 
 **Note:** Unix socket paths must be absolute (starting with `/`). The URL format is `unix://` followed by the absolute path, resulting in three slashes for root paths: `unix:///var/run/coprocessor.sock`.
 
+## Unix Domain Socket paths
+
+Unix Domain Sockets also support a `path` parameter. For example, `unix:///path/to/socket.sock?path=some_path`. Because Unix Domain Sockets don't require the `.sock` file ending, we can't easily tell whether there's a path. So, we require paths be explicit.
+
 ## Coprocessor Implementation
 
 Your coprocessor must listen on the specified Unix socket path. Here's a Node.js example:

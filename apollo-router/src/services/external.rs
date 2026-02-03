@@ -329,7 +329,6 @@ where
             } else if scheme == Some("http") {
                 80
             } else {
-                // TODO: something better for uds?
                 0
             }
         });

@@ -196,7 +196,7 @@ coprocessor:
   url: unix:///tmp/coprocessor.sock
 ```
 
-You can specify a custom HTTP path using the `path` query parameter:
+Because `.sock` isn't required as a file extension, the router can't tell if a path has been appended to the base URL. You can specify a custom HTTP path using the `path` query parameter:
 
 ```yaml title="router.yaml"
 coprocessor:
