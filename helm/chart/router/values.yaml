@@ -145,7 +145,7 @@ service:
   port: 80
   # -- Annotations to add to the Service (e.g., for load balancer configuration)
   annotations: {}
-  targetPort: http
+  targetport: http
 
 serviceMonitor:
   enabled: false

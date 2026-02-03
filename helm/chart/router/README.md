@@ -85,7 +85,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | securityContext | object | `{}` | Container-level security context settings |
 | service.annotations | object | `{}` | Annotations to add to the Service (e.g., for load balancer configuration) |
 | service.port | int | `80` |  |
-| service.targetPort | string | `"http"` |  |
+| service.targetport | string | `"http"` |  |
 | service.type | string | `"ClusterIP"` |  |
 | serviceAccount.annotations | object | `{}` |  |
 | serviceAccount.create | bool | `true` |  |
