@@ -127,7 +127,7 @@ The difference between estimated and actual operation cost calculations is due o
 
 There are three ways to indicate the expected list sizes to the router:
 * Set the global maximum in your router configuration file (see [Configuring demand control](#configuring-demand-control)).
-* Set a subgraph-specific list size in your router configuration file (see [Configuring demand control](#configuring-demand-control); requires Router >=v2.12.0)
+* Set a subgraph-specific list size in your router configuration file (see [Configuring demand control](#configuring-demand-control); requires Router v2.12.0 and later)
 * Use the Apollo Federation [@listSize directive](/federation/federated-schemas/federated-directives/#listsize). 
 
 The `@listSize` directive supports field-level granularity in setting list size. By using its `assumedSize` argument, you can set a statically defined list size for a field. If you are using paging parameters which control the size of the list, use the `slicingArguments` argument.
@@ -255,31 +255,32 @@ When `demand_control` is enabled, the router measures the cost of each operation
 
 Customize `demand_control` with the following settings:
 
-| Option                                            | Valid values                    | Default value | Description                                                                                                                        |
-| -----------------------------------               | ------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`                                         | boolean                         | `false`       | Set `true` to measure operation costs or enforce operation cost limits.                                                            |
-| `mode`                                            | `measure`, `enforce`            | --            | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
-| `strategy`                                        | `static_estimated`              | --            | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                                              |
-| `static_estimated.actual_cost_mode`               | `by_subgraph`, `response_shape` | `by_subgraph` | - `by_subgraph` calculates the cost of an operation as the sum of the cost of each subgraph response.<br/>- `response_shape` calculates the cost based on only the final shape of the response |
-| `static_estimated.list_size`                      | integer                         | --            | The assumed maximum size of a list for fields that return lists.                                                                   |
-| `static_estimated.max`                            | integer                         | --            | The maximum cost of an accepted operation. An operation with a higher cost than this is rejected.                                  |
-| `static_estimated.subgraph`                       | integer (optional)              | --            | Subgraph-level demand control (requires router >v2.12.0).                                                                          |
-| `static_estimated.subgraph.all.list_size`         | integer (optional)              | --            | The assumed maximum size of a list for fields that return lists.                                                                   |
-| `static_estimated.subgraph.all.max`               | float (optional)                | --            | The maximum cost accepted by a subgraph.                                                                                           |
-| `static_estimated.subgraph.subgraphs.*.list_size` | integer (optional)              | --            | The assumed maximum size of a list for fields that return lists, for this subgraph.                                                |
-| `static_estimated.subgraph.subgraphs.*.max`       | float (optional)                | --            | The maximum cost accepted by this subgraph.                                                                                        |
+| Option                                            | Valid values                       | Default value | Description                                                                                                                         |
+| ------------------------------------------------- | ---------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                                         | boolean                            | `false`       | Set to `true` to measure operation costs or enforce operation cost limits.                                                          |
+| `mode`                                            | `measure`, `enforce`               | --            | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits. |
+| `strategy`                                        | `static_estimated`                 | --            | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                                               |
+| `static_estimated.actual_cost_mode`               | `by_subgraph`, `by_response_shape` | `by_subgraph` | - `by_subgraph` calculates the cost of an operation as the sum of the cost of each subgraph response.<br/>- `by_response_shape` calculates the cost based on only the final shape of the response. |
+| `static_estimated.list_size`                      | integer                            | --            | The assumed maximum size of a list for fields that return lists.                                                                   |
+| `static_estimated.max`                            | integer                            | --            | The maximum cost of an accepted operation. An operation with a higher cost than this is rejected.                                  |
+| `static_estimated.subgraph`                       | integer (optional)                 | --            | Subgraph-level demand control (requires router >v2.12.0).                                                                          |
+| `static_estimated.subgraph.all.list_size`         | integer (optional)                 | --            | The assumed maximum size of a list for fields that return lists.                                                                   |
+| `static_estimated.subgraph.all.max`               | float (optional)                   | --            | The maximum cost accepted by a subgraph.                                                                                           |
+| `static_estimated.subgraph.subgraphs.*.list_size` | integer (optional)                 | --            | The assumed maximum size of a list for fields that return lists, for this subgraph.                                                |
+| `static_estimated.subgraph.subgraphs.*.max`       | float (optional)                   | --            | The maximum cost accepted by this subgraph.                                                                                        |
 
 When enabling `demand_control` for the first time, set it to `measure` mode. This will allow you to observe the cost of your operations before setting your maximum cost.
 
 ### Actual cost calculation mode
 
-The `actual_cost_mode` option allows you to choose how the actual cost of an operation is calculated.
+Use the `actual_cost_mode` option to choose how the actual cost of an operation is calculated.
 
-* `by_subgraph` (default for Router versions &ge;v2.12.0) sums the cost of each subgraph response. This method reflects
-  the total work done per operation and more closely mirrors the cost estimation strategy.
-* `response_shape` uses only the final shape of the response. It does not consider the intermediate work required to
-  attain that shape, i.e. fields that were fetched to support federated lookups that were not included in the client
-  response. This behavior was the only option available in Router versions &le;v2.11.0.
+- `by_subgraph` (default for Router versions v2.12.0 and later) sums the cost of each subgraph response. This method reflects
+  the total work done per operation and more closely mirrors the cost estimation strategy. Use this method unless you
+  have pre-existing plugins or coprocessors that make decisions using the actual cost.
+- `by_response_shape` uses only the final shape of the response. It doesn't consider the intermediate work required to
+  attain that shape, such as fields that were fetched to support federated lookups that were not included in the client
+  response. This behavior was the only option in Router versions v2.11.0 and earlier.
 
 ## Telemetry for demand control
 

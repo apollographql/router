@@ -88,7 +88,7 @@ pub(crate) enum StrategyConfig {
         ///
         /// * `by_subgraph` (default) computes the cost of each subgraph response and sums them
         ///   to get the total query cost.
-        /// * `response_shape` computes the cost based on the final structure of the composed
+        /// * `by_response_shape` computes the cost based on the final structure of the composed
         ///   response, not including any interim structures from subgraph responses that did not
         ///   make it to the composed response.
         #[serde(default)]
@@ -117,7 +117,7 @@ pub(crate) enum ActualCostMode {
     /// interim structures from subgraph responses that did not make it to the composed response.
     #[deprecated(since = "TBD", note = "use `BySubgraph` instead")]
     #[warn(deprecated_in_future)]
-    ResponseShape,
+    ByResponseShape,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
@@ -142,9 +142,9 @@ impl StrategyConfig {
         };
 
         #[allow(deprecated_in_future)]
-        if matches!(actual_cost_mode, ActualCostMode::ResponseShape) {
+        if matches!(actual_cost_mode, ActualCostMode::ByResponseShape) {
             tracing::warn!(
-                "Actual cost computation mode `response_shape` will be deprecated in the future; migrate to `by_subgraph` when possible",
+                "Actual cost computation mode `by_response_shape` will be deprecated in the future; migrate to `by_subgraph` when possible",
             );
         }
 
