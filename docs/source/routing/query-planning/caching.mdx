@@ -51,7 +51,7 @@ supergraph:
     warmed_up_queries: 100
 ```
 
-In addition, the router can use the contents of the [persisted query list](/graphos/platform/security/persisted-queries) to prewarm the cache. By default, it does this when loading a new schema but not on startup; you can [configure](/graphos/platform/security/persisted-queries#experimental_prewarm_query_plan_cache) it to change either of these defaults.
+Additionally, the router can use the [persisted query list](/graphos/platform/security/persisted-queries) to prewarm the cache. By default, the router prewarms the cache when loading a new schema but not on startup. You can [configure](/graphos/platform/security/persisted-queries#experimental_prewarm_query_plan_cache) the router to change these defaults.
 
 #### Cache warm-up with headers
 
