@@ -52,8 +52,12 @@ impl Strategy {
         &self,
         request: &ExecutableDocument,
         response: &subgraph::Response,
+        subgraph_name: &str,
     ) -> Result<(), DemandControlError> {
-        match self.inner.on_subgraph_response(request, response) {
+        match self
+            .inner
+            .on_subgraph_response(request, response, subgraph_name)
+        {
             Err(e) if self.mode == Mode::Enforce => Err(e),
             _ => Ok(()),
         }
@@ -93,8 +97,13 @@ impl StrategyFactory {
 
     pub(crate) fn create(&self) -> Strategy {
         let strategy: Arc<dyn StrategyImpl> = match &self.config.strategy {
-            StrategyConfig::StaticEstimated { list_size, max } => Arc::new(StaticEstimated {
+            StrategyConfig::StaticEstimated {
+                list_size,
+                max,
+                actual_cost_mode,
+            } => Arc::new(StaticEstimated {
                 max: *max,
+                actual_cost_mode: *actual_cost_mode,
                 cost_calculator: StaticCostCalculator::new(
                     self.supergraph_schema.clone(),
                     self.subgraph_schemas.clone(),
@@ -122,6 +131,7 @@ pub(crate) trait StrategyImpl: Send + Sync {
         &self,
         request: &ExecutableDocument,
         response: &subgraph::Response,
+        subgraph_name: &str,
     ) -> Result<(), DemandControlError>;
     fn on_execution_response(
         &self,
