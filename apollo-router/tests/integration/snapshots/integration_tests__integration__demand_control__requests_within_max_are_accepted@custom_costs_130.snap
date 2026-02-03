@@ -1,0 +1,47 @@
+---
+source: apollo-router/tests/integration/demand_control.rs
+expression: parse_result_for_snapshot(response).await
+---
+{
+  "apollo::demand_control::actual_cost": 124.0,
+  "apollo::demand_control::actual_cost_by_subgraph": {
+    "subgraphWithCost": 121.0,
+    "subgraphWithListSize": 3.0
+  },
+  "apollo::demand_control::estimated_cost": 127.0,
+  "apollo::demand_control::result": "COST_OK",
+  "apollo::demand_control::strategy": "static_estimated",
+  "apollo::experimental_mock_subgraphs::subgraph_call_count": {
+    "subgraphWithCost": 1,
+    "subgraphWithListSize": 1
+  },
+  "body": {
+    "data": {
+      "argWithCost": 30,
+      "enumWithCost": "A",
+      "fieldWithCost": 2,
+      "fieldWithDynamicListSize": {
+        "items": [
+          {
+            "id": 7
+          },
+          {
+            "id": 9
+          }
+        ]
+      },
+      "fieldWithListSize": [
+        "hello",
+        "world",
+        "and",
+        "nearby",
+        "planets"
+      ],
+      "inputWithCost": 5,
+      "objectWithCost": {
+        "id": 9
+      },
+      "scalarWithCost": 6172364
+    }
+  }
+}
