@@ -120,6 +120,9 @@ impl PluginPrivate for MockSubgraphsPlugin {
             let config = config.clone();
             let subgraph_schema = subgraph_schema.clone();
             async move {
+                // WARN: REMOVE ME BEFORE MERGING! here to demonstrate the fix
+                dbg!(request.subgraph_request.body());
+
                 let mut response = http::Response::builder();
                 let body = if let Some(config) = &config {
                     *response.headers_mut().unwrap() = config.headers.0.clone();
