@@ -97,19 +97,19 @@ coprocessor:
 
 In this case, the `RouterService` only sends a coprocessor request whenever it receives a client request. The coprocessor request body includes _no_ data related to the client request (only "control" data, which is [covered below](#coprocessor-request-format)).
 
-### Per-stage coprocessor URLs
+### Configure per-stage coprocessor URLs
 
-Override the global coprocessor URL on a per-stage basis:
+Override the global coprocessor URL for each stage:
 
 ```yaml title="router.yaml"
 coprocessor:
-  url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
+  url: "http://127.0.0.1:3000" # Mandatory URL, which is the address of the coprocessor
   router:
     request:
       headers: false
   supergraph:
     request:
-      url: http://127.0.0.1:3001 # overrides the top level URL for supergraph request
+      url: "http://127.0.0.1:3001" # Overrides the top-level URL for supergraph requests
       headers: true
       body: true
     response: # uses the top level coprocessor URL for supergraph response
