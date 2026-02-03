@@ -15,6 +15,7 @@ use apollo_federation::schema::ValidFederationSchema;
 
 use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::cost_calculator::directives::RequiresDirective;
+use crate::plugins::demand_control::cost_calculator::directives::SizedFields;
 
 pub(in crate::plugins::demand_control) struct InputDefinition {
     name: Name,
@@ -67,6 +68,8 @@ pub(in crate::plugins::demand_control) struct FieldDefinition {
     ty: ExtendedType,
     cost_directive: Option<CostDirective>,
     list_size_directive: Option<ListSizeDirective>,
+    /// Parsed at schema load so invalid sizedFields fail startup, not first request.
+    parsed_sized_fields: Option<Arc<SizedFields>>,
     requires_directive: Option<RequiresDirective>,
     arguments: HashMap<Name, InputDefinition>,
 }
@@ -91,6 +94,7 @@ impl FieldDefinition {
             ty: field_type.clone(),
             cost_directive: None,
             list_size_directive: None,
+            parsed_sized_fields: None,
             requires_directive: None,
             arguments: HashMap::new(),
         };
@@ -102,6 +106,16 @@ impl FieldDefinition {
                 schema,
                 field_definition,
             )?;
+        if let Some(ref list_size) = processed_field_definition.list_size_directive
+            && let Some(ref field_names) = list_size.sized_fields
+        {
+            processed_field_definition.parsed_sized_fields =
+                Some(Arc::new(SizedFields::from_strings(
+                    schema.schema(),
+                    field_definition.ty.inner_named_type(),
+                    field_names,
+                )?));
+        }
         processed_field_definition.requires_directive = RequiresDirective::from_field_definition(
             field_definition,
             parent_type_name,
@@ -130,6 +144,12 @@ impl FieldDefinition {
         &self,
     ) -> Option<&ListSizeDirective> {
         self.list_size_directive.as_ref()
+    }
+
+    pub(in crate::plugins::demand_control) fn parsed_sized_fields(
+        &self,
+    ) -> Option<&Arc<SizedFields>> {
+        self.parsed_sized_fields.as_ref()
     }
 
     pub(in crate::plugins::demand_control) fn requires_directive(
