@@ -1070,7 +1070,7 @@ fn remove_inaccessible_elements(
         })?;
 
     // Find all elements that use @inaccessible. Clone so there's no live borrow.
-    let inaccessible_referencers = schema.referencers().get_directive(&directive_name)?.clone();
+    let inaccessible_referencers = schema.referencers().get_directive(&directive_name).clone();
 
     // Remove fields and arguments from inaccessible types first. If any inaccessible type has a field
     // that references another inaccessible type, it would prevent the other type from being
