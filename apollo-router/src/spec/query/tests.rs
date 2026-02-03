@@ -2935,6 +2935,7 @@ fn variable_validation() {
         }})
     );
 
+    // Tests if nested inputs are correctly validated
     assert_validation_error!(
         "input MessageInput {
             content: String
@@ -2956,7 +2957,11 @@ fn variable_validation() {
         json!({"msg":  {
             "content": "Hello",
             "author": "Me",
-            "canvas": [{"input": 3}, {"input": 4}, {"input": 5, "unknownField": "unknown"}],
+            "canvas": [
+                {"input": 3},
+                {"input": 4},
+                {"input": 5, "unknownField": "unknown"}
+                ],
         }})
     );
 
