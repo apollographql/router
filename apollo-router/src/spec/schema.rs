@@ -138,21 +138,8 @@ impl Schema {
                         // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
                         // It hides the socket path in a hex encoded authority that the unix socket connector will
                         // know how to decode
-                        //
-                        // supports an optional `path` query parameter for HTTP path, eg: unix:///tmp/socket.sock?path=/api/v1
-                        let (socket_path, http_path) = if let Some(query_start) = url_path.find('?')
-                        {
-                            let socket = &url_path[..query_start];
-                            let query = &url_path[query_start + 1..];
-                            let path = query
-                                .split('&')
-                                .find_map(|param| param.strip_prefix("path="))
-                                .unwrap_or("/");
-                            (socket, path)
-                        } else {
-                            (url_path, "/")
-                        };
-                        hyperlocal::Uri::new(socket_path, http_path).into()
+                        // TODO: support optional paths, ROUTER-1589
+                        hyperlocal::Uri::new(url_path, "/").into()
                     } else {
                         Uri::from_str(url)
                             .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?

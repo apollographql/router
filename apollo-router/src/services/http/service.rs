@@ -58,6 +58,7 @@ type MixedClient = HTTPClient;
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
+// TODO: make this configurable: ROUTER-1589
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]

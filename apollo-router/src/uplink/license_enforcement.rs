@@ -426,8 +426,7 @@ impl LicenseEnforcementReport {
             ]);
         }
 
-        //configuration_restrictions
-        vec![]
+        configuration_restrictions
     }
 
     fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
