@@ -328,15 +328,35 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
             }
             ExtendedType::Interface(interface) => {
                 let interface = interface.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut interface.directives,
+                );
                 for field in interface.fields.values_mut() {
                     let field = field.make_mut();
                     coerce_arguments_default_values(&types, &mut field.arguments);
+                    coerce_directive_application_values_ast(
+                        &directive_definitions,
+                        &types,
+                        &mut field.directives,
+                    );
                 }
             }
             ExtendedType::InputObject(input_object) => {
                 let input_object = input_object.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut input_object.directives,
+                );
                 for field in input_object.fields.values_mut() {
                     let field = field.make_mut();
+                    coerce_directive_application_values_ast(
+                        &directive_definitions,
+                        &types,
+                        &mut field.directives,
+                    );
                     let Some(default_value) = &mut field.default_value else {
                         continue;
                     };
@@ -346,8 +366,37 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                     }
                 }
             }
-            ExtendedType::Union(_) | ExtendedType::Scalar(_) | ExtendedType::Enum(_) => {
-                // Nothing to do
+            ExtendedType::Union(union_) => {
+                let union_ = union_.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut union_.directives,
+                );
+            }
+            ExtendedType::Scalar(scalar) => {
+                let scalar = scalar.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut scalar.directives,
+                );
+            }
+            ExtendedType::Enum(enum_) => {
+                let enum_ = enum_.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut enum_.directives,
+                );
+                for value in enum_.values.values_mut() {
+                    let value = value.make_mut();
+                    coerce_directive_application_values_ast(
+                        &directive_definitions,
+                        &types,
+                        &mut value.directives,
+                    );
+                }
             }
         }
     }
