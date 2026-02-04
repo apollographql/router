@@ -467,12 +467,8 @@ The possible values for `apollo.subscription.end_reason` are:
 | `stream_end` | The underlying data stream ended. This typically happens when the subgraph closes the WebSocket connection or the stream source terminates. |
 | `heartbeat_delivery_failed` | A heartbeat message could not be delivered to the client. This usually indicates the client disconnected unexpectedly while the router was sending a keepalive heartbeat. |
 | `client_disconnect` | The client disconnected after receiving subscription data (not during a heartbeat). This indicates the client closed the connection mid-subscription. |
-
-<Note>
-
-The `apollo.subscription.end_reason` attribute only appears on subscription operations using the [HTTP multipart protocol](/router/executing-operations/subscription-multipart-protocol/). WebSocket passthrough subscriptions to subgraphs have their own connection lifecycle managed by the WebSocket protocol.
-
-</Note>
+| `schema_reload` | The subscription was terminated because the router's supergraph schema was updated. Clients can reconnect to resume the subscription. |
+| `config_reload` | The subscription was terminated because the router's configuration was updated. Clients can reconnect to resume the subscription. |
 
 #### Example: Monitoring subscription health
 

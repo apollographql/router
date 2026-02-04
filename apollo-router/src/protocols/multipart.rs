@@ -13,7 +13,9 @@ use tokio_stream::wrappers::IntervalStream;
 use tracing::Span;
 
 use crate::graphql;
+use crate::plugins::subscription::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
+use crate::plugins::subscription::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
 
 #[cfg(test)]
 const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(10);
@@ -84,6 +86,22 @@ impl Multipart {
             span: Span::current(),
         }
     }
+
+    /// Checks if the errors indicate a reload-related termination and returns the appropriate end reason
+    fn detect_reload_end_reason(errors: &[graphql::Error]) -> SubscriptionEndReason {
+        for error in errors {
+            match error.extensions.get("code").and_then(|v| v.as_str()) {
+                Some(code) if code == SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE => {
+                    return SubscriptionEndReason::SchemaReload;
+                }
+                Some(code) if code == SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE => {
+                    return SubscriptionEndReason::ConfigReload;
+                }
+                _ => {}
+            }
+        }
+        SubscriptionEndReason::ServerClose
+    }
 }
 
 /// Reasons why a subscription ended
@@ -97,16 +115,21 @@ pub(crate) enum SubscriptionEndReason {
     HeartbeatDeliveryFailed,
     /// Client disconnected unexpectedly (after a message was sent)
     ClientDisconnect,
+    /// Subscription terminated due to router schema reload
+    SchemaReload,
+    /// Subscription terminated due to router configuration reload
+    ConfigReload,
 }
 
 impl SubscriptionEndReason {
-    /// Returns the string representation of the end reason
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::ServerClose => "server_close",
             Self::StreamEnd => "stream_end",
             Self::HeartbeatDeliveryFailed => "heartbeat_delivery_failed",
             Self::ClientDisconnect => "client_disconnect",
+            Self::SchemaReload => "schema_reload",
+            Self::ConfigReload => "config_reload",
         }
     }
 }
@@ -166,6 +189,10 @@ impl Stream for Multipart {
 
                     let is_still_open =
                         response.has_next.unwrap_or(false) || response.subscribed.unwrap_or(false);
+
+                    // Check for reload-related termination before errors are moved
+                    let end_reason = Self::detect_reload_end_reason(&response.errors);
+
                     let mut buf = if self.is_first_chunk {
                         self.is_first_chunk = false;
                         Vec::from(&b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..])
@@ -223,10 +250,8 @@ impl Stream for Multipart {
                     } else {
                         self.is_terminated = true;
                         if self.mode == ProtocolMode::Subscription {
-                            self.span.record(
-                                "apollo.subscription.end_reason",
-                                SubscriptionEndReason::ServerClose.as_str(),
-                            );
+                            self.span
+                                .record("apollo.subscription.end_reason", end_reason.as_str());
                         }
                         buf.extend_from_slice(b"\r\n--graphql--\r\n");
                     }
@@ -484,6 +509,82 @@ mod tests {
         assert_eq!(
             reason,
             Some(SubscriptionEndReason::ClientDisconnect.as_str().to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_end_reason_schema_reload() {
+        // Test: Subscription terminated due to schema reload
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!(
+            "test_span",
+            "apollo.subscription.end_reason" = tracing::field::Empty
+        );
+        let _span_guard = span.enter();
+        let responses = vec![
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                .subscribed(true)
+                .build(),
+            // Schema reload error response
+            graphql::Response::builder()
+                .error(
+                    graphql::Error::builder()
+                        .message("subscription has been closed due to a schema reload")
+                        .extension_code("SUBSCRIPTION_SCHEMA_RELOAD")
+                        .build(),
+                )
+                .subscribed(false)
+                .build(),
+        ];
+        let gql_responses = stream::iter(responses);
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+
+        // Consume all messages
+        while protocol.next().await.is_some() {}
+
+        let reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            reason,
+            Some(SubscriptionEndReason::SchemaReload.as_str().to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_end_reason_config_reload() {
+        // Test: Subscription terminated due to config reload
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!(
+            "test_span",
+            "apollo.subscription.end_reason" = tracing::field::Empty
+        );
+        let _span_guard = span.enter();
+        let responses = vec![
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                .subscribed(true)
+                .build(),
+            // Config reload error response
+            graphql::Response::builder()
+                .error(
+                    graphql::Error::builder()
+                        .message("subscription has been closed due to a configuration reload")
+                        .extension_code("SUBSCRIPTION_CONFIG_RELOAD")
+                        .build(),
+                )
+                .subscribed(false)
+                .build(),
+        ];
+        let gql_responses = stream::iter(responses);
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+
+        // Consume all messages
+        while protocol.next().await.is_some() {}
+
+        let reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            reason,
+            Some(SubscriptionEndReason::ConfigReload.as_str().to_string())
         );
     }
 

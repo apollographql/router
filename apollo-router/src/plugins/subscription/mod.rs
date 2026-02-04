@@ -36,6 +36,8 @@ pub(crate) mod notification;
 pub(crate) mod subgraph;
 
 pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
+pub(crate) use execution::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
+pub(crate) use execution::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
 pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
 pub(crate) use fetch::fetch_service_handle_subscription;
