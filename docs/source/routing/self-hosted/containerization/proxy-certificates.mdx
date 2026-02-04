@@ -1,5 +1,5 @@
 ---
-title: Add Proxy Certificates to Containers
+title: Add Proxy Certificates to Router Containers
 subtitle: Configure trust for your proxy's root certificate
 description: Add your corporate proxy's root certificate to Apollo Router containers to enable TLS inspection in enterprise environments.
 ---
@@ -138,7 +138,7 @@ Test connectivity to a service through the proxy:
 docker run --entrypoint /bin/bash -it router-with-proxy-cert -c "curl -v https://uplink.api.apollographql.com/"
 ```
 
-## Related topics
+## Related Topics
 
 - [TLS configuration](/graphos/routing/security/tls): Configure TLS settings for Apollo Router
 - [Docker deployment](/graphos/routing/self-hosted/containerization/docker): Deploy Apollo Runtime using Docker
