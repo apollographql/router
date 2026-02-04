@@ -39,11 +39,6 @@ pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs
 /// Version of our externalised data. Rev this if it changes
 pub(crate) const EXTERNALIZABLE_VERSION: u8 = 1;
 
-/// Extension to pass Unix socket path information to HttpClientService for proper span attributes.
-/// Uses Arc<str> for efficient sharing without cloning the actual string data.
-#[derive(Clone, Debug)]
-pub(crate) struct UnixSocketPath(pub(crate) Arc<str>);
-
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub(crate) enum PipelineStep {
     RouterRequest,
@@ -300,18 +295,18 @@ where
         // Standard http::Uri doesn't support unix:// URLs, so we need to convert them
         // using hyperlocal which encodes the socket path in a way the Unix connector understands
         #[cfg(unix)]
-        let (converted_uri, unix_socket_path) = if let Some(path) = uri.strip_prefix("unix://") {
+        let converted_uri = if let Some(path) = uri.strip_prefix("unix://") {
             let (socket_path, http_path) = parse_unix_socket_url(path);
             let socket_path: Arc<str> = socket_path.into();
             let hyperlocal_uri: http::Uri =
                 hyperlocal::Uri::new(socket_path.as_ref(), &http_path).into();
-            (hyperlocal_uri, Some(socket_path))
+            hyperlocal_uri
         } else {
-            (uri.parse()?, None)
+            uri.parse()?
         };
 
         #[cfg(not(unix))]
-        let (converted_uri, unix_socket_path): (http::Uri, Option<Arc<str>>) = (uri.parse()?, None);
+        let converted_uri: http::Uri = uri.parse()?;
 
         let mut http_request = http::Request::builder()
             .uri(converted_uri)
@@ -332,14 +327,14 @@ where
                 0
             }
         });
-        let otel_name = format!("POST {schema_uri}");
 
+        let otel_name = format!("POST {uri}");
         let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
             "otel.kind" = "CLIENT",
             "http.request.method" = "POST",
             "server.address" = %host,
             "server.port" = %port,
-            "url.full" = %schema_uri,
+            "url.full" = %uri,
             "otel.name" = %otel_name,
             "otel.original_name" = "http_request",
         );
@@ -350,14 +345,6 @@ where
                 &mut crate::otel_compat::HeaderInjector(http_request.headers_mut()),
             );
         });
-
-        // Add Unix socket path as an extension so HttpClientService can use it for span attributes
-        // We use Arc<str> so HttpClientService can share the path without cloning the string data
-        if let Some(socket_path) = unix_socket_path {
-            http_request
-                .extensions_mut()
-                .insert(UnixSocketPath(socket_path));
-        }
 
         let request = HttpRequest {
             http_request,
@@ -406,6 +393,7 @@ fn parse_unix_socket_url(url_path: &str) -> (String, String) {
         // Parse the `path` parameter from the query string
         let http_path = query
             .split('&')
+            // TODO: make const
             .find_map(|param| param.strip_prefix("path="))
             .unwrap_or("/");
 
