@@ -665,14 +665,14 @@ impl<S: HasMetadata> Subgraph<S> {
             return vec![];
         };
 
-        let Ok(itf_objects) = self
+        let itf_objects = &self
             .schema()
             .referencers()
             .get_directive(&interface_object_def.name)
-            .map(|refs| &refs.object_types)
-        else {
+            .object_types;
+        if itf_objects.is_empty() {
             return vec![];
-        };
+        }
 
         itf_objects
             .iter()

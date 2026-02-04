@@ -313,7 +313,7 @@ impl SchemaUpgrader {
     ) -> Result<(), FederationError> {
         // both @provides and @requires will only have an object_fields referencer
         for directive_name in ["requires", "provides"] {
-            let referencers = schema.referencers().get_directive(directive_name)?;
+            let referencers = schema.referencers().get_directive(directive_name);
             for field in &referencers.object_fields.clone() {
                 let field_type = field.make_mut(&mut schema.schema)?.make_mut();
 
@@ -331,7 +331,7 @@ impl SchemaUpgrader {
 
         // now do the exact same thing for @key. The difference is that the directive location will be object_types
         // rather than object_fields
-        let referencers = schema.referencers().get_directive("key")?;
+        let referencers = schema.referencers().get_directive("key");
         for field in &referencers.object_types.clone() {
             let field_type = field.make_mut(&mut schema.schema)?.make_mut();
 
@@ -689,7 +689,7 @@ impl SchemaUpgrader {
         if let Some(key) = &upgrade_metadata.key_directive_name {
             for pos in schema
                 .referencers()
-                .get_directive(key)?
+                .get_directive(key)
                 .interface_types
                 .clone()
             {
@@ -1098,7 +1098,7 @@ fn is_interface_object_used(subgraph: &Subgraph<Expanded>) -> Result<bool, Feder
         let referencers = subgraph
             .schema()
             .referencers()
-            .get_directive(interface_object_def.name.as_str())?;
+            .get_directive(interface_object_def.name.as_str());
         if !referencers.object_types.is_empty() {
             return Ok(true);
         }

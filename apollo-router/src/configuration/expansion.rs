@@ -536,4 +536,30 @@ mod test {
             assert_yaml_snapshot!(value);
         })
     }
+
+    #[test]
+    fn test_dollar_escape() {
+        // Test that $$ is escaped to a literal $ by shellexpand
+        let expansion = Expansion::builder()
+            .mocked_env_var("API_HOST", "api.example.com")
+            .supported_mode("env")
+            .build();
+
+        let value = json!({
+            // $$ should become a single $
+            "literal_dollar": "some$$api$$key",
+            // $$ alongside ${env.VAR} expansion
+            "mixed": "https://${env.API_HOST}/path?price=$$100",
+            // Multiple $$ in a row
+            "multiple_escapes": "$$first $$second $$third",
+            // $$ at start and end
+            "edges": "$$start and end$$",
+            // No expansion needed (plain string)
+            "plain": "no dollars here"
+        });
+        let result = expansion.expand(&value).expect("expansion must succeed");
+        insta::with_settings!({sort_maps => true}, {
+            assert_yaml_snapshot!(result);
+        })
+    }
 }

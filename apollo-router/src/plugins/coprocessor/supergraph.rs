@@ -219,8 +219,7 @@ where
 
     let headers_to_send = request_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
 
     let body_to_send = request_config
         .body
@@ -375,8 +374,7 @@ where
     // Encode headers, body, status, context, sdl to create a payload
     let headers_to_send = response_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
     let body_to_send = response_config
         .body
         .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));

@@ -87,7 +87,7 @@ An OCI reference to a graph artifact that contains the supergraph schema. The re
 
 When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink. The router still fetches entitlements and persisted queries from Uplink.
 
-For information on finding OCI artifact references, see [Schema from Graph Artifacts](/graphos/routing/configuration/schema-oci).
+For information on finding graph artifact references, see [Graph Artifacts](/graphos/platform/schema-management/delivery/graph-artifacts#find-oci-artifact-references).
 
 </td>
 </tr>
@@ -100,6 +100,10 @@ For information on finding OCI artifact references, see [Schema from Graph Artif
 
 To use environment variables when running router, you must set them before the `router` command:
 
-```bash
-APOLLO_KEY="..." APOLLO_GRAPH_REF="artifact.api.apollographql.com/my-graph-a50b9d546b298e5a@sha256:14409db3d8a8d74ff9e9a0b5712c0aa8d574bcacc3656e1bc0c55ecf97cd9264" ./router
+```bash title="Using a graph ref"
+APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+```
+
+```bash title="Using a graph artifact reference"
+APOLLO_KEY="..." APOLLO_GRAPH_ARTIFACT_REFERENCE="artifact.api.apollographql.com/my-graph-a50b9d546b298e5a@sha256:14409db3d8a8d74ff9e9a0b5712c0aa8d574bcacc3656e1bc0c55ecf97cd9264" ./router
 ```
