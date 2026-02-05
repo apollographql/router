@@ -83,8 +83,13 @@ pub fn make_request(
         .uri(uri);
 
     // add the headers and if content-type is specified, we'll check that when constructing the body
-    let (mut request, is_form_urlencoded, header_apply_to_errors) =
-        add_headers(request, client_headers, &transport.headers, &inputs);
+    let (mut request, is_form_urlencoded, header_apply_to_errors) = add_headers(
+        request,
+        client_headers,
+        &transport.headers,
+        &inputs,
+        transport.body.is_some(),
+    );
     let header_mapping_problems =
         aggregate_apply_to_errors_with_problem_locations(header_apply_to_errors);
 
@@ -174,6 +179,7 @@ fn add_headers(
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
     config: &[Header],
     inputs: &IndexMap<String, Value>,
+    has_body: bool,
 ) -> (
     http::request::Builder,
     bool,
@@ -230,7 +236,9 @@ fn add_headers(
         mine_type.as_ref() == Some(&mime::APPLICATION_WWW_FORM_URLENCODED)
     } else {
         // Only set this content type header as a default if one hasn't been specified. This allows the user to override the value.
-        request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
+        if has_body {
+            request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
+        }
         false
     };
 
@@ -281,6 +289,7 @@ mod tests {
             &incoming_supergraph_headers,
             &[],
             &IndexMap::with_hasher(Default::default()),
+            true,
         );
         let request = request.body("").unwrap();
         assert_eq!(request.headers().len(), 1);
@@ -317,12 +326,33 @@ mod tests {
             &incoming_supergraph_headers,
             &config,
             &IndexMap::with_hasher(Default::default()),
+            true,
         );
         let request = request.body("").unwrap();
         let result = request.headers();
         assert_eq!(result.len(), 4);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));
         assert_eq!(result.get("x-insert"), Some(&"inserted".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_headers_no_content_type_when_no_body() {
+        let incoming_supergraph_headers: HeaderMap<HeaderValue> = vec![].into_iter().collect();
+
+        let config = vec![];
+
+        let request = http::Request::builder();
+        let (request, ..) = add_headers(
+            request,
+            &incoming_supergraph_headers,
+            &config,
+            &IndexMap::with_hasher(Default::default()),
+            false,
+        );
+        let request = request.body("").unwrap();
+        let result = request.headers();
+        assert_eq!(result.len(), 0);
+        assert!(result.get("content-type").is_none());
     }
 
     #[test]
@@ -346,6 +376,7 @@ mod tests {
             &incoming_supergraph_headers,
             &config,
             &IndexMap::with_hasher(Default::default()),
+            true,
         );
         let request = request.body("").unwrap();
         let result = request.headers();
@@ -384,6 +415,7 @@ mod tests {
             &incoming_supergraph_headers,
             &config,
             &IndexMap::with_hasher(Default::default()),
+            true,
         );
         let request = request.body("").unwrap();
         let result = request.headers();

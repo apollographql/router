@@ -2040,9 +2040,7 @@ mod tests {
                     method: GET,
                     uri: http://localhost/api/path,
                     version: HTTP/1.1,
-                    headers: {
-                        "content-type": "application/json",
-                    },
+                    headers: {},
                     body: Empty,
                 },
                 RootField {
