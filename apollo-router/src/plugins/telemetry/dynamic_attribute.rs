@@ -2,8 +2,8 @@
 //!
 //! This module provides functionality for adding and managing dynamic attributes on
 //! tracing spans and events. Attributes are stored using `Vec<KeyValue>` rather than
-//! a `HashMap<Key, Value>` despite us not allowing duplicate keys because the vector 
-//! performs better at low number of elements, which is realistic for the typical number of 
+//! a `HashMap<Key, Value>` despite us not allowing duplicate keys because the vector
+//! performs better at low number of elements, which is realistic for the typical number of
 //! attributes we see in practice.
 
 use opentelemetry::Key;
