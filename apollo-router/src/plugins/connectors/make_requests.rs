@@ -2033,14 +2033,16 @@ mod tests {
         })
         .collect();
 
-        assert_debug_snapshot!(requests, @r###"
+        assert_debug_snapshot!(requests, @r#"
         [
             (
                 Request {
                     method: GET,
                     uri: http://localhost/api/path,
                     version: HTTP/1.1,
-                    headers: {},
+                    headers: {
+                        "content-type": "application/json",
+                    },
                     body: Empty,
                 },
                 RootField {
@@ -2058,7 +2060,7 @@ mod tests {
                 ),
             ),
         ]
-        "###);
+        "#);
     }
 }
 

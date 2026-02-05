@@ -83,12 +83,10 @@ pub fn make_request(
         .uri(uri);
 
     // add the headers and if content-type is specified, we'll check that when constructing the body
-    let (mut request, content_type, header_apply_to_errors) =
+    let (mut request, is_form_urlencoded, header_apply_to_errors) =
         add_headers(request, client_headers, &transport.headers, &inputs);
     let header_mapping_problems =
         aggregate_apply_to_errors_with_problem_locations(header_apply_to_errors);
-
-    let is_form_urlencoded = content_type.as_ref() == Some(&mime::APPLICATION_WWW_FORM_URLENCODED);
 
     let (json_body, form_body, body, content_length, body_apply_to_errors) =
         if let Some(ref selection) = transport.body {
@@ -102,7 +100,6 @@ pub fn make_request(
                     let len = encoded.len();
                     (encoded, len)
                 } else {
-                    request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
                     let bytes = serde_json::to_vec(json_body)?;
                     let len = bytes.len();
                     let body_string = serde_json::to_string(json_body)?;
@@ -179,7 +176,7 @@ fn add_headers(
     inputs: &IndexMap<String, Value>,
 ) -> (
     http::request::Builder,
-    Option<mime::Mime>,
+    bool,
     Vec<(ProblemLocation, ApplyToError)>,
 ) {
     let mut content_type = None;
@@ -223,11 +220,21 @@ fn add_headers(
         }
     }
 
-    (
-        request,
-        content_type.and_then(|v| v.to_str().unwrap_or_default().parse().ok()),
-        warnings,
-    )
+    let is_form_urlencoded = if let Some(content_type) = content_type {
+        // We don't need to set a content type here because it is set earlier in this function
+        let mine_type = content_type
+            .to_str()
+            .unwrap_or_default()
+            .parse::<mime::Mime>()
+            .ok();
+        mine_type.as_ref() == Some(&mime::APPLICATION_WWW_FORM_URLENCODED)
+    } else {
+        // Only set this content type header as a default if one hasn't been specified. This allows the user to override the value.
+        request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
+        false
+    };
+
+    (request, is_form_urlencoded, warnings)
 }
 
 #[derive(Error, Debug)]
@@ -276,7 +283,8 @@ mod tests {
             &IndexMap::with_hasher(Default::default()),
         );
         let request = request.body("").unwrap();
-        assert!(request.headers().is_empty());
+        assert_eq!(request.headers().len(), 1);
+        assert!(request.headers().get("content-type").is_some());
     }
 
     #[test]
@@ -312,9 +320,78 @@ mod tests {
         );
         let request = request.body("").unwrap();
         let result = request.headers();
-        assert_eq!(result.len(), 3);
+        assert_eq!(result.len(), 4);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));
         assert_eq!(result.get("x-insert"), Some(&"inserted".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_headers_replace_default_content_type() {
+        let incoming_supergraph_headers: HeaderMap<HeaderValue> = vec![(
+            "content-type".parse().unwrap(),
+            "application/json".parse().unwrap(),
+        )]
+        .into_iter()
+        .collect();
+
+        let config = vec![Header::from_values(
+            "content-type".parse().unwrap(),
+            HeaderSource::Value("application/vnd.iaas.v1+json".parse().unwrap()),
+            OriginatingDirective::Connect,
+        )];
+
+        let request = http::Request::builder();
+        let (request, ..) = add_headers(
+            request,
+            &incoming_supergraph_headers,
+            &config,
+            &IndexMap::with_hasher(Default::default()),
+        );
+        let request = request.body("").unwrap();
+        let result = request.headers();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result.get("content-type"),
+            Some(&"application/vnd.iaas.v1+json".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_headers_multiple_content_type() {
+        let incoming_supergraph_headers: HeaderMap<HeaderValue> = vec![(
+            "content-type".parse().unwrap(),
+            "application/json".parse().unwrap(),
+        )]
+        .into_iter()
+        .collect();
+
+        let config = vec![
+            Header::from_values(
+                "content-type".parse().unwrap(),
+                HeaderSource::Value("application/json".parse().unwrap()),
+                OriginatingDirective::Connect,
+            ),
+            Header::from_values(
+                "content-type".parse().unwrap(),
+                HeaderSource::Value("application/vnd.iaas.v1+json".parse().unwrap()),
+                OriginatingDirective::Connect,
+            ),
+        ];
+
+        let request = http::Request::builder();
+        let (request, ..) = add_headers(
+            request,
+            &incoming_supergraph_headers,
+            &config,
+            &IndexMap::with_hasher(Default::default()),
+        );
+        let request = request.body("").unwrap();
+        let result = request.headers();
+
+        let content_type_values: Vec<&HeaderValue> = result.get_all("content-type").iter().collect();
+        assert_eq!(content_type_values.len(), 2);
+        assert_eq!(content_type_values[0], "application/json");
+        assert_eq!(content_type_values[1], "application/vnd.iaas.v1+json");
     }
 
     #[test]
