@@ -15,6 +15,7 @@ use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
+use opentelemetry::global::get_text_map_propagator;
 use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_STATUS_CODE;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
@@ -26,6 +27,7 @@ use tower::ServiceBuilder;
 use tower::util::Either;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
+use tracing::Span;
 
 use super::HttpRequest;
 use super::HttpResponse;
@@ -36,6 +38,8 @@ use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
+use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::hickory_dns_connector::new_async_http_connector;
@@ -283,7 +287,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
     fn call(&mut self, request: HttpRequest) -> Self::Future {
         let HttpRequest {
-            http_request,
+            mut http_request,
             context,
             ..
         } = request;
@@ -312,6 +316,15 @@ impl tower::Service<HttpRequest> for HttpClientService {
         };
 
         let service_name = self.service.clone();
+        let http_req_span = Span::current();
+
+        get_text_map_propagator(|propagator| {
+            propagator.inject_context(
+                &prepare_context(http_req_span.context()),
+                &mut crate::otel_compat::HeaderInjector(http_request.headers_mut()),
+            );
+        });
+
         let (parts, body) = http_request.into_parts();
         let content_encoding = parts.headers.get(&CONTENT_ENCODING);
 
