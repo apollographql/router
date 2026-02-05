@@ -437,13 +437,22 @@ mod tests {
         assert_eq!(taken.len(), 3);
 
         // Find and verify the replaced values
-        let method = taken.iter().find(|kv| kv.key.as_str() == "http.method").unwrap();
+        let method = taken
+            .iter()
+            .find(|kv| kv.key.as_str() == "http.method")
+            .unwrap();
         assert_eq!(method.value.as_str(), Cow::Borrowed("POST"));
 
-        let route = taken.iter().find(|kv| kv.key.as_str() == "http.route").unwrap();
+        let route = taken
+            .iter()
+            .find(|kv| kv.key.as_str() == "http.route")
+            .unwrap();
         assert_eq!(route.value.as_str(), Cow::Borrowed("/new"));
 
-        let status = taken.iter().find(|kv| kv.key.as_str() == "http.status").unwrap();
+        let status = taken
+            .iter()
+            .find(|kv| kv.key.as_str() == "http.status")
+            .unwrap();
         assert_eq!(status.value.as_str(), Cow::Borrowed("200"));
     }
 
