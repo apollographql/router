@@ -18,7 +18,8 @@ pub(super) fn observe_query_lexical_token(lexical_tokens_reached: usize) {
 
 #[cfg(test)]
 mod tests {
-    use crate::spec::{Query, Schema};
+    use crate::spec::Query;
+    use crate::spec::Schema;
 
     #[test]
     fn test_query_recursion_and_tokens() {
