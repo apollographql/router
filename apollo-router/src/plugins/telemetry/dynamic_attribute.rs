@@ -27,11 +27,23 @@ impl LogAttributes {
     }
 
     pub(crate) fn insert(&mut self, kv: KeyValue) {
-        self.attributes.push(kv);
+        // Replace existing attribute with same key, or add new one
+        if let Some(existing) = self.attributes.iter_mut().find(|a| a.key == kv.key) {
+            *existing = kv;
+        } else {
+            self.attributes.push(kv);
+        }
     }
 
     pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
-        self.attributes.extend(other);
+        // Replace existing attributes with same key, or add new ones
+        for kv in other {
+            if let Some(existing) = self.attributes.iter_mut().find(|a| a.key == kv.key) {
+                *existing = kv;
+            } else {
+                self.attributes.push(kv);
+            }
+        }
     }
 }
 
@@ -87,7 +99,14 @@ impl SpanDynAttribute for ::tracing::Span {
                                 Some(otel_data) => {
                                     update_otel_data(otel_data, &key, &value);
                                     if let Some(attrs) = otel_data.builder.attributes.as_mut() {
-                                        attrs.push(KeyValue::new(key, value))
+                                        // Replace existing attribute with same key, or add new one
+                                        if let Some(existing) =
+                                            attrs.iter_mut().find(|a| a.key == key)
+                                        {
+                                            *existing = KeyValue::new(key, value);
+                                        } else {
+                                            attrs.push(KeyValue::new(key, value))
+                                        }
                                     } else {
                                         otel_data.builder.attributes =
                                             Some([KeyValue::new(key, value)].into_iter().collect());
@@ -145,7 +164,17 @@ impl SpanDynAttribute for ::tracing::Span {
                                     if let Some(existing_attributes) =
                                         otel_data.builder.attributes.as_mut()
                                     {
-                                        existing_attributes.extend(attributes);
+                                        // Replace existing attributes with same key, or add new ones
+                                        for attr in attributes {
+                                            if let Some(existing) = existing_attributes
+                                                .iter_mut()
+                                                .find(|e| e.key == attr.key)
+                                            {
+                                                *existing = attr;
+                                            } else {
+                                                existing_attributes.push(attr);
+                                            }
+                                        }
                                     } else {
                                         otel_data.builder.attributes = Some(attributes);
                                     }
@@ -283,5 +312,99 @@ impl EventDynAttribute for ::tracing::Span {
                 ::tracing::error!("no Registry, this is a bug");
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use opentelemetry::Key;
+    use opentelemetry::KeyValue;
+
+    use super::LogAttributes;
+
+    #[test]
+    fn test_log_attributes_insert_replaces_existing() {
+        let mut attrs = LogAttributes::default();
+
+        // Insert initial attribute
+        attrs.insert(KeyValue::new(Key::from_static_str("http.method"), "GET"));
+        assert_eq!(attrs.attributes().len(), 1);
+        assert_eq!(attrs.attributes()[0].value.as_str(), Cow::Borrowed("GET"));
+
+        // Insert attribute with same key - should replace
+        attrs.insert(KeyValue::new(Key::from_static_str("http.method"), "POST"));
+        assert_eq!(attrs.attributes().len(), 1);
+        assert_eq!(attrs.attributes()[0].value.as_str(), Cow::Borrowed("POST"));
+    }
+
+    #[test]
+    fn test_log_attributes_insert_adds_new() {
+        let mut attrs = LogAttributes::default();
+
+        attrs.insert(KeyValue::new(Key::from_static_str("http.method"), "GET"));
+        attrs.insert(KeyValue::new(
+            Key::from_static_str("http.route"),
+            "/graphql",
+        ));
+
+        assert_eq!(attrs.attributes().len(), 2);
+    }
+
+    #[test]
+    fn test_log_attributes_extend_replaces_existing() {
+        let mut attrs = LogAttributes::default();
+
+        // Insert initial attributes
+        attrs.insert(KeyValue::new(Key::from_static_str("http.method"), "GET"));
+        attrs.insert(KeyValue::new(Key::from_static_str("http.route"), "/old"));
+
+        // Extend with new values for existing keys
+        attrs.extend([
+            KeyValue::new(Key::from_static_str("http.method"), "POST"),
+            KeyValue::new(Key::from_static_str("http.route"), "/new"),
+            KeyValue::new(Key::from_static_str("http.status"), "200"),
+        ]);
+
+        assert_eq!(attrs.attributes().len(), 3);
+
+        // Find and verify the replaced values
+        let method = attrs
+            .attributes()
+            .iter()
+            .find(|kv| kv.key.as_str() == "http.method")
+            .unwrap();
+        assert_eq!(method.value.as_str(), Cow::Borrowed("POST"));
+
+        let route = attrs
+            .attributes()
+            .iter()
+            .find(|kv| kv.key.as_str() == "http.route")
+            .unwrap();
+        assert_eq!(route.value.as_str(), Cow::Borrowed("/new"));
+
+        let status = attrs
+            .attributes()
+            .iter()
+            .find(|kv| kv.key.as_str() == "http.status")
+            .unwrap();
+        assert_eq!(status.value.as_str(), Cow::Borrowed("200"));
+    }
+
+    #[test]
+    fn test_log_attributes_extend_preserves_order_for_new_keys() {
+        let mut attrs = LogAttributes::default();
+
+        attrs.insert(KeyValue::new(Key::from_static_str("first"), "1"));
+        attrs.extend([
+            KeyValue::new(Key::from_static_str("second"), "2"),
+            KeyValue::new(Key::from_static_str("third"), "3"),
+        ]);
+
+        assert_eq!(attrs.attributes().len(), 3);
+        assert_eq!(attrs.attributes()[0].key.as_str(), "first");
+        assert_eq!(attrs.attributes()[1].key.as_str(), "second");
+        assert_eq!(attrs.attributes()[2].key.as_str(), "third");
     }
 }
