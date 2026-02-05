@@ -388,7 +388,8 @@ mod tests {
         let request = request.body("").unwrap();
         let result = request.headers();
 
-        let content_type_values: Vec<&HeaderValue> = result.get_all("content-type").iter().collect();
+        let content_type_values: Vec<&HeaderValue> =
+            result.get_all("content-type").iter().collect();
         assert_eq!(content_type_values.len(), 2);
         assert_eq!(content_type_values[0], "application/json");
         assert_eq!(content_type_values[1], "application/vnd.iaas.v1+json");
