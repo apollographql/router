@@ -28,6 +28,7 @@ use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
+use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
@@ -165,6 +166,7 @@ async fn service_call(
             .query
             .clone()
             .unwrap_or_default(),
+        variables.clone(),
     )
     .await
     {
@@ -408,6 +410,7 @@ async fn plan_query(
     operation_name: Option<String>,
     context: Context,
     query_str: String,
+    variables: Object,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
     let qpr = planning
         .call(
@@ -415,6 +418,7 @@ async fn plan_query(
                 .query(query_str)
                 .and_operation_name(operation_name)
                 .context(context.clone())
+                .variables(variables)
                 .build(),
         )
         .instrument(tracing::info_span!(

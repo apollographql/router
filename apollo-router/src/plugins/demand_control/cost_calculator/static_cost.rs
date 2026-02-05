@@ -553,53 +553,57 @@ impl<'schema> ResponseCostCalculator<'schema> {
         if field.name == TYPENAME {
             return;
         }
-        if let Some(definition) = self.schema.output_field_definition(parent_ty, &field.name) {
-            match value {
-                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                    self.cost += definition
-                        .cost_directive()
-                        .map_or(0.0, |cost| cost.weight());
-                }
-                Value::Array(items) => {
-                    for item in items {
-                        self.visit_list_item(request, variables, parent_ty, field, item);
-                    }
-                }
-                Value::Object(children) => {
-                    self.cost += definition
-                        .cost_directive()
-                        .map_or(1.0, |cost| cost.weight());
-                    self.visit_selections(request, variables, &field.selection_set, children);
-                }
-            }
 
-            if include_argument_score {
-                for argument in &field.arguments {
-                    if let Some(argument_definition) = definition.argument_by_name(&argument.name) {
-                        if let Ok(score) = score_argument(
-                            &argument.value,
-                            argument_definition,
-                            self.schema,
-                            variables,
-                        ) {
-                            self.cost += score;
-                        }
-                    } else {
-                        tracing::debug!(
-                            "Failed to get schema definition for argument {}.{}({}:). The resulting response cost will be a partial result.",
-                            parent_ty,
-                            field.name,
-                            argument.name,
-                        )
-                    }
-                }
-            }
-        } else {
+        let definition = self.schema.output_field_definition(parent_ty, &field.name);
+
+        // We need to have a field definition for later processing, unless the query is an
+        // `_entities` query. If the field should be there and isn't, return now.
+        let is_entities_query = parent_ty == "Query" && field.name == "_entities";
+        if definition.is_none() && !is_entities_query {
             tracing::debug!(
                 "Failed to get schema definition for field {}.{}. The resulting response cost will be a partial result.",
                 parent_ty,
                 field.name,
-            )
+            );
+            return;
+        }
+
+        match value {
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                self.cost += definition
+                    .and_then(|d| d.cost_directive())
+                    .map_or(0.0, |cost| cost.weight());
+            }
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_list_item(request, variables, parent_ty, field, item);
+                }
+            }
+            Value::Object(children) => {
+                self.cost += definition
+                    .and_then(|d| d.cost_directive())
+                    .map_or(1.0, |cost| cost.weight());
+                self.visit_selections(request, variables, &field.selection_set, children);
+            }
+        }
+
+        if include_argument_score && let Some(definition) = definition {
+            for argument in &field.arguments {
+                if let Some(argument_definition) = definition.argument_by_name(&argument.name) {
+                    if let Ok(score) =
+                        score_argument(&argument.value, argument_definition, self.schema, variables)
+                    {
+                        self.cost += score;
+                    }
+                } else {
+                    tracing::debug!(
+                        "Failed to get schema definition for argument {}.{}({}:). The resulting response cost will be a partial result.",
+                        parent_ty,
+                        field.name,
+                        argument.name,
+                    )
+                }
+            }
         }
     }
 }
@@ -746,6 +750,7 @@ mod tests {
                 CacheKeyMetadata::default(),
                 PlanOptions::default(),
                 ComputeJobType::QueryPlanning,
+                variables.clone(),
             ))
             .await
             .unwrap();

@@ -3,8 +3,8 @@
 /apollo-federation/ @apollographql/fed-core @apollographql/rust-platform
 /apollo-federation/src/connectors @apollographql/graph-dev
 /apollo-router/ @apollographql/foundation
-/apollo-router/src/plugins/connectors @apollographql/graph-dev
+/apollo-router/src/plugins/connectors @apollographql/orchestration-language
 /apollo-router/src/plugins/fleet_detector.rs @apollographql/runtime-readiness
-/apollo-router-benchmarks/ @apollographql/router-core @apollographql/fed-core
-/examples/ @apollographql/router-core @apollographql/fed-core
+/apollo-router-benchmarks/ @apollographql/router-core @apollographql/orchestration-language
+/examples/ @apollographql/router-core
 /.github/CODEOWNERS @apollographql/router-core @apollographql/fed-core

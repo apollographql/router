@@ -1,6 +1,7 @@
 use apollo_compiler::ExecutableDocument;
 
 use crate::graphql;
+use crate::plugins::demand_control::ActualCostMode;
 use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::StrategyImpl;
@@ -11,6 +12,7 @@ use crate::services::subgraph;
 pub(crate) struct StaticEstimated {
     // The estimated value of the demand
     pub(crate) max: f64,
+    pub(crate) actual_cost_mode: ActualCostMode,
     pub(crate) cost_calculator: StaticCostCalculator,
 }
 
@@ -49,9 +51,29 @@ impl StrategyImpl for StaticEstimated {
 
     fn on_subgraph_response(
         &self,
-        _request: &ExecutableDocument,
-        _response: &subgraph::Response,
+        request: &ExecutableDocument,
+        response: &subgraph::Response,
+        subgraph_name: &str,
     ) -> Result<(), DemandControlError> {
+        if !matches!(self.actual_cost_mode, ActualCostMode::BySubgraph) {
+            return Ok(());
+        }
+
+        let subgraph_response_body = response.response.body();
+        let cost = self.cost_calculator.actual(
+            request,
+            subgraph_response_body,
+            &response
+                .context
+                .extensions()
+                .with_lock(|lock| lock.get().cloned())
+                .unwrap_or_default(),
+        )?;
+
+        response
+            .context
+            .update_actual_cost_by_subgraph(subgraph_name, cost)?;
+
         Ok(())
     }
 
@@ -61,17 +83,25 @@ impl StrategyImpl for StaticEstimated {
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
-        if response.data.is_some() {
-            let cost = self.cost_calculator.actual(
+        if response.data.is_none() {
+            return Ok(());
+        }
+
+        let cost = match self.actual_cost_mode {
+            ActualCostMode::BySubgraph => context
+                .get_actual_cost_by_subgraph()?
+                .map_or(0.0, |cost| cost.total()),
+            ActualCostMode::ByResponseShape => self.cost_calculator.actual(
                 request,
                 response,
                 &context
                     .extensions()
                     .with_lock(|lock| lock.get().cloned())
                     .unwrap_or_default(),
-            )?;
-            context.insert_actual_cost(cost)?;
-        }
+            )?,
+        };
+
+        context.insert_actual_cost(cost)?;
         Ok(())
     }
 }

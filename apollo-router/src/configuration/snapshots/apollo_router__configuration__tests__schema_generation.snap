@@ -115,6 +115,21 @@ expression: "&schema"
         }
       ]
     },
+    "ActualCostMode": {
+      "oneOf": [
+        {
+          "const": "by_subgraph",
+          "description": "Computes the cost of each subgraph response and sums them to get the total query cost.",
+          "type": "string"
+        },
+        {
+          "const": "by_response_shape",
+          "deprecated": true,
+          "description": "Computes the cost based on the final structure of the composed response, not including any\ninterim structures from subgraph responses that did not make it to the composed response.",
+          "type": "string"
+        }
+      ]
+    },
     "All": {
       "enum": [
         "all"
@@ -4561,7 +4576,7 @@ expression: "&schema"
               "$ref": "#/definitions/StandardInstrumentExtendedRouterOverheadAttributesWithRouterSelector"
             }
           ],
-          "description": "Histogram of router overhead (time not spent in subgraph requests)"
+          "description": "Histogram of router overhead (time not spent in subgraph requests). The default unit is\nseconds, but this can be changed with selectors"
         },
         "http.server.active_requests": {
           "allOf": [
@@ -9137,6 +9152,14 @@ expression: "&schema"
             "static_estimated": {
               "additionalProperties": false,
               "properties": {
+                "actual_cost_mode": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/ActualCostMode"
+                    }
+                  ],
+                  "description": "The strategy used to calculate the actual cost incurred by an operation.\n\n* `by_subgraph` (default) computes the cost of each subgraph response and sums them\n  to get the total query cost.\n* `by_response_shape` computes the cost based on the final structure of the composed\n  response, not including any interim structures from subgraph responses that did not\n  make it to the composed response."
+                },
                 "list_size": {
                   "description": "The assumed length of lists returned by the operation.",
                   "format": "uint32",
