@@ -236,7 +236,14 @@ pub(crate) struct EventAttributes {
 
 impl EventAttributes {
     pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
-        self.attributes.extend(other);
+        // Replace existing attributes with same key, or add new ones
+        for kv in other {
+            if let Some(existing) = self.attributes.iter_mut().find(|a| a.key == kv.key) {
+                *existing = kv;
+            } else {
+                self.attributes.push(kv);
+            }
+        }
     }
 
     pub(crate) fn take(&mut self) -> Vec<KeyValue> {
@@ -322,6 +329,7 @@ mod tests {
     use opentelemetry::Key;
     use opentelemetry::KeyValue;
 
+    use super::EventAttributes;
     use super::LogAttributes;
 
     #[test]
@@ -406,5 +414,62 @@ mod tests {
         assert_eq!(attrs.attributes()[0].key.as_str(), "first");
         assert_eq!(attrs.attributes()[1].key.as_str(), "second");
         assert_eq!(attrs.attributes()[2].key.as_str(), "third");
+    }
+
+    #[test]
+    fn test_event_attributes_extend_replaces_existing() {
+        let mut attrs = EventAttributes::default();
+
+        // Extend with initial attributes
+        attrs.extend([
+            KeyValue::new(Key::from_static_str("http.method"), "GET"),
+            KeyValue::new(Key::from_static_str("http.route"), "/old"),
+        ]);
+
+        // Extend with new values for existing keys
+        attrs.extend([
+            KeyValue::new(Key::from_static_str("http.method"), "POST"),
+            KeyValue::new(Key::from_static_str("http.route"), "/new"),
+            KeyValue::new(Key::from_static_str("http.status"), "200"),
+        ]);
+
+        let taken = attrs.take();
+        assert_eq!(taken.len(), 3);
+
+        // Find and verify the replaced values
+        let method = taken.iter().find(|kv| kv.key.as_str() == "http.method").unwrap();
+        assert_eq!(method.value.as_str(), Cow::Borrowed("POST"));
+
+        let route = taken.iter().find(|kv| kv.key.as_str() == "http.route").unwrap();
+        assert_eq!(route.value.as_str(), Cow::Borrowed("/new"));
+
+        let status = taken.iter().find(|kv| kv.key.as_str() == "http.status").unwrap();
+        assert_eq!(status.value.as_str(), Cow::Borrowed("200"));
+    }
+
+    #[test]
+    fn test_event_attributes_extend_adds_new() {
+        let mut attrs = EventAttributes::default();
+
+        attrs.extend([
+            KeyValue::new(Key::from_static_str("http.method"), "GET"),
+            KeyValue::new(Key::from_static_str("http.route"), "/graphql"),
+        ]);
+
+        let taken = attrs.take();
+        assert_eq!(taken.len(), 2);
+    }
+
+    #[test]
+    fn test_event_attributes_take_clears_attributes() {
+        let mut attrs = EventAttributes::default();
+
+        attrs.extend([KeyValue::new(Key::from_static_str("http.method"), "GET")]);
+        let taken = attrs.take();
+        assert_eq!(taken.len(), 1);
+
+        // After take, attributes should be empty
+        let taken_again = attrs.take();
+        assert_eq!(taken_again.len(), 0);
     }
 }
