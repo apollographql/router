@@ -368,10 +368,35 @@ impl LitExpr {
         Ok((input, WithRange::new(Self::Object(output), range)))
     }
 
-    // LitProperty ::= Key ":" LitExpr
+    // LitProperty ::= Key ":" LitExpr | KeyPath (shorthand, V0_4+)
     fn parse_property(input: Span) -> ParseResult<(WithRange<Key>, WithRange<Self>)> {
-        tuple((Key::parse, spaces_or_comments, char(':'), Self::parse))(input)
-            .map(|(input, (key, _, _colon, value))| (input, (key, value)))
+        let full_result =
+            tuple((Key::parse, spaces_or_comments, char(':'), Self::parse))(input.clone());
+
+        match full_result {
+            Ok((remainder, (key, _, _, value))) => Ok((remainder, (key, value))),
+            Err(_) if input.extra.spec >= ConnectSpec::V0_4 => {
+                Self::parse_shorthand_property(input)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn parse_shorthand_property(input: Span) -> ParseResult<(WithRange<Key>, WithRange<Self>)> {
+        let (remainder, value) = Self::parse(input.clone())?;
+        let Self::Path(path) = value.as_ref() else {
+            return Err(nom_fail_message(
+                input,
+                "Shorthand property must be a path starting with a key",
+            ));
+        };
+        let Some(key) = path.get_single_key() else {
+            return Err(nom_fail_message(
+                input,
+                "Shorthand property must be a path starting with a key",
+            ));
+        };
+        Ok((remainder, (key.clone(), value)))
     }
 
     // LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
@@ -1165,6 +1190,209 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_shorthand_object_property() {
+        // Test shorthand object property syntax: { a } means { a: a }
+        // This is only supported in V0_4+
+
+        // Build expected AST for { a: a } - a single-key path
+        let expected_a = LitExpr::Object({
+            let mut map = IndexMap::default();
+            map.insert(
+                Key::field("a").into_with_range(),
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("a").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+                .into_with_range(),
+            );
+            map
+        });
+
+        // Shorthand { a } should parse to the same AST as { a: a }
+        check_parse_with_spec("{ a }", ConnectSpec::V0_4, expected_a);
+
+        // Multi-property shorthand: { a, b }
+        let expected_ab = LitExpr::Object({
+            let mut map = IndexMap::default();
+            map.insert(
+                Key::field("a").into_with_range(),
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("a").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+                .into_with_range(),
+            );
+            map.insert(
+                Key::field("b").into_with_range(),
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("b").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+                .into_with_range(),
+            );
+            map
+        });
+
+        check_parse_with_spec("{ a, b }", ConnectSpec::V0_4, expected_ab);
+
+        // Mixed shorthand and explicit: { a, b: 1 }
+        let expected_mixed = LitExpr::Object({
+            let mut map = IndexMap::default();
+            map.insert(
+                Key::field("a").into_with_range(),
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("a").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+                .into_with_range(),
+            );
+            map.insert(
+                Key::field("b").into_with_range(),
+                LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+            );
+            map
+        });
+
+        check_parse_with_spec("{ a, b: 1 }", ConnectSpec::V0_4, expected_mixed);
+
+        // Shorthand with optional: { a?, b }
+        let expected_optional = LitExpr::Object({
+            let mut map = IndexMap::default();
+            map.insert(
+                Key::field("a").into_with_range(),
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("a").into_with_range(),
+                        PathList::Question(PathList::Empty.into_with_range()).into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+                .into_with_range(),
+            );
+            map.insert(
+                Key::field("b").into_with_range(),
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("b").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+                .into_with_range(),
+            );
+            map
+        });
+
+        check_parse_with_spec("{ a?, b }", ConnectSpec::V0_4, expected_optional);
+
+        // Nested shorthand with subselection: { a? { b c? }, d }
+        // Note: inner braces are SubSelection (space-separated), not LitObject (comma-separated)
+        let input = "{ a? { b c? }, d }";
+        let (remainder, parsed) = LitExpr::parse(new_span_with_spec(input, ConnectSpec::V0_4))
+            .expect("Failed to parse nested shorthand");
+        assert!(span_is_all_spaces_or_comments(remainder));
+
+        // Verify it's an Object with keys "a" and "d"
+        let LitExpr::Object(map) = parsed.as_ref() else {
+            panic!("Expected Object, got {:?}", parsed);
+        };
+        assert_eq!(map.len(), 2);
+        let keys: Vec<_> = map.keys().map(|k| k.as_str()).collect();
+        assert!(keys.contains(&"a"), "Expected key 'a', got {:?}", keys);
+        assert!(keys.contains(&"d"), "Expected key 'd', got {:?}", keys);
+    }
+
+    #[test]
+    fn test_shorthand_not_supported_in_old_versions() {
+        // Shorthand should fail to parse in V0_1, V0_2, and V0_3
+        let result = LitExpr::parse(new_span_with_spec("{ a }", ConnectSpec::V0_1));
+        assert!(result.is_err(), "Shorthand should not parse in V0_1");
+
+        let result = LitExpr::parse(new_span_with_spec("{ a }", ConnectSpec::V0_2));
+        assert!(result.is_err(), "Shorthand should not parse in V0_2");
+
+        let result = LitExpr::parse(new_span_with_spec("{ a }", ConnectSpec::V0_3));
+        assert!(result.is_err(), "Shorthand should not parse in V0_3");
+    }
+
+    #[test]
+    fn test_shorthand_pretty_print() {
+        // Test that { a: a } pretty-prints as { a }
+        let obj = LitExpr::Object({
+            let mut map = IndexMap::default();
+            map.insert(
+                Key::field("a").into_with_range(),
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("a").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+                .into_with_range(),
+            );
+            map
+        });
+
+        let printed = obj.pretty_print_with_indentation(true, 0);
+        assert_eq!(
+            printed, "{ a }",
+            "Expected shorthand output, got: {printed}"
+        );
+
+        // But { a: b } should NOT print as shorthand (different key/value names)
+        let obj_diff = LitExpr::Object({
+            let mut map = IndexMap::default();
+            map.insert(
+                Key::field("a").into_with_range(),
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("b").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+                .into_with_range(),
+            );
+            map
+        });
+
+        let printed = obj_diff.pretty_print_with_indentation(true, 0);
+        assert_eq!(
+            printed, "{ a: b }",
+            "Expected explicit output, got: {printed}"
+        );
+
+        // { a: 1 } should also NOT print as shorthand (value is not a path)
+        let obj_val = LitExpr::Object({
+            let mut map = IndexMap::default();
+            map.insert(
+                Key::field("a").into_with_range(),
+                LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+            );
+            map
+        });
+
+        let printed = obj_val.pretty_print_with_indentation(true, 0);
+        assert_eq!(
+            printed, "{ a: 1 }",
+            "Expected explicit output, got: {printed}"
+        );
+    }
+
     #[track_caller]
     fn check_parse_with_spec(input: &str, spec: ConnectSpec, expected: LitExpr) {
         match LitExpr::parse(new_span_with_spec(input, spec)) {
@@ -1174,5 +1402,34 @@ mod tests {
             }
             Err(e) => panic!("Failed to parse '{input}': {e:?}"),
         }
+    }
+
+    #[test]
+    fn test_shorthand_optional_pretty_print() {
+        // { a? } desugars to { a: a? } and should pretty-print back as { a? }
+        let (_, parsed) = LitExpr::parse(new_span_with_spec("{ a? }", ConnectSpec::V0_4)).unwrap();
+        let printed = parsed.pretty_print_with_indentation(true, 0);
+        assert_eq!(
+            printed, "{ a? }",
+            "Expected shorthand optional output, got: {printed}"
+        );
+
+        // { a?, b } should pretty-print as { a?, b }
+        let (_, parsed) =
+            LitExpr::parse(new_span_with_spec("{ a?, b }", ConnectSpec::V0_4)).unwrap();
+        let printed = parsed.pretty_print_with_indentation(true, 0);
+        assert_eq!(
+            printed, "{ a?, b }",
+            "Expected shorthand optional output, got: {printed}"
+        );
+
+        // { a?: 1 } should NOT be shorthand (value is not a path matching the key)
+        let (_, parsed) =
+            LitExpr::parse(new_span_with_spec("{ a: a?, b: 1 }", ConnectSpec::V0_4)).unwrap();
+        let printed = parsed.pretty_print_with_indentation(true, 0);
+        assert_eq!(
+            printed, "{ a?, b: 1 }",
+            "Expected mixed shorthand output, got: {printed}"
+        );
     }
 }
