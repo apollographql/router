@@ -51,6 +51,12 @@ use crate::connectors::variable::VariableReference;
 // here, if error messages can be improved with additional context.
 pub(super) type ParseResult<'a, T> = IResult<Span<'a>, T>;
 
+/// Maximum recursion depth for PathList parsing. Prevents stack overflow on
+/// pathologically deep inputs like `$.a.b.c.d...` repeated hundreds of times.
+/// This limit is well above any reasonable real-world nesting level while
+/// staying safely within typical thread stack sizes.
+const MAX_PARSE_DEPTH: usize = 64;
+
 // Generates a non-fatal error with the given suffix and message, allowing the
 // parser to recover and continue.
 pub(super) fn nom_error_message(
@@ -1137,6 +1143,13 @@ impl PathList {
     }
 
     pub(super) fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
+        if depth > MAX_PARSE_DEPTH {
+            return Err(nom_fail_message(
+                input,
+                "Path selection exceeds maximum nesting depth",
+            ));
+        }
+
         let spec = get_connect_spec(&input);
 
         // If the input is empty (i.e. this method will end up returning
@@ -4670,5 +4683,168 @@ mod tests {
         assert!(JSONSelection::parse_with_spec("...User", ConnectSpec::V0_5).is_ok());
         assert!(JSONSelection::parse_with_spec("...UserProfile123", ConnectSpec::V0_5).is_ok());
         assert!(JSONSelection::parse_with_spec("...User_Profile", ConnectSpec::V0_5).is_ok());
+    }
+
+    // =========================================================================
+    // Tests for review findings H1, H2, M4
+    // See docs/review-friendly-wing.md for details.
+    // =========================================================================
+
+    // H1: PathList::parse_with_depth has no recursion depth limit.
+    //
+    // An adversarial input with deeply chained keys can recurse to arbitrary
+    // stack depth, potentially causing a stack overflow.
+
+    #[test]
+    fn parse_depth_50_succeeds() {
+        // 50 chained keys should parse fine — well under MAX_PARSE_DEPTH (64).
+        let path = format!("${}", ".a".repeat(50));
+        let result = JSONSelection::parse_with_spec(&path, ConnectSpec::V0_5);
+        assert!(
+            result.is_ok(),
+            "50-level deep path should parse successfully: {:?}",
+            result.unwrap_err()
+        );
+    }
+
+    #[test]
+    fn parse_depth_500_returns_error() {
+        // H1 FIX: 500 chained keys no longer causes a stack overflow.
+        // Instead, it is cleanly rejected by the MAX_PARSE_DEPTH guard.
+        let deep_path = format!("${}", ".a".repeat(500));
+        let result = JSONSelection::parse_with_spec(&deep_path, ConnectSpec::V0_5);
+        assert!(
+            result.is_err(),
+            "500-level deep path should be rejected by depth limit"
+        );
+    }
+
+    #[test]
+    fn parse_depth_10_succeeds() {
+        // A reasonable depth (e.g., 10 levels) should always succeed.
+        let path = "$.a.b.c.d.e.f.g.h.i.j";
+        let result = JSONSelection::parse_with_spec(path, ConnectSpec::V0_5);
+        assert!(
+            result.is_ok(),
+            "A 10-level deep path should parse successfully: {:?}",
+            result.unwrap_err()
+        );
+    }
+
+    // H2/M4: parse_v0_5 speculative backtracking and space-before-typename.
+    //
+    // The v0.5 parser speculatively tries "..." + uppercase typename.
+    // If it fails, it backtracks and tries anonymous spread. This means:
+    //   "...User"  -> SpreadNamed("User")    (uppercase)
+    //   "...user"  -> anonymous spread of path "user" (lowercase)
+    //   "... User" -> anonymous spread, "User" is a separate field
+    //
+    // These tests pin down the exact semantics.
+
+    #[test]
+    fn space_between_dots_and_typename_is_not_spread_named() {
+        // "... User" should NOT parse as SpreadNamed.
+        // The space makes "..." an anonymous spread token, and "User" is parsed
+        // as a separate NamedSelection (a field named "User").
+        let result = JSONSelection::parse_with_spec("... User", ConnectSpec::V0_5).unwrap();
+        let pretty = result.pretty_print();
+
+        // Should contain "... " (anonymous spread) and "User" as separate things,
+        // NOT "...User" (SpreadNamed).
+        assert!(
+            !pretty.contains("...User"),
+            "Space before typename should not create SpreadNamed. Got: {pretty}",
+        );
+    }
+
+    #[test]
+    fn no_space_after_dots_creates_spread_named() {
+        // "...User" with no space should parse as SpreadNamed.
+        let result = JSONSelection::parse_with_spec("...User", ConnectSpec::V0_5).unwrap();
+        let pretty = result.pretty_print();
+
+        assert!(
+            pretty.contains("...User"),
+            "No space should create SpreadNamed. Got: {pretty}",
+        );
+    }
+
+    #[test]
+    fn dots_lowercase_is_anonymous_spread() {
+        // "...metadata" in v0.5 should be an anonymous spread (lowercase),
+        // NOT a SpreadNamed reference.
+        let result =
+            JSONSelection::parse_with_spec("...metadata { id name }", ConnectSpec::V0_5).unwrap();
+        let pretty = result.pretty_print();
+
+        // Anonymous spread pretty prints as "... metadata" (with space)
+        assert!(
+            pretty.contains("... metadata"),
+            "Lowercase should be anonymous spread, not SpreadNamed. Got: {pretty}",
+        );
+    }
+
+    #[test]
+    fn spread_named_not_supported_in_v04() {
+        // In v0.4, "...User" should be an anonymous spread of path "User",
+        // NOT a SpreadNamed. SpreadNamed is a v0.5 feature.
+        let result = JSONSelection::parse_with_spec("...User", ConnectSpec::V0_4).unwrap();
+        let pretty = result.pretty_print();
+
+        // In v0.4, this is an anonymous spread -- pretty prints as "... User"
+        assert!(
+            !pretty.contains("...User") || pretty.contains("... User"),
+            "v0.4 should not create SpreadNamed for ...User. Got: {pretty}",
+        );
+    }
+
+    #[test]
+    fn spread_named_round_trips_through_pretty_print() {
+        // Verify parse -> pretty_print -> parse produces the same AST.
+        let original = "id ...User email";
+        let parsed = JSONSelection::parse_with_spec(original, ConnectSpec::V0_5).unwrap();
+        let pretty = parsed.pretty_print();
+        let reparsed = JSONSelection::parse_with_spec(&pretty, ConnectSpec::V0_5).unwrap();
+        let pretty2 = reparsed.pretty_print();
+
+        assert_eq!(
+            pretty, pretty2,
+            "SpreadNamed should round-trip through pretty_print.\n\
+             First:  {pretty}\n\
+             Second: {pretty2}",
+        );
+    }
+
+    #[test]
+    fn spread_named_with_surrounding_fields() {
+        // Multiple spreads and fields should all parse correctly in v0.5.
+        let input = "id ...User ...Address email";
+        let parsed = JSONSelection::parse_with_spec(input, ConnectSpec::V0_5).unwrap();
+        let pretty = parsed.pretty_print();
+
+        assert!(pretty.contains("id"), "Missing 'id' in: {pretty}");
+        assert!(pretty.contains("...User"), "Missing '...User' in: {pretty}");
+        assert!(
+            pretty.contains("...Address"),
+            "Missing '...Address' in: {pretty}"
+        );
+        assert!(pretty.contains("email"), "Missing 'email' in: {pretty}");
+    }
+
+    #[test]
+    fn spread_named_in_nested_subselection_v05() {
+        // SpreadNamed should work inside nested subselections too.
+        let input = "data { ...User extraField }";
+        let parsed = JSONSelection::parse_with_spec(input, ConnectSpec::V0_5).unwrap();
+        let pretty = parsed.pretty_print();
+
+        assert!(
+            pretty.contains("...User"),
+            "SpreadNamed should work in nested subselection. Got: {pretty}",
+        );
+        assert!(
+            pretty.contains("extraField"),
+            "Extra field should be preserved. Got: {pretty}",
+        );
     }
 }

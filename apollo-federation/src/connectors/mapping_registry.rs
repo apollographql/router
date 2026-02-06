@@ -153,6 +153,12 @@ impl MappingRegistry {
         self.mappings.get(name)
     }
 
+    /// Insert a mapping directly (for testing and programmatic construction)
+    #[cfg(test)]
+    pub fn insert_mapping(&mut self, name: Name, definition: MappingDefinition) {
+        self.mappings.insert(name, definition);
+    }
+
     /// Expand all `...TypeName` spreads in a JSONSelection
     ///
     /// This replaces `SpreadNamed` nodes with the corresponding mapping's selection.
@@ -204,6 +210,14 @@ impl MappingRegistry {
         expanding: &mut HashSet<String>,
         depth: usize,
     ) -> Result<SubSelection, FederationError> {
+        if depth > MAX_EXPANSION_DEPTH {
+            return Err(FederationError::internal(format!(
+                "Mapping expansion exceeded maximum depth of {}. \
+                 This may indicate an overly complex mapping chain.",
+                MAX_EXPANSION_DEPTH
+            )));
+        }
+
         let mut new_selections = Vec::new();
 
         for named in &sub.selections {
@@ -857,6 +871,183 @@ mod tests {
             anon_pretty.contains("... metadata"),
             "Anonymous spread ... metadata not found in: {}",
             anon_pretty
+        );
+    }
+
+    // =========================================================================
+    // Tests for review finding C2
+    // See docs/review-friendly-wing.md for details.
+    // =========================================================================
+
+    // C2: expand_path_list does not recurse into LitExpr.
+    //
+    // LitExpr::Path can contain a PathSelection with a SubSelection that holds
+    // SpreadNamed nodes. The current expand_path_list clones LitExpr without
+    // recursing into it, leaving SpreadNamed nodes unexpanded.
+
+    #[test]
+    fn expand_spread_in_nested_subselection() {
+        use apollo_compiler::name;
+
+        // Create registry with mappings
+        let mut registry = MappingRegistry::new();
+
+        let user_selection =
+            JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
+        if let TopLevelSelection::Named(sub) = user_selection.inner {
+            registry.mappings.insert(
+                name!(User),
+                MappingDefinition {
+                    selection: sub,
+                    source_type: name!(User),
+                },
+            );
+        }
+
+        let addr_selection =
+            JSONSelection::parse_with_spec("street city", ConnectSpec::V0_5).unwrap();
+        if let TopLevelSelection::Named(sub) = addr_selection.inner {
+            registry.mappings.insert(
+                name!(Address),
+                MappingDefinition {
+                    selection: sub,
+                    source_type: name!(Address),
+                },
+            );
+        }
+
+        // Selection with spreads inside a path subselection:
+        // users: $.data { ...User address { ...Address } }
+        let selection = JSONSelection::parse_with_spec(
+            "users: $.data { ...User address { ...Address } }",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+
+        let expanded = registry.expand_selection(&selection).unwrap();
+        let pretty = expanded.pretty_print();
+
+        // Both spreads should be fully expanded
+        assert!(
+            !pretty.contains("...User"),
+            "...User should be expanded. Got: {}",
+            pretty
+        );
+        assert!(
+            !pretty.contains("...Address"),
+            "...Address should be expanded. Got: {}",
+            pretty
+        );
+        assert!(pretty.contains("id"), "Expected 'id' in: {}", pretty);
+        assert!(pretty.contains("name"), "Expected 'name' in: {}", pretty);
+        assert!(
+            pretty.contains("street"),
+            "Expected 'street' in: {}",
+            pretty
+        );
+        assert!(pretty.contains("city"), "Expected 'city' in: {}", pretty);
+    }
+
+    #[test]
+    fn expand_three_levels_of_transitive_spreads() {
+        use apollo_compiler::name;
+
+        // Create a 3-level deep chain: Order -> ...User -> address { ...Address }
+        let mut registry = MappingRegistry::new();
+
+        let addr_selection =
+            JSONSelection::parse_with_spec("street city zip", ConnectSpec::V0_5).unwrap();
+        if let TopLevelSelection::Named(sub) = addr_selection.inner {
+            registry.mappings.insert(
+                name!(Address),
+                MappingDefinition {
+                    selection: sub,
+                    source_type: name!(Address),
+                },
+            );
+        }
+
+        // User references Address
+        let user_selection = JSONSelection::parse_with_spec(
+            "id name address { ...Address }",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        if let TopLevelSelection::Named(sub) = user_selection.inner {
+            registry.mappings.insert(
+                name!(User),
+                MappingDefinition {
+                    selection: sub,
+                    source_type: name!(User),
+                },
+            );
+        }
+
+        // Top-level references User
+        let selection = JSONSelection::parse_with_spec(
+            "...User email",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+
+        let expanded = registry.expand_selection(&selection).unwrap();
+        let pretty = expanded.pretty_print();
+
+        // All three levels should be fully expanded
+        assert!(
+            !pretty.contains("...User"),
+            "...User should be expanded. Got: {}",
+            pretty
+        );
+        assert!(
+            !pretty.contains("...Address"),
+            "...Address should be expanded. Got: {}",
+            pretty
+        );
+
+        // Verify all leaf fields are present
+        for field in &["id", "name", "street", "city", "zip", "email"] {
+            assert!(pretty.contains(field), "Expected '{}' in: {}", field, pretty);
+        }
+    }
+
+    #[test]
+    fn expand_rejects_chain_exceeding_max_depth() {
+        // C2 FIX: The MAX_EXPANSION_DEPTH check is now in expand_sub_selection,
+        // so deep non-circular chains are caught.
+        let mut registry = MappingRegistry::new();
+
+        for i in 0..35 {
+            let this_name = Name::new(&format!("T{i}")).unwrap();
+            let next_ref = if i < 34 {
+                format!("field{i} ...T{}", i + 1)
+            } else {
+                format!("field{i}")
+            };
+
+            let sel = JSONSelection::parse_with_spec(&next_ref, ConnectSpec::V0_5).unwrap();
+            if let TopLevelSelection::Named(sub) = sel.inner {
+                registry.mappings.insert(
+                    this_name.clone(),
+                    MappingDefinition {
+                        selection: sub,
+                        source_type: this_name,
+                    },
+                );
+            }
+        }
+
+        // Try to expand T0 -- this creates a 35-level chain which exceeds MAX_EXPANSION_DEPTH (32).
+        let selection = JSONSelection::parse_with_spec("...T0", ConnectSpec::V0_5).unwrap();
+        let result = registry.expand_selection(&selection);
+
+        assert!(
+            result.is_err(),
+            "35-level chain should be rejected by depth check"
+        );
+        assert!(
+            result.unwrap_err().to_string().contains("maximum depth"),
+            "Error should mention maximum depth"
         );
     }
 }

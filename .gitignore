@@ -21,6 +21,8 @@
 /docs/node_modules/
 /docs/.cache/
 /docs/public
+/docs/source/routing/connectors/
+/docs/source/images/connectors-*
 
 # Prevent accidental commits of router.yaml in the root
 /router.yaml
