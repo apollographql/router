@@ -1989,7 +1989,8 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         schema: &FederationSchema,
         directive_name: &Name,
     ) -> bool {
-        !self.get_applied_directives(schema, directive_name)
+        !self
+            .get_applied_directives(schema, directive_name)
             .is_empty()
     }
 
