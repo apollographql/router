@@ -70,6 +70,7 @@ mod tests {
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
     use apollo_federation::connectors::runtime::key::ResponseKey;
+    use apollo_federation::connectors::runtime::responses::MappedResponse;
     use futures::future::BoxFuture;
     use http::HeaderMap;
     use http::HeaderValue;
@@ -5339,5 +5340,172 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test]
+    async fn should_use_structured_error_when_coprocessor_breaks_with_errors_object() {
+        let connector_stage = ConnectorStage {
+            request: ConnectorRequestConf {
+                body: true,
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        let mock_connector_service = crate::plugin::test::MockConnector::new(Default::default());
+
+        let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": { "break": 401 },
+                            "body": {
+                                "errors": [
+                                    {
+                                        "message": "Not authenticated.",
+                                        "extensions": {
+                                            "code": "ERR_UNAUTHENTICATED"
+                                        }
+                                    }
+                                ]
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = connector_stage.as_service(
+            mock_http_client,
+            mock_connector_service.boxed(),
+            "http://test".to_string(),
+            "my_connector_source".to_string(),
+            true,
+        );
+
+        let request = create_test_connector_request();
+        let response = service.oneshot(request).await.unwrap();
+
+        assert!(response.transport_result.is_err());
+        match &response.mapped_response {
+            MappedResponse::Error { error, .. } => {
+                assert_eq!(error.message, "Not authenticated.");
+                assert_eq!(error.code(), "ERR_UNAUTHENTICATED");
+            }
+            _ => panic!("Expected MappedResponse::Error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn should_use_string_error_when_coprocessor_breaks_with_string_body() {
+        let connector_stage = ConnectorStage {
+            request: ConnectorRequestConf {
+                body: true,
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        let mock_connector_service = crate::plugin::test::MockConnector::new(Default::default());
+
+        let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": { "break": 400 },
+                            "body": "Request blocked"
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = connector_stage.as_service(
+            mock_http_client,
+            mock_connector_service.boxed(),
+            "http://test".to_string(),
+            "my_connector_source".to_string(),
+            true,
+        );
+
+        let request = create_test_connector_request();
+        let response = service.oneshot(request).await.unwrap();
+
+        assert!(response.transport_result.is_err());
+        match &response.mapped_response {
+            MappedResponse::Error { error, .. } => {
+                assert_eq!(error.message, "Request blocked");
+                assert_eq!(error.code(), "ERROR");
+            }
+            _ => panic!("Expected MappedResponse::Error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn should_pass_extra_extensions_from_structured_error() {
+        let connector_stage = ConnectorStage {
+            request: ConnectorRequestConf {
+                body: true,
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        let mock_connector_service = crate::plugin::test::MockConnector::new(Default::default());
+
+        let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": { "break": 429 },
+                            "body": {
+                                "errors": [
+                                    {
+                                        "message": "Rate limited",
+                                        "extensions": {
+                                            "code": "RATE_LIMITED",
+                                            "retryAfter": 30
+                                        }
+                                    }
+                                ]
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = connector_stage.as_service(
+            mock_http_client,
+            mock_connector_service.boxed(),
+            "http://test".to_string(),
+            "my_connector_source".to_string(),
+            true,
+        );
+
+        let request = create_test_connector_request();
+        let response = service.oneshot(request).await.unwrap();
+
+        assert!(response.transport_result.is_err());
+        match &response.mapped_response {
+            MappedResponse::Error { error, .. } => {
+                assert_eq!(error.message, "Rate limited");
+                assert_eq!(error.code(), "RATE_LIMITED");
+                assert_eq!(
+                    error.extensions.get("retryAfter"),
+                    Some(&serde_json_bytes::Value::Number(30.into()))
+                );
+            }
+            _ => panic!("Expected MappedResponse::Error"),
+        }
     }
 }
