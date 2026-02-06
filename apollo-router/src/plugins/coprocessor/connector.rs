@@ -238,8 +238,7 @@ where
 
     let headers_to_send = request_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
 
     let body_to_send = request_config.body.then(|| body.clone());
 
@@ -366,8 +365,7 @@ where
         Ok(TransportResponse::Http(http_response)) => {
             let headers = response_config
                 .headers
-                .then(|| externalize_header_map(&http_response.inner.headers))
-                .transpose()?;
+                .then(|| externalize_header_map(&http_response.inner.headers));
             let status = response_config
                 .status_code
                 .then(|| http_response.inner.status.as_u16());
