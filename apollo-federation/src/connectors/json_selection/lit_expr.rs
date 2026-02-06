@@ -375,7 +375,7 @@ impl LitExpr {
 
         match full_result {
             Ok((remainder, (key, _, _, value))) => Ok((remainder, (key, value))),
-            Err(_) if input.extra.spec == ConnectSpec::V0_4 => {
+            Err(_) if input.extra.spec >= ConnectSpec::V0_4 => {
                 Self::parse_shorthand_property(input)
             }
             Err(e) => Err(e),
