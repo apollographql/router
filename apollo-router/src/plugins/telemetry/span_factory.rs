@@ -94,7 +94,6 @@ impl SpanMode {
                     "apollo_private.duration_ns" = ::tracing::field::Empty,
                     "apollo_private.http.request_headers" = ::tracing::field::Empty,
                     "apollo_private.http.response_headers" = ::tracing::field::Empty,
-                    "apollo.subscription.end_reason" = ::tracing::field::Empty,
                 );
                 span
             }
@@ -111,7 +110,6 @@ impl SpanMode {
                     "apollo_private.http.request_headers" = ::tracing::field::Empty,
                     "apollo_private.http.response_headers" = ::tracing::field::Empty,
                     "apollo_private.request" = true,
-                    "apollo.subscription.end_reason" = ::tracing::field::Empty,
                 )
             }
         }

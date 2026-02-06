@@ -16,11 +16,17 @@ use crate::graphql;
 use crate::plugins::subscription::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
 use crate::plugins::subscription::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
+use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 
 #[cfg(test)]
 const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(10);
 #[cfg(not(test))]
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+
+const SUBSCRIPTION_END_REASON_KEY: opentelemetry::Key =
+    opentelemetry::Key::from_static_str("apollo.subscription.end_reason");
+const DEFER_END_REASON_KEY: opentelemetry::Key =
+    opentelemetry::Key::from_static_str("apollo.defer.end_reason");
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -132,22 +138,58 @@ impl SubscriptionEndReason {
             Self::ConfigReload => "config_reload",
         }
     }
+
+    pub(crate) fn as_value(&self) -> opentelemetry::Value {
+        opentelemetry::Value::String(self.as_str().into())
+    }
+}
+
+/// Reasons why a defer request ended
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeferEndReason {
+    /// All deferred chunks were delivered successfully
+    Completed,
+    /// Client disconnected before all deferred data was delivered
+    ClientDisconnect,
+}
+
+impl DeferEndReason {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::ClientDisconnect => "client_disconnect",
+        }
+    }
+
+    pub(crate) fn as_value(&self) -> opentelemetry::Value {
+        opentelemetry::Value::String(self.as_str().into())
+    }
 }
 
 impl Drop for Multipart {
     fn drop(&mut self) {
-        // Only handle subscription mode
-        if self.mode == ProtocolMode::Subscription && !self.is_terminated {
-            // Stream wasn't terminated properly - determine the reason
-            let reason = if self.heartbeat_pending {
-                // Heartbeat was the last thing sent - likely failed to deliver
-                SubscriptionEndReason::HeartbeatDeliveryFailed
-            } else {
-                // Connection closed after a message was sent
-                SubscriptionEndReason::ClientDisconnect
-            };
-            self.span
-                .record("apollo.subscription.end_reason", reason.as_str());
+        if !self.is_terminated {
+            match self.mode {
+                ProtocolMode::Subscription => {
+                    // Stream wasn't terminated properly - determine the reason
+                    let reason = if self.heartbeat_pending {
+                        // Heartbeat was the last thing sent - likely failed to deliver
+                        SubscriptionEndReason::HeartbeatDeliveryFailed
+                    } else {
+                        // Connection closed after a message was sent
+                        SubscriptionEndReason::ClientDisconnect
+                    };
+                    self.span
+                        .set_span_dyn_attribute(SUBSCRIPTION_END_REASON_KEY, reason.as_value());
+                }
+                ProtocolMode::Defer => {
+                    // Defer stream wasn't terminated properly - client disconnected
+                    self.span.set_span_dyn_attribute(
+                        DEFER_END_REASON_KEY,
+                        DeferEndReason::ClientDisconnect.as_value(),
+                    );
+                }
+            }
         }
     }
 }
@@ -212,9 +254,9 @@ impl Stream for Multipart {
                                 && response.extensions.is_empty()
                             {
                                 self.is_terminated = true;
-                                self.span.record(
-                                    "apollo.subscription.end_reason",
-                                    SubscriptionEndReason::ServerClose.as_str(),
+                                self.span.set_span_dyn_attribute(
+                                    SUBSCRIPTION_END_REASON_KEY,
+                                    SubscriptionEndReason::ServerClose.as_value(),
                                 );
                                 return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
                             }
@@ -249,9 +291,19 @@ impl Stream for Multipart {
                         buf.extend_from_slice(b"\r\n--graphql");
                     } else {
                         self.is_terminated = true;
-                        if self.mode == ProtocolMode::Subscription {
-                            self.span
-                                .record("apollo.subscription.end_reason", end_reason.as_str());
+                        match self.mode {
+                            ProtocolMode::Subscription => {
+                                self.span.set_span_dyn_attribute(
+                                    SUBSCRIPTION_END_REASON_KEY,
+                                    end_reason.as_value(),
+                                );
+                            }
+                            ProtocolMode::Defer => {
+                                self.span.set_span_dyn_attribute(
+                                    DEFER_END_REASON_KEY,
+                                    DeferEndReason::Completed.as_value(),
+                                );
+                            }
                         }
                         buf.extend_from_slice(b"\r\n--graphql--\r\n");
                     }
@@ -272,10 +324,12 @@ impl Stream for Multipart {
                         )
                     };
                     self.is_terminated = true;
-                    self.span.record(
-                        "apollo.subscription.end_reason",
-                        SubscriptionEndReason::StreamEnd.as_str(),
-                    );
+                    if self.mode == ProtocolMode::Subscription {
+                        self.span.set_span_dyn_attribute(
+                            SUBSCRIPTION_END_REASON_KEY,
+                            SubscriptionEndReason::StreamEnd.as_value(),
+                        );
+                    }
 
                     Poll::Ready(Some(Ok(buf)))
                 }
@@ -283,10 +337,20 @@ impl Stream for Multipart {
                     // Stream ended - this is a clean termination
                     self.heartbeat_pending = false;
                     self.is_terminated = true;
-                    self.span.record(
-                        "apollo.subscription.end_reason",
-                        SubscriptionEndReason::StreamEnd.as_str(),
-                    );
+                    match self.mode {
+                        ProtocolMode::Subscription => {
+                            self.span.set_span_dyn_attribute(
+                                SUBSCRIPTION_END_REASON_KEY,
+                                SubscriptionEndReason::StreamEnd.as_value(),
+                            );
+                        }
+                        ProtocolMode::Defer => {
+                            self.span.set_span_dyn_attribute(
+                                DEFER_END_REASON_KEY,
+                                DeferEndReason::Completed.as_value(),
+                            );
+                        }
+                    }
                     Poll::Ready(None)
                 }
             },
@@ -298,67 +362,62 @@ impl Stream for Multipart {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::sync::Mutex;
 
     use futures::stream;
+    use opentelemetry::KeyValue;
     use serde_json_bytes::ByteString;
-    use tracing::Id;
-    use tracing::Subscriber;
-    use tracing::field::Visit;
-    use tracing::span::Record;
     use tracing_subscriber::Layer;
     use tracing_subscriber::layer::Context;
     use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::registry::LookupSpan;
 
     use super::*;
+    use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
+    use crate::plugins::telemetry::otel;
+    use crate::plugins::telemetry::otel::OtelData;
 
-    /// A test layer that captures the recorded `apollo.subscription.end_reason` value
-    #[derive(Clone)]
+    #[derive(Clone, Default)]
     struct EndReasonCapture {
-        captured_reason: Arc<std::sync::Mutex<Option<String>>>,
+        captured_reason: Arc<Mutex<Option<KeyValue>>>,
     }
 
-    struct EndReasonVisitor<'a> {
-        captured_reason: &'a Arc<std::sync::Mutex<Option<String>>>,
-    }
-
-    impl Visit for EndReasonVisitor<'_> {
-        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-            if field.name() == "apollo.subscription.end_reason" {
-                *self.captured_reason.lock().unwrap() = Some(value.to_string());
+    impl<S> Layer<S> for EndReasonCapture
+    where
+        S: tracing_core::Subscriber + for<'lookup> LookupSpan<'lookup>,
+    {
+        fn on_exit(&self, id: &tracing_core::span::Id, ctx: Context<'_, S>) {
+            if let Some(span) = ctx.span(id)
+                && let Some(data) = span.extensions().get::<OtelData>()
+                && let Some(attributes) = data.builder.attributes.as_ref()
+            {
+                *self.captured_reason.lock().unwrap() = attributes.iter().find_map(|attr| {
+                    let key = &attr.key;
+                    (*key == SUBSCRIPTION_END_REASON_KEY || *key == DEFER_END_REASON_KEY)
+                        .then(|| attr.clone())
+                });
             }
         }
-
-        fn record_debug(&mut self, _field: &tracing::field::Field, _value: &dyn std::fmt::Debug) {}
     }
 
-    impl<S: Subscriber> Layer<S> for EndReasonCapture {
-        fn on_record(&self, _span: &Id, values: &Record<'_>, _ctx: Context<'_, S>) {
-            let mut visitor = EndReasonVisitor {
-                captured_reason: &self.captured_reason,
-            };
-            values.record(&mut visitor);
-        }
-    }
-
-    /// Helper to run a test with a span that has the end_reason field
+    /// Helper to set up tracing with DynAttributeLayer and EndReasonCapture
     fn setup_tracing() -> (tracing::subscriber::DefaultGuard, EndReasonCapture) {
-        let layer = EndReasonCapture {
-            captured_reason: Arc::new(std::sync::Mutex::new(None)),
-        };
-        let subscriber = tracing_subscriber::registry().with(layer.clone());
+        let layer = EndReasonCapture::default();
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(DynAttributeLayer::new())
+            .with(otel::layer().force_sampling())
+            .with(layer.clone());
         let guard = tracing::subscriber::set_default(subscriber);
         (guard, layer)
     }
 
     #[tokio::test]
-    async fn test_end_reason_server_close_empty_response() {
+    async fn test_subscription_end_reason_server_close_empty_response() {
         // Test: Server closes connection gracefully (empty response)
         let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!(
-            "test_span",
-            "apollo.subscription.end_reason" = tracing::field::Empty
-        );
-        let _span_guard = span.enter();
+        let span = tracing::info_span!("test_span");
+        let span_guard = span.enter();
+
         let responses = vec![
             graphql::Response::builder()
                 .data(serde_json_bytes::Value::String(ByteString::from("data")))
@@ -372,21 +431,26 @@ mod tests {
 
         // Consume all messages
         while protocol.next().await.is_some() {}
+
+        drop(protocol);
+        drop(span_guard);
+        drop(span);
+
         let reason = layer.captured_reason.lock().unwrap().clone();
         assert_eq!(
             reason,
-            Some(SubscriptionEndReason::ServerClose.as_str().to_string())
+            Some(KeyValue::new(
+                SUBSCRIPTION_END_REASON_KEY,
+                SubscriptionEndReason::ServerClose.as_value()
+            ))
         );
     }
 
     #[tokio::test]
-    async fn test_end_reason_server_close_with_final_data() {
+    async fn test_subscription_end_reason_server_close_with_final_data() {
         // Test: Server closes normally with final data (subscribed=false, no errors)
         let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!(
-            "test_span",
-            "apollo.subscription.end_reason" = tracing::field::Empty
-        );
+        let span = tracing::info_span!("test_span");
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
@@ -403,10 +467,18 @@ mod tests {
 
         // Consume all messages
         while protocol.next().await.is_some() {}
+
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
         let reason = layer.captured_reason.lock().unwrap().clone();
         assert_eq!(
             reason,
-            Some(SubscriptionEndReason::ServerClose.as_str().to_string())
+            Some(KeyValue::new(
+                SUBSCRIPTION_END_REASON_KEY,
+                SubscriptionEndReason::ServerClose.as_value()
+            ))
         );
     }
 
@@ -414,10 +486,7 @@ mod tests {
     async fn test_end_reason_stream_end() {
         // Test: Stream ends via EOF (empty stream)
         let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!(
-            "test_span",
-            "apollo.subscription.end_reason" = tracing::field::Empty
-        );
+        let span = tracing::info_span!("test_span");
         let _span_guard = span.enter();
         let responses: Vec<graphql::Response> = vec![];
         let gql_responses = stream::iter(responses);
@@ -425,10 +494,18 @@ mod tests {
 
         // Consume all messages (will get EOF)
         while protocol.next().await.is_some() {}
+
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
         let reason = layer.captured_reason.lock().unwrap().clone();
         assert_eq!(
             reason,
-            Some(SubscriptionEndReason::StreamEnd.as_str().to_string())
+            Some(KeyValue::new(
+                SUBSCRIPTION_END_REASON_KEY,
+                SubscriptionEndReason::StreamEnd.as_value()
+            ))
         );
     }
 
@@ -436,10 +513,7 @@ mod tests {
     async fn test_end_reason_heartbeat_delivery_failed() {
         // Test: Stream dropped while heartbeat was pending
         let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!(
-            "test_span",
-            "apollo.subscription.end_reason" = tracing::field::Empty
-        );
+        let span = tracing::info_span!("test_span");
         let _span_guard = span.enter();
         use tokio::time::sleep;
 
@@ -463,17 +537,19 @@ mod tests {
                 break;
             }
         }
+
         // Protocol is dropped here with heartbeat_pending = true
         drop(protocol);
-        let reason = layer.captured_reason.lock().unwrap().clone();
+        drop(_span_guard);
+        drop(span);
 
+        let reason = layer.captured_reason.lock().unwrap().clone();
         assert_eq!(
             reason,
-            Some(
-                SubscriptionEndReason::HeartbeatDeliveryFailed
-                    .as_str()
-                    .to_string()
-            )
+            Some(KeyValue::new(
+                SUBSCRIPTION_END_REASON_KEY,
+                SubscriptionEndReason::HeartbeatDeliveryFailed.as_value()
+            ))
         );
     }
 
@@ -481,10 +557,7 @@ mod tests {
     async fn test_end_reason_client_disconnect() {
         // Test: Stream dropped after a message (not heartbeat) was sent
         let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!(
-            "test_span",
-            "apollo.subscription.end_reason" = tracing::field::Empty
-        );
+        let span = tracing::info_span!("test_span");
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
@@ -505,28 +578,29 @@ mod tests {
         // Protocol is dropped here without being terminated
         // and heartbeat_pending = false
         drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
         let reason = layer.captured_reason.lock().unwrap().clone();
         assert_eq!(
             reason,
-            Some(SubscriptionEndReason::ClientDisconnect.as_str().to_string())
+            Some(KeyValue::new(
+                SUBSCRIPTION_END_REASON_KEY,
+                SubscriptionEndReason::ClientDisconnect.as_value()
+            ))
         );
     }
 
     #[tokio::test]
-    async fn test_end_reason_schema_reload() {
-        // Test: Subscription terminated due to schema reload
+    async fn test_subscription_end_reason_schema_reload() {
         let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!(
-            "test_span",
-            "apollo.subscription.end_reason" = tracing::field::Empty
-        );
+        let span = tracing::info_span!("test_span");
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
                 .data(serde_json_bytes::Value::String(ByteString::from("data")))
                 .subscribed(true)
                 .build(),
-            // Schema reload error response
             graphql::Response::builder()
                 .error(
                     graphql::Error::builder()
@@ -542,22 +616,24 @@ mod tests {
 
         // Consume all messages
         while protocol.next().await.is_some() {}
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
 
         let reason = layer.captured_reason.lock().unwrap().clone();
         assert_eq!(
             reason,
-            Some(SubscriptionEndReason::SchemaReload.as_str().to_string())
+            Some(KeyValue::new(
+                SUBSCRIPTION_END_REASON_KEY,
+                SubscriptionEndReason::SchemaReload.as_value()
+            ))
         );
     }
 
     #[tokio::test]
-    async fn test_end_reason_config_reload() {
-        // Test: Subscription terminated due to config reload
+    async fn test_subscription_end_reason_config_reload() {
         let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!(
-            "test_span",
-            "apollo.subscription.end_reason" = tracing::field::Empty
-        );
+        let span = tracing::info_span!("test_span");
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
@@ -580,22 +656,63 @@ mod tests {
 
         // Consume all messages
         while protocol.next().await.is_some() {}
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
 
         let reason = layer.captured_reason.lock().unwrap().clone();
         assert_eq!(
             reason,
-            Some(SubscriptionEndReason::ConfigReload.as_str().to_string())
+            Some(KeyValue::new(
+                SUBSCRIPTION_END_REASON_KEY,
+                SubscriptionEndReason::ConfigReload.as_value()
+            ))
         );
     }
 
     #[tokio::test]
-    async fn test_end_reason_not_set_for_defer_mode() {
-        // Test: Defer mode should not record any end reason
+    async fn test_defer_end_reason_completed() {
+        // Test: Defer completes normally with all chunks delivered (has_next=false)
         let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!(
-            "test_span",
-            "apollo.subscription.end_reason" = tracing::field::Empty
+        let span = tracing::info_span!("test_span");
+        let _span_guard = span.enter();
+        let responses = vec![
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("initial")))
+                .has_next(true)
+                .build(),
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from(
+                    "deferred",
+                )))
+                .has_next(false)
+                .build(),
+        ];
+        let gql_responses = stream::iter(responses);
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
+
+        // Consume all messages
+        while protocol.next().await.is_some() {}
+
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
+        let end_reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            end_reason,
+            Some(KeyValue::new(
+                DEFER_END_REASON_KEY,
+                DeferEndReason::Completed.as_value()
+            ))
         );
+    }
+
+    #[tokio::test]
+    async fn test_defer_end_reason_completed_single_chunk() {
+        // Test: Defer completes with a single chunk (has_next=false)
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!("test_span");
         let _span_guard = span.enter();
         let responses = vec![
             graphql::Response::builder()
@@ -609,9 +726,87 @@ mod tests {
         // Consume all messages
         while protocol.next().await.is_some() {}
 
-        let reason = layer.captured_reason.lock().unwrap().clone();
-        // Defer mode doesn't set end_reason
-        assert_eq!(reason, None);
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
+        let end_reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            end_reason,
+            Some(KeyValue::new(
+                DEFER_END_REASON_KEY,
+                DeferEndReason::Completed.as_value()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_defer_end_reason_completed_empty_stream() {
+        // Test: Defer completes when the stream is empty (None case)
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!("test_span");
+        let _span_guard = span.enter();
+        let responses: Vec<graphql::Response> = vec![];
+        let gql_responses = stream::iter(responses);
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
+
+        // Consume all messages
+        while protocol.next().await.is_some() {}
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
+        let end_reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            end_reason,
+            Some(KeyValue::new(
+                DEFER_END_REASON_KEY,
+                DeferEndReason::Completed.as_value()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_defer_end_reason_client_disconnect() {
+        // Test: Client disconnects before all deferred data is delivered
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!("test_span");
+        let _span_guard = span.enter();
+        let responses = vec![
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("initial")))
+                .has_next(true) // More data expected
+                .build(),
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from(
+                    "deferred1",
+                )))
+                .has_next(true) // Still more data expected
+                .build(),
+        ];
+        let gql_responses = stream::iter(responses);
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
+
+        // Read only the first chunk, then drop (simulating client disconnect)
+        let resp = protocol.next().await;
+        assert!(resp.is_some());
+
+        // Stream is NOT terminated (has_next was true)
+        assert!(!protocol.is_terminated);
+
+        // Drop the protocol - simulates client disconnect
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
+        let end_reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            end_reason,
+            Some(KeyValue::new(
+                DEFER_END_REASON_KEY,
+                DeferEndReason::ClientDisconnect.as_value()
+            ))
+        );
     }
 
     #[tokio::test]
@@ -779,13 +974,24 @@ mod tests {
     }
 
     #[test]
-    fn test_defer_mode_no_drop_logging() {
-        // Defer mode should not trigger any logging on drop
-        // This test just verifies it doesn't panic
+    fn test_defer_mode_drop_records_client_disconnect() {
+        // Defer mode should record client_disconnect on drop if not terminated
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!("test_span");
+        let _span_guard = span.enter();
         let responses: Vec<graphql::Response> = vec![];
         let gql_responses = stream::iter(responses);
         let protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
         drop(protocol);
-        // No panic = success (defer mode doesn't log on drop)
+        drop(_span_guard);
+        drop(span);
+        let defer_reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            defer_reason,
+            Some(KeyValue::new(
+                DEFER_END_REASON_KEY,
+                DeferEndReason::ClientDisconnect.as_value()
+            ))
+        );
     }
 }
