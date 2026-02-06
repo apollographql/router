@@ -526,7 +526,7 @@ impl NamedSelection {
         }
     }
 
-    pub(super) fn is_anonymous(&self) -> bool {
+    pub(crate) fn is_anonymous(&self) -> bool {
         match &self.prefix {
             NamingPrefix::None => self.path.is_anonymous(),
             NamingPrefix::Alias(_) => false,
@@ -1013,7 +1013,7 @@ impl PathSelection {
         self.path.get_single_key()
     }
 
-    pub(super) fn is_anonymous(&self) -> bool {
+    pub(crate) fn is_anonymous(&self) -> bool {
         self.path.is_anonymous()
     }
 
@@ -1024,8 +1024,7 @@ impl PathSelection {
         }
     }
 
-    #[allow(unused)]
-    pub(super) fn has_subselection(&self) -> bool {
+    pub(crate) fn has_subselection(&self) -> bool {
         self.path.has_subselection()
     }
 

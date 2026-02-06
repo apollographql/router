@@ -22,6 +22,7 @@ use super::json_selection::PathSelection;
 use super::json_selection::Ranged;
 use super::json_selection::SubSelection;
 use super::json_selection::TopLevelSelection;
+use super::json_selection::LitExpr;
 use super::json_selection::WithRange;
 use super::spec::ConnectLink;
 use super::spec::MappingDirectiveArguments;
@@ -32,7 +33,7 @@ use crate::error::FederationError;
 #[derive(Debug, Clone)]
 pub struct MappingDefinition {
     /// The parsed selection for this mapping
-    pub selection: SubSelection,
+    pub(crate) selection: TopLevelSelection,
     /// The original GraphQL type this mapping is defined on
     pub source_type: Name,
 }
@@ -92,16 +93,7 @@ impl MappingRegistry {
                 ))
             })?;
 
-            // Extract the SubSelection from the parsed result
-            match parsed.inner {
-                TopLevelSelection::Named(sub) => sub,
-                TopLevelSelection::Path(_) => {
-                    return Err(FederationError::internal(format!(
-                        "@mapping selection on type `{}` must be a field selection, not a path",
-                        args.type_name
-                    )));
-                }
-            }
+            parsed.inner
         } else {
             // Auto-map mode: generate selection from field names
             Self::generate_auto_map_selection(&args.field_names, spec)?
@@ -113,11 +105,11 @@ impl MappingRegistry {
         })
     }
 
-    /// Generate an auto-map SubSelection from field names
+    /// Generate an auto-map selection from field names
     fn generate_auto_map_selection(
         field_names: &[Name],
         spec: ConnectSpec,
-    ) -> Result<SubSelection, FederationError> {
+    ) -> Result<TopLevelSelection, FederationError> {
         // Generate a simple selection string like "field1 field2 field3"
         let selection_str = field_names
             .iter()
@@ -136,7 +128,7 @@ impl MappingRegistry {
         })?;
 
         match parsed.inner {
-            TopLevelSelection::Named(sub) => Ok(sub),
+            TopLevelSelection::Named(sub) => Ok(TopLevelSelection::Named(sub)),
             TopLevelSelection::Path(_) => Err(FederationError::internal(
                 "Auto-map generated unexpected path selection".to_string(),
             )),
@@ -194,6 +186,12 @@ impl MappingRegistry {
         match top_level {
             TopLevelSelection::Named(sub) => {
                 let expanded = self.expand_sub_selection(sub, expanding, depth)?;
+                if expanded.selections.len() == 1 {
+                    let only = &expanded.selections[0];
+                    if only.is_anonymous() || matches!(only.prefix, NamingPrefix::Spread(None)) {
+                        return Ok(TopLevelSelection::Path(only.path.clone()));
+                    }
+                }
                 Ok(TopLevelSelection::Named(expanded))
             }
             TopLevelSelection::Path(path) => {
@@ -238,15 +236,33 @@ impl MappingRegistry {
                         // Mark as expanding to detect cycles
                         expanding.insert(type_name.to_string());
 
-                        // Recursively expand the mapping's selection (increment depth)
-                        let expanded =
-                            self.expand_sub_selection(&mapping.selection, expanding, depth + 1)?;
+                        match &mapping.selection {
+                            TopLevelSelection::Named(sub) => {
+                                let expanded =
+                                    self.expand_sub_selection(sub, expanding, depth + 1)?;
+                                expanding.remove(type_name);
+                                new_selections.extend(expanded.selections);
+                            }
+                            TopLevelSelection::Path(path) => {
+                                let expanded_path =
+                                    self.expand_path_selection(path, expanding, depth + 1)?;
+                                expanding.remove(type_name);
 
-                        // Remove from expanding set
-                        expanding.remove(type_name);
+                                // Anonymous paths with subselections behave like inline spreads.
+                                let prefix = if expanded_path.is_anonymous()
+                                    && expanded_path.has_subselection()
+                                {
+                                    NamingPrefix::Spread(None)
+                                } else {
+                                    NamingPrefix::None
+                                };
 
-                        // Add all selections from the expanded mapping
-                        new_selections.extend(expanded.selections);
+                                new_selections.push(NamedSelection {
+                                    prefix,
+                                    path: expanded_path,
+                                });
+                            }
+                        }
                     } else {
                         return Err(FederationError::internal(format!(
                             "Unknown mapping reference: ...{}. \
@@ -261,6 +277,14 @@ impl MappingRegistry {
                     new_selections.push(expanded_named);
                 }
             }
+        }
+
+        if new_selections.len() > 1 && new_selections.iter().any(|s| s.is_anonymous()) {
+            return Err(FederationError::internal(
+                "Path selections cannot be combined with other selections at the same level. \
+                 Use the path selection alone, or add a subselection like `$.path { ... }`."
+                    .to_string(),
+            ));
         }
 
         Ok(SubSelection {
@@ -333,9 +357,10 @@ impl MappingRegistry {
                 ))
             }
             PathList::Expr(expr, tail) => {
+                let expanded_expr = self.expand_lit_expr(expr.as_ref(), expanding, depth)?;
                 let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
                 Ok(PathList::Expr(
-                    expr.clone(),
+                    WithRange::new(expanded_expr, expr.range()),
                     WithRange::new(expanded_tail, tail.range()),
                 ))
             }
@@ -347,6 +372,60 @@ impl MappingRegistry {
                 )))
             }
             PathList::Empty => Ok(PathList::Empty),
+        }
+    }
+
+    /// Expand path selections nested inside literal expressions.
+    fn expand_lit_expr(
+        &self,
+        lit_expr: &LitExpr,
+        expanding: &mut HashSet<String>,
+        depth: usize,
+    ) -> Result<LitExpr, FederationError> {
+        match lit_expr {
+            LitExpr::String(_)
+            | LitExpr::Number(_)
+            | LitExpr::Bool(_)
+            | LitExpr::Null => Ok(lit_expr.clone()),
+            LitExpr::Object(obj) => {
+                let mut expanded_obj = apollo_compiler::collections::IndexMap::default();
+                for (key, value) in obj {
+                    let expanded_value = self.expand_lit_expr(value.as_ref(), expanding, depth)?;
+                    expanded_obj.insert(
+                        key.clone(),
+                        WithRange::new(expanded_value, value.range()),
+                    );
+                }
+                Ok(LitExpr::Object(expanded_obj))
+            }
+            LitExpr::Array(arr) => {
+                let mut expanded_arr = Vec::with_capacity(arr.len());
+                for value in arr {
+                    let expanded_value = self.expand_lit_expr(value.as_ref(), expanding, depth)?;
+                    expanded_arr.push(WithRange::new(expanded_value, value.range()));
+                }
+                Ok(LitExpr::Array(expanded_arr))
+            }
+            LitExpr::Path(path) => {
+                let expanded_path = self.expand_path_selection(path, expanding, depth)?;
+                Ok(LitExpr::Path(expanded_path))
+            }
+            LitExpr::LitPath(literal, subpath) => {
+                let expanded_literal = self.expand_lit_expr(literal.as_ref(), expanding, depth)?;
+                let expanded_subpath = self.expand_path_list(subpath.as_ref(), expanding, depth)?;
+                Ok(LitExpr::LitPath(
+                    WithRange::new(expanded_literal, literal.range()),
+                    WithRange::new(expanded_subpath, subpath.range()),
+                ))
+            }
+            LitExpr::OpChain(op, operands) => {
+                let mut expanded_operands = Vec::with_capacity(operands.len());
+                for operand in operands {
+                    let expanded_operand = self.expand_lit_expr(operand.as_ref(), expanding, depth)?;
+                    expanded_operands.push(WithRange::new(expanded_operand, operand.range()));
+                }
+                Ok(LitExpr::OpChain(op.clone(), expanded_operands))
+            }
         }
     }
 
@@ -371,10 +450,13 @@ mod tests {
         use apollo_compiler::name;
 
         let field_names = vec![name!(id), name!(name), name!(email)];
-        let sub =
+        let selection =
             MappingRegistry::generate_auto_map_selection(&field_names, ConnectSpec::V0_5).unwrap();
 
-        assert_eq!(sub.selections.len(), 3);
+        match selection {
+            TopLevelSelection::Named(sub) => assert_eq!(sub.selections.len(), 3),
+            TopLevelSelection::Path(_) => panic!("auto-map should generate named selection"),
+        }
     }
 
     #[test]
@@ -397,7 +479,10 @@ mod tests {
 
         // Verify the selection was parsed correctly
         let definition = result.unwrap();
-        assert_eq!(definition.selection.selections.len(), 2);
+        match definition.selection {
+            TopLevelSelection::Named(sub) => assert_eq!(sub.selections.len(), 2),
+            TopLevelSelection::Path(_) => panic!("expected named selection"),
+        }
     }
 
     #[test]
@@ -433,7 +518,7 @@ mod tests {
             registry.mappings.insert(
                 name!(User),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -460,7 +545,7 @@ mod tests {
             registry.mappings.insert(
                 name!(User),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -494,7 +579,7 @@ mod tests {
             registry.mappings.insert(
                 name!(UserA),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(UserA),
                 },
             );
@@ -507,7 +592,7 @@ mod tests {
             registry.mappings.insert(
                 name!(UserB),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(UserB),
                 },
             );
@@ -515,6 +600,42 @@ mod tests {
 
         // Try to expand UserA - should fail with circular reference error
         let selection = JSONSelection::parse_with_spec("...UserA", ConnectSpec::V0_5).unwrap();
+        let result = registry.expand_selection(&selection);
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Circular reference"));
+    }
+
+    #[test]
+    fn test_circular_reference_detection_with_path_mappings() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        let map_a_selection =
+            JSONSelection::parse_with_spec("$.root { ...MapB }", ConnectSpec::V0_5).unwrap();
+        registry.mappings.insert(
+            name!(MapA),
+            MappingDefinition {
+                selection: map_a_selection.inner,
+                source_type: name!(TypeA),
+            },
+        );
+
+        let map_b_selection =
+            JSONSelection::parse_with_spec("$.other { ...MapA }", ConnectSpec::V0_5).unwrap();
+        registry.mappings.insert(
+            name!(MapB),
+            MappingDefinition {
+                selection: map_b_selection.inner,
+                source_type: name!(TypeB),
+            },
+        );
+
+        let selection = JSONSelection::parse_with_spec("...MapA", ConnectSpec::V0_5).unwrap();
         let result = registry.expand_selection(&selection);
 
         assert!(result.is_err());
@@ -551,7 +672,7 @@ mod tests {
             registry.mappings.insert(
                 name!(Address),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(Address),
                 },
             );
@@ -565,7 +686,7 @@ mod tests {
             registry.mappings.insert(
                 name!(User),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -597,7 +718,7 @@ mod tests {
             registry.mappings.insert(
                 name!(BasicUser),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -623,7 +744,7 @@ mod tests {
             registry.mappings.insert(
                 name!(User),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -662,7 +783,7 @@ mod tests {
             registry.mappings.insert(
                 name!(User),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -694,7 +815,7 @@ mod tests {
             registry.mappings.insert(
                 name!(UserBasic),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -706,7 +827,7 @@ mod tests {
             registry.mappings.insert(
                 name!(ContactInfo),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -771,6 +892,38 @@ mod tests {
     }
 
     #[test]
+    fn test_from_schema_integration_with_path_alias() {
+        use apollo_compiler::Schema;
+
+        let schema = Schema::parse(
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@mapping"])
+            directive @link(url: String, import: [link__Import]) repeatable on SCHEMA
+            scalar link__Import
+            directive @mapping(selection: String, as: String) repeatable on OBJECT | INTERFACE
+
+            type Data @mapping(selection: "$.response.data", as: "DataPath") {
+                id: ID!
+            }
+
+            type Query {
+                data: Data
+            }
+            "#,
+            "test.graphql",
+        )
+        .unwrap();
+
+        let registry = MappingRegistry::from_schema(&schema).unwrap();
+
+        assert!(registry.has_mapping("DataPath"));
+        assert!(!registry.has_mapping("Data"));
+
+        let mapping = registry.get_mapping("DataPath").unwrap();
+        assert!(matches!(mapping.selection, TopLevelSelection::Path(_)));
+    }
+
+    #[test]
     fn test_auto_map_empty_fields_error() {
         // Auto-map with no fields should fail
         let result = MappingRegistry::generate_auto_map_selection(&[], ConnectSpec::V0_5);
@@ -795,10 +948,10 @@ mod tests {
     }
 
     #[test]
-    fn test_path_selection_not_allowed_in_mapping() {
+    fn test_path_selection_allowed_in_mapping() {
         use apollo_compiler::name;
 
-        // Path selection (starting with $) is not allowed in @mapping
+        // Path selection (starting with $) is allowed in @mapping
         let args = MappingDirectiveArguments {
             type_name: name!(User),
             alias: name!(User),
@@ -807,11 +960,135 @@ mod tests {
         };
 
         let result = MappingRegistry::build_mapping_definition(&args, ConnectSpec::V0_5);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("must be a field selection, not a path"));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_path_mapping_top_level_parity() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+        let mapping_selection =
+            JSONSelection::parse_with_spec("$.data.user", ConnectSpec::V0_5).unwrap();
+        registry.mappings.insert(
+            name!(UserPath),
+            MappingDefinition {
+                selection: mapping_selection.inner,
+                source_type: name!(User),
+            },
+        );
+
+        let selection = JSONSelection::parse_with_spec("...UserPath", ConnectSpec::V0_5).unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+
+        let inline = JSONSelection::parse_with_spec("$.data.user", ConnectSpec::V0_5).unwrap();
+        assert_eq!(expanded.pretty_print(), inline.pretty_print());
+    }
+
+    #[test]
+    fn test_path_mapping_with_method_parity() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+        let mapping_selection =
+            JSONSelection::parse_with_spec("$.data.users->first { id }", ConnectSpec::V0_5)
+                .unwrap();
+        registry.mappings.insert(
+            name!(UserPath),
+            MappingDefinition {
+                selection: mapping_selection.inner,
+                source_type: name!(User),
+            },
+        );
+
+        let selection = JSONSelection::parse_with_spec("...UserPath", ConnectSpec::V0_5).unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+
+        let inline =
+            JSONSelection::parse_with_spec("$.data.users->first { id }", ConnectSpec::V0_5)
+                .unwrap();
+        assert_eq!(expanded.pretty_print(), inline.pretty_print());
+    }
+
+    #[test]
+    fn test_path_mapping_with_subselection_allows_siblings() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+        let mapping_selection =
+            JSONSelection::parse_with_spec("$.data.user { id }", ConnectSpec::V0_5).unwrap();
+        registry.mappings.insert(
+            name!(UserPath),
+            MappingDefinition {
+                selection: mapping_selection.inner,
+                source_type: name!(User),
+            },
+        );
+
+        let selection =
+            JSONSelection::parse_with_spec("...UserPath name", ConnectSpec::V0_5).unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+
+        let inline =
+            JSONSelection::parse_with_spec("$.data.user { id } name", ConnectSpec::V0_5).unwrap();
+        assert_eq!(expanded.pretty_print(), inline.pretty_print());
+    }
+
+    #[test]
+    fn test_path_mapping_with_sibling_selections_errors() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+        let mapping_selection =
+            JSONSelection::parse_with_spec("$.data.user", ConnectSpec::V0_5).unwrap();
+        registry.mappings.insert(
+            name!(UserPath),
+            MappingDefinition {
+                selection: mapping_selection.inner,
+                source_type: name!(User),
+            },
+        );
+
+        let selection =
+            JSONSelection::parse_with_spec("...UserPath name", ConnectSpec::V0_5).unwrap();
+        let err = registry.expand_selection(&selection).unwrap_err().to_string();
+        assert!(
+            err.contains("Path selections cannot be combined with other selections at the same level")
+        );
+    }
+
+    #[test]
+    fn test_path_mapping_nested_path_mapping_parity() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+        let inner_selection =
+            JSONSelection::parse_with_spec("$.inner { id }", ConnectSpec::V0_5).unwrap();
+        registry.mappings.insert(
+            name!(InnerPath),
+            MappingDefinition {
+                selection: inner_selection.inner,
+                source_type: name!(Inner),
+            },
+        );
+
+        let outer_selection =
+            JSONSelection::parse_with_spec("$.outer { ...InnerPath }", ConnectSpec::V0_5).unwrap();
+        registry.mappings.insert(
+            name!(OuterPath),
+            MappingDefinition {
+                selection: outer_selection.inner,
+                source_type: name!(Outer),
+            },
+        );
+
+        let selection = JSONSelection::parse_with_spec("...OuterPath", ConnectSpec::V0_5).unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+
+        let inline =
+            JSONSelection::parse_with_spec("$.outer { $.inner { id } }", ConnectSpec::V0_5)
+                .unwrap();
+        assert_eq!(expanded.pretty_print(), inline.pretty_print());
     }
 
     #[test]
@@ -826,7 +1103,7 @@ mod tests {
             registry.mappings.insert(
                 name!(UserMapping),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -838,7 +1115,7 @@ mod tests {
             registry.mappings.insert(
                 name!(UserMapping),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(Admin),
                 },
             );
@@ -875,15 +1152,11 @@ mod tests {
     }
 
     // =========================================================================
-    // Tests for review finding C2
-    // See docs/review-friendly-wing.md for details.
+    // Regression tests for review finding C2.
     // =========================================================================
 
-    // C2: expand_path_list does not recurse into LitExpr.
-    //
-    // LitExpr::Path can contain a PathSelection with a SubSelection that holds
-    // SpreadNamed nodes. The current expand_path_list clones LitExpr without
-    // recursing into it, leaving SpreadNamed nodes unexpanded.
+    // C2: PathList::Expr must recurse into nested LitExpr::Path values so
+    // SpreadNamed nodes are expanded inside `$(...)` expressions.
 
     #[test]
     fn expand_spread_in_nested_subselection() {
@@ -898,7 +1171,7 @@ mod tests {
             registry.mappings.insert(
                 name!(User),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -910,7 +1183,7 @@ mod tests {
             registry.mappings.insert(
                 name!(Address),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(Address),
                 },
             );
@@ -949,6 +1222,35 @@ mod tests {
     }
 
     #[test]
+    fn expand_spread_inside_path_expression_literal() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        let user_selection =
+            JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
+        if let TopLevelSelection::Named(sub) = user_selection.inner {
+            registry.mappings.insert(
+                name!(User),
+                MappingDefinition {
+                    selection: TopLevelSelection::Named(sub),
+                    source_type: name!(User),
+                },
+            );
+        }
+
+        let selection =
+            JSONSelection::parse_with_spec("payload: $(data { ...User })", ConnectSpec::V0_5)
+                .unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+
+        let inline =
+            JSONSelection::parse_with_spec("payload: $(data { id name })", ConnectSpec::V0_5)
+                .unwrap();
+        assert_eq!(expanded.pretty_print(), inline.pretty_print());
+    }
+
+    #[test]
     fn expand_three_levels_of_transitive_spreads() {
         use apollo_compiler::name;
 
@@ -961,7 +1263,7 @@ mod tests {
             registry.mappings.insert(
                 name!(Address),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(Address),
                 },
             );
@@ -977,7 +1279,7 @@ mod tests {
             registry.mappings.insert(
                 name!(User),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -1030,7 +1332,7 @@ mod tests {
                 registry.mappings.insert(
                     this_name.clone(),
                     MappingDefinition {
-                        selection: sub,
+                        selection: TopLevelSelection::Named(sub),
                         source_type: this_name,
                     },
                 );

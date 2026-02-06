@@ -6509,7 +6509,7 @@ mod tests {
             registry.insert_mapping(
                 name!(User),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
                 },
             );
@@ -6600,7 +6600,7 @@ mod tests {
             registry.insert_mapping(
                 name!(Address),
                 MappingDefinition {
-                    selection: sub,
+                    selection: TopLevelSelection::Named(sub),
                     source_type: name!(Address),
                 },
             );
