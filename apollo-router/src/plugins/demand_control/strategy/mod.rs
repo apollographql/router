@@ -4,11 +4,14 @@ use ahash::HashMap;
 use apollo_compiler::ExecutableDocument;
 
 use crate::Context;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
+use crate::plugins::demand_control::ActualCostMode;
 use crate::plugins::demand_control::DemandControlConfig;
 use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::Mode;
 use crate::plugins::demand_control::StrategyConfig;
+use crate::plugins::demand_control::SubgraphStrategyConfig;
 use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
 use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
@@ -95,21 +98,41 @@ impl StrategyFactory {
         }
     }
 
+    pub(crate) fn create_static_estimated_strategy(
+        &self,
+        list_size: u32,
+        max: f64,
+        actual_cost_mode: ActualCostMode,
+        subgraphs: &SubgraphConfiguration<SubgraphStrategyConfig>,
+    ) -> StaticEstimated {
+        let subgraph_maxes = subgraphs.extract(|config| config.max);
+        let subgraph_list_sizes = subgraphs.extract(|config| config.list_size);
+        StaticEstimated {
+            max,
+            subgraph_maxes,
+            actual_cost_mode,
+            cost_calculator: StaticCostCalculator::new(
+                self.supergraph_schema.clone(),
+                self.subgraph_schemas.clone(),
+                Arc::new(subgraph_list_sizes),
+                list_size,
+            ),
+        }
+    }
+
     pub(crate) fn create(&self) -> Strategy {
         let strategy: Arc<dyn StrategyImpl> = match &self.config.strategy {
             StrategyConfig::StaticEstimated {
                 list_size,
                 max,
                 actual_cost_mode,
-            } => Arc::new(StaticEstimated {
-                max: *max,
-                actual_cost_mode: *actual_cost_mode,
-                cost_calculator: StaticCostCalculator::new(
-                    self.supergraph_schema.clone(),
-                    self.subgraph_schemas.clone(),
-                    *list_size,
-                ),
-            }),
+                subgraph,
+            } => Arc::new(self.create_static_estimated_strategy(
+                *list_size,
+                *max,
+                *actual_cost_mode,
+                subgraph,
+            )),
             #[cfg(test)]
             StrategyConfig::Test { stage, error } => Arc::new(test::Test {
                 stage: stage.clone(),
