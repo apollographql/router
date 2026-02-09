@@ -9,6 +9,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use futures::future::ready;
@@ -49,6 +50,7 @@ use crate::plugins::traffic_shaping::Http2Config;
 use crate::register_plugin;
 use crate::services;
 use crate::services::external::Control;
+use crate::services::http_layer;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::external::Externalizable;
@@ -70,6 +72,164 @@ pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
+
+async fn router_response_to_http_layer(
+    res: router::Response,
+) -> Result<http_layer::HttpLayerResponse, BoxError> {
+    let (parts, body) = res.response.into_parts();
+    let bytes = router::body::into_bytes(body)
+        .await
+        .map_err::<BoxError, _>(Into::into)?;
+    Ok(http::Response::from_parts(parts, bytes))
+}
+
+/// Wrapper service that runs coprocessor http_service request/response stages at the http_layer boundary.
+struct HttpServiceCoprocessorWrapper<C, B> {
+    inner: B,
+    run_request: bool,
+    run_response: bool,
+    http_client: C,
+    default_url: String,
+    sdl: Arc<String>,
+    response_validation: bool,
+    request_config: RouterRequestConf,
+    response_config: RouterResponseConf,
+}
+
+impl<C, B> Service<http_layer::HttpLayerRequest> for HttpServiceCoprocessorWrapper<C, B>
+where
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    B: Service<
+            http_layer::HttpLayerRequest,
+            Response = http_layer::HttpLayerResponse,
+            Error = BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    B::Future: Send + 'static,
+{
+    type Response = http_layer::HttpLayerResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: http_layer::HttpLayerRequest) -> Self::Future {
+        let inner = self.inner.clone();
+        let run_request = self.run_request;
+        let run_response = self.run_response;
+        let http_client = self.http_client.clone();
+        let default_url = self.default_url.clone();
+        let sdl = self.sdl.clone();
+        let response_validation = self.response_validation;
+        let request_config = self.request_config.clone();
+        let response_config = self.response_config.clone();
+
+        Box::pin(async move {
+            let context = req
+                .extensions()
+                .get::<crate::Context>()
+                .cloned()
+                .unwrap_or_default();
+            let router_request = router::Request {
+                router_request: req.map(router::body::RouterRequestBody::buffered),
+                context: context.clone(),
+            };
+
+            let mut request = router_request;
+            if run_request {
+                let mut executed = false;
+                let coprocessor_url =
+                    request_config.url.clone().unwrap_or_else(|| default_url.clone());
+                match process_http_request_stage(
+                    http_client.clone(),
+                    coprocessor_url,
+                    sdl.clone(),
+                    request,
+                    request_config,
+                    response_validation,
+                    &mut executed,
+                )
+                .await
+                {
+                    Ok(ControlFlow::Break(res)) => {
+                        if executed {
+                            record_coprocessor_operation(PipelineStep::HttpRequest, true);
+                        }
+                        return router_response_to_http_layer(res).await;
+                    }
+                    Ok(ControlFlow::Continue(r)) => {
+                        request = r;
+                        if executed {
+                            record_coprocessor_operation(PipelineStep::HttpRequest, true);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("coprocessor: http_service request stage error: {e}");
+                        if executed {
+                            record_coprocessor_operation(PipelineStep::HttpRequest, false);
+                        }
+                        return Err(e);
+                    }
+                }
+            }
+
+            let (parts, body) = request.router_request.into_parts();
+            let bytes = body.into_bytes().await?;
+            let mut http_req = http::Request::from_parts(parts, bytes);
+            http_req.extensions_mut().insert(request.context.clone());
+            let context_for_response = request.context;
+
+            let http_layer_response = inner.oneshot(http_req).await?;
+
+            if run_response {
+                let (parts, body) = http_layer_response.into_parts();
+                let bytes = Bytes::from(body);
+                let router_response = router::Response::http_response_builder()
+                    .context(context_for_response)
+                    .response(http::Response::from_parts(
+                        parts,
+                        router::body::from_bytes(bytes),
+                    ))
+                    .build()
+                    .map_err(|e| BoxError::from(e.to_string()))?;
+                let mut executed = false;
+                let coprocessor_url =
+                    response_config.url.clone().unwrap_or_else(|| default_url.clone());
+                let result = process_http_response_stage(
+                    http_client,
+                    coprocessor_url,
+                    sdl,
+                    router_response,
+                    response_config,
+                    response_validation,
+                    &mut executed,
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!("coprocessor: http_service response stage error: {e}");
+                    e
+                })?;
+                if executed {
+                    record_coprocessor_operation(PipelineStep::HttpResponse, true);
+                }
+                router_response_to_http_layer(result).await
+            } else {
+                Ok(http_layer_response)
+            }
+        })
+    }
+}
 
 type MapFn = fn(http::Response<hyper::body::Incoming>) -> http::Response<RouterBody>;
 
@@ -197,6 +357,13 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
         self.router_service(service)
     }
 
+    fn http_service(
+        &self,
+        service: http_layer::BoxService,
+    ) -> http_layer::BoxService {
+        self.http_service(service)
+    }
+
     fn supergraph_service(
         &self,
         service: services::supergraph::BoxService,
@@ -310,6 +477,38 @@ where
             self.configuration.response_validation,
         )
     }
+
+    fn http_service(
+        &self,
+        service: http_layer::BoxService,
+    ) -> http_layer::BoxService {
+        let http_service_config = &self.configuration.http_service;
+        let run_request = http_service_config.request != RouterRequestConf::default();
+        let run_response = http_service_config.response != RouterResponseConf::default();
+        if !run_request && !run_response {
+            return service;
+        }
+        let inner = tower::buffer::Buffer::new(service, 1);
+        let http_client = self.http_client.clone();
+        let default_url = self.configuration.url.clone();
+        let sdl = self.sdl.clone();
+        let response_validation = self.configuration.response_validation;
+        let request_config = http_service_config.request.clone();
+        let response_config = http_service_config.response.clone();
+
+        let wrapper = HttpServiceCoprocessorWrapper {
+            inner,
+            run_request,
+            run_response,
+            http_client,
+            default_url,
+            sdl,
+            response_validation,
+            request_config,
+            response_config,
+        };
+        tower::util::BoxService::new(wrapper)
+    }
 }
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -352,6 +551,17 @@ pub(super) struct RouterResponseConf {
     /// The coprocessor URL for this stage (overrides the global URL if specified)
     pub(super) url: Option<String>,
 }
+
+/// HTTP service stage config (same payload shape as router; runs at http_service plugin hook).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
+#[serde(default)]
+pub(super) struct HttpServiceStage {
+    /// The request configuration
+    pub(super) request: RouterRequestConf,
+    /// The response configuration
+    pub(super) response: RouterResponseConf,
+}
+
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -414,6 +624,9 @@ struct Conf {
     /// Response validation defaults to true
     #[serde(default = "default_response_validation")]
     response_validation: bool,
+    /// The http_service stage request/response configuration (runs at http_service plugin hook)
+    #[serde(default)]
+    http_service: HttpServiceStage,
     /// The router stage request/response configuration
     #[serde(default)]
     router: RouterStage,
@@ -814,6 +1027,147 @@ impl SubgraphStage {
 }
 
 // -----------------------------------------------------------------------------------------
+/// Early HTTP request stage: same payload shape as router request, runs before router_service stack.
+async fn process_http_request_stage<C>(
+    http_client: C,
+    coprocessor_url: String,
+    sdl: Arc<String>,
+    mut request: router::Request,
+    mut request_config: RouterRequestConf,
+    response_validation: bool,
+    executed: &mut bool,
+) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
+where
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+{
+    let should_be_executed = request_config
+        .condition
+        .as_mut()
+        .map(|c| c.evaluate_request(&request) == Some(true))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(ControlFlow::Continue(request));
+    }
+    let (parts, body) = request.router_request.into_parts();
+    let bytes = body.into_bytes().await?;
+
+    let headers_to_send = request_config
+        .headers
+        .then(|| externalize_header_map(&parts.headers));
+    let body_to_send = request_config
+        .body
+        .then(|| String::from_utf8(bytes.to_vec()))
+        .transpose()
+        .unwrap_or_default();
+    let path_to_send = request_config.path.then(|| parts.uri.to_string());
+    let context_to_send = request_config.context.get_context(&request.context);
+    let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
+
+    let payload = Externalizable::router_builder()
+        .stage(PipelineStep::HttpRequest)
+        .control(Control::default())
+        .id(request.context.id.clone())
+        .and_headers(headers_to_send)
+        .and_body(body_to_send)
+        .and_context(context_to_send)
+        .and_sdl(sdl_to_send)
+        .and_path(path_to_send)
+        .method(parts.method.to_string())
+        .build();
+
+    tracing::debug!(?payload, "externalized output (http_request stage)");
+    let start = Instant::now();
+    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    *executed = true;
+    let duration = start.elapsed();
+    record_coprocessor_duration(PipelineStep::HttpRequest, duration);
+
+    tracing::debug!(?co_processor_result, "co-processor returned");
+    let mut co_processor_output = co_processor_result?;
+
+    validate_coprocessor_output(&co_processor_output, PipelineStep::HttpRequest)?;
+    let control = co_processor_output.control.expect("validated above; qed");
+
+    if matches!(control, Control::Break(_)) {
+        let code = control.get_http_status()?;
+        let body_as_value = co_processor_output
+            .body
+            .as_ref()
+            .and_then(|b| serde_json::from_str(b).ok())
+            .unwrap_or(Value::Null);
+        let graphql_response = match body_as_value {
+            Value::Null => graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(co_processor_output.body.take().unwrap_or_default())
+                        .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build(),
+            _ => deserialize_coprocessor_response(body_as_value, response_validation),
+        };
+
+        let res = router::Response::builder()
+            .errors(graphql_response.errors)
+            .extensions(graphql_response.extensions)
+            .status_code(code)
+            .context(request.context);
+
+        let mut res = match (graphql_response.label, graphql_response.data) {
+            (Some(label), Some(data)) => res.label(label).data(data).build()?,
+            (Some(label), None) => res.label(label).build()?,
+            (None, Some(data)) => res.data(data).build()?,
+            (None, None) => res.build()?,
+        };
+        if let Some(headers) = co_processor_output.headers {
+            *res.response.headers_mut() = internalize_header_map(headers)?;
+        }
+
+        if let Some(context) = co_processor_output.context {
+            for (mut key, value) in context.try_into_iter()? {
+                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                    &request_config.context
+                {
+                    key = context_key_from_deprecated(key);
+                }
+                res.context.upsert_json_value(key, move |_current| value);
+            }
+        }
+
+        return Ok(ControlFlow::Break(res));
+    }
+
+    let new_body = match co_processor_output.body {
+        Some(s) => router::RequestBody::buffered(s.into()),
+        None => router::RequestBody::buffered(bytes),
+    };
+
+    request.router_request = http::Request::from_parts(parts, new_body);
+
+    if let Some(context) = co_processor_output.context {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
+            {
+                key = context_key_from_deprecated(key);
+            }
+            request
+                .context
+                .upsert_json_value(key, move |_current| value);
+        }
+    }
+
+    if let Some(headers) = co_processor_output.headers {
+        *request.router_request.headers_mut() = internalize_header_map(headers)?;
+    }
+
+    Ok(ControlFlow::Continue(request))
+}
+
 /// This function receives a mutable `executed` flag so the caller can know
 /// whether this stage actually ran before an early return or error. This is
 /// required because metric recording happens outside this function.
@@ -850,7 +1204,7 @@ where
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
     let (parts, body) = request.router_request.into_parts();
-    let bytes = router::body::into_bytes(body).await?;
+    let bytes = body.into_bytes().await?;
 
     let headers_to_send = request_config
         .headers
@@ -957,8 +1311,8 @@ where
     // are present in our co_processor_output.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => router::body::from_bytes(bytes),
-        None => router::body::from_bytes(bytes),
+        Some(s) => router::RequestBody::buffered(s.into()),
+        None => router::RequestBody::buffered(bytes),
     };
 
     request.router_request = http::Request::from_parts(parts, new_body);
@@ -980,6 +1334,166 @@ where
     }
 
     Ok(ControlFlow::Continue(request))
+}
+
+/// HTTP service response stage: same flow as router response, uses PipelineStep::HttpResponse.
+async fn process_http_response_stage<C>(
+    http_client: C,
+    coprocessor_url: String,
+    sdl: Arc<String>,
+    mut response: router::Response,
+    response_config: RouterResponseConf,
+    _response_validation: bool,
+    executed: &mut bool,
+) -> Result<router::Response, BoxError>
+where
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+{
+    if !response_config.condition.evaluate_response(&response) {
+        return Ok(response);
+    }
+    let (parts, body) = response.response.into_parts();
+    let mut stream = body.into_data_stream();
+    let first = stream.next().await.transpose()?;
+    let rest = stream;
+
+    let bytes = match first {
+        Some(b) => b,
+        None => {
+            tracing::error!(
+                "Coprocessor cannot convert body into future due to problem with first part"
+            );
+            return Err(BoxError::from(
+                "Coprocessor cannot convert body into future due to problem with first part",
+            ));
+        }
+    };
+
+    let headers_to_send = response_config
+        .headers
+        .then(|| externalize_header_map(&parts.headers));
+    let body_to_send = response_config
+        .body
+        .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
+        .transpose()?;
+    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
+    let context_to_send = response_config.context.get_context(&response.context);
+    let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
+
+    let payload = Externalizable::router_builder()
+        .stage(PipelineStep::HttpResponse)
+        .id(response.context.id.clone())
+        .and_headers(headers_to_send)
+        .and_body(body_to_send)
+        .and_context(context_to_send)
+        .and_status_code(status_to_send)
+        .and_sdl(sdl_to_send.clone())
+        .build();
+
+    tracing::debug!(?payload, "externalized output (http_response stage)");
+    let start = Instant::now();
+    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    *executed = true;
+    let duration = start.elapsed();
+    record_coprocessor_duration(PipelineStep::HttpResponse, duration);
+
+    tracing::debug!(?co_processor_result, "co-processor returned");
+    let co_processor_output = co_processor_result?;
+
+    validate_coprocessor_output(&co_processor_output, PipelineStep::HttpResponse)?;
+
+    let new_body = match co_processor_output.body {
+        Some(bytes) => router::body::from_bytes(bytes),
+        None => router::body::from_bytes(bytes),
+    };
+
+    response.response = http::Response::from_parts(parts, new_body);
+
+    if let Some(control) = co_processor_output.control {
+        *response.response.status_mut() = control.get_http_status()?
+    }
+
+    if let Some(context) = co_processor_output.context {
+        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+    }
+
+    if let Some(headers) = co_processor_output.headers {
+        *response.response.headers_mut() = internalize_header_map(headers)?;
+    }
+
+    let (parts, body) = response.response.into_parts();
+    let context = response.context.clone();
+    let map_context = response.context.clone();
+
+    let mapped_stream = rest
+        .map_err(BoxError::from)
+        .and_then(move |deferred_response| {
+            let generator_client = http_client.clone();
+            let generator_coprocessor_url = coprocessor_url.clone();
+            let generator_map_context = map_context.clone();
+            let generator_sdl_to_send = sdl_to_send.clone();
+            let generator_id = map_context.id.clone();
+            let context_conf = response_config.context.clone();
+
+            async move {
+                let bytes = deferred_response.to_vec();
+                let body_to_send = response_config
+                    .body
+                    .then(|| String::from_utf8(bytes.clone()))
+                    .transpose()?;
+                let generator_map_context = generator_map_context.clone();
+                let context_to_send = context_conf.get_context(&generator_map_context);
+
+                let payload = Externalizable::router_builder()
+                    .stage(PipelineStep::HttpResponse)
+                    .id(generator_id)
+                    .and_body(body_to_send)
+                    .and_context(context_to_send)
+                    .and_sdl(generator_sdl_to_send)
+                    .build();
+
+                tracing::debug!(?payload, "externalized output");
+                let co_processor_result = payload
+                    .call(generator_client, &generator_coprocessor_url)
+                    .await;
+                tracing::debug!(?co_processor_result, "co-processor returned");
+                let co_processor_output = co_processor_result?;
+
+                validate_coprocessor_output(&co_processor_output, PipelineStep::HttpResponse)?;
+
+                let final_bytes: Bytes = match co_processor_output.body {
+                    Some(bytes) => bytes.into(),
+                    None => bytes.into(),
+                };
+
+                if let Some(context) = co_processor_output.context {
+                    update_context_from_coprocessor(
+                        &generator_map_context,
+                        context,
+                        &context_conf,
+                    )?;
+                }
+
+                Ok(final_bytes)
+            }
+        });
+
+    let bytes = router::body::into_bytes(body).await.map_err(BoxError::from);
+    let final_stream = RouterBody::new(http_body_util::StreamBody::new(
+        once(ready(bytes))
+            .chain(mapped_stream)
+            .map(|b| b.map(http_body::Frame::data).map_err(axum::Error::new)),
+    ));
+
+    router::Response::http_response_builder()
+        .context(context)
+        .response(http::Response::from_parts(parts, final_stream))
+        .build()
 }
 
 /// This function receives a mutable `executed` flag so the caller can know

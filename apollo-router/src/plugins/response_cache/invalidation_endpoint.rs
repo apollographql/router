@@ -99,7 +99,8 @@ impl Service<router::Request> for InvalidationService {
                 }
                 match parts.method {
                     Method::POST => {
-                        let body = router::body::into_bytes(body)
+                        let body = body
+                            .into_bytes()
                             .instrument(tracing::info_span!("into_bytes"))
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))

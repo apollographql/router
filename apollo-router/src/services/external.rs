@@ -38,6 +38,10 @@ pub(crate) const EXTERNALIZABLE_VERSION: u8 = 1;
 
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub(crate) enum PipelineStep {
+    /// HTTP service request stage (raw request, http_service plugin hook).
+    HttpRequest,
+    /// HTTP service response stage (raw response, http_service plugin hook).
+    HttpResponse,
     RouterRequest,
     RouterResponse,
     SupergraphRequest,
@@ -132,7 +136,10 @@ where
     ) -> Self {
         assert!(matches!(
             stage,
-            PipelineStep::RouterRequest | PipelineStep::RouterResponse
+            PipelineStep::HttpRequest
+                | PipelineStep::HttpResponse
+                | PipelineStep::RouterRequest
+                | PipelineStep::RouterResponse
         ));
         Externalizable {
             version: EXTERNALIZABLE_VERSION,
@@ -363,6 +370,14 @@ mod test {
 
     #[test]
     fn it_will_build_router_externalizable_correctly() {
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::HttpRequest)
+            .id(String::default())
+            .build();
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::HttpResponse)
+            .id(String::default())
+            .build();
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::RouterRequest)
             .id(String::default())

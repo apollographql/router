@@ -18,6 +18,8 @@ pub(crate) fn assert_coprocessor_operations_metrics(
 ) {
     // Iterate over all known pipeline stages and verify the metrics
     for stage in [
+        PipelineStep::HttpRequest,
+        PipelineStep::HttpResponse,
         PipelineStep::RouterRequest,
         PipelineStep::RouterResponse,
         PipelineStep::SupergraphRequest,

@@ -158,6 +158,15 @@ pub(crate) trait RouterFactory:
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 
     fn pipeline_ref(&self) -> Arc<PipelineRef>;
+
+    /// Wrap the HTTP-layer inner service with http_service plugin hooks. Default: identity.
+    fn wrap_http_layer(
+        &self,
+        inner: crate::services::http_layer::BoxService,
+    ) -> crate::services::http_layer::BoxService {
+        let _ = inner;
+        inner
+    }
 }
 
 /// Factory for creating a RouterFactory

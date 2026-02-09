@@ -4,8 +4,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::task::Poll;
 use std::time::Instant;
 
+use axum::body::Body as AxumBody;
 use axum::Router;
 use axum::extract::Extension;
 use axum::extract::State;
@@ -21,16 +23,20 @@ use http::HeaderValue;
 use http::Request;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
+use http_body_util::BodyExt;
 use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::json;
+use tower::buffer::Buffer;
+use tower::BoxError;
+use tower::Service;
+use tower::ServiceExt;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
-use tower::ServiceExt;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use tracing::instrument::WithSubscriber;
@@ -50,12 +56,14 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::plugins::telemetry::SpanMode;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::http_layer;
 use crate::services::router;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
@@ -64,6 +72,55 @@ use crate::uplink::license_enforcement::LicenseState;
 static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^/\{\*[^/]+\}$").expect("this regex to check wildcard paths is valid")
 });
+
+/// Inner service for the HTTP layer: converts HttpLayerRequest to router::Request,
+/// calls the router pipeline, converts the response to HttpLayerResponse.
+/// Used as the innermost service in the http_service plugin stack.
+struct InnerHttpHandler<RF> {
+    factory: RF,
+}
+
+impl<RF> InnerHttpHandler<RF> {
+    fn new(factory: RF) -> Self {
+        Self { factory }
+    }
+}
+
+impl<RF> Service<http_layer::HttpLayerRequest> for InnerHttpHandler<RF>
+where
+    RF: RouterFactory + Clone + Send + 'static,
+    RF::Future: Send,
+{
+    type Response = http_layer::HttpLayerResponse;
+    type Error = BoxError;
+    type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: http_layer::HttpLayerRequest) -> Self::Future {
+        let factory = self.factory.clone();
+        Box::pin(async move {
+            let context = req
+                .extensions()
+                .get::<crate::Context>()
+                .cloned()
+                .unwrap_or_default();
+            let router_request = router::Request {
+                router_request: req.map(router::body::RouterRequestBody::buffered),
+                context,
+            };
+            let service = factory.create();
+            let router_response = service.oneshot(router_request).await?;
+            let (parts, body) = router_response.response.into_parts();
+            let bytes = router::body::into_bytes(body)
+                .await
+                .map_err::<BoxError, _>(Into::into)?;
+            Ok(http::Response::from_parts(parts, bytes))
+        })
+    }
+}
 
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 fn jemalloc_metrics_instruments() -> (
@@ -103,7 +160,8 @@ pub(crate) fn make_axum_router<RF>(
     license: Arc<LicenseState>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
-    RF: RouterFactory,
+    RF: RouterFactory + Clone + Send + 'static,
+    RF::Future: Send,
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
@@ -146,7 +204,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
-        RF: RouterFactory,
+        RF: RouterFactory + Clone + Send + 'static,
+        RF::Future: Send,
     {
         Box::pin(async move {
             let pipeline_ref = service_factory.pipeline_ref().clone();
@@ -338,23 +397,25 @@ fn main_endpoint<RF>(
     license: Arc<LicenseState>,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
-    RF: RouterFactory,
+    RF: RouterFactory + Clone + Send + 'static,
+    RF::Future: Send,
 {
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
     let span_mode = span_mode(configuration);
 
-    // XXX(@goto-bus-stop): in hyper 0.x, we required a HandleErrorLayer around this,
-    // to turn errors from decompression into an axum error response. Now,
-    // `RequestDecompressionLayer` appears to preserve(?) the error type from the inner service?
-    // So maybe we don't need this anymore? But I don't understand what happens to an error *caused
-    // by decompression* (such as an invalid compressed data stream).
+    // Build the HTTP-layer plugin stack: inner handler (router call) wrapped by http_service hooks.
+    let inner = InnerHttpHandler::new(service_factory.clone());
+    let inner_box = tower::util::BoxService::new(inner);
+    let wrapped = service_factory.wrap_http_layer(inner_box);
+    let http_layer_service = Buffer::new(wrapped, DEFAULT_BUFFER_SIZE);
+
     let decompression = tower_http::decompression::RequestDecompressionLayer::new()
         .br(true)
         .gzip(true)
         .deflate(true);
-    let mut main_route = main_router::<RF>(configuration)
+    let mut main_route = main_router(configuration, http_layer_service)
         .layer(decompression)
         .layer(middleware::from_fn_with_state(
             (license.clone(), Instant::now(), Arc::new(AtomicU64::new(0))),
@@ -442,28 +503,39 @@ async fn license_handler(
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct HandlerOptions {
     early_cancel: bool,
     experimental_log_on_broken_pipe: bool,
 }
 
-pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router<()>
+pub(super) fn main_router<S>(configuration: &Configuration, http_layer_service: S) -> axum::Router<()>
 where
-    RF: RouterFactory,
+    S: Service<
+            http_layer::HttpLayerRequest,
+            Response = http_layer::HttpLayerResponse,
+            Error = BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    S::Future: Send,
 {
     let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
-        get(handle_graphql::<RF>).post(handle_graphql::<RF>),
+        get(handle_http_layer::<S>).post(handle_http_layer::<S>),
     );
 
     if BARE_WILDCARD_PATH_REGEX.is_match(configuration.supergraph.path.as_str()) {
-        router = router.route("/", get(handle_graphql::<RF>).post(handle_graphql::<RF>));
+        router = router.route("/", get(handle_http_layer::<S>).post(handle_http_layer::<S>));
     }
 
-    router = router.route_layer(Extension(HandlerOptions {
-        early_cancel: configuration.supergraph.early_cancel,
-        experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
-    }));
+    router = router
+        .layer(Extension(http_layer_service))
+        .route_layer(Extension(HandlerOptions {
+            early_cancel: configuration.supergraph.early_cancel,
+            experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
+        }));
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     {
         use tower::layer::layer_fn;
@@ -479,6 +551,63 @@ where
     router
 }
 
+async fn handle_http_layer<S>(
+    Extension(service): Extension<S>,
+    Extension(_options): Extension<HandlerOptions>,
+    request: Request<AxumBody>,
+) -> axum::response::Response
+where
+    S: Service<
+            http_layer::HttpLayerRequest,
+            Response = http_layer::HttpLayerResponse,
+            Error = BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    S::Future: Send,
+{
+    let _guard = i64_up_down_counter_with_unit!(
+        "apollo.router.session.count.active",
+        "Amount of in-flight sessions",
+        "{session}",
+        1
+    );
+
+    let (parts, body) = request.into_parts();
+    let accept_encoding = parts.headers.get(ACCEPT_ENCODING).cloned();
+
+    let bytes = match body.collect().await {
+        Ok(collected) => collected.to_bytes(),
+        Err(e) => return internal_server_error(e),
+    };
+
+    let http_layer_request = Request::from_parts(parts, bytes);
+
+    let response = match service.oneshot(http_layer_request).await {
+        Ok(r) => r,
+        Err(e) => return internal_server_error(e),
+    };
+
+    let (mut parts, body_bytes) = response.into_parts();
+    let opt_compressor = accept_encoding
+        .as_ref()
+        .and_then(|value| value.to_str().ok())
+        .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
+    let body = match opt_compressor {
+        None => router::body::from_bytes(body_bytes),
+        Some(compressor) => {
+            parts
+                .headers
+                .insert(CONTENT_ENCODING, HeaderValue::from_static(compressor.content_encoding()));
+            router::body::from_result_stream(compressor.process(router::body::from_bytes(body_bytes)))
+        }
+    };
+
+    http::Response::from_parts(parts, body).into_response()
+}
+
+#[allow(dead_code)]
 async fn handle_graphql<RF: RouterFactory>(
     Extension(options): Extension<HandlerOptions>,
     Extension(service_factory): Extension<RF>,
@@ -551,7 +680,7 @@ async fn handle_graphql<RF: RouterFactory>(
     }
 }
 
-fn internal_server_error<T>(err: T) -> Response
+fn internal_server_error<T>(err: T) -> axum::response::Response
 where
     T: Display,
 {
@@ -572,6 +701,7 @@ where
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!(response))).into_response()
 }
 
+#[allow(dead_code)]
 struct CancelHandler<'a> {
     context: &'a Context,
     got_first_response: bool,
@@ -579,6 +709,7 @@ struct CancelHandler<'a> {
     span: tracing::Span,
 }
 
+#[allow(dead_code)]
 impl<'a> CancelHandler<'a> {
     fn new(context: &'a Context, experimental_log_on_broken_pipe: bool) -> Self {
         CancelHandler {

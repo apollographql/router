@@ -26,6 +26,7 @@ use tower::BoxError;
 use uuid::Uuid;
 
 use self::body::RouterBody;
+use self::body::RouterRequestBody;
 use self::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use self::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use super::supergraph;
@@ -44,6 +45,8 @@ pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxEr
 pub type ServiceResult = Result<Response, BoxError>;
 
 pub type Body = RouterBody;
+/// Request body type: buffered bytes (from HTTP layer) or stream. Used by [`Request`].
+pub type RequestBody = RouterRequestBody;
 pub type Error = hyper::Error;
 
 pub mod body;
@@ -55,18 +58,19 @@ mod tests;
 assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.
 ///
-/// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
+/// This consists of the raw HTTP request (method, URI, headers, body) and context.
+/// The body is not parsed as GraphQL until RouterService.
 #[non_exhaustive]
 pub struct Request {
-    /// Original request to the Router.
-    pub router_request: http::Request<Body>,
+    /// Original request to the Router (raw HTTP; body not yet parsed).
+    pub router_request: http::Request<RequestBody>,
 
     /// Context for extension
     pub context: Context,
 }
 
-impl From<(http::Request<Body>, Context)> for Request {
-    fn from((router_request, context): (http::Request<Body>, Context)) -> Self {
+impl From<(http::Request<RequestBody>, Context)> for Request {
+    fn from((router_request, context): (http::Request<RequestBody>, Context)) -> Self {
         Self {
             router_request,
             context,
@@ -78,26 +82,26 @@ impl From<(http::Request<Body>, Context)> for Request {
 ///
 /// It's only meant for integration tests, as the "real" router should create bodies explicitly accounting for
 /// streaming, size limits, etc.
-pub struct IntoBody(Body);
+pub struct IntoBody(RequestBody);
 
 impl From<Body> for IntoBody {
     fn from(value: Body) -> Self {
-        Self(value)
+        Self(RequestBody::stream(value))
     }
 }
 impl From<String> for IntoBody {
     fn from(value: String) -> Self {
-        Self(body::from_bytes(value))
+        Self(RequestBody::stream(body::from_bytes(value)))
     }
 }
 impl From<Bytes> for IntoBody {
     fn from(value: Bytes) -> Self {
-        Self(body::from_bytes(value))
+        Self(RequestBody::buffered(value))
     }
 }
 impl From<Vec<u8>> for IntoBody {
     fn from(value: Vec<u8>) -> Self {
-        Self(body::from_bytes(value))
+        Self(RequestBody::stream(body::from_bytes(value)))
     }
 }
 
@@ -112,7 +116,7 @@ impl Request {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         uri: http::Uri,
         method: Method,
-        body: Body,
+        body: RequestBody,
     ) -> Result<Request, BoxError> {
         let mut router_request = http::Request::builder()
             .uri(uri)
@@ -139,7 +143,7 @@ impl Request {
         let mut router_request = http::Request::builder()
             .uri(uri.unwrap_or_else(|| http::Uri::from_static("http://example.com/")))
             .method(method.unwrap_or(Method::GET))
-            .body(body.map_or_else(body::empty, |constructed| constructed.0))?;
+            .body(body.map_or_else(|| RequestBody::stream(body::empty()), |constructed| constructed.0))?;
         *router_request.headers_mut() = header_map(headers)?;
         Ok(Self {
             router_request,
@@ -187,13 +191,13 @@ impl TryFrom<supergraph::Request> for Request {
                 .parse()
                 .map_err(ParseError::InvalidUri)?;
 
-            http::Request::from_parts(parts, body::empty())
+            http::Request::from_parts(parts, RequestBody::stream(body::empty()))
         } else {
             http::Request::from_parts(
                 parts,
-                body::from_bytes(
+                RequestBody::stream(body::from_bytes(
                     serde_json::to_vec(&request).map_err(ParseError::SerializationError)?,
-                ),
+                )),
             )
         };
         Ok(Self {
@@ -493,7 +497,7 @@ where
         let context: Context = request.extensions().get().cloned().unwrap_or_default();
 
         Self {
-            router_request: request.map(convert_to_body),
+            router_request: request.map(convert_to_request_body),
             context,
         }
     }
@@ -505,7 +509,9 @@ impl From<Request> for http::Request<Body> {
             .router_request
             .extensions_mut()
             .insert(request.context);
-        request.router_request
+        request
+            .router_request
+            .map(|rb| rb.into_router_body())
     }
 }
 
@@ -524,6 +530,15 @@ where
         Some(body) => mem::take(body),
         None => Body::new(http_body_util::BodyStream::new(b.map_err(axum::Error::new))),
     }
+}
+
+/// Convert an arbitrary `http_body::Body` into `RequestBody` (as Stream). Used for From<http::Request<T>>.
+fn convert_to_request_body<T>(b: T) -> RequestBody
+where
+    T: http_body::Body<Data = Bytes> + Send + 'static,
+    <T as http_body::Body>::Error: Into<BoxError>,
+{
+    RequestBody::stream(convert_to_body(b))
 }
 
 #[cfg(test)]

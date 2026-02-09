@@ -33,7 +33,6 @@ use tower::buffer::Buffer;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::Body;
 use super::ClientRequestAccepts;
 use crate::Configuration;
 use crate::Context;
@@ -743,13 +742,14 @@ impl RouterService {
         self,
         context: &Context,
         parts: &Parts,
-        body: Body,
+        body: router::RequestBody,
     ) -> Result<Result<(Vec<graphql::Request>, bool), TranslateError>, BoxError> {
         let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> =
             if parts.method == Method::GET {
                 self.translate_query_request(parts).await
             } else {
-                let bytes = router::body::into_bytes(body)
+                let bytes = body
+                    .into_bytes()
                     .instrument(tracing::debug_span!("receive_body"))
                     .await?;
                 if let Some(level) = context
@@ -850,6 +850,17 @@ impl RouterFactory for RouterCreator {
 
     fn pipeline_ref(&self) -> Arc<PipelineRef> {
         self.pipeline_handle.pipeline_ref.clone()
+    }
+
+    fn wrap_http_layer(
+        &self,
+        inner: crate::services::http_layer::BoxService,
+    ) -> crate::services::http_layer::BoxService {
+        self.supergraph_creator
+            .plugins()
+            .iter()
+            .rev()
+            .fold(inner, |acc, (_, e)| e.http_service(acc))
     }
 }
 

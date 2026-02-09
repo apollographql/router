@@ -25,7 +25,6 @@ use crate::graphql::Response;
 use crate::plugins::subscription::notification::Notify;
 use crate::plugins::subscription::notification::NotifyError;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
 
 type HmacSha256 = Hmac<sha2::Sha256>;
 pub(crate) static SUBSCRIPTION_CALLBACK_HMAC_KEY: OnceCell<String> = OnceCell::new();
@@ -156,7 +155,8 @@ impl Service<router::Request> for CallbackService {
 
                 match parts.method {
                     Method::POST => {
-                        let cb_body = router::body::into_bytes(Into::<RouterBody>::into(body))
+                        let cb_body = body
+                            .into_bytes()
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {

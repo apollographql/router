@@ -38,6 +38,7 @@ pub(crate) mod fetch;
 pub(crate) mod fetch_service;
 pub(crate) mod hickory_dns_connector;
 pub(crate) mod http;
+pub(crate) mod http_layer;
 pub(crate) mod layers;
 pub(crate) mod new_service;
 pub(crate) mod query_planner;

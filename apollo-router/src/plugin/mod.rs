@@ -50,6 +50,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugins::subscription::notification::Notify;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
+use crate::services::http_layer;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -407,6 +408,28 @@ pub trait Plugin: Send + Sync + 'static {
         service
     }
 
+    /// This function is EXPERIMENTAL and its signature is subject to change.
+    ///
+    /// This service runs at raw HTTP level, in front of the router, after license and rate-limit checks.
+    /// Plugins can read and mutate the request/response body (as bytes). Define `http_service` for
+    /// customizations that need to see or modify raw HTTP (method, URI, headers, body) before GraphQL parsing.
+    fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService {
+        service
+    }
+
+    /// Outer hook around outbound subgraph HTTP: the first customization before the wire.
+    /// Plugins that implement this (and do not return the service unchanged) form the "outer" chain;
+    /// the existing `http_client_service` chain (telemetry, etc.) remains inner. No internal plugins
+    /// sit between this hook and the HTTP client. Default: identity.
+    #[allow(private_interfaces)]
+    fn subgraph_http_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -481,6 +504,21 @@ pub trait PluginUnstable: Send + Sync + 'static {
         service
     }
 
+    /// Raw HTTP layer in front of the router (after license/rate-limit). See [Plugin::http_service].
+    fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService {
+        service
+    }
+
+    /// Outer hook around outbound subgraph HTTP (see [Plugin::subgraph_http_service]).
+    #[allow(private_interfaces)]
+    fn subgraph_http_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -532,6 +570,19 @@ where
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         Plugin::subgraph_service(self, subgraph_name, service)
+    }
+
+    fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService {
+        Plugin::http_service(self, service)
+    }
+
+    #[allow(private_interfaces)]
+    fn subgraph_http_service(
+        &self,
+        subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        Plugin::subgraph_http_service(self, subgraph_name, service)
     }
 
     /// Return the name of the plugin.
@@ -621,6 +672,21 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         service
     }
 
+    /// Raw HTTP layer in front of the router (after license/rate-limit). Plugins can read and mutate request/response body.
+    fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService {
+        service
+    }
+
+    /// Outer hook around outbound subgraph HTTP (see [Plugin::subgraph_http_service]).
+    #[allow(private_interfaces)]
+    fn subgraph_http_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        service
+    }
+
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
@@ -683,6 +749,19 @@ where
         PluginUnstable::subgraph_service(self, subgraph_name, service)
     }
 
+    fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService {
+        PluginUnstable::http_service(self, service)
+    }
+
+    #[allow(private_interfaces)]
+    fn subgraph_http_service(
+        &self,
+        subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        PluginUnstable::subgraph_http_service(self, subgraph_name, service)
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -740,6 +819,17 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService;
 
+    /// Raw HTTP layer in front of the router (after license/rate-limit).
+    fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService;
+
+    /// Outer hook around outbound subgraph HTTP (no internal plugins between hook and wire).
+    #[allow(private_interfaces)]
+    fn subgraph_http_service(
+        &self,
+        subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService;
+
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
@@ -794,6 +884,19 @@ where
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         self.http_client_service(name, service)
+    }
+
+    fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService {
+        PluginPrivate::http_service(self, service)
+    }
+
+    #[allow(private_interfaces)]
+    fn subgraph_http_service(
+        &self,
+        name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        PluginPrivate::subgraph_http_service(self, name, service)
     }
 
     fn connector_request_service(
