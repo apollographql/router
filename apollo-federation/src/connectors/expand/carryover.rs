@@ -428,6 +428,12 @@ pub(super) fn carryover_directives(
     Ok(())
 }
 
+/// Specs listed here are handled explicitly elsewhere in expansion and must be
+/// skipped by the generic directive carryover loop. Without `connect`, the loop
+/// tries to look up `directive @connect(...)` / `@source` / `@mapping` in the
+/// supergraph's referencers, but those definitions don't exist (they have
+/// type-system-only locations and are excluded during merge). This affects all
+/// connect spec versions when using compose()-produced supergraphs.
 fn is_known_link(link: &Link) -> bool {
     link.url.identity.domain == APOLLO_SPEC_DOMAIN
         && [
@@ -439,6 +445,7 @@ fn is_known_link(link: &Link) -> bool {
             name!(requiresScopes),
             name!(policy),
             name!(context),
+            name!(connect),
         ]
         .contains(&link.url.identity.name)
 }

@@ -371,6 +371,7 @@ mod helpers {
                 key_name.clone(),
                 link.connect_directive_name.clone(),
                 link.source_directive_name.clone(),
+                link.mapping_directive_name.clone(), // v0.5+; LegacyExpander already had this
             ]));
 
             Self {
