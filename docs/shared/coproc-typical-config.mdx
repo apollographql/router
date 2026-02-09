@@ -46,4 +46,19 @@ coprocessor:
         service_name: false
         status_code: false
         subgraph_request_id: false
+  connector: # This coprocessor hooks into connector HTTP requests
+    all:
+      request: # By including this key, the coprocessor sends a request before each connector HTTP call.
+        headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
+        body: false
+        context: false
+        uri: false
+        method: false
+        service_name: false
+      response: # By including this key, the coprocessor sends a request after each connector HTTP call.
+        headers: true
+        body: false
+        context: false
+        service_name: false
+        status_code: false
 ```
