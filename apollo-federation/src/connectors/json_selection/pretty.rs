@@ -9,6 +9,7 @@ use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
 use super::lit_expr::LitOp;
+use super::location::WithRange;
 use super::parser::Alias;
 use super::parser::Key;
 use crate::connectors::json_selection::JSONSelection;
@@ -188,24 +189,58 @@ impl PrettyPrintable for PathList {
 
 impl PrettyPrintable for MethodArgs {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
-        let mut result = String::new();
+        let printed_args: Vec<String> = self
+            .args
+            .iter()
+            .map(|arg| arg.pretty_print_with_indentation(inline, indentation + 1))
+            .collect();
 
-        result.push('(');
+        // Check if args would produce multi-line output in non-inline mode,
+        // which determines whether we break across lines (or add spacing in
+        // inline mode to be consistent with collapsed multi-line output).
+        let would_break = if inline {
+            self.args
+                .iter()
+                .any(|arg| arg.pretty_print_with_indentation(false, 0).contains('\n'))
+        } else {
+            printed_args.iter().any(|a| a.contains('\n'))
+        };
 
-        // TODO Break long argument lists across multiple lines, with indentation?
-        for (i, arg) in self.args.iter().enumerate() {
-            if i > 0 {
-                result.push_str(", ");
-            }
-            result.push_str(
-                arg.pretty_print_with_indentation(inline, indentation + 1)
-                    .as_str(),
-            );
+        if !inline && would_break {
+            let indent = indent_chars(indentation + 1);
+            let separator = format!(",\n{indent}");
+            let joined = printed_args.iter().map(String::as_str).join(&separator);
+            format!("(\n{indent}{joined}\n{})", indent_chars(indentation))
+        } else if would_break {
+            let joined = printed_args.iter().map(String::as_str).join(", ");
+            format!("( {joined} )")
+        } else {
+            let joined = printed_args.iter().map(String::as_str).join(", ");
+            format!("({joined})")
         }
+    }
+}
 
-        result.push(')');
-
-        result
+impl LitExpr {
+    fn is_shorthand_property(key: &WithRange<Key>, value: &WithRange<LitExpr>) -> bool {
+        let Key::Field(key_name) = key.as_ref() else {
+            return false;
+        };
+        let LitExpr::Path(PathSelection { path }) = value.as_ref() else {
+            return false;
+        };
+        let PathList::Key(path_key, tail) = path.as_ref() else {
+            return false;
+        };
+        let tail_is_simple = match tail.as_ref() {
+            PathList::Empty => true,
+            // Allow shorthand for optional paths like { a? } which desugar to { a: a? }
+            PathList::Question(inner) => matches!(inner.as_ref(), PathList::Empty),
+            // Allow shorthand for paths with subselections like { a { b c }, d }
+            PathList::Selection(_) => true,
+            _ => false,
+        };
+        tail_is_simple && path_key.as_str() == key_name
     }
 }
 
@@ -244,13 +279,23 @@ impl PrettyPrintable for LitExpr {
                         result.push_str(indent_chars(indentation + 1).as_str());
                     }
 
-                    result.push_str(key.pretty_print().as_str());
-                    result.push_str(": ");
-                    result.push_str(
-                        value
-                            .pretty_print_with_indentation(inline, indentation + 1)
-                            .as_str(),
-                    );
+                    if Self::is_shorthand_property(key, value) {
+                        // Print just the value path, which includes any
+                        // trailing `?` (e.g. `a?` for { a: a? }).
+                        result.push_str(
+                            value
+                                .pretty_print_with_indentation(inline, indentation + 1)
+                                .as_str(),
+                        );
+                    } else {
+                        result.push_str(key.pretty_print().as_str());
+                        result.push_str(": ");
+                        result.push_str(
+                            value
+                                .pretty_print_with_indentation(inline, indentation + 1)
+                                .as_str(),
+                        );
+                    }
                 }
 
                 if inline {
@@ -377,6 +422,8 @@ mod tests {
     use crate::connectors::json_selection::PrettyPrintable;
     use crate::connectors::json_selection::location::new_span;
     use crate::connectors::json_selection::pretty::indent_chars;
+    use crate::connectors::spec::ConnectSpec;
+    use crate::selection;
 
     // Test all valid pretty print permutations
     fn test_permutations(selection: impl PrettyPrintable, expected: &str) {
@@ -533,5 +580,34 @@ mod tests {
     fn it_prints_root_selection() {
         let root_selection = JSONSelection::parse("id name").unwrap();
         test_permutations(root_selection, "id\nname");
+    }
+
+    #[test]
+    fn it_reprints_shorthand_properties() {
+        let expected = r#"
+upc
+... category->match(
+  ["book", {
+    __typename: "Book",
+    title,
+    author {
+      id
+    }
+  }],
+  ["film", $ {
+    __typename: $("Film")
+    title
+    director {
+      id
+    }
+  }],
+  [@, null]
+)"#
+        .trim_start();
+
+        let sel = selection!(&expected, ConnectSpec::V0_4);
+        crate::assert_debug_snapshot!(&sel);
+
+        test_permutations(sel, expected);
     }
 }
