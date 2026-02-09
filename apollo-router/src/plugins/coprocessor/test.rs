@@ -4958,7 +4958,6 @@ mod tests {
             mock_connector_service.boxed(),
             "http://test".to_string(),
             "my_connector_source".to_string(),
-            true,
         );
 
         let request = create_test_connector_request();
@@ -5000,7 +4999,6 @@ mod tests {
             mock_connector_service.boxed(),
             "http://test".to_string(),
             "my_connector_source".to_string(),
-            true,
         );
 
         let request = create_test_connector_request();
@@ -5073,7 +5071,6 @@ mod tests {
             inner_service.boxed(),
             "http://test".to_string(),
             "my_connector_source".to_string(),
-            true,
         );
 
         let request = create_test_connector_request();
@@ -5130,7 +5127,6 @@ mod tests {
             mock_connector_service.boxed(),
             "http://test".to_string(),
             "my_connector_source".to_string(),
-            true,
         );
 
         let request = create_test_connector_request();
@@ -5179,7 +5175,6 @@ mod tests {
                     mock_connector_service.boxed(),
                     "http://test".to_string(),
                     "my_connector_source".to_string(),
-                    true,
                 );
 
                 let request = create_test_connector_request();
@@ -5233,7 +5228,6 @@ mod tests {
                     mock_connector_service.boxed(),
                     "http://test".to_string(),
                     "my_connector_source".to_string(),
-                    true,
                 );
 
                 let request = create_test_connector_request();
@@ -5281,7 +5275,6 @@ mod tests {
             mock_connector_service.boxed(),
             "http://test".to_string(),
             "my_connector_source".to_string(),
-            true,
         );
 
         let request = create_test_connector_request();
@@ -5325,7 +5318,6 @@ mod tests {
                     mock_connector_service.boxed(),
                     "http://test".to_string(),
                     "my_connector_source".to_string(),
-                    true,
                 );
 
                 let request = create_test_connector_request();
@@ -5383,7 +5375,6 @@ mod tests {
             mock_connector_service.boxed(),
             "http://test".to_string(),
             "my_connector_source".to_string(),
-            true,
         );
 
         let request = create_test_connector_request();
@@ -5431,7 +5422,6 @@ mod tests {
             mock_connector_service.boxed(),
             "http://test".to_string(),
             "my_connector_source".to_string(),
-            true,
         );
 
         let request = create_test_connector_request();
@@ -5489,7 +5479,6 @@ mod tests {
             mock_connector_service.boxed(),
             "http://test".to_string(),
             "my_connector_source".to_string(),
-            true,
         );
 
         let request = create_test_connector_request();
@@ -5504,6 +5493,267 @@ mod tests {
                     error.extensions.get("retryAfter"),
                     Some(&serde_json_bytes::Value::Number(30.into()))
                 );
+            }
+            _ => panic!("Expected MappedResponse::Error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn should_send_context_and_id_in_response_stage() {
+        let connector_stage = ConnectorStage {
+            request: Default::default(),
+            response: ConnectorResponseConf {
+                context: ContextConf::NewContextConf(NewContextConf::All),
+                body: true,
+                ..Default::default()
+            },
+        };
+
+        let mock_connector_service = crate::plugin::test::MockConnector::new(
+            [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+        );
+
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let body = router::body::into_bytes(req.into_body()).await.unwrap();
+                let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+                // Verify the coprocessor receives a non-empty id
+                assert!(
+                    !payload["id"].as_str().unwrap_or("").is_empty(),
+                    "id should not be empty in response stage"
+                );
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse"
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = connector_stage.as_service(
+            mock_http_client,
+            mock_connector_service.boxed(),
+            "http://test".to_string(),
+            "my_connector_source".to_string(),
+        );
+
+        let request = create_test_connector_request();
+        let response = service.oneshot(request).await.unwrap();
+
+        assert!(response.transport_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn should_update_context_in_response_stage() {
+        let connector_stage = ConnectorStage {
+            request: Default::default(),
+            response: ConnectorResponseConf {
+                context: ContextConf::NewContextConf(NewContextConf::All),
+                body: true,
+                ..Default::default()
+            },
+        };
+
+        let mock_connector_service = crate::plugin::test::MockConnector::new(
+            [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+        );
+
+        let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse",
+                            "context": {
+                                "entries": {
+                                    "response-key": "response-value"
+                                }
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = connector_stage.as_service(
+            mock_http_client,
+            mock_connector_service.boxed(),
+            "http://test".to_string(),
+            "my_connector_source".to_string(),
+        );
+
+        let request = create_test_connector_request();
+        let context = request.context.clone();
+        service.oneshot(request).await.unwrap();
+
+        assert_eq!(
+            context.get_json_value("response-key"),
+            Some(serde_json_bytes::Value::String("response-value".into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn should_apply_body_modification_for_data_response() {
+        let connector_stage = ConnectorStage {
+            request: Default::default(),
+            response: ConnectorResponseConf {
+                body: true,
+                ..Default::default()
+            },
+        };
+
+        let mock_connector_service = crate::plugin::test::MockConnector::new(
+            [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+        );
+
+        let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse",
+                            "body": {"modified": "data"}
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = connector_stage.as_service(
+            mock_http_client,
+            mock_connector_service.boxed(),
+            "http://test".to_string(),
+            "my_connector_source".to_string(),
+        );
+
+        let request = create_test_connector_request();
+        let response = service.oneshot(request).await.unwrap();
+
+        match &response.mapped_response {
+            MappedResponse::Data { data, .. } => {
+                assert_eq!(data, &serde_json_bytes::json!({"modified": "data"}));
+            }
+            _ => panic!("Expected MappedResponse::Data"),
+        }
+    }
+
+    fn create_error_connector_service()
+    -> tower::util::BoxService<request_service::Request, request_service::Response, BoxError> {
+        tower::service_fn(|_req: request_service::Request| async {
+            Ok(request_service::Response {
+                transport_result: Err(
+                    apollo_federation::connectors::runtime::errors::Error::TransportFailure(
+                        "original error".to_string(),
+                    ),
+                ),
+                mapped_response: MappedResponse::Error {
+                    error: apollo_federation::connectors::runtime::errors::RuntimeError::new(
+                        "Original error message",
+                        &create_test_response_key(),
+                    ),
+                    key: create_test_response_key(),
+                    problems: Vec::new(),
+                },
+            })
+        })
+        .boxed()
+    }
+
+    #[tokio::test]
+    async fn should_apply_error_message_modification_for_error_response() {
+        let connector_stage = ConnectorStage {
+            request: Default::default(),
+            response: ConnectorResponseConf {
+                body: true,
+                ..Default::default()
+            },
+        };
+
+        let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse",
+                            "body": {
+                                "errors": [{"message": "Modified error message"}]
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = connector_stage.as_service(
+            mock_http_client,
+            create_error_connector_service(),
+            "http://test".to_string(),
+            "my_connector_source".to_string(),
+        );
+
+        let request = create_test_connector_request();
+        let response = service.oneshot(request).await.unwrap();
+
+        match &response.mapped_response {
+            MappedResponse::Error { error, .. } => {
+                assert_eq!(error.message, "Modified error message");
+            }
+            _ => panic!("Expected MappedResponse::Error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn should_apply_error_code_modification_for_error_response() {
+        let connector_stage = ConnectorStage {
+            request: Default::default(),
+            response: ConnectorResponseConf {
+                body: true,
+                ..Default::default()
+            },
+        };
+
+        let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse",
+                            "body": {
+                                "errors": [{
+                                    "message": "Not authorized",
+                                    "extensions": {
+                                        "code": "ERR_UNAUTHORIZED"
+                                    }
+                                }]
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = connector_stage.as_service(
+            mock_http_client,
+            create_error_connector_service(),
+            "http://test".to_string(),
+            "my_connector_source".to_string(),
+        );
+
+        let request = create_test_connector_request();
+        let response = service.oneshot(request).await.unwrap();
+
+        match &response.mapped_response {
+            MappedResponse::Error { error, .. } => {
+                assert_eq!(error.code(), "ERR_UNAUTHORIZED");
             }
             _ => panic!("Expected MappedResponse::Error"),
         }

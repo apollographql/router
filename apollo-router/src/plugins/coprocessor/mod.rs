@@ -346,7 +346,6 @@ where
             service,
             self.configuration.url.clone(),
             source_name.to_string(),
-            self.configuration.response_validation,
         )
     }
 }

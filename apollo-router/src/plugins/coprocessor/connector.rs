@@ -3,6 +3,29 @@
 use std::ops::ControlFlow;
 use std::time::Instant;
 
+use super::COPROCESSOR_ERROR_EXTENSION;
+use super::ContextConf;
+use super::EXTERNAL_SPAN_NAME;
+use super::NewContextConf;
+use super::internalize_header_map;
+use super::record_coprocessor_duration;
+use super::record_coprocessor_operation;
+use super::update_context_from_coprocessor;
+use super::validate_coprocessor_output;
+use crate::Context;
+use crate::context::context_key_from_deprecated;
+use crate::json_ext::Value;
+use crate::layers::ServiceBuilderExt;
+use crate::layers::async_checkpoint::AsyncCheckpointLayer;
+use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
+use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
+use crate::services::connector::request_service;
+use crate::services::external::Control;
+use crate::services::external::Externalizable;
+use crate::services::external::PipelineStep;
+use crate::services::external::externalize_header_map;
+use crate::services::router::body::RouterBody;
 use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
@@ -16,29 +39,6 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::util::MapFutureLayer;
-
-use super::COPROCESSOR_ERROR_EXTENSION;
-use super::ContextConf;
-use super::EXTERNAL_SPAN_NAME;
-use super::NewContextConf;
-use super::internalize_header_map;
-use super::record_coprocessor_duration;
-use super::record_coprocessor_operation;
-use super::validate_coprocessor_output;
-use crate::Context;
-use crate::context::context_key_from_deprecated;
-use crate::json_ext::Value;
-use crate::layers::ServiceBuilderExt;
-use crate::layers::async_checkpoint::AsyncCheckpointLayer;
-use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
-use crate::services::connector::request_service;
-use crate::services::external::Control;
-use crate::services::external::Externalizable;
-use crate::services::external::PipelineStep;
-use crate::services::external::externalize_header_map;
-use crate::services::router::body::RouterBody;
 
 /// What information is passed to a connector request stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -109,7 +109,6 @@ impl ConnectorStage {
         service: request_service::BoxService,
         default_url: String,
         service_name: String,
-        _response_validation: bool,
     ) -> request_service::BoxService
     where
         C: Service<
@@ -163,37 +162,44 @@ impl ConnectorStage {
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
 
-            MapFutureLayer::new(move |fut| {
-                let http_client = http_client.clone();
-                let coprocessor_url = coprocessor_url.clone();
-                let response_config = response_config.clone();
-                let service_name = service_name.clone();
+            MapFutureWithRequestDataLayer::new(
+                |req: &request_service::Request| req.context.clone(),
+                move |context: Context, fut| {
+                    let http_client = http_client.clone();
+                    let coprocessor_url = coprocessor_url.clone();
+                    let response_config = response_config.clone();
+                    let service_name = service_name.clone();
 
-                async move {
-                    let response: request_service::Response = fut.await?;
+                    async move {
+                        let response: request_service::Response = fut.await?;
 
-                    let mut succeeded = true;
-                    let mut executed = false;
-                    let result = process_connector_response_stage(
-                        http_client,
-                        coprocessor_url,
-                        service_name,
-                        response,
-                        response_config,
-                        &mut executed,
-                    )
-                    .await
-                    .map_err(|error| {
-                        succeeded = false;
-                        tracing::error!("coprocessor: connector response stage error: {error}");
-                        error
-                    });
-                    if executed {
-                        record_coprocessor_operation(PipelineStep::ConnectorResponse, succeeded);
+                        let mut succeeded = true;
+                        let mut executed = false;
+                        let result = process_connector_response_stage(
+                            http_client,
+                            coprocessor_url,
+                            service_name,
+                            response,
+                            response_config,
+                            context,
+                            &mut executed,
+                        )
+                        .await
+                        .map_err(|error| {
+                            succeeded = false;
+                            tracing::error!("coprocessor: connector response stage error: {error}");
+                            error
+                        });
+                        if executed {
+                            record_coprocessor_operation(
+                                PipelineStep::ConnectorResponse,
+                                succeeded,
+                            );
+                        }
+                        result
                     }
-                    result
-                }
-            })
+                },
+            )
         });
 
         fn external_service_span() -> impl Fn(&request_service::Request) -> tracing::Span + Clone {
@@ -251,7 +257,6 @@ where
 
     let context_to_send = request_config.context.get_context(&request.context);
     let uri = request_config.uri.then(|| parts.uri.to_string());
-    let connector_service_name = service_name.clone();
     let service_name_to_send = request_config.service_name.then_some(service_name);
 
     let payload = Externalizable::connector_builder()
@@ -368,10 +373,6 @@ where
         debug,
     });
 
-    // service_name from coprocessor response is intentionally ignored -
-    // the connector source name should not be changed by the coprocessor
-    let _ = connector_service_name;
-
     Ok(ControlFlow::Continue(request))
 }
 
@@ -381,6 +382,7 @@ async fn process_connector_response_stage<C>(
     service_name: String,
     mut response: request_service::Response,
     response_config: ConnectorResponseConf,
+    context: Context,
     executed: &mut bool,
 ) -> Result<request_service::Response, BoxError>
 where
@@ -412,14 +414,8 @@ where
     // Extract body from mapped response
     let body_to_send: Option<serde_json_bytes::Value> = if response_config.body {
         match &response.mapped_response {
-            apollo_federation::connectors::runtime::responses::MappedResponse::Data {
-                data,
-                ..
-            } => Some(data.clone()),
-            apollo_federation::connectors::runtime::responses::MappedResponse::Error {
-                error,
-                ..
-            } => Some(serde_json_bytes::json!({
+            MappedResponse::Data { data, .. } => Some(data.clone()),
+            MappedResponse::Error { error, .. } => Some(serde_json_bytes::json!({
                 "errors": [{"message": error.message.clone()}]
             })),
         }
@@ -427,16 +423,12 @@ where
         None
     };
 
-    // Note: context is not directly available on connector::request_service::Response.
-    // The context is carried on the request side. For the response stage, we pass
-    // context through the MapFutureLayer closure if needed. For now, context operations
-    // on connector response are limited.
-    let context_to_send = None::<Context>;
+    let context_to_send = response_config.context.get_context(&context);
     let service_name_to_send = response_config.service_name.then_some(service_name);
 
     let payload = Externalizable::connector_builder()
         .stage(PipelineStep::ConnectorResponse)
-        .id(String::new())
+        .id(context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -469,6 +461,44 @@ where
         && let Ok(TransportResponse::Http(ref mut http_response)) = response.transport_result
     {
         http_response.inner.headers = internalize_header_map(headers)?;
+    }
+
+    if let Some(returned_context) = co_processor_output.context {
+        update_context_from_coprocessor(&context, returned_context, &response_config.context)?;
+    }
+
+    if let Some(body) = co_processor_output.body {
+        match response.mapped_response {
+            MappedResponse::Data { ref mut data, .. } => {
+                *data = body;
+            }
+            MappedResponse::Error {
+                mut error,
+                key,
+                problems,
+            } => {
+                if let Some(errors) = body.get("errors").and_then(|e| e.as_array())
+                    && let Some(first_error) = errors.first().and_then(|e| e.as_object())
+                {
+                    if let Some(message) = first_error.get("message").and_then(|m| m.as_str()) {
+                        error.message = message.to_string();
+                    }
+                    if let Some(code) = first_error
+                        .get("extensions")
+                        .and_then(|e| e.as_object())
+                        .and_then(|ext| ext.get("code"))
+                        .and_then(|c| c.as_str())
+                    {
+                        error = error.with_code(code);
+                    }
+                }
+                response.mapped_response = MappedResponse::Error {
+                    error,
+                    key,
+                    problems,
+                };
+            }
+        }
     }
 
     Ok(response)
