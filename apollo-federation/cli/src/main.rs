@@ -14,6 +14,7 @@ use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use apollo_federation::bail;
 use apollo_federation::composition;
+use apollo_federation::composition::compose;
 use apollo_federation::composition::compose_with_connectors;
 use apollo_federation::composition::validate_satisfiability_with_connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
@@ -128,6 +129,10 @@ enum Command {
         /// Path to a Rover supergraph config YAML file.
         #[arg(long, conflicts_with = "schemas")]
         config: Option<PathBuf>,
+        /// Output pre-expansion supergraph (compatible with router runtime expansion).
+        /// By default, compose outputs the expanded supergraph with per-connector subgraphs.
+        #[arg(long)]
+        no_expand: bool,
     },
     /// Expand and validate a subgraph schema and print the result
     Subgraph {
@@ -221,7 +226,11 @@ fn main() -> ExitCode {
         Command::Validate { schemas } => cmd_validate(&schemas),
         Command::Subgraph { subgraph_schema } => cmd_subgraph(&subgraph_schema),
         Command::Satisfiability { supergraph_schema } => cmd_satisfiability(&supergraph_schema),
-        Command::Compose { schemas, config } => cmd_compose(&schemas, config.as_ref()),
+        Command::Compose {
+            schemas,
+            config,
+            no_expand,
+        } => cmd_compose(&schemas, config.as_ref(), no_expand),
         Command::Extract {
             supergraph_schema,
             destination_dir,
@@ -269,9 +278,9 @@ fn cmd_api_schema(file_paths: &[PathBuf], enable_defer: bool) -> Result<(), AnyE
     Ok(())
 }
 
-fn compose_files_inner(
+fn parse_subgraph_files(
     file_paths: &[PathBuf],
-) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
+) -> Result<Vec<typestate::Subgraph<typestate::Initial>>, Vec<CompositionError>> {
     let mut subgraphs = Vec::new();
     let mut errors = Vec::new();
     for path in file_paths {
@@ -289,21 +298,33 @@ fn compose_files_inner(
         }
     }
     if !errors.is_empty() {
-        // Subgraph errors
         let mut composition_errors = Vec::new();
         for error in errors {
             composition_errors.extend(error.to_composition_errors());
         }
         return Err(composition_errors);
     }
+    Ok(subgraphs)
+}
 
+fn compose_files_inner(
+    file_paths: &[PathBuf],
+) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
+    let subgraphs = parse_subgraph_files(file_paths)?;
     compose_with_connectors(subgraphs)
 }
 
-/// Compose a supergraph from a Rover config YAML file.
-fn compose_from_config_inner(
-    config_path: &Path,
+fn compose_files_no_expand_inner(
+    file_paths: &[PathBuf],
 ) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
+    let subgraphs = parse_subgraph_files(file_paths)?;
+    compose(subgraphs)
+}
+
+/// Parse subgraphs from a Rover config YAML file.
+fn parse_config_subgraphs(
+    config_path: &Path,
+) -> Result<Vec<typestate::Subgraph<typestate::Initial>>, Vec<CompositionError>> {
     let config_str = read_input(config_path);
     let config: SupergraphConfig = serde_yaml::from_str(&config_str).map_err(|e| {
         vec![CompositionError::MergeError {
@@ -327,12 +348,10 @@ fn compose_from_config_inner(
             } else {
                 config_dir.join(file_path)
             };
-            // Follow the same pattern as compose_files_inner - use unwrap for file I/O errors
             std::fs::read_to_string(&full_path).unwrap_or_else(|e| {
                 panic!("Failed to read schema file for subgraph '{}': {}", name, e)
             })
         } else {
-            // Return early with a composition error for missing schema specification
             return Err(vec![CompositionError::MergeError {
                 error: SingleFederationError::Internal {
                     message: format!(
@@ -355,7 +374,6 @@ fn compose_from_config_inner(
     }
 
     if !errors.is_empty() {
-        // Subgraph errors
         let mut composition_errors = Vec::new();
         for error in errors {
             composition_errors.extend(error.to_composition_errors());
@@ -363,7 +381,23 @@ fn compose_from_config_inner(
         return Err(composition_errors);
     }
 
+    Ok(subgraphs)
+}
+
+/// Compose a supergraph from a Rover config YAML file.
+fn compose_from_config_inner(
+    config_path: &Path,
+) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
+    let subgraphs = parse_config_subgraphs(config_path)?;
     compose_with_connectors(subgraphs)
+}
+
+/// Compose a supergraph from a Rover config YAML file (pre-expansion, no connector expansion).
+fn compose_from_config_no_expand_inner(
+    config_path: &Path,
+) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
+    let subgraphs = parse_config_subgraphs(config_path)?;
+    compose(subgraphs)
 }
 
 /// Compose a supergraph from multiple subgraph files.
@@ -388,7 +422,34 @@ fn compose_from_config(
     match compose_from_config_inner(config_path) {
         Ok(supergraph) => Ok(supergraph),
         Err(errors) => {
-            // Print composition errors
+            print_composition_errors(&errors);
+            let num_errors = errors.len();
+            Err(anyhow!("Error: found {num_errors} composition error(s)."))
+        }
+    }
+}
+
+/// Compose a supergraph from subgraph files (pre-expansion, no connector expansion).
+fn compose_files_no_expand(
+    file_paths: &[PathBuf],
+) -> Result<composition::Supergraph<composition::Satisfiable>, AnyError> {
+    match compose_files_no_expand_inner(file_paths) {
+        Ok(supergraph) => Ok(supergraph),
+        Err(errors) => {
+            print_composition_errors(&errors);
+            let num_errors = errors.len();
+            Err(anyhow!("Error: found {num_errors} composition error(s)."))
+        }
+    }
+}
+
+/// Compose a supergraph from a Rover config YAML file (pre-expansion, no connector expansion).
+fn compose_from_config_no_expand(
+    config_path: &Path,
+) -> Result<composition::Supergraph<composition::Satisfiable>, AnyError> {
+    match compose_from_config_no_expand_inner(config_path) {
+        Ok(supergraph) => Ok(supergraph),
+        Err(errors) => {
             print_composition_errors(&errors);
             let num_errors = errors.len();
             Err(anyhow!("Error: found {num_errors} composition error(s)."))
@@ -599,7 +660,11 @@ fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
     }
 }
 
-fn cmd_compose(file_paths: &[PathBuf], config_path: Option<&PathBuf>) -> Result<(), AnyError> {
+fn cmd_compose(
+    file_paths: &[PathBuf],
+    config_path: Option<&PathBuf>,
+    no_expand: bool,
+) -> Result<(), AnyError> {
     let config_path = if let Some((first, rest)) = file_paths.split_first()
         && rest.is_empty()
         && (first.extension().is_some_and(|ext| ext == "yaml")
@@ -614,9 +679,17 @@ fn cmd_compose(file_paths: &[PathBuf], config_path: Option<&PathBuf>) -> Result<
         config_path
     };
     let supergraph = if let Some(config) = config_path {
-        compose_from_config(config)?
+        if no_expand {
+            compose_from_config_no_expand(config)?
+        } else {
+            compose_from_config(config)?
+        }
     } else if !file_paths.is_empty() {
-        compose_files(file_paths)?
+        if no_expand {
+            compose_files_no_expand(file_paths)?
+        } else {
+            compose_files(file_paths)?
+        }
     } else {
         bail!("Error: must provide either schema files or --config");
     };
