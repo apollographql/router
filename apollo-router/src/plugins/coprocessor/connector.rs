@@ -3,6 +3,20 @@
 use std::ops::ControlFlow;
 use std::time::Instant;
 
+use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
+use apollo_federation::connectors::runtime::errors::RuntimeError;
+use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde_json_bytes::ByteString;
+use tower::BoxError;
+use tower::Service;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+
 use super::COPROCESSOR_ERROR_EXTENSION;
 use super::ContextConf;
 use super::EXTERNAL_SPAN_NAME;
@@ -26,19 +40,6 @@ use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::externalize_header_map;
 use crate::services::router::body::RouterBody;
-use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
-use apollo_federation::connectors::runtime::errors::RuntimeError;
-use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
-use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
-use apollo_federation::connectors::runtime::responses::MappedResponse;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json_bytes::ByteString;
-use tower::BoxError;
-use tower::Service;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 /// What information is passed to a connector request stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
