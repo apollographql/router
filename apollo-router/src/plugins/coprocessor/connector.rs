@@ -252,9 +252,9 @@ where
         .headers
         .then(|| externalize_header_map(&parts.headers));
 
-    let body_to_send = request_config
-        .body
-        .then(|| Value::String(body.clone().into()));
+    let body_to_send = request_config.body.then(|| {
+        serde_json::from_str::<Value>(&body).unwrap_or_else(|_| Value::String(body.clone().into()))
+    });
 
     let context_to_send = request_config.context.get_context(&request.context);
     let uri = request_config.uri.then(|| parts.uri.to_string());

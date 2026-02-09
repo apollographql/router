@@ -163,8 +163,8 @@ This field's type depends on the coprocessor request's [`stage`](#stage):
 - For `RouterService` stages, `body` is a JSON _string_.
   - This is necessary to support handling [deferred queries](#handling-deferred-query-responses).
   - If you modify `body` during the `RouterRequest` stage, the new value must be a valid string serialization of a JSON object. If it isn't, the router detects that the body is malformed and returns an error to the client.
-- For connector stages, `body` is a JSON _string_ for requests and a JSON _object_ for responses.
-  - The request body is the raw HTTP body string that will be sent to the REST API.
+- For connector stages, `body` is a JSON _object_ for both requests and responses when the body is valid JSON, or a JSON _string_ if the request body is not valid JSON.
+  - If the request body is valid JSON, it is sent as a parsed JSON object. Otherwise, it is sent as a raw string.
   - The response body is the parsed JSON data or an error object.
 
 This field's structure depends on whether the coprocessor request corresponds to a request, a standard response, or a response "chunk" for a deferred query:
@@ -962,7 +962,7 @@ The following keys are populated by the demand control plugin:
     "content-type": ["application/json"],
     "accept": ["application/json"]
   },
-  "body": "{\"query\":\"query { users { id name } }\"}",
+  "body": { "query": "query { users { id name } }" },
   "context": {
     "entries": {
       "apollo::supergraph::operation_name": "GetUsers",

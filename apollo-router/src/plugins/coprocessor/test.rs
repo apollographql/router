@@ -4967,6 +4967,130 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn should_send_json_body_as_parsed_json_to_coprocessor() {
+        let connector_stage = ConnectorStage {
+            request: ConnectorRequestConf {
+                body: true,
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        let mock_connector_service = crate::plugin::test::MockConnector::new(
+            [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+        );
+
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let body = router::body::into_bytes(req.into_body()).await.unwrap();
+                let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+                // The body should be a JSON object, not a JSON string
+                assert!(
+                    payload["body"].is_object(),
+                    "expected body to be a JSON object, got: {}",
+                    payload["body"]
+                );
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": "continue"
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = connector_stage.as_service(
+            mock_http_client,
+            mock_connector_service.boxed(),
+            "http://test".to_string(),
+            "my_connector_source".to_string(),
+        );
+
+        let request = create_test_connector_request();
+        let response = service.oneshot(request).await.unwrap();
+
+        assert!(response.transport_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn should_send_non_json_body_as_string_to_coprocessor() {
+        let connector_stage = ConnectorStage {
+            request: ConnectorRequestConf {
+                body: true,
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        let mock_connector_service = crate::plugin::test::MockConnector::new(
+            [("plain text body".to_string(), "ok".to_string())].into(),
+        );
+
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let body = router::body::into_bytes(req.into_body()).await.unwrap();
+                let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+                // The body should be a JSON string since the request body is not valid JSON
+                assert!(
+                    payload["body"].is_string(),
+                    "expected body to be a JSON string, got: {}",
+                    payload["body"]
+                );
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": "continue"
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = connector_stage.as_service(
+            mock_http_client,
+            mock_connector_service.boxed(),
+            "http://test".to_string(),
+            "my_connector_source".to_string(),
+        );
+
+        // Create a request with a non-JSON body
+        let http_request = http::Request::builder()
+            .uri("http://original-connector-uri/api")
+            .method(http::Method::POST)
+            .header("content-type", "text/plain")
+            .body("plain text body".to_string())
+            .unwrap();
+
+        let transport_request = TransportRequest::Http(HttpRequest {
+            inner: http_request,
+            debug: Default::default(),
+        });
+
+        let request = request_service::Request {
+            context: crate::Context::default(),
+            connector: create_test_connector(),
+            transport_request,
+            key: create_test_response_key(),
+            mapping_problems: vec![],
+            supergraph_request: Default::default(),
+            operation: Default::default(),
+        };
+
+        let response = service.oneshot(request).await.unwrap();
+
+        assert!(response.transport_result.is_ok());
+    }
+
+    #[tokio::test]
     async fn should_return_transport_error_when_coprocessor_breaks() {
         let connector_stage = ConnectorStage {
             request: ConnectorRequestConf {
