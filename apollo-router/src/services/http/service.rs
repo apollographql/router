@@ -27,6 +27,7 @@ use tower::ServiceBuilder;
 use tower::util::Either;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
+use tracing::Instrument;
 use tracing::Span;
 
 use super::HttpRequest;
@@ -356,7 +357,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
             };
 
             let http_response = do_fetch(client, &service_name, http_request)
-                //.instrument(http_req_span)
+                .instrument(http_req_span)
                 .await?;
 
             Ok(HttpResponse {
