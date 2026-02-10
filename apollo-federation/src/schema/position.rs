@@ -641,8 +641,25 @@ impl HasMutableDirectives for InputObjectFieldDefinitionPosition {
     }
 }
 
+/// A trait that exposes the list of applied directives on a given schema position.
+///
+/// Depending on the underlying GraphQL type, `apollo-rs` exposes the associated directives
+/// as either wrapped in `Node<Directive>` (reference-counter smart pointer) or `Component<Directive>`
+/// (wraps node and tracks its origin in the schema). By defining `AppliedDirective` associated
+/// type as `AsRef<Directive>` we can define a common trait that works with both wrappers.
 pub(crate) trait HasAppliedDirectives {
     type AppliedDirective: AsRef<Directive>;
+
+    fn filter_directives<'dir, T: AsRef<Directive>>(
+        &self,
+        directives: impl IntoIterator<Item = &'dir T>,
+        name: &Name,
+    ) -> Vec<&'dir T> {
+        directives
+            .into_iter()
+            .filter(|directive| &directive.as_ref().name == name)
+            .collect()
+    }
 
     fn get_applied_directives<'schema>(
         &self,
@@ -660,11 +677,7 @@ impl HasAppliedDirectives for SchemaDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         let schema_def = self.get(&schema.schema);
-        schema_def
-            .directives
-            .iter()
-            .filter(|d| d.name == *directive_name)
-            .collect()
+        self.filter_directives(schema_def.directives.iter(), directive_name)
     }
 }
 
@@ -783,15 +796,9 @@ impl HasAppliedDirectives for ScalarTypeDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|scalar| self.filter_directives(scalar.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -803,15 +810,9 @@ impl HasAppliedDirectives for ObjectTypeDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|object| self.filter_directives(object.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -823,15 +824,9 @@ impl HasAppliedDirectives for ObjectFieldDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|field| self.filter_directives(field.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -843,14 +838,9 @@ impl HasAppliedDirectives for ObjectFieldArgumentDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
-        if let Some(arg) = self.try_get(&schema.schema) {
-            arg.directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -862,15 +852,9 @@ impl HasAppliedDirectives for InterfaceTypeDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|intf| self.filter_directives(intf.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -882,15 +866,9 @@ impl HasAppliedDirectives for InterfaceFieldDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|field| self.filter_directives(field.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -901,14 +879,9 @@ impl HasAppliedDirectives for InterfaceFieldArgumentDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
-        if let Some(arg) = self.try_get(&schema.schema) {
-            arg.directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -919,15 +892,9 @@ impl HasAppliedDirectives for UnionTypeDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|union| self.filter_directives(union.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -938,15 +905,9 @@ impl HasAppliedDirectives for EnumTypeDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|enum_type| self.filter_directives(enum_type.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -957,14 +918,9 @@ impl HasAppliedDirectives for EnumValueDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
-        if let Some(val) = self.try_get(&schema.schema) {
-            val.directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|value| self.filter_directives(value.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -975,15 +931,9 @@ impl HasAppliedDirectives for InputObjectTypeDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|directive| &directive.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -994,15 +944,9 @@ impl HasAppliedDirectives for InputObjectFieldDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
-        if let Some(field) = self.try_get(&schema.schema) {
-            field
-                .directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|field| self.filter_directives(field.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 
@@ -1013,15 +957,9 @@ impl HasAppliedDirectives for DirectiveArgumentDefinitionPosition {
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
-        if let Some(argument) = self.try_get(&schema.schema) {
-            argument
-                .directives
-                .iter()
-                .filter(|d| &d.name == directive_name)
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.try_get(&schema.schema)
+            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .unwrap_or_default()
     }
 }
 

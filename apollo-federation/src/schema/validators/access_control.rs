@@ -325,9 +325,9 @@ impl<'validator> AccessControlValidator<'validator> {
                                 .valid_schema
                                 .get_type(Name::new_unchecked(target_type_name))?;
                             let target_type_auth_requirements =
-                                self.read_auth_requirements_from_element(target_type.clone());
+                                self.read_auth_requirements_from_element(&target_type);
                             if !auth_requirements_on_context
-                                .satisfies(target_type_auth_requirements)
+                                .satisfies(&target_type_auth_requirements)
                             {
                                 let error =
                                     SingleFederationError::MissingTransitiveAuthRequirements {
@@ -377,7 +377,7 @@ impl<'validator> AccessControlValidator<'validator> {
     ) -> AuthRequirements {
         let requires_authenticated =
             self.authenticated_directive_name
-                .clone()
+                .as_ref()
                 .is_some_and(|directive_name| {
                     let is_field_authenticated = !requires_position
                         .get_applied_directives(&self.valid_schema.schema, &directive_name)
@@ -390,23 +390,23 @@ impl<'validator> AccessControlValidator<'validator> {
                 });
         let required_scopes: Option<BTreeSet<BTreeSet<String>>> = self
             .requires_scopes_directive_name
-            .clone()
+            .as_ref()
             .and_then(|directive_name| {
                 calculate_disjunction_value(
                     requires_position,
                     &self.valid_schema.schema,
-                    &directive_name,
+                    directive_name,
                     &REQUIRES_SCOPES_SCOPES_ARGUMENT_NAME,
                 )
             });
         let required_policies: Option<BTreeSet<BTreeSet<String>>> = self
             .policy_directive_name
-            .clone()
+            .as_ref()
             .and_then(|directive_name| {
                 calculate_disjunction_value(
                     requires_position,
                     &self.valid_schema.schema,
-                    &directive_name,
+                    directive_name,
                     &POLICY_POLICIES_ARGUMENT_NAME,
                 )
             });
@@ -459,14 +459,14 @@ impl<'validator> AccessControlValidator<'validator> {
         auth_requirements: &AuthRequirements,
     ) -> Result<(), FederationError> {
         let field_position = &field_selection.field.field_position;
-        let field_reqs = self.read_auth_requirements_from_element(field_position.clone());
+        let field_reqs = self.read_auth_requirements_from_element(field_position);
 
         let field_return_type_position = field_selection.field.output_base_type()?;
         let field_return_type_reqs =
-            self.read_auth_requirements_from_element(field_return_type_position.clone());
+            self.read_auth_requirements_from_element(&field_return_type_position);
 
-        if !auth_requirements.satisfies(field_reqs)
-            || !auth_requirements.satisfies(field_return_type_reqs)
+        if !auth_requirements.satisfies(&field_reqs)
+            || !auth_requirements.satisfies(&field_return_type_reqs)
         {
             Err(FederationError::SingleFederationError(
                 SingleFederationError::MissingTransitiveAuthRequirements {
@@ -486,8 +486,8 @@ impl<'validator> AccessControlValidator<'validator> {
         condition_position: &CompositeTypeDefinitionPosition,
         auth_requirements: &AuthRequirements,
     ) -> Result<(), FederationError> {
-        let condition_reqs = self.read_auth_requirements_from_element(condition_position.clone());
-        if !auth_requirements.satisfies(condition_reqs) {
+        let condition_reqs = self.read_auth_requirements_from_element(condition_position);
+        if !auth_requirements.satisfies(&condition_reqs) {
             Err(FederationError::SingleFederationError(
                 SingleFederationError::MissingTransitiveAuthRequirements {
                     message: format!(
@@ -503,35 +503,35 @@ impl<'validator> AccessControlValidator<'validator> {
 
     fn read_auth_requirements_from_element<T: HasAppliedDirectives>(
         &self,
-        element: T,
+        element: &T,
     ) -> Option<AuthRequirementsOnElement> {
         let requires_authenticated =
             self.authenticated_directive_name
-                .clone()
+                .as_ref()
                 .is_some_and(|directive_name| {
                     !element
-                        .get_applied_directives(&self.valid_schema.schema, &directive_name)
+                        .get_applied_directives(&self.valid_schema.schema, directive_name)
                         .is_empty()
                 });
         let required_scopes: Option<BTreeSet<BTreeSet<String>>> = self
             .requires_scopes_directive_name
-            .clone()
+            .as_ref()
             .and_then(|directive_name| {
                 parse_optional_disjunction_value_from_element(
-                    &element,
+                    element,
                     &self.valid_schema.schema,
-                    &directive_name,
+                    directive_name,
                     &REQUIRES_SCOPES_SCOPES_ARGUMENT_NAME,
                 )
             });
         let required_policies: Option<BTreeSet<BTreeSet<String>>> = self
             .policy_directive_name
-            .clone()
+            .as_ref()
             .and_then(|directive_name| {
                 parse_optional_disjunction_value_from_element(
-                    &element,
+                    element,
                     &self.valid_schema.schema,
-                    &directive_name,
+                    directive_name,
                     &POLICY_POLICIES_ARGUMENT_NAME,
                 )
             });
@@ -552,8 +552,8 @@ impl<'validator> AccessControlValidator<'validator> {
         target_subgraph: &Option<Name>,
     ) -> Vec<CompositionError> {
         if let Some(subgraph_name) = target_subgraph
-            .clone()
-            .and_then(|s| self.join_spec_names_to_subgraph_names.get(&s))
+            .as_ref()
+            .and_then(|s| self.join_spec_names_to_subgraph_names.get(s))
         {
             let subgraph_error = SubgraphError::new_without_locations(subgraph_name, error.into());
             subgraph_error.to_composition_errors().collect()
@@ -631,9 +631,9 @@ fn read_disjunction_argument_value<'directive>(
 }
 
 fn parse_disjunction_value(value: &Value) -> BTreeSet<BTreeSet<String>> {
-    value.as_list().map_or_else(
-        || EMPTY_DNF_SET.clone(),
-        |disjunctions| {
+    value
+        .as_list()
+        .map(|disjunctions| {
             disjunctions
                 .iter()
                 .map(|d| {
@@ -643,9 +643,10 @@ fn parse_disjunction_value(value: &Value) -> BTreeSet<BTreeSet<String>> {
                             conjunctions.iter().map(|c| c.to_string()).collect()
                         })
                 })
-                .collect()
-        },
-    )
+                .collect::<BTreeSet<BTreeSet<String>>>()
+        })
+        .filter(|dnf| !dnf.is_empty())
+        .unwrap_or_else(|| EMPTY_DNF_SET.clone())
 }
 
 static EMPTY_DNF_SET: LazyLock<BTreeSet<BTreeSet<String>>> = LazyLock::new(|| {
@@ -662,9 +663,11 @@ struct AuthRequirements {
 }
 
 impl AuthRequirements {
-    fn satisfies(&self, other: Option<AuthRequirementsOnElement>) -> bool {
+    fn satisfies(&self, other: &Option<AuthRequirementsOnElement>) -> bool {
         // auth requirements on element have to be an implication of type + field requirements
-        other.map_or_else(|| true, |o| self.requirements.satisfies(o))
+        other
+            .as_ref()
+            .is_none_or(|o| self.requirements.satisfies(&o))
     }
 }
 
@@ -676,27 +679,27 @@ struct AuthRequirementsOnElement {
 }
 
 impl AuthRequirementsOnElement {
-    fn satisfies(&self, other: AuthRequirementsOnElement) -> bool {
+    fn satisfies(&self, other: &AuthRequirementsOnElement) -> bool {
         let authenticated_satisfied = self.is_authenticated || !other.is_authenticated;
         let scopes_satisfied =
-            AuthRequirementsOnElement::is_implication(self.scopes.clone(), other.scopes);
+            AuthRequirementsOnElement::is_implication(&self.scopes, &other.scopes);
         let policies_satisfied =
-            AuthRequirementsOnElement::is_implication(self.policies.clone(), other.policies);
+            AuthRequirementsOnElement::is_implication(&self.policies, &other.policies);
         authenticated_satisfied && scopes_satisfied && policies_satisfied
     }
 
     // Whether the left DNF expression materially implies the right one.
     // See: https://en.wikipedia.org/wiki/Material_conditional
     fn is_implication(
-        first: Option<BTreeSet<BTreeSet<String>>>,
-        second: Option<BTreeSet<BTreeSet<String>>>,
+        first: &Option<BTreeSet<BTreeSet<String>>>,
+        second: &Option<BTreeSet<BTreeSet<String>>>,
     ) -> bool {
         // Normally for DNF, you'd consider [] to be always false and [[]] to be always true,
         // and code that uses any()/all() needs no special-casing to work with these
         // definitions. However, router special-cases [] to also mean true, and so if we're
         // about to do any evaluation on DNFs, we need to do these conversions beforehand.
-        let first_normalized = first.unwrap_or_else(|| EMPTY_DNF_SET.clone());
-        let second_normalized = second.unwrap_or_else(|| EMPTY_DNF_SET.clone());
+        let first_normalized = first.as_ref().unwrap_or_else(|| &EMPTY_DNF_SET);
+        let second_normalized = second.as_ref().unwrap_or_else(|| &EMPTY_DNF_SET);
 
         // outer elements follow OR rules so we need all conditions to match as we don't know which one will be provided at runtime
         first_normalized.iter().all(|first_inner| {
