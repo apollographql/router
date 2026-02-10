@@ -228,7 +228,12 @@ or type was unauthorized.
 </Property>
 <Property name="VALIDATION_INVALID_TYPE_VARIABLE">
 
-One or more operation variables have runtime values that don't match their defined GraphQL types:
+At least one variable couldn't be validated. Common causes:
+- Missing required variable
+- Type mismatch
+- Null for non-nullable (`null` provided for required field)
+- Incomplete input object (Missing required nested fields)
+- Invalid scalar
 - Providing 'null' or ommiting required (non-nullable) variables
 - Variable values whose JSON type does not match the expected GraphQL type
 - Invalid or incomplete nested input objects with missing required fields
