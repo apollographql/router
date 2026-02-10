@@ -427,7 +427,7 @@ async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Cannot decode JWT: InvalidSignature")
+        .message("Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.")
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -758,7 +758,7 @@ async fn it_inserts_failure_jwt_status_into_context() {
     match error {
         Some(err) => {
             assert_eq!(err.code, "CANNOT_DECODE_JWT");
-            assert_eq!(err.message, "Cannot decode JWT: InvalidSignature");
+            assert_eq!(err.message, "Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.");
         }
         None => panic!("expected an error"),
     }
@@ -775,7 +775,7 @@ async fn it_inserts_failure_jwt_status_into_context() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Cannot decode JWT: InvalidSignature")
+        .message("Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.")
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -823,7 +823,7 @@ async fn it_moves_on_after_jwt_errors_when_configured() {
     match error {
         Some(err) => {
             assert_eq!(err.code, "CANNOT_DECODE_JWT");
-            assert_eq!(err.message, "Cannot decode JWT: InvalidSignature");
+            assert_eq!(err.message, "Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.");
         }
         None => panic!("expected an error"),
     }
