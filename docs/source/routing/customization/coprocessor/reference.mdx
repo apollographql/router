@@ -389,6 +389,9 @@ The following keys are populated by the demand control plugin:
 - `apollo::demand_control::estimated_cost` - Estimated cost of the requests to be sent to the subgraphs
 - `apollo::demand_control::actual_cost` - Actual calculated cost of the responses returned by the subgraphs
 - `apollo::demand_control::result` - `COST_OK` if allowed, and `COST_TOO_EXPENSIVE` if rejected due to cost limits
+- `apollo::demand_control::estimated_cost_by_subgraph` - Map of estimated cost of the requests to be sent to the subgraphs, by subgraph
+- `apollo::demand_control::actual_cost_by_subgraph` - Map of actual calculated cost of the responses returned by the subgraphs, by subgraph
+- `apollo::demand_control::result_by_subgraph` - Map of result by subgraph, `COST_OK` if allowed, and `COST_TOO_EXPENSIVE` if rejected due to cost limits
 - `apollo::demand_control::strategy` - Name of the cost calculation strategy used
 
 ### Caching
