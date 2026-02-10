@@ -1240,7 +1240,7 @@ impl SpecDefinition for JoinSpecDefinition {
                                 let field_value_name = link.map_or(name!("FieldValue"), |link| {
                                     link.type_name_in_schema(&name!("FieldValue"))
                                 });
-                                Ok(Type::Named(field_value_name))
+                                Ok(Type::NonNullNamed(field_value_name))
                             },
                             default_value: None,
                         },

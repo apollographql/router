@@ -40,6 +40,7 @@ fn vanilla_setcontext_success_case() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     let supergraph = result.expect("Expected composition to succeed");
+    insta::assert_snapshot!(supergraph.schema().schema());
     assert!(
         !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
