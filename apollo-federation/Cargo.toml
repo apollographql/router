@@ -20,7 +20,7 @@ correctness = []
 
 [dependencies]
 apollo-compiler.workspace = true
-time = { version = "0.3.34", default-features = false, features = [
+time = { version = "0.3.37", default-features = false, features = [
   "local-offset",
 ] }
 derive_more = { version = "2.0.0", features = [
