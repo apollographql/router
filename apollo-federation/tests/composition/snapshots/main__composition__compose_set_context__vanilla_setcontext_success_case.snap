@@ -1,8 +1,8 @@
 ---
-source: apollo-federation/tests/composition/connectors.rs
-expression: schema_string
+source: apollo-federation/tests/composition/compose_set_context.rs
+expression: supergraph.schema().schema()
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]) @join__directive(name: "link", graphs: [WITH_CONNECTORS], args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) @join__directive(name: "source", graphs: [WITH_CONNECTORS], args: {name: "v1", http: {baseURL: "http://v1"}}) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY) {
   query: Query
 }
 
@@ -22,6 +22,10 @@ directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
 
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
 enum link__Purpose {
   """
   `SECURITY` features provide metadata necessary to securely resolve fields.
@@ -36,7 +40,8 @@ enum link__Purpose {
 scalar link__Import
 
 enum join__Graph {
-  WITH_CONNECTORS @join__graph(name: "with-connectors", url: "http://with-connectors")
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "http://Subgraph1")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "http://Subgraph2")
 }
 
 scalar join__FieldSet
@@ -52,11 +57,20 @@ input join__ContextArgument {
   selection: join__FieldValue!
 }
 
-type Query @join__type(graph: WITH_CONNECTORS) {
-  resources: [Resource!]! @join__directive(name: "connect", graphs: [WITH_CONNECTORS], args: {source: "v1", http: {GET: "/resources"}, selection: ""})
+scalar context__ContextFieldValue
+
+type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  t: T! @join__field(graph: SUBGRAPH1)
+  a: Int! @join__field(graph: SUBGRAPH2)
 }
 
-type Resource @join__type(graph: WITH_CONNECTORS, key: "id") {
+type T @join__type(graph: SUBGRAPH1, key: "id") @context(name: "Subgraph1__context") {
   id: ID!
-  name: String!
+  u: U!
+  prop: String!
+}
+
+type U @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH2, key: "id") {
+  id: ID!
+  field: Int! @join__field(graph: SUBGRAPH1, contextArguments: [{context: "Subgraph1__context", name: "a", type: "String", selection: "{ prop }"}])
 }
