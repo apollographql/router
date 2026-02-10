@@ -1547,7 +1547,7 @@ input join__ContextArgument {
   name: String!
   type: String!
   context: String!
-  selection: join__FieldValue
+  selection: join__FieldValue!
 }
 "#);
 
