@@ -5,12 +5,13 @@ flowchart RL
 
     subgraph router["Router"]
         direction LR
+        httpLayer("HTTP <br/> layer")
         routerService("Router <br/> Service")
         supergraphService("Supergraph <br/> Service")
         executionService("Execution <br/> Service")
         subgraphService("Subgraph <br/> Service")
-        routerService -->|request| supergraphService -->|request| executionService -->|request| subgraphService
-        subgraphService -->|response| executionService -->|response| supergraphService -->|response| routerService
+        httpLayer -->|request| routerService -->|request| supergraphService -->|request| executionService -->|request| subgraphService
+        subgraphService -->|response| executionService -->|response| supergraphService -->|response| routerService -->|response| httpLayer
 
     end
 
@@ -23,7 +24,8 @@ flowchart RL
 
     end
 
-client -->|request| router -->|request| infra
-
-infra -->|response| router -->|response| client
+client -->|request| httpLayer
+subgraphService -->|request| infra
+infra -->|response| subgraphService
+httpLayer -->|response| client
 ```

@@ -34,12 +34,14 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
 use crate::register_plugin;
+use crate::services::http_layer;
 
 mod engine;
 
 pub(crate) const RHAI_SPAN_NAME: &str = "rhai_plugin";
 
 mod execution;
+mod rhai_http;
 mod router;
 mod subgraph;
 mod supergraph;
@@ -191,10 +193,32 @@ impl Plugin for Rhai {
         }
         shared_service.take_unwrap()
     }
+
+    fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService {
+        const FUNCTION_NAME_SERVICE: &str = "http_service";
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
+        }
+        tracing::debug!("http_service function found");
+        let shared_service = Arc::new(Mutex::new(Some(service)));
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            None,
+            ServiceStep::Http(shared_service.clone()),
+            self.scope.clone(),
+        ) {
+            tracing::error!(
+                service = "HttpService",
+                "service callback failed: {error}"
+            );
+        }
+        shared_service.take_unwrap()
+    }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum ServiceStep {
+    Http(SharedMut<http_layer::BoxService>),
     Router(SharedMut<router::BoxService>),
     Supergraph(SharedMut<supergraph::BoxService>),
     Execution(SharedMut<execution::BoxService>),
@@ -606,6 +630,41 @@ macro_rules! gen_map_deferred_response {
 impl ServiceStep {
     fn map_request(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
+            ServiceStep::Http(service) => {
+                service.replace(|inner| {
+                    let rhai_service = rhai_service.clone();
+                    ServiceBuilder::new()
+                        .checkpoint(move |request: http_layer::HttpRequest| {
+                            let wrapper = rhai_http::RhaiHttpRequest::from_http_request(request);
+                            let shared_request = Shared::new(Mutex::new(Some(wrapper)));
+                            let result: Result<Dynamic, Box<EvalAltResult>> =
+                                execute(&rhai_service, &callback, (shared_request.clone(),));
+                            if let Err(error) = result {
+                                let error_details = process_error(error);
+                                if error_details.body.is_none() {
+                                    tracing::error!("map_request callback failed: {error_details:#?}");
+                                }
+                                return Ok(rhai_http::request_failure(error_details)
+                                    .unwrap_or_else(|_| {
+                                        ControlFlow::Break(
+                                            http::Response::builder()
+                                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                .body(bytes::Bytes::from(
+                                                    "{\"errors\":[{\"message\":\"internal error\"}]}",
+                                                ))
+                                                .expect("valid response"),
+                                        )
+                                    }));
+                            }
+                            let request_opt = shared_request.lock().take();
+                            Ok(ControlFlow::Continue(
+                                request_opt.unwrap().into_http_request(),
+                            ))
+                        })
+                        .service(inner)
+                        .boxed()
+                });
+            }
             ServiceStep::Router(service) => {
                 gen_map_router_deferred_request!(router, service, rhai_service, callback);
             }
@@ -623,6 +682,26 @@ impl ServiceStep {
 
     fn map_response(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
+            ServiceStep::Http(service) => {
+                service.replace(|inner| {
+                    let rhai_service = rhai_service.clone();
+                    tower::ServiceExt::map_response(inner, move |response: http_layer::HttpResponse| {
+                        let wrapper = rhai_http::RhaiHttpResponse::from_http_response(response);
+                        let shared_response = Shared::new(Mutex::new(Some(wrapper)));
+                        let result: Result<Dynamic, Box<EvalAltResult>> =
+                            execute(&rhai_service, &callback, (shared_response.clone(),));
+                        if let Err(error) = result {
+                            let error_details = process_error(error);
+                            if error_details.body.is_none() {
+                                tracing::error!("map_response callback failed: {error_details:#?}");
+                            }
+                            return rhai_http::response_failure(error_details);
+                        }
+                        shared_response.lock().take().unwrap().into_http_response()
+                    })
+                    .boxed()
+                });
+            }
             ServiceStep::Router(service) => {
                 gen_map_router_deferred_response!(router, service, rhai_service, callback);
             }

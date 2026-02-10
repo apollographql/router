@@ -14,11 +14,14 @@ This reference documents the symbols and behaviors that are specific to [Rhai cu
 Your Rhai script's [main file](/graphos/routing/customization/rhai/#the-main-file) hooks into the individual services of the router's [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
+fn http_service(service) {}
 fn router_service(service) {}
 fn supergraph_service(service) {}
 fn execution_service(service) {}
 fn subgraph_service(service, subgraph) {}
 ```
+
+The **HTTP layer** (`http_service`) runs first and receives the raw HTTP request/response (method, URI, headers, body as string). Use it when you need to customize at the HTTP boundary before the request is converted to a GraphQL/router request. See [HTTP layer request and response](#http-layer-request-and-response) for the object shapes.
 
 Within each hook, you define custom logic to interact with the current active request and/or response as needed. This most commonly involves using methods of the provided `service` object to [register service callbacks](/graphos/routing/customization/rhai/#service-callbacks), like so:
 
@@ -36,6 +39,25 @@ fn supergraph_service(service) {
   service.map_response(response_callback);
 }
 ```
+
+## HTTP layer request and response
+
+When you define `fn http_service(service)` and register callbacks with `service.map_request` and `service.map_response`, those callbacks receive raw HTTP objects:
+
+**Request** (in `map_request` callbacks):
+
+- `request.method` — HTTP method (read/write)
+- `request.uri` — full URI (read/write)
+- `request.headers` — HTTP headers (read/write)
+- `request.body` — request body as a **string** (read/write), e.g. JSON
+
+**Response** (in `map_response` callbacks):
+
+- `response.status_code` — HTTP status code (read/write)
+- `response.headers` — HTTP headers (read/write)
+- `response.body` — response body as a **string** (read/write), e.g. JSON
+
+At this stage the body is not yet parsed as GraphQL; you can read or replace it as a string (for example, to validate or rewrite JSON before it reaches the router pipeline). Throwing from an HTTP layer callback produces an HTTP error response (status and optional JSON body), same as at other stages.
 
 ## Logging
 
@@ -57,12 +79,13 @@ log_trace("trace-level log message");
 
 ## Terminating client requests
 
-Your Rhai script can terminate the associated client request that triggered it. To do so, it must throw an exception from either the router service or supergraph service. This returns an `Internal Server Error` to the client with a `500` response code.
+Your Rhai script can terminate the associated client request that triggered it. To do so, throw an exception from a callback in **http_service**, **router_service**, or **supergraph_service**. This returns an error response to the client (by default an `Internal Server Error` with a `500` status code).
 
-When choosing between router service versus supergraph service termination:
+When choosing where to terminate:
 
+- **HTTP layer** (`http_service`): Runs first; request and response bodies are raw strings (e.g. JSON). Use to reject or short-circuit before any GraphQL parsing, or when you only need to inspect or mutate raw HTTP.
 - **Router service**: Cannot access request/response body and executes before parsing and validation; ideal for checks that should be consistently applied, like checking required headers, even when invalid operations are provided by the client.
-- **Supergraph service**: Use whenever you need to examine request bodies to enforce termination.
+- **Supergraph service**: Use whenever you need to examine GraphQL request bodies to enforce termination.
 
 For example:
 ```rhai
@@ -408,7 +431,9 @@ Router.APOLLO_COST_BY_SUBGRAPH_RESULT_KEY // Context key to get the cost result 
 
 ## `Request` interface
 
-All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields:
+The following describes the `request` object for **router_service**, **supergraph_service**, **execution_service**, and **subgraph_service**. For the HTTP layer (`http_service`), the request shape is different (e.g. `body` is a string, no `context`); see [HTTP layer request and response](#http-layer-request-and-response).
+
+All callback functions registered via `map_request` (in those services) are passed a `request` object that represents the request sent by the client. This object provides the following fields:
 
 ```
 request.context
@@ -626,7 +651,9 @@ request.subgraph.headers.x-my-new-header = 42.to_string();
 
 ## `Response` interface
 
-All callback functions registered via `map_response` are passed a `response` object that represents an HTTP response.
+The following describes the `response` object for **router_service**, **supergraph_service**, **execution_service**, and **subgraph_service**. For the HTTP layer (`http_service`), the response shape is different (e.g. `body` is a string, no GraphQL `body.data`/`body.errors`); see [HTTP layer request and response](#http-layer-request-and-response).
+
+All callback functions registered via `map_response` (in those services) are passed a `response` object that represents an HTTP response.
 
 * For callbacks in `subgraph_service`, this object represents the response sent to the router by the corresponding subgraph.
 * In all other services, this object represents the response that the router will send to the requesting client.

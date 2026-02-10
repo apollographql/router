@@ -48,7 +48,10 @@ use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::http_layer;
 use crate::test_harness::tracing_test;
+use bytes::Bytes;
+use tower::service_fn;
 
 // There is a lot of repetition in these tests, so I've tried to reduce that with these two
 // functions. The repetition could probably be reduced further, but ...
@@ -1178,4 +1181,32 @@ async fn test_complex_property_chain() {
     call_property_mutation_test("test_complex_property_chain", request)
         .await
         .expect("test failed - complex property chains should work");
+}
+
+#[tokio::test]
+async fn test_http_service_map_request_and_map_response() {
+    // Rhai script defines http_service(service) with map_request and map_response.
+    // Assert that the response has the header set by the script.
+    let dyn_plugin = create_plugin("http_service_test.rhai").await.unwrap();
+    let inner = service_fn(|_req: http_layer::HttpRequest| async move {
+        Ok::<_, BoxError>(
+            http::Response::builder()
+                .status(StatusCode::OK)
+                .body(Bytes::from(r#"{"data":{}}"#))
+                .unwrap(),
+        )
+    });
+    let mut service = dyn_plugin.http_service(BoxService::new(inner));
+    let request = http::Request::builder()
+        .method(Method::POST)
+        .uri("/")
+        .header("content-type", "application/json")
+        .body(Bytes::from(r#"{"query":"query { __typename }"}"#))
+        .unwrap();
+    let response = service.ready().await.unwrap().call(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-rhai-http-layer"),
+        Some(&HeaderValue::from_static("ok"))
+    );
 }

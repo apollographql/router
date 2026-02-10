@@ -97,6 +97,8 @@ Indicates which stage of the router's [request-handling lifecycle](/graphos/rout
 
 This value is one of the following:
 
+- `HttpRequest`: The router has just received the client request at the HTTP layer (before `RouterService`). Raw HTTP only; same payload shape as `RouterRequest`.
+- `HttpResponse`: The router is about to send the HTTP response to the client (after the pipeline, at the HTTP layer). Same payload shape as `RouterResponse`.
 - `RouterRequest`: The `RouterService` has just received a client request.
 - `RouterResponse`: The `RouterService` is about to send response data to a client.
 - `SupergraphRequest`: The `SupergraphService` is about to send a GraphQL request.
@@ -156,6 +158,7 @@ If your coprocessor [returns a _different_ value](#responding-to-coprocessor-req
 
 This field's type depends on the coprocessor request's [`stage`](#stage):
 
+- For `HttpRequest` and `HttpResponse` stages, `body` is a JSON _string_ (same as `RouterRequest` / `RouterResponse`).
 - For `SubgraphService` stages, `body` is a JSON _object_.
 - For `SupergraphService` stages, `body` is a JSON _object_.
 - For `RouterService` stages, `body` is a JSON _string_.
@@ -432,6 +435,61 @@ The following keys are populated by the demand control plugin:
 ---
 
 ## Example requests by stage
+
+### `HttpRequest`
+
+The HTTP layer request stage. Same payload shape as `RouterRequest`; the router has just received the raw HTTP request.
+
+<ExpansionPanel title="Click to expand">
+
+```json title="Example coprocessor request body"
+{
+  // Control properties
+  "version": 1,
+  "stage": "HttpRequest",
+  "control": "continue",
+  "id": "1b19c05fdafc521016df33148ad63c1b",
+
+  // Data properties
+  "headers": {
+    "content-type": ["application/json"],
+    "host": ["127.0.0.1:4000"],
+    "accept": ["*/*"]
+  },
+  "body": "{\"query\": \"query GetActiveUser { me { name } }\"}",
+  "context": { "entries": {} },
+  "sdl": "...",
+  "path": "/",
+  "method": "POST"
+}
+```
+
+</ExpansionPanel>
+
+### `HttpResponse`
+
+The HTTP layer response stage. Same payload shape as `RouterResponse`; the router is about to send the raw HTTP response to the client.
+
+<ExpansionPanel title="Click to expand">
+
+```json title="Example coprocessor request body"
+{
+  // Control properties
+  "version": 1,
+  "stage": "HttpResponse",
+  "control": "continue",
+  "id": "1b19c05fdafc521016df33148ad63c1b",
+
+  // Data properties
+  "headers": { "content-type": ["application/json"] },
+  "body": "{\"data\": {\"me\": {\"name\": \"Ada Lovelace\"}}}",
+  "context": { "entries": {} },
+  "statusCode": 200,
+  "sdl": "..."
+}
+```
+
+</ExpansionPanel>
 
 ### `RouterRequest`
 

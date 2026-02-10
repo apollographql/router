@@ -61,6 +61,17 @@ Your Rhai script's main file defines whichever combination of request lifecycle 
 // You don't need to define all of these hooks! Just define
 // whichever ones your customization needs.
 
+fn http_service(service) {
+  let request_callback = |request| {
+      print("HTTP service: Raw request received");
+  };
+  let response_callback = |response| {
+      print("HTTP service: Raw response ready to send");
+  };
+  service.map_request(request_callback);
+  service.map_response(response_callback);
+}
+
 fn supergraph_service(service) {
   let request_callback = |request| {
       print("Supergraph service: Client request received");
@@ -140,18 +151,19 @@ fn supergraph_service(service) {
 
 ## Router request lifecycle
 
-Before you build your Rhai script, it helps to understand how the router handles each incoming GraphQL request. During each request's execution, different **services** in the router communicate with each other as shown:
+Before you build your Rhai script, it helps to understand how the router handles each incoming GraphQL request. The router first receives a **raw HTTP request** at the **HTTP layer**. Your Rhai scripts can define `fn http_service(service)` to run at this stage (see [Service descriptions](#service-descriptions) below). You can also use [native plugins](/graphos/routing/customization/native-plugins) (via the `http_service` hook) or the [coprocessor](/graphos/routing/customization/coprocessor) (HttpRequest/HttpResponse stages). The request is then converted to a GraphQL/router request and flows through the services below. During each request's execution, different **services** in the router communicate with each other as shown:
 
 ```mermaid
 sequenceDiagram
     actor Client
+    participant HttpLayer as HTTP layer
     participant RouterService as Router<br/>Service
     participant SupergraphService as Supergraph<br/>Service
     participant ExecutionService as Execution<br/>Service
     participant SubgraphService(s) as Subgraph<br/>Service(s)
 
-    Client->>RouterService: Sends request
-    RouterService->>SupergraphService: Converts raw HTTP request<br/>to GraphQL/JSON request
+    Client->>HttpLayer: Sends raw HTTP request
+    HttpLayer->>RouterService: Converts to GraphQL/JSON request
     SupergraphService->>ExecutionService: Initiates query<br/>plan execution
     par
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
@@ -165,12 +177,13 @@ sequenceDiagram
     end
     ExecutionService-->>SupergraphService: Assembles and<br/>returns response
     SupergraphService-->>RouterService: Returns GraphQL/JSON<br/>response
-    RouterService-->>Client: Returns HTTP<br/>response
+    RouterService-->>HttpLayer: Returns HTTP response
+    HttpLayer-->>Client: Returns HTTP<br/>response
 ```
 
 As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the generated response for the client.
 
-Your Rhai scripts can hook into any combination of the above services (if you are using the Apollo Router Core v1.30.0 and later). The scripts can modify the request, response, and/or related metadata as they're passed along.
+Your Rhai scripts can hook into any combination of the services in the diagram above (if you are using the Apollo Router Core v1.30.0 and later), including the HTTP layer via `http_service`. The scripts can modify the request, response, and/or related metadata as they're passed along.
 
 ### Service descriptions
 
@@ -188,13 +201,26 @@ Each service of the router has a corresponding function that a Rhai script can d
 <tr>
 <td>
 
+##### HTTP layer
+
+`http_service`
+</td>
+<td>
+
+Runs first; the request is raw HTTP (method, URI, headers, body as string). Define `http_service` if your customization needs to see or mutate the raw HTTP request or response before it is converted to a GraphQL/router request. You can use `service.map_request` and `service.map_response` like the other hooks. The request and response objects expose `method`, `uri`, `headers`, and `body` (as a string; e.g. JSON). See the [Rhai API reference](/graphos/reference/router/rhai/#http-layer-request-and-response) for details.
+
+</td>
+</tr>
+<tr>
+<td>
+
 ##### `RouterService`
 
 `router_service`
 </td>
 <td>
 
-Runs at the very beginning and very end of the HTTP request lifecycle.
+Runs at the very beginning and very end of the GraphQL request lifecycle (after the HTTP layer).
 
 For example, [JWT authentication](/router/configuration/authn-jwt) is performed within the `RouterService`.
 
@@ -257,22 +283,25 @@ Whereas other services are called once per client request, this service is calle
 </tbody>
 </table>
 
-Each service uses data structures for request and response data that contain:
+For **router_service**, **supergraph_service**, **execution_service**, and **subgraph_service**, request and response data use structures that contain:
 * A context object that was created at the start of the request and is propagated throughout the entire request lifecycle. It holds:
     - The original request from the client
     - A bag of data that can be populated by plugins for communication across the request lifecycle
 * Any other specific data to that service (e.g., query plans and downstream requests/responses)
 
+The **HTTP layer** (`http_service`) uses a simpler shape: request and response expose `method`, `uri`, `headers`, and `body` (as a string). There is no context object at this stage. See the [Rhai API reference](/graphos/reference/router/rhai/#http-layer-request-and-response).
+
 ### Service callbacks
 
 Each hook in your Rhai script's [main file](#main-file) is passed a `service` object, which provides two methods: `map_request` and `map_response`. Most of the time in a hook, you use one or both of these methods to register **callback functions** that are called during the lifecycle of a GraphQL operation.
 
-* `map_request` callbacks are called in each service as execution proceeds "to the right" from the router receiving a client request:
+* `map_request` callbacks are called in each service as execution proceeds "to the right." The **HTTP layer** runs first (before the request is converted to GraphQL); then the flow continues through the router and downstream:
 
     ```mermaid
     graph LR;
       client(Client);
-      client --> router(router_service);
+      client --> http(http_service);
+      http --> router(router_service);
       subgraph Router
       router --> supergraph(supergraph_service);
       supergraph --> execution(execution_service);
@@ -284,13 +313,13 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
       class client,sub_a,sub_b secondary;
     ```
     
-    These callbacks are each passed the current state of the client's `request` (which might have been modified by an earlier callback in the chain). Each callback can modify this `request` object directly.
+    These callbacks are each passed the current state of the client's `request` (which might have been modified by an earlier callback in the chain). Each callback can modify this `request` object directly. At the HTTP layer the request has a different shape (e.g. raw `body` as string); see the [API reference](/graphos/reference/router/rhai/#http-layer-request-and-response).
     
     Additionally, callbacks for `subgraph_service` can access and modify the sub-operation request that the router will send to the corresponding subgraph via `request.subgraph`.
     
     For reference, see the fields of [`request`](/graphos/reference/router/rhai/#request-interface).
     
-* `map_response` callbacks are called in each service as execution proceeds back "to the left" from subgraphs resolving their individual sub-operations:
+* `map_response` callbacks are called in each service as execution proceeds back "to the left" from subgraphs resolving their individual sub-operations, and finally at the **HTTP layer** before the response is sent to the client:
 
     ```mermaid
     graph RL;
@@ -299,6 +328,7 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
       execution(execution_service);
       supergraph(supergraph_service);
       router(router_service);
+      http(http_service);
       subs_a(subgraph_service);
       subs_b(subgraph_service);
       end;
@@ -310,13 +340,16 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
       subs_b --> execution;
       execution --> supergraph;
       supergraph --> router;;
-      router --> client;
+      router --> http;
+      http --> client;
       class client,sub_a,sub_b secondary;
     ```
     
     First, callbacks for `subgraph_service` are each passed the `response` from the corresponding subgraph.
     
-    Afterward, callbacks for `execution_service`, `supergraph_service` and then `router_service` are passed the combined `response` for the client that's assembled from all subgraph `response`s.
+    Afterward, callbacks for `execution_service`, `supergraph_service`, and then `router_service` are passed the combined `response` for the client that's assembled from all subgraph `response`s.
+    
+    Finally, callbacks for `http_service` are passed the raw HTTP response (e.g. body as string) before it is sent to the client.
     
 
 

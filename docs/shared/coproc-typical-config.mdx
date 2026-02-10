@@ -2,6 +2,20 @@
 coprocessor:
   url: http://127.0.0.1:8081 # Required. Replace with the URL of your coprocessor's HTTP endpoint.
   timeout: 2s # The timeout for all coprocessor requests. Defaults to 1 second (1s)
+  http_service: # This coprocessor hooks into the HTTP layer (before RouterService)
+    request: # HttpRequest stage: when the router receives the raw HTTP request
+      headers: true
+      body: false
+      context: false
+      sdl: false
+      path: false
+      method: false
+    response: # HttpResponse stage: when the router is about to send the raw HTTP response
+      headers: true
+      body: false
+      context: false
+      sdl: false
+      status_code: false
   router: # This coprocessor hooks into the `RouterService`
     request: # By including this key, the `RouterService` sends a coprocessor request whenever it first receives a client request.
       headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.

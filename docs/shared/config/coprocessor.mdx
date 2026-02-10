@@ -7,6 +7,28 @@ coprocessor:
   client:
     dns_resolution_strategy: ipv4_only
     experimental_http2: enable
+  http_service:
+    request:
+      body: false
+      condition:
+        eq:
+        - false
+        - false
+      context: false
+      headers: false
+      method: false
+      path: false
+      sdl: false
+    response:
+      body: false
+      condition:
+        eq:
+        - false
+        - false
+      context: false
+      headers: false
+      sdl: false
+      status_code: false
   execution:
     request:
       body: false
