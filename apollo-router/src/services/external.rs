@@ -385,7 +385,11 @@ pub(crate) fn externalize_header_map(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::assert_snapshot_subscriber;
     use crate::test_harness::tracing_test;
+    use http::Response;
+    use tower::service_fn;
+    use tracing_futures::WithSubscriber;
 
     #[test]
     fn it_will_build_router_externalizable_correctly() {
@@ -475,5 +479,45 @@ mod test {
         assert!(tracing_test::logs_contain(
             "unable to convert header value to utf-8 for x-test-header, will not be sent to coprocessor: invalid utf-8 sequence of 1 bytes from index 7"
         ));
+    }
+
+    #[tokio::test]
+    async fn it_will_create_an_http_request_span() {
+        use crate::services::http::{HttpRequest, HttpResponse};
+
+        async {
+            // The mock service emits an event so the snapshot captures the
+            // surrounding http_request span fields set by Externalizable::call.
+            let service = service_fn(|req: HttpRequest| async move {
+                tracing::info!("got request");
+                Ok::<_, BoxError>(HttpResponse {
+                    http_response: Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(
+                            serde_json::to_vec(&serde_json::json!({
+                                "version": EXTERNALIZABLE_VERSION,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                                "id": "test-id",
+                            }))
+                            .unwrap(),
+                        ))
+                        .unwrap(),
+                    context: req.context,
+                })
+            });
+
+            let externalizable = Externalizable::<String>::router_builder()
+                .stage(PipelineStep::RouterRequest)
+                .id("test-id".to_string())
+                .build();
+
+            // call() creates an http_request span with OTel attributes
+            let _ = externalizable
+                .call(service, "http://example.com/test", Context::new())
+                .await;
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await;
     }
 }
