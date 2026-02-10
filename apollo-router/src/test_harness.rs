@@ -34,6 +34,7 @@ use crate::services::SupergraphCreator;
 use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::http_layer;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
@@ -283,6 +284,18 @@ impl<'a> TestHarness<'a> {
         self.extra_plugin(SubgraphServicePlugin(callback))
     }
 
+    /// Adds a callback-based hook similar to [`Plugin::http_service`].
+    ///
+    /// The callback wraps the HTTP-layer service (receives [`http_layer::HttpRequest`],
+    /// returns [`http_layer::HttpResponse`]). Use this to test body/header mutation or
+    /// to inject errors at the HTTP boundary.
+    pub fn http_hook(
+        self,
+        callback: impl Fn(http_layer::BoxService) -> http_layer::BoxService + Send + Sync + 'static,
+    ) -> Self {
+        self.extra_plugin(HttpServicePlugin(callback))
+    }
+
     /// Enables this test harness to make network requests to subgraphs.
     ///
     /// If this is not called, all subgraph requests get an empty response by default
@@ -438,6 +451,7 @@ struct RouterServicePlugin<F>(F);
 struct SupergraphServicePlugin<F>(F);
 struct ExecutionServicePlugin<F>(F);
 struct SubgraphServicePlugin<F>(F);
+struct HttpServicePlugin<F>(F);
 
 #[async_trait::async_trait]
 impl<F> Plugin for RouterServicePlugin<F>
@@ -504,6 +518,22 @@ where
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         (self.0)(subgraph_name, service)
+    }
+}
+
+#[async_trait::async_trait]
+impl<F> Plugin for HttpServicePlugin<F>
+where
+    F: 'static + Send + Sync + Fn(http_layer::BoxService) -> http_layer::BoxService,
+{
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService {
+        (self.0)(service)
     }
 }
 

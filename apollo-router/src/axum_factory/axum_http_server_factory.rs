@@ -73,8 +73,8 @@ static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^/\{\*[^/]+\}$").expect("this regex to check wildcard paths is valid")
 });
 
-/// Inner service for the HTTP layer: converts HttpLayerRequest to router::Request,
-/// calls the router pipeline, converts the response to HttpLayerResponse.
+/// Inner service for the HTTP layer: converts HttpRequest to router::Request,
+/// calls the router pipeline, converts the response to HttpResponse.
 /// Used as the innermost service in the http_service plugin stack.
 struct InnerHttpHandler<RF> {
     factory: RF,
@@ -86,12 +86,12 @@ impl<RF> InnerHttpHandler<RF> {
     }
 }
 
-impl<RF> Service<http_layer::HttpLayerRequest> for InnerHttpHandler<RF>
+impl<RF> Service<http_layer::HttpRequest> for InnerHttpHandler<RF>
 where
     RF: RouterFactory + Clone + Send + 'static,
     RF::Future: Send,
 {
-    type Response = http_layer::HttpLayerResponse;
+    type Response = http_layer::HttpResponse;
     type Error = BoxError;
     type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -99,7 +99,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: http_layer::HttpLayerRequest) -> Self::Future {
+    fn call(&mut self, req: http_layer::HttpRequest) -> Self::Future {
         let factory = self.factory.clone();
         Box::pin(async move {
             let context = req
@@ -512,8 +512,8 @@ struct HandlerOptions {
 pub(super) fn main_router<S>(configuration: &Configuration, http_layer_service: S) -> axum::Router<()>
 where
     S: Service<
-            http_layer::HttpLayerRequest,
-            Response = http_layer::HttpLayerResponse,
+            http_layer::HttpRequest,
+            Response = http_layer::HttpResponse,
             Error = BoxError,
         > + Clone
         + Send
@@ -558,8 +558,8 @@ async fn handle_http_layer<S>(
 ) -> axum::response::Response
 where
     S: Service<
-            http_layer::HttpLayerRequest,
-            Response = http_layer::HttpLayerResponse,
+            http_layer::HttpRequest,
+            Response = http_layer::HttpResponse,
             Error = BoxError,
         > + Clone
         + Send

@@ -75,7 +75,7 @@ const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZAT
 
 async fn router_response_to_http_layer(
     res: router::Response,
-) -> Result<http_layer::HttpLayerResponse, BoxError> {
+) -> Result<http_layer::HttpResponse, BoxError> {
     let (parts, body) = res.response.into_parts();
     let bytes = router::body::into_bytes(body)
         .await
@@ -96,7 +96,7 @@ struct HttpServiceCoprocessorWrapper<C, B> {
     response_config: RouterResponseConf,
 }
 
-impl<C, B> Service<http_layer::HttpLayerRequest> for HttpServiceCoprocessorWrapper<C, B>
+impl<C, B> Service<http_layer::HttpRequest> for HttpServiceCoprocessorWrapper<C, B>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
@@ -105,15 +105,15 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
     B: Service<
-            http_layer::HttpLayerRequest,
-            Response = http_layer::HttpLayerResponse,
+            http_layer::HttpRequest,
+            Response = http_layer::HttpResponse,
             Error = BoxError,
         > + Clone
         + Send
         + 'static,
     B::Future: Send + 'static,
 {
-    type Response = http_layer::HttpLayerResponse;
+    type Response = http_layer::HttpResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -124,7 +124,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: http_layer::HttpLayerRequest) -> Self::Future {
+    fn call(&mut self, req: http_layer::HttpRequest) -> Self::Future {
         let inner = self.inner.clone();
         let run_request = self.run_request;
         let run_response = self.run_response;

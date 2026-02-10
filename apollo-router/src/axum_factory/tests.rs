@@ -56,6 +56,7 @@ use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
 use tower::BoxError;
 use tower::Service;
+use tower::ServiceBuilder as TowerServiceBuilder;
 use tower::ServiceExt;
 use tower::service_fn;
 
@@ -85,11 +86,13 @@ use crate::services::SupergraphResponse;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
+use crate::services::http_layer;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
+use bytes::Bytes;
 
 macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -2427,5 +2430,170 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
     assert_eq!(
         "tried to bind 0.0.0.0 and 127.0.0.1 on port 4013",
         error.to_string()
+    );
+}
+
+// -----------------------------------------------------------------------------
+// HTTP layer (http_service hook) tests
+// -----------------------------------------------------------------------------
+
+/// Builds an HTTP service with an optional http_service hook and wraps it so we can
+/// send JSON request bodies and receive parsed JSON response bodies.
+async fn http_layer_service_with_hook(
+    hook: impl Fn(http_layer::BoxService) -> http_layer::BoxService + Send + Sync + 'static,
+) -> impl Service<
+    http::Request<serde_json::Value>,
+    Response = http::Response<MaybeMultipart<serde_json::Value>>,
+    Error = BoxError,
+> {
+    let service = TestHarness::builder()
+        .http_hook(hook)
+        .build_http_service()
+        .await
+        .unwrap()
+        .map_err(Into::into);
+
+    let service = TowerServiceBuilder::new()
+        .map_future(|future| async move {
+            let response: http::Response<axum::body::Body> = future.await?;
+            let (parts, body) = response.into_parts();
+            let bytes = body
+                .collect()
+                .await
+                .map_err(|e| BoxError::from(e))?
+                .to_bytes();
+            Ok::<_, BoxError>(http::Response::from_parts(
+                parts,
+                MaybeMultipart::NotMultipart(bytes.to_vec()),
+            ))
+        })
+        .service(service);
+    http_client::json(service)
+}
+
+#[tokio::test]
+async fn http_layer_mutate_body_to_valid_graphql_query() {
+    // Replace the request body with a different valid GraphQL query in the http_service hook.
+    // The router should execute the replaced query and return its result.
+    let replaced_query = json!({ "query": "query { __typename }" });
+    let service = http_layer_service_with_hook(move |inner| {
+        TowerServiceBuilder::new()
+            .map_request(move |mut req: http_layer::HttpRequest| {
+                *req.body_mut() = Bytes::from(serde_json::to_string(&replaced_query).unwrap());
+                req
+            })
+            .service(inner)
+            .boxed()
+    })
+    .await;
+
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .uri("/")
+        .header("host", "127.0.0.1")
+        .header("content-type", "application/json")
+        .body(json!({ "query": "query { topProducts(first: 1) { name } }" }))
+        .unwrap();
+
+    let response = service.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200, "expected success after body mutation");
+    let body = response.into_body().expect_not_multipart();
+    assert!(body.get("data").is_some(), "expected data in response: {:?}", body);
+    assert_eq!(body.get("data").and_then(|d| d.get("__typename")), Some(&json!("Query")));
+}
+
+#[tokio::test]
+async fn http_layer_mutate_headers() {
+    // Add a custom response header in the http_service hook and assert it is present.
+    let service = http_layer_service_with_hook(|inner| {
+        TowerServiceBuilder::new()
+            .map_response(|mut res: http_layer::HttpResponse| {
+                res.headers_mut().insert(
+                    "x-http-layer-test",
+                    http::HeaderValue::from_static("mutated"),
+                );
+                res
+            })
+            .service(inner)
+            .boxed()
+    })
+    .await;
+
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .uri("/")
+        .header("host", "127.0.0.1")
+        .header("content-type", "application/json")
+        .body(json!({ "query": "query { __typename }" }))
+        .unwrap();
+
+    let response = service.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers().get("x-http-layer-test"),
+        Some(&http::HeaderValue::from_static("mutated"))
+    );
+}
+
+#[tokio::test]
+async fn http_layer_mutate_body_to_invalid_request_returns_error() {
+    // Replace the body with invalid JSON; the router should return an error response.
+    let service = http_layer_service_with_hook(|inner| {
+        TowerServiceBuilder::new()
+            .map_request(|mut req: http_layer::HttpRequest| {
+                *req.body_mut() = Bytes::from(r#"not valid json"#);
+                req
+            })
+            .service(inner)
+            .boxed()
+    })
+    .await;
+
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .uri("/")
+        .header("host", "127.0.0.1")
+        .header("content-type", "application/json")
+        .body(json!({ "query": "query { __typename }" }))
+        .unwrap();
+
+    let response = service.oneshot(request).await.unwrap();
+    assert!(
+        response.status().is_client_error() || response.status().is_server_error(),
+        "expected error status for invalid body, got {}",
+        response.status()
+    );
+    let body = response.into_body().expect_not_multipart();
+    let has_errors = body.get("errors").is_some() || body.get("error").is_some();
+    assert!(has_errors, "expected errors in response body: {:?}", body);
+}
+
+#[tokio::test]
+async fn http_layer_plugin_error_returns_error_to_client() {
+    // When the http_service plugin returns an error (e.g. custom validation failure),
+    // the client receives an error response. The router converts the layer error into
+    // an HTTP error response so the request is still accounted for in normal error handling
+    // and can be reported to GraphOS billing/telemetry as a failed request.
+    let service = http_layer_service_with_hook(|_inner| {
+        tower::service_fn(|_req: http_layer::HttpRequest| async move {
+            Err::<http_layer::HttpResponse, _>(BoxError::from("custom plugin error"))
+        })
+        .boxed()
+    })
+    .await;
+
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .uri("/")
+        .header("host", "127.0.0.1")
+        .header("content-type", "application/json")
+        .body(json!({ "query": "query { __typename }" }))
+        .unwrap();
+
+    let response = service.oneshot(request).await.unwrap();
+    assert!(
+        response.status().is_server_error(),
+        "expected 5xx when plugin returns error, got {}",
+        response.status()
     );
 }
