@@ -42,8 +42,8 @@ type Query {
         ... category->match(
           ["book", {
             __typename: "Book",
-            title: $.title,
-            author: { id: $.author.id }
+            title,
+            author { id },
           }],
           ["film", $ {
             __typename: $("Film")
