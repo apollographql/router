@@ -1,4 +1,4 @@
-### Add support for coprocessor communication over Unix Domain Sockets ([Issue #5739](https://github.com/apollographql/router/issues/5739))
+### Support Unix domain socket (UDS) communication for coprocessors ([Issue #5739](https://github.com/apollographql/router/issues/5739))
 
 Many of Apollo's customers using coprocessor will co-locate their coprocessor with their Router instance on the same host. 
 (ie: within the same pod in kubernetes).
