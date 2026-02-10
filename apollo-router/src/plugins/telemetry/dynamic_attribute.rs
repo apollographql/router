@@ -35,22 +35,12 @@ impl LogAttributes {
     }
 
     pub(crate) fn insert(&mut self, kv: KeyValue) {
-        // Replace existing attribute with same key, or add new one
-        if let Some(existing) = self.attributes.iter_mut().find(|a| a.key == kv.key) {
-            *existing = kv;
-        } else {
-            self.attributes.push(kv);
-        }
+        upsert_attribute(&mut self.attributes, kv);
     }
 
     pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
-        // Replace existing attributes with same key, or add new ones
         for kv in other {
-            if let Some(existing) = self.attributes.iter_mut().find(|a| a.key == kv.key) {
-                *existing = kv;
-            } else {
-                self.attributes.push(kv);
-            }
+            upsert_attribute(&mut self.attributes, kv);
         }
     }
 }
@@ -108,13 +98,7 @@ impl SpanDynAttribute for ::tracing::Span {
                                     update_otel_data(otel_data, &key, &value);
                                     if let Some(attrs) = otel_data.builder.attributes.as_mut() {
                                         // Replace existing attribute with same key, or add new one
-                                        if let Some(existing) =
-                                            attrs.iter_mut().find(|a| a.key == key)
-                                        {
-                                            *existing = KeyValue::new(key, value);
-                                        } else {
-                                            attrs.push(KeyValue::new(key, value))
-                                        }
+                                        upsert_attribute(attrs, KeyValue::new(key, value));
                                     } else {
                                         otel_data.builder.attributes =
                                             Some([KeyValue::new(key, value)].into_iter().collect());
@@ -172,16 +156,8 @@ impl SpanDynAttribute for ::tracing::Span {
                                     if let Some(existing_attributes) =
                                         otel_data.builder.attributes.as_mut()
                                     {
-                                        // Replace existing attributes with same key, or add new ones
                                         for attr in attributes {
-                                            if let Some(existing) = existing_attributes
-                                                .iter_mut()
-                                                .find(|e| e.key == attr.key)
-                                            {
-                                                *existing = attr;
-                                            } else {
-                                                existing_attributes.push(attr);
-                                            }
+                                            upsert_attribute(existing_attributes, attr);
                                         }
                                     } else {
                                         otel_data.builder.attributes = Some(attributes);
@@ -244,13 +220,8 @@ pub(crate) struct EventAttributes {
 
 impl EventAttributes {
     pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
-        // Replace existing attributes with same key, or add new ones
         for kv in other {
-            if let Some(existing) = self.attributes.iter_mut().find(|a| a.key == kv.key) {
-                *existing = kv;
-            } else {
-                self.attributes.push(kv);
-            }
+            upsert_attribute(&mut self.attributes, kv);
         }
     }
 
@@ -283,6 +254,7 @@ impl EventDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => match &mut otel_data.event_attributes {
                                     Some(event_attributes) => {
+                                        // No need to use the upsert function here as they're going into a Map
                                         event_attributes.extend(
                                             attributes.map(|KeyValue { key, value }| (key, value)),
                                         );
@@ -327,6 +299,15 @@ impl EventDynAttribute for ::tracing::Span {
                 ::tracing::error!("no Registry, this is a bug");
             }
         });
+    }
+}
+
+/// Replace existing attribute with same key, or add new one
+fn upsert_attribute(attributes: &mut Vec<KeyValue>, kv: KeyValue) {
+    if let Some(existing) = attributes.iter_mut().find(|a| a.key == kv.key) {
+        *existing = kv;
+    } else {
+        attributes.push(kv);
     }
 }
 
@@ -385,27 +366,17 @@ mod tests {
 
         assert_eq!(attrs.attributes().len(), 3);
 
-        // Find and verify the replaced values
-        let method = attrs
-            .attributes()
-            .iter()
-            .find(|kv| kv.key.as_str() == "http.method")
-            .unwrap();
-        assert_eq!(method.value.as_str(), Cow::Borrowed("POST"));
+        let expected_kvs = [
+            ("http.method", "POST"),
+            ("http.route", "/new"),
+            ("http.status", "200"),
+        ];
 
-        let route = attrs
-            .attributes()
-            .iter()
-            .find(|kv| kv.key.as_str() == "http.route")
-            .unwrap();
-        assert_eq!(route.value.as_str(), Cow::Borrowed("/new"));
-
-        let status = attrs
-            .attributes()
-            .iter()
-            .find(|kv| kv.key.as_str() == "http.status")
-            .unwrap();
-        assert_eq!(status.value.as_str(), Cow::Borrowed("200"));
+        for (key, expected_value) in expected_kvs {
+            let attributes = attrs.attributes();
+            let kv = attributes.iter().find(|kv| kv.key.as_str() == key).unwrap();
+            assert_eq!(kv.value.as_str(), expected_value, "key = {key}");
+        }
     }
 
     #[test]
@@ -444,24 +415,16 @@ mod tests {
         let taken = attrs.take();
         assert_eq!(taken.len(), 3);
 
-        // Find and verify the replaced values
-        let method = taken
-            .iter()
-            .find(|kv| kv.key.as_str() == "http.method")
-            .unwrap();
-        assert_eq!(method.value.as_str(), Cow::Borrowed("POST"));
+        let expected_kvs = [
+            ("http.method", "POST"),
+            ("http.route", "/new"),
+            ("http.status", "200"),
+        ];
 
-        let route = taken
-            .iter()
-            .find(|kv| kv.key.as_str() == "http.route")
-            .unwrap();
-        assert_eq!(route.value.as_str(), Cow::Borrowed("/new"));
-
-        let status = taken
-            .iter()
-            .find(|kv| kv.key.as_str() == "http.status")
-            .unwrap();
-        assert_eq!(status.value.as_str(), Cow::Borrowed("200"));
+        for (key, expected_value) in expected_kvs {
+            let kv = taken.iter().find(|kv| kv.key.as_str() == key).unwrap();
+            assert_eq!(kv.value.as_str(), expected_value, "key = {key}");
+        }
     }
 
     #[test]
