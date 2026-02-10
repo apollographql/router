@@ -380,11 +380,11 @@ impl<'validator> AccessControlValidator<'validator> {
                 .as_ref()
                 .is_some_and(|directive_name| {
                     let is_field_authenticated = !requires_position
-                        .get_applied_directives(&self.valid_schema.schema, &directive_name)
+                        .get_applied_directives(&self.valid_schema.schema, directive_name)
                         .is_empty();
                     let is_type_authenticated = !requires_position
                         .parent()
-                        .get_applied_directives(&self.valid_schema.schema, &directive_name)
+                        .get_applied_directives(&self.valid_schema.schema, directive_name)
                         .is_empty();
                     is_field_authenticated || is_type_authenticated
                 });
@@ -667,7 +667,7 @@ impl AuthRequirements {
         // auth requirements on element have to be an implication of type + field requirements
         other
             .as_ref()
-            .is_none_or(|o| self.requirements.satisfies(&o))
+            .is_none_or(|o| self.requirements.satisfies(o))
     }
 }
 
