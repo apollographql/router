@@ -384,12 +384,13 @@ pub(crate) fn externalize_header_map(
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::assert_snapshot_subscriber;
-    use crate::test_harness::tracing_test;
     use http::Response;
     use tower::service_fn;
     use tracing_futures::WithSubscriber;
+
+    use super::*;
+    use crate::assert_snapshot_subscriber;
+    use crate::test_harness::tracing_test;
 
     #[test]
     fn it_will_build_router_externalizable_correctly() {
@@ -483,7 +484,8 @@ mod test {
 
     #[tokio::test]
     async fn it_will_create_an_http_request_span() {
-        use crate::services::http::{HttpRequest, HttpResponse};
+        use crate::services::http::HttpRequest;
+        use crate::services::http::HttpResponse;
 
         async {
             // The mock service emits an event so the snapshot captures the
