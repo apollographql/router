@@ -190,6 +190,7 @@ impl StaticCostCalculator {
         field: &Field,
         parent_type: &NamedType,
         list_size_from_upstream: Option<i32>,
+        inherited_list_size: Option<ListSizeDirective>,
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         // When we pre-process the schema, __typename isn't included. So, we short-circuit here to avoid failed lookups.
@@ -209,16 +210,27 @@ impl StaticCostCalculator {
                     field.name
                 ))
             })?;
-        let list_size_directive = match definition.list_size_directive() {
-            Some(dir) => ListSizeDirective::new(dir, field, ctx.variables).map(Some),
-            None => Ok(None),
-        }?;
+        let own_list_size_directive = match definition.list_size_directive() {
+            Some(dir) => Some(ListSizeDirective::new(
+                dir,
+                field,
+                ctx.variables,
+                definition.parsed_sized_fields().map(Arc::clone),
+            )?),
+            None => None,
+        };
+
         let instance_count = if !field.ty().is_list() {
             1
         } else if let Some(value) = list_size_from_upstream {
             // This is a sized field whose length is defined by the `@listSize` directive on the parent field
             value
-        } else if let Some(expected_size) = list_size_directive
+        } else if let Some(expected_size) = own_list_size_directive
+            .as_ref()
+            .and_then(|dir| dir.expected_size)
+        {
+            expected_size
+        } else if let Some(expected_size) = inherited_list_size
             .as_ref()
             .and_then(|dir| dir.expected_size)
         {
@@ -245,7 +257,8 @@ impl StaticCostCalculator {
             ctx,
             &field.selection_set,
             field.ty().inner_named_type(),
-            list_size_directive.as_ref(),
+            own_list_size_directive.as_ref(),
+            inherited_list_size,
             subgraph,
         )?;
 
@@ -277,7 +290,8 @@ impl StaticCostCalculator {
                     ctx,
                     selection_set,
                     parent_type,
-                    list_size_directive.as_ref(),
+                    own_list_size_directive.as_ref(),
+                    None,
                     subgraph,
                 )?;
             }
@@ -302,6 +316,7 @@ impl StaticCostCalculator {
         ctx: &ScoringContext,
         fragment_spread: &FragmentSpread,
         list_size_directive: Option<&ListSizeDirective>,
+        inherited_list_size: Option<&ListSizeDirective>,
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
@@ -315,6 +330,7 @@ impl StaticCostCalculator {
             &fragment.selection_set,
             fragment.type_condition(),
             list_size_directive,
+            inherited_list_size.cloned(),
             subgraph,
         )
     }
@@ -325,6 +341,7 @@ impl StaticCostCalculator {
         inline_fragment: &InlineFragment,
         parent_type: &NamedType,
         list_size_directive: Option<&ListSizeDirective>,
+        inherited_list_size: Option<&ListSizeDirective>,
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         self.score_selection_set(
@@ -335,6 +352,7 @@ impl StaticCostCalculator {
                 .as_ref()
                 .unwrap_or(parent_type),
             list_size_directive,
+            inherited_list_size.cloned(),
             subgraph,
         )
     }
@@ -359,6 +377,7 @@ impl StaticCostCalculator {
             &operation.selection_set,
             root_type_name,
             None,
+            None,
             subgraph,
         )?;
 
@@ -371,22 +390,47 @@ impl StaticCostCalculator {
         selection: &Selection,
         parent_type: &NamedType,
         list_size_directive: Option<&ListSizeDirective>,
+        inherited_list_size: Option<&ListSizeDirective>,
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         match selection {
-            Selection::Field(f) => self.score_field(
+            Selection::Field(f) => {
+                // We need two things for scoring this field: (1) the list size to use for
+                // instance_count if this field is a list (list_size_from_upstream), and (2) the
+                // directive to pass to this field's selection set so nested lists (e.g. "page" under
+                // "results") get the right sizing (descended).
+                let size_from_parent = list_size_directive.and_then(|dir| dir.size_of(f));
+                let size_from_inherited = inherited_list_size.and_then(|dir| dir.size_of(f));
+                let list_size_from_upstream = size_from_parent.or(size_from_inherited);
+
+                let descended = list_size_directive
+                    .and_then(|dir| dir.descend(f.name.as_str()))
+                    .or_else(|| inherited_list_size.and_then(|dir| dir.descend(f.name.as_str())));
+
+                self.score_field(
+                    ctx,
+                    f,
+                    parent_type,
+                    list_size_from_upstream,
+                    descended,
+                    subgraph,
+                )
+            }
+            Selection::FragmentSpread(s) => self.score_fragment_spread(
                 ctx,
-                f,
-                parent_type,
-                list_size_directive.and_then(|dir| dir.size_of(f)),
+                s,
+                list_size_directive,
+                inherited_list_size,
                 subgraph,
             ),
-            Selection::FragmentSpread(s) => {
-                self.score_fragment_spread(ctx, s, list_size_directive, subgraph)
-            }
-            Selection::InlineFragment(i) => {
-                self.score_inline_fragment(ctx, i, parent_type, list_size_directive, subgraph)
-            }
+            Selection::InlineFragment(i) => self.score_inline_fragment(
+                ctx,
+                i,
+                parent_type,
+                list_size_directive,
+                inherited_list_size,
+                subgraph,
+            ),
         }
     }
 
@@ -396,6 +440,7 @@ impl StaticCostCalculator {
         selection_set: &SelectionSet,
         parent_type_name: &NamedType,
         list_size_directive: Option<&ListSizeDirective>,
+        inherited_list_size: Option<ListSizeDirective>,
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
@@ -405,6 +450,7 @@ impl StaticCostCalculator {
                 selection,
                 parent_type_name,
                 list_size_directive,
+                inherited_list_size.as_ref(),
                 subgraph,
             )?;
         }
@@ -1392,6 +1438,92 @@ mod tests {
             let query = r#"query { search(input: {pagination: {first: 8, after: "cursor"}, query: "search term"}) { id } }"#;
             // 8 (list size) + 2 (input objects: SearchInput + PaginationInput)
             assert_eq!(estimated_cost(SCHEMA, query, "{}"), 10.0);
+        }
+    }
+
+    /// Nested sizedFields in @listSize (e.g. "results { page }")
+    mod nested_sized_fields_tests {
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
+
+        #[rstest::rstest]
+        #[case::simple_sized_fields_on_nested_type(
+            r#"query { containerWithNestedList(first: 5) { page { id } metadata } }"#,
+            "{}",
+            6.0  // ResultContainer: 1, page: 5 * 1 = 5, metadata: 0
+        )]
+        #[case::nested_sized_fields_two_levels(
+            r#"query { deepContainerWithNestedList(first: 7) { results { page { id } } } }"#,
+            "{}",
+            9.0  // DeepContainer: 1, results: 1, page: 7 * 1 = 7
+        )]
+        #[case::nested_sized_fields_with_variable(
+            r#"query Q($n: Int!) { deepContainerWithNestedList(first: $n) { results { page { id } } } }"#,
+            r#"{"n": 3}"#,
+            5.0
+        )]
+        #[case::nested_sized_fields_with_default_value(
+            r#"query { deepContainerWithNestedList { results { page { id } } } }"#,
+            "{}",
+            12.0  // default first: 10
+        )]
+        #[case::nested_sized_fields_not_selected(
+            r#"query { deepContainerWithNestedList(first: 100) { total } }"#,
+            "{}",
+            1.0
+        )]
+        #[case::intermediate_container_without_sized_field(
+            r#"query { deepContainerWithNestedList(first: 100) { results { metadata } } }"#,
+            "{}",
+            2.0
+        )]
+        #[case::mixed_sized_fields_single_and_nested(
+            r#"query {
+                deepContainerWithMixedSizedFields(first: 5) {
+                    page { id }
+                    results { page { id } }
+                }
+            }"#,
+            "{}",
+            12.0  // DeepContainer: 1, page: 5 * 1 = 5, results: 1, page: 5 * 1 = 5
+        )]
+        fn nested_sized_fields_cases(
+            #[case] query: &str,
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+
+        /// Schema load fails when a sizedFields path has more than one leaf (one-leaf-per-path rule).
+        #[test]
+        fn multiple_leaves_in_one_path_fails_at_schema_load() {
+            use std::sync::Arc;
+
+            use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
+            use crate::spec;
+
+            // Schema with sizedFields: ["results { page metadata }"] - two leaves in one path
+            let schema_str = include_str!("./fixtures/custom_cost_schema.graphql").replace(
+                r#"sizedFields: ["results { page }"]"#,
+                r#"sizedFields: ["results { page metadata }"]"#,
+            );
+            // ResultContainer has page: [A] and metadata: String. So "results { page metadata }"
+            // has two top-level selections with no sub-selections (page is a leaf, metadata is a leaf).
+            let schema = spec::Schema::parse(&schema_str, &Default::default()).unwrap();
+            let result = DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone()));
+
+            match &result {
+                Err(e) => assert!(
+                    e.to_string().contains("at most one list field per path"),
+                    "expected error about one list field per path, got: {}",
+                    e
+                ),
+                Ok(_) => {
+                    panic!("expected schema load to fail for multiple list fields in one path")
+                }
+            }
         }
     }
 }
