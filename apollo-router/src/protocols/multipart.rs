@@ -64,6 +64,9 @@ pub(crate) struct Multipart {
     heartbeat_pending: bool,
     /// The span captured at creation time, used to record attributes on connection close.
     span: Span,
+    /// The end reason determined during polling, written to the span on Drop.
+    /// If `None` when dropped and `!is_terminated`, an abnormal reason is inferred.
+    end_reason: Option<EndReason>,
 }
 
 impl Multipart {
@@ -90,6 +93,7 @@ impl Multipart {
             heartbeat_pending: false,
             // Capture the current span so we can record attributes later
             span: Span::current(),
+            end_reason: None,
         }
     }
 
@@ -108,6 +112,14 @@ impl Multipart {
         }
         SubscriptionEndReason::ServerClose
     }
+}
+
+/// Unified end reason for both subscription and defer modes,
+/// stored in the Multipart struct and written to the span on Drop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EndReason {
+    Subscription(SubscriptionEndReason),
+    Defer(DeferEndReason),
 }
 
 /// Reasons why a subscription ended
@@ -168,27 +180,34 @@ impl DeferEndReason {
 
 impl Drop for Multipart {
     fn drop(&mut self) {
-        if !self.is_terminated {
-            match self.mode {
-                ProtocolMode::Subscription => {
-                    // Stream wasn't terminated properly - determine the reason
-                    let reason = if self.heartbeat_pending {
-                        // Heartbeat was the last thing sent - likely failed to deliver
-                        SubscriptionEndReason::HeartbeatDeliveryFailed
-                    } else {
-                        // Connection closed after a message was sent
-                        SubscriptionEndReason::ClientDisconnect
-                    };
-                    self.span
-                        .set_span_dyn_attribute(SUBSCRIPTION_END_REASON_KEY, reason.as_value());
-                }
-                ProtocolMode::Defer => {
-                    // Defer stream wasn't terminated properly - client disconnected
-                    self.span.set_span_dyn_attribute(
-                        DEFER_END_REASON_KEY,
-                        DeferEndReason::ClientDisconnect.as_value(),
-                    );
-                }
+        // Determine the end reason: use the one recorded during polling if available,
+        // otherwise infer an abnormal termination reason.
+        let end_reason = self.end_reason.take().unwrap_or_else(|| match self.mode {
+            ProtocolMode::Subscription => {
+                // Stream wasn't terminated properly - determine the reason
+                let reason = if self.heartbeat_pending {
+                    // Heartbeat was the last thing sent - likely failed to deliver
+                    SubscriptionEndReason::HeartbeatDeliveryFailed
+                } else {
+                    // Connection closed after a message was sent
+                    SubscriptionEndReason::ClientDisconnect
+                };
+                EndReason::Subscription(reason)
+            }
+            ProtocolMode::Defer => {
+                // Defer stream wasn't terminated properly - client disconnected
+                EndReason::Defer(DeferEndReason::ClientDisconnect)
+            }
+        });
+
+        match end_reason {
+            EndReason::Subscription(reason) => {
+                self.span
+                    .set_span_dyn_attribute(SUBSCRIPTION_END_REASON_KEY, reason.as_value());
+            }
+            EndReason::Defer(reason) => {
+                self.span
+                    .set_span_dyn_attribute(DEFER_END_REASON_KEY, reason.as_value());
             }
         }
     }
@@ -254,10 +273,9 @@ impl Stream for Multipart {
                                 && response.extensions.is_empty()
                             {
                                 self.is_terminated = true;
-                                self.span.set_span_dyn_attribute(
-                                    SUBSCRIPTION_END_REASON_KEY,
-                                    SubscriptionEndReason::ServerClose.as_value(),
-                                );
+                                self.end_reason = Some(EndReason::Subscription(
+                                    SubscriptionEndReason::ServerClose,
+                                ));
                                 return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
                             }
 
@@ -291,20 +309,10 @@ impl Stream for Multipart {
                         buf.extend_from_slice(b"\r\n--graphql");
                     } else {
                         self.is_terminated = true;
-                        match self.mode {
-                            ProtocolMode::Subscription => {
-                                self.span.set_span_dyn_attribute(
-                                    SUBSCRIPTION_END_REASON_KEY,
-                                    end_reason.as_value(),
-                                );
-                            }
-                            ProtocolMode::Defer => {
-                                self.span.set_span_dyn_attribute(
-                                    DEFER_END_REASON_KEY,
-                                    DeferEndReason::Completed.as_value(),
-                                );
-                            }
-                        }
+                        self.end_reason = Some(match self.mode {
+                            ProtocolMode::Subscription => EndReason::Subscription(end_reason),
+                            ProtocolMode::Defer => EndReason::Defer(DeferEndReason::Completed),
+                        });
                         buf.extend_from_slice(b"\r\n--graphql--\r\n");
                     }
 
@@ -325,10 +333,8 @@ impl Stream for Multipart {
                     };
                     self.is_terminated = true;
                     if self.mode == ProtocolMode::Subscription {
-                        self.span.set_span_dyn_attribute(
-                            SUBSCRIPTION_END_REASON_KEY,
-                            SubscriptionEndReason::StreamEnd.as_value(),
-                        );
+                        self.end_reason =
+                            Some(EndReason::Subscription(SubscriptionEndReason::StreamEnd));
                     }
 
                     Poll::Ready(Some(Ok(buf)))
@@ -337,20 +343,12 @@ impl Stream for Multipart {
                     // Stream ended - this is a clean termination
                     self.heartbeat_pending = false;
                     self.is_terminated = true;
-                    match self.mode {
+                    self.end_reason = Some(match self.mode {
                         ProtocolMode::Subscription => {
-                            self.span.set_span_dyn_attribute(
-                                SUBSCRIPTION_END_REASON_KEY,
-                                SubscriptionEndReason::StreamEnd.as_value(),
-                            );
+                            EndReason::Subscription(SubscriptionEndReason::StreamEnd)
                         }
-                        ProtocolMode::Defer => {
-                            self.span.set_span_dyn_attribute(
-                                DEFER_END_REASON_KEY,
-                                DeferEndReason::Completed.as_value(),
-                            );
-                        }
-                    }
+                        ProtocolMode::Defer => EndReason::Defer(DeferEndReason::Completed),
+                    });
                     Poll::Ready(None)
                 }
             },
