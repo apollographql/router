@@ -27,6 +27,8 @@ use crate::services::subgraph;
 
 register_private_plugin!("apollo", "experimental_mock_subgraphs", MockSubgraphsPlugin);
 
+const SUBGRAPH_CALL_COUNT_KEY: &str = "apollo::experimental_mock_subgraphs::subgraph_call_count";
+
 /// Configuration for the `mock_subgraphs` plugin
 ///
 ///
@@ -120,8 +122,14 @@ impl PluginPrivate for MockSubgraphsPlugin {
             let config = config.clone();
             let subgraph_schema = subgraph_schema.clone();
             async move {
-                // WARN: REMOVE ME BEFORE MERGING! here to demonstrate the fix
-                dbg!(request.subgraph_request.body());
+                request
+                    .context
+                    .upsert(SUBGRAPH_CALL_COUNT_KEY, |mut v: HashMap<String, u64>| {
+                        let subgraph_value = v.entry(request.subgraph_name.clone()).or_default();
+                        *subgraph_value += 1;
+                        v
+                    })
+                    .unwrap();
 
                 let mut response = http::Response::builder();
                 let body = if let Some(config) = &config {
