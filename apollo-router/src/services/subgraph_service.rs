@@ -42,6 +42,7 @@ use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::router::body::RouterBody;
+use super::subgraph::CurrentSubgraphRequestId;
 use super::subgraph::SubgraphRequestId;
 use crate::Configuration;
 use crate::Context;
@@ -905,6 +906,11 @@ pub(crate) async fn call_single_http(
             lock.insert::<SubgraphRequestBodySize>(SubgraphRequestBodySize(body_len));
         });
     }
+
+    // Store subgraph request id in context so the service HTTP coprocessor stage can include it.
+    context
+        .extensions()
+        .with_lock(|lock| lock.insert(CurrentSubgraphRequestId(subgraph_request_id.clone())));
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     let (parts, content_type, body) = match do_fetch(client, &context, service_name, request)

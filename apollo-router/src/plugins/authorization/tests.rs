@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
@@ -13,7 +14,6 @@ use crate::plugin::test::MockSubgraphService;
 use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::router;
-use crate::services::router::body;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -281,7 +281,9 @@ async fn authenticated_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 
@@ -312,7 +314,9 @@ async fn authenticated_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 
@@ -399,7 +403,9 @@ async fn authenticated_directive_reject_unauthorized() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 
@@ -484,7 +490,9 @@ async fn authenticated_directive_dry_run() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 
@@ -625,7 +633,9 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 
@@ -656,7 +666,9 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 
@@ -687,7 +699,9 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 
@@ -718,7 +732,9 @@ async fn scopes_directive() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 
@@ -797,7 +813,9 @@ async fn scopes_directive_reject_unauthorized() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 
@@ -877,7 +895,9 @@ async fn scopes_directive_dry_run() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 
@@ -959,7 +979,9 @@ async fn errors_in_extensions() {
             .method("POST")
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
-            .body(body::from_bytes(serde_json::to_vec(&req).unwrap()))
+            .body(router::body::RouterRequestBody::buffered(Bytes::from(
+                serde_json::to_vec(&req).unwrap(),
+            )))
             .unwrap(),
     };
 

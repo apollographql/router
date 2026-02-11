@@ -1,13 +1,19 @@
 //! Customization via Rhai.
 
 use std::fmt;
+use std::future::Future;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::Context;
+use std::task::Poll;
 
 use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use http::StatusCode;
 use parking_lot::Mutex;
 use rhai::AST;
@@ -25,6 +31,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::util::BoxService;
+use tower_service::Service;
 
 use self::engine::RhaiService;
 use self::engine::SharedMut;
@@ -34,7 +41,9 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
 use crate::register_plugin;
+use crate::services::http as service_http;
 use crate::services::http_layer;
+use crate::services::router as services_router;
 
 mod engine;
 
@@ -207,10 +216,35 @@ impl Plugin for Rhai {
             ServiceStep::Http(shared_service.clone()),
             self.scope.clone(),
         ) {
-            tracing::error!(
-                service = "HttpService",
-                "service callback failed: {error}"
-            );
+            tracing::error!(service = "HttpService", "service callback failed: {error}");
+        }
+        shared_service.take_unwrap()
+    }
+
+    fn service_http(
+        &self,
+        name: &str,
+        service: service_http::BoxService,
+    ) -> service_http::BoxService {
+        const FUNCTION_NAME_SERVICE: &str = "service_http";
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
+        }
+        tracing::debug!("service_http function found");
+        let shared_service = Arc::new(Mutex::new(Some(service)));
+        let callbacks: SharedMut<(Option<FnPtr>, Option<FnPtr>)> =
+            Arc::new(Mutex::new(Some((None, None))));
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            Some(name),
+            ServiceStep::ServiceHttp(
+                shared_service.clone(),
+                name.to_string(),
+                callbacks.clone(),
+            ),
+            self.scope.clone(),
+        ) {
+            tracing::error!(service = "ServiceHttp", "service callback failed: {error}");
         }
         shared_service.take_unwrap()
     }
@@ -219,6 +253,11 @@ impl Plugin for Rhai {
 #[derive(Clone, Debug)]
 pub(crate) enum ServiceStep {
     Http(SharedMut<http_layer::BoxService>),
+    ServiceHttp(
+        SharedMut<service_http::BoxService>,
+        String,
+        SharedMut<(Option<FnPtr>, Option<FnPtr>)>,
+    ),
     Router(SharedMut<router::BoxService>),
     Supergraph(SharedMut<supergraph::BoxService>),
     Execution(SharedMut<execution::BoxService>),
@@ -627,6 +666,150 @@ macro_rules! gen_map_deferred_response {
     };
 }
 
+/// Message sent to the task that owns the inner service.
+type ServiceHttpTaskMessage = (
+    service_http::HttpRequest,
+    oneshot::Sender<Result<service_http::HttpResponse, BoxError>>,
+);
+
+/// Wrapper service that runs the Rhai map_request callback for service_http.
+/// Buffers the request body, runs the script, then sends to a task that calls the inner service.
+struct ServiceHttpRequestLayer {
+    request_tx: mpsc::Sender<ServiceHttpTaskMessage>,
+    callbacks: SharedMut<(Option<FnPtr>, Option<FnPtr>)>,
+    rhai_service: RhaiService,
+    service_name: String,
+}
+
+impl Service<service_http::HttpRequest> for ServiceHttpRequestLayer {
+    type Response = service_http::HttpResponse;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: service_http::HttpRequest) -> Self::Future {
+        let request_tx = self.request_tx.clone();
+        let callbacks = self.callbacks.clone();
+        let rhai_service = self.rhai_service.clone();
+        let service_name = self.service_name.clone();
+        Box::pin(async move {
+            let (parts, body) = req.http_request.into_parts();
+            let body_bytes = services_router::body::into_bytes(body)
+                .await
+                .map_err(|e| -> BoxError { e.into() })?;
+            let req_cb = callbacks.with_mut(|c| c.0.clone());
+            let modified = if let Some(callback) = req_cb {
+                let wrapper = rhai_http::RhaiServiceHttpRequest::from_parts(
+                    parts,
+                    body_bytes,
+                    &req.context,
+                    Some(service_name),
+                );
+                let shared = Shared::new(Mutex::new(Some(wrapper)));
+                let exec_result: Result<Dynamic, Box<EvalAltResult>> =
+                    execute(&rhai_service, &callback, (shared.clone(),));
+                if let Err(error) = exec_result {
+                    let error_details = process_error(error);
+                    if error_details.body.is_none() {
+                        tracing::error!(
+                            "service_http map_request callback failed: {error_details:#?}"
+                        );
+                    }
+                    return Ok(rhai_http::service_http_response_failure(
+                        req.context,
+                        error_details,
+                    ));
+                }
+                shared.lock().take().unwrap().into_http_request(req.context)
+            } else {
+                let http_request = http::Request::from_parts(
+                    parts,
+                    services_router::body::from_bytes(body_bytes),
+                );
+                service_http::HttpRequest {
+                    http_request,
+                    context: req.context,
+                }
+            };
+            let (resp_tx, resp_rx) = oneshot::channel();
+            if request_tx.send((modified, resp_tx)).await.is_err() {
+                return Err("service HTTP request layer: task closed".into());
+            }
+            match resp_rx.await {
+                Ok(Ok(r)) => Ok(r),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err("service HTTP request layer: channel closed".into()),
+            }
+        })
+    }
+}
+
+/// Wrapper service that runs the Rhai map_response callback for service_http.
+/// Sends to a task that calls the inner service, then buffers the response and runs the script.
+struct ServiceHttpResponseLayer {
+    request_tx: mpsc::Sender<ServiceHttpTaskMessage>,
+    callbacks: SharedMut<(Option<FnPtr>, Option<FnPtr>)>,
+    rhai_service: RhaiService,
+}
+
+impl Service<service_http::HttpRequest> for ServiceHttpResponseLayer {
+    type Response = service_http::HttpResponse;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: service_http::HttpRequest) -> Self::Future {
+        let request_tx = self.request_tx.clone();
+        let callbacks = self.callbacks.clone();
+        let rhai_service = self.rhai_service.clone();
+        Box::pin(async move {
+            let (resp_tx, resp_rx) = oneshot::channel();
+            if request_tx.send((req, resp_tx)).await.is_err() {
+                return Err("service HTTP response layer: task closed".into());
+            }
+            let response = match resp_rx.await {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => return Err(e),
+                Err(_) => return Err("service HTTP response layer: channel closed".into()),
+            };
+            let res_cb = callbacks.with_mut(|c| c.1.clone());
+            let modified = if let Some(callback) = res_cb {
+                let (parts, body) = response.http_response.into_parts();
+                let body_bytes = services_router::body::into_bytes(body)
+                    .await
+                    .map_err(|e| -> BoxError { e.into() })?;
+                let wrapper =
+                    rhai_http::RhaiServiceHttpResponse::from_parts(parts, body_bytes);
+                let shared = Shared::new(Mutex::new(Some(wrapper)));
+                let exec_result: Result<Dynamic, Box<EvalAltResult>> =
+                    execute(&rhai_service, &callback, (shared.clone(),));
+                if let Err(error) = exec_result {
+                    let error_details = process_error(error);
+                    if error_details.body.is_none() {
+                        tracing::error!(
+                            "service_http map_response callback failed: {error_details:#?}"
+                        );
+                    }
+                    return Ok(rhai_http::service_http_response_failure(
+                        response.context,
+                        error_details,
+                    ));
+                }
+                shared.lock().take().unwrap().into_http_response(response.context)
+            } else {
+                response
+            };
+            Ok(modified)
+        })
+    }
+}
+
 impl ServiceStep {
     fn map_request(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
@@ -677,6 +860,24 @@ impl ServiceStep {
             ServiceStep::Subgraph(service) => {
                 gen_map_request!(subgraph, service, rhai_service, callback);
             }
+            ServiceStep::ServiceHttp(service, service_name, callbacks) => {
+                callbacks.with_mut(|c| c.0 = Some(callback));
+                service.replace(|mut inner| {
+                    let (tx, mut rx) = mpsc::channel::<ServiceHttpTaskMessage>(32);
+                    tokio::spawn(async move {
+                        while let Some((req, resp_tx)) = rx.recv().await {
+                            let result = inner.call(req).await;
+                            let _ = resp_tx.send(result);
+                        }
+                    });
+                    BoxService::new(ServiceHttpRequestLayer {
+                        request_tx: tx,
+                        callbacks: callbacks.clone(),
+                        rhai_service: rhai_service.clone(),
+                        service_name: service_name.clone(),
+                    })
+                });
+            }
         }
     }
 
@@ -685,20 +886,25 @@ impl ServiceStep {
             ServiceStep::Http(service) => {
                 service.replace(|inner| {
                     let rhai_service = rhai_service.clone();
-                    tower::ServiceExt::map_response(inner, move |response: http_layer::HttpResponse| {
-                        let wrapper = rhai_http::RhaiHttpResponse::from_http_response(response);
-                        let shared_response = Shared::new(Mutex::new(Some(wrapper)));
-                        let result: Result<Dynamic, Box<EvalAltResult>> =
-                            execute(&rhai_service, &callback, (shared_response.clone(),));
-                        if let Err(error) = result {
-                            let error_details = process_error(error);
-                            if error_details.body.is_none() {
-                                tracing::error!("map_response callback failed: {error_details:#?}");
+                    tower::ServiceExt::map_response(
+                        inner,
+                        move |response: http_layer::HttpResponse| {
+                            let wrapper = rhai_http::RhaiHttpResponse::from_http_response(response);
+                            let shared_response = Shared::new(Mutex::new(Some(wrapper)));
+                            let result: Result<Dynamic, Box<EvalAltResult>> =
+                                execute(&rhai_service, &callback, (shared_response.clone(),));
+                            if let Err(error) = result {
+                                let error_details = process_error(error);
+                                if error_details.body.is_none() {
+                                    tracing::error!(
+                                        "map_response callback failed: {error_details:#?}"
+                                    );
+                                }
+                                return rhai_http::response_failure(error_details);
                             }
-                            return rhai_http::response_failure(error_details);
-                        }
-                        shared_response.lock().take().unwrap().into_http_response()
-                    })
+                            shared_response.lock().take().unwrap().into_http_response()
+                        },
+                    )
                     .boxed()
                 });
             }
@@ -713,6 +919,23 @@ impl ServiceStep {
             }
             ServiceStep::Subgraph(service) => {
                 gen_map_response!(subgraph, service, rhai_service, callback);
+            }
+            ServiceStep::ServiceHttp(service, _service_name, callbacks) => {
+                callbacks.with_mut(|c| c.1 = Some(callback));
+                service.replace(|mut inner| {
+                    let (tx, mut rx) = mpsc::channel::<ServiceHttpTaskMessage>(32);
+                    tokio::spawn(async move {
+                        while let Some((req, resp_tx)) = rx.recv().await {
+                            let result = inner.call(req).await;
+                            let _ = resp_tx.send(result);
+                        }
+                    });
+                    BoxService::new(ServiceHttpResponseLayer {
+                        request_tx: tx,
+                        callbacks: callbacks.clone(),
+                        rhai_service: rhai_service.clone(),
+                    })
+                });
             }
         }
     }

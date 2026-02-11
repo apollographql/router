@@ -1,17 +1,19 @@
-//! HTTP layer (http_service) types and helpers for Rhai.
+//! HTTP layer (http_service) and service HTTP (service_http) types and helpers for Rhai.
 
 use std::ops::ControlFlow;
 
 use bytes::Bytes;
-use http::header::CONTENT_TYPE;
 use http::Request;
 use http::Response;
 use http::StatusCode;
+use http::header::CONTENT_TYPE;
 use tower::BoxError;
 
 use super::ErrorDetails;
 use crate::graphql::Error;
+use crate::services::http as service_http;
 use crate::services::http_layer;
+use crate::services::router;
 
 /// Wrapper for HTTP layer request, exposed to Rhai scripts.
 #[derive(Default)]
@@ -85,13 +87,88 @@ pub(super) fn request_failure(
         let err = Error::builder()
             .message(error_details.message.unwrap_or_default())
             .build();
-        serde_json::to_string(&crate::graphql::Response::builder().errors(vec![err]).build())?
+        serde_json::to_string(
+            &crate::graphql::Response::builder()
+                .errors(vec![err])
+                .build(),
+        )?
     };
     let res = Response::builder()
         .status(error_details.status)
         .header(CONTENT_TYPE, "application/json")
         .body(Bytes::from(body_str))?;
     Ok(ControlFlow::Break(res))
+}
+
+/// Wrapper for service HTTP request (service_http), exposed to Rhai scripts.
+#[derive(Default)]
+pub(crate) struct RhaiServiceHttpRequest {
+    pub(crate) method: http::Method,
+    pub(crate) uri: http::Uri,
+    pub(crate) headers: http::HeaderMap,
+    pub(crate) body: String,
+    /// Service name (subgraph/connector) when available.
+    pub(crate) service_name: Option<String>,
+}
+
+impl RhaiServiceHttpRequest {
+    pub(crate) fn from_parts(
+        parts: http::request::Parts,
+        body: Bytes,
+        _context: &crate::Context,
+        service_name: Option<String>,
+    ) -> Self {
+        Self {
+            method: parts.method.clone(),
+            uri: parts.uri.clone(),
+            headers: parts.headers.clone(),
+            body: String::from_utf8_lossy(&body).to_string(),
+            service_name,
+        }
+    }
+
+    pub(crate) fn into_http_request(self, context: crate::Context) -> service_http::HttpRequest {
+        let mut req = Request::builder()
+            .method(self.method)
+            .uri(self.uri)
+            .body(router::body::from_bytes(Bytes::from(self.body)))
+            .expect("valid HTTP request");
+        *req.headers_mut() = self.headers;
+        service_http::HttpRequest {
+            http_request: req,
+            context,
+        }
+    }
+}
+
+/// Wrapper for service HTTP response (service_http), exposed to Rhai scripts.
+#[derive(Default)]
+pub(crate) struct RhaiServiceHttpResponse {
+    pub(crate) status_code: StatusCode,
+    pub(crate) headers: http::HeaderMap,
+    pub(crate) body: String,
+}
+
+impl RhaiServiceHttpResponse {
+    pub(crate) fn from_parts(parts: http::response::Parts, body: Bytes) -> Self {
+        Self {
+            status_code: parts.status,
+            headers: parts.headers.clone(),
+            body: String::from_utf8_lossy(&body).to_string(),
+        }
+    }
+
+    pub(crate) fn into_http_response(self, context: crate::Context) -> service_http::HttpResponse {
+        let mut res = Response::builder()
+            .status(self.status_code)
+            .body(router::body::from_bytes(Bytes::from(self.body)))
+            .expect("valid HTTP response");
+        *res.headers_mut() = self.headers;
+        service_http::HttpResponse {
+            http_response: res,
+            context,
+        }
+    }
 }
 
 /// Build an HTTP layer error response for response-stage failures.
@@ -102,12 +179,45 @@ pub(super) fn response_failure(error_details: ErrorDetails) -> http_layer::HttpR
         let err = Error::builder()
             .message(error_details.message.unwrap_or_default())
             .build();
-        serde_json::to_string(&crate::graphql::Response::builder().errors(vec![err]).build())
-            .unwrap_or_default()
+        serde_json::to_string(
+            &crate::graphql::Response::builder()
+                .errors(vec![err])
+                .build(),
+        )
+        .unwrap_or_default()
     };
     Response::builder()
         .status(error_details.status)
         .header(CONTENT_TYPE, "application/json")
         .body(Bytes::from(body_str))
         .expect("valid HTTP response")
+}
+
+/// Build a service HTTP error response for request/response stage failures.
+pub(super) fn service_http_response_failure(
+    context: crate::Context,
+    error_details: ErrorDetails,
+) -> service_http::HttpResponse {
+    let body_str = if let Some(graphql_body) = error_details.body {
+        serde_json::to_string(&graphql_body).unwrap_or_default()
+    } else {
+        let err = Error::builder()
+            .message(error_details.message.unwrap_or_default())
+            .build();
+        serde_json::to_string(
+            &crate::graphql::Response::builder()
+                .errors(vec![err])
+                .build(),
+        )
+        .unwrap_or_default()
+    };
+    let http_response = Response::builder()
+        .status(error_details.status)
+        .header(CONTENT_TYPE, "application/json")
+        .body(router::body::from_bytes(Bytes::from(body_str)))
+        .expect("valid HTTP response");
+    service_http::HttpResponse {
+        http_response,
+        context,
+    }
 }

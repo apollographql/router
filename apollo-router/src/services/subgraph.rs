@@ -43,6 +43,12 @@ pub(crate) type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Se
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SubgraphRequestId(pub String);
 
+/// Stored in context extensions when making the outbound HTTP call so the service HTTP
+/// coprocessor stage (ServiceHttpRequest/ServiceHttpResponse) can include it in the payload.
+#[allow(dead_code)] // Used in subgraph_service and read in coprocessor service HTTP stages (trait dispatch).
+#[derive(Clone, Debug)]
+pub(crate) struct CurrentSubgraphRequestId(pub(crate) SubgraphRequestId);
+
 impl Display for SubgraphRequestId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)

@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use bytes::Bytes;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
@@ -16,6 +17,7 @@ use sha2::Digest;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
+use tower::service_fn;
 use tower::util::BoxService;
 use tracing_futures::WithSubscriber;
 use uuid::Uuid;
@@ -50,8 +52,6 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::http_layer;
 use crate::test_harness::tracing_test;
-use bytes::Bytes;
-use tower::service_fn;
 
 // There is a lot of repetition in these tests, so I've tried to reduce that with these two
 // functions. The repetition could probably be reduced further, but ...

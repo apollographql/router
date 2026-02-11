@@ -7,7 +7,6 @@ use apollo_router::TestHarness;
 use apollo_router::graphql;
 use apollo_router::services::execution;
 use apollo_router::services::supergraph;
-use serde_json::Value;
 use serde_json::json;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -304,7 +303,7 @@ limits:
         .build();
 
     let (_, response) = router.execute_query(request.clone()).await;
-    let body: Value = response.json().await.unwrap();
+    let body: serde_json::Value = response.json().await.unwrap();
     assert!(
         body.get("errors").is_none(),
         "expected no errors with warn_only, got: {body:?}"
@@ -315,7 +314,7 @@ limits:
     router.assert_reloaded().await;
 
     let (_, response) = router.execute_query(request).await;
-    let body: Value = response.json().await.unwrap();
+    let body: serde_json::Value = response.json().await.unwrap();
 
     let errors = body
         .get("errors")

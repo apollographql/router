@@ -500,7 +500,6 @@ mod tests {
     use crate::services::SubgraphResponse;
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::router;
-    use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
     use crate::spec::QueryHash;
@@ -869,7 +868,9 @@ mod tests {
                 .method("POST")
                 .header(CONTENT_TYPE, "application/json")
                 .header(ACCEPT, "application/json")
-                .body(body::from_bytes(serde_json::to_vec(&request).unwrap()))
+                .body(router::body::RouterRequestBody::buffered(bytes::Bytes::from(
+                    serde_json::to_vec(&request).unwrap(),
+                )))
                 .unwrap(),
         };
 

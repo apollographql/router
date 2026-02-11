@@ -1,0 +1,15 @@
+{
+  "name": "coprocessor-http-service",
+  "version": "1.0.0",
+  "description": "Coprocessor example for the http_service hook (router front HTTP layer)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

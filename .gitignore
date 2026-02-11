@@ -16,6 +16,7 @@
 .idea
 *.iml
 .vscode
+.cursor
 
 # Docs
 /docs/node_modules/

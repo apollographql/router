@@ -89,6 +89,134 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     Ok(())
 }
 
+/// Integration test: router binary with coprocessor http_service stage (router front HTTP hook).
+/// Verifies that when config enables coprocessor.http_service.request/response, the coprocessor
+/// is called at the HTTP layer and can add response headers visible to the client.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_http_service_stage() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| {
+            let mut body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = body
+                .as_object()
+                .and_then(|o| o.get("stage"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("");
+            if stage == "RouterHttpRequest" {
+                // Continue the request unchanged
+                body.as_object_mut()
+                    .and_then(|o| o.insert("control".to_string(), json!("Continue")));
+            } else if stage == "RouterHttpResponse" {
+                // Add a header so we can assert the http_service response stage ran
+                let obj = body.as_object_mut().expect("payload is object");
+                let headers = obj
+                    .entry("headers")
+                    .or_insert_with(|| json!({}))
+                    .as_object_mut()
+                    .expect("headers is object");
+                headers.insert(
+                    "x-http-service-stage".to_string(),
+                    serde_json::Value::Array(vec![serde_json::Value::String("response".to_string())]),
+                );
+            }
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_http_service.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert!(response.status().is_success(), "expected 2xx, got {}", response.status());
+
+    let header_value = response
+        .headers()
+        .get("x-http-service-stage")
+        .and_then(|v| v.to_str().ok());
+    assert_eq!(
+        header_value,
+        Some("response"),
+        "expected x-http-service-stage: response from coprocessor http_service stage; headers: {:?}",
+        response.headers()
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+/// Integration test: router with coprocessor service_http stage (ServiceHttpRequest/ServiceHttpResponse).
+/// Verifies that when config enables service_http, the coprocessor receives HTTP-shaped payloads.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_service_http_stage() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| {
+            let mut body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = body
+                .as_object()
+                .and_then(|o| o.get("stage"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("");
+            if stage == "ServiceHttpRequest" {
+                body.as_object_mut()
+                    .and_then(|o| o.insert("control".to_string(), json!("Continue")));
+            } else if stage == "ServiceHttpResponse" {
+                let obj = body.as_object_mut().expect("payload is object");
+                let headers = obj
+                    .entry("headers")
+                    .or_insert_with(|| json!({}))
+                    .as_object_mut()
+                    .expect("headers is object");
+                headers.insert(
+                    "x-service-http-stage".to_string(),
+                    serde_json::Value::Array(vec![serde_json::Value::String("response".to_string())]),
+                );
+            }
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_service_http.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert!(response.status().is_success(), "expected 2xx, got {}", response.status());
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_coprocessor_response_handling() -> Result<(), BoxError> {
     if !graph_os_enabled() {

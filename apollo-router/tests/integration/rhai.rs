@@ -5,6 +5,53 @@ use serde_json::json;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 
+/// Integration test: router binary with Rhai http_service hook (router front HTTP layer).
+/// Verifies that when a Rhai script defines http_service(service) and adds a response header,
+/// the header is visible on the client response.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_rhai_http_service_hook() {
+    let config = r#"
+rhai:
+  scripts: tests/fixtures
+  main: http_service_test.rhai
+"#;
+
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .supergraph(PathBuf::from("tests/fixtures/supergraph.graphql"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({
+                    "query": "{ topProducts { name } }",
+                    "variables": {}
+                }))
+                .build(),
+        )
+        .await;
+
+    assert!(response.status().is_success());
+
+    let header_value = response
+        .headers()
+        .get("x-rhai-http-layer")
+        .and_then(|v| v.to_str().ok());
+    assert_eq!(
+        header_value,
+        Some("ok"),
+        "expected x-rhai-http-layer: ok from Rhai http_service hook; headers: {:?}",
+        response.headers()
+    );
+
+    router.graceful_shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn all_rhai_callbacks_are_invoked() {
     let config = r#"

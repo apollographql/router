@@ -111,7 +111,7 @@ impl Service<router::Request> for SimpleEndpoint {
                 });
             };
 
-            // let's add a context key so that the subgraph_http_service displays the headers it's about to send!
+            // let's add a context key so that the service_http displays the headers it's about to send!
             if let Some(context) = json_body.get_mut("context") {
                 let context = context.get_mut("entries").unwrap(); // context always has entries.
                 if let Some(context) = context.as_object_mut() {

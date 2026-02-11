@@ -18,8 +18,8 @@ pub(crate) fn assert_coprocessor_operations_metrics(
 ) {
     // Iterate over all known pipeline stages and verify the metrics
     for stage in [
-        PipelineStep::HttpRequest,
-        PipelineStep::HttpResponse,
+        PipelineStep::RouterHttpRequest,
+        PipelineStep::RouterHttpResponse,
         PipelineStep::RouterRequest,
         PipelineStep::RouterResponse,
         PipelineStep::SupergraphRequest,
@@ -28,6 +28,8 @@ pub(crate) fn assert_coprocessor_operations_metrics(
         PipelineStep::ExecutionResponse,
         PipelineStep::SubgraphRequest,
         PipelineStep::SubgraphResponse,
+        PipelineStep::ServiceHttpRequest,
+        PipelineStep::ServiceHttpResponse,
     ] {
         // Check if this stage is part of the expected stages list
         if let Some((_, expected_value, succeeded)) =

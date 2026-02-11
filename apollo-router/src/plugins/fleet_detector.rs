@@ -280,15 +280,17 @@ impl PluginPrivate for FleetDetector {
                     }
 
                     // For streaming bodies, we need to wrap the stream and count bytes as we go
-                    router::RequestBody::stream(router::body::from_result_stream(body.into_data_stream().inspect(move |res| {
-                        if let Ok(bytes) = res {
-                            u64_counter!(
-                                "apollo.router.operations.request_size",
-                                "Total number of request bytes from clients",
-                                bytes.len() as u64
-                            );
-                        }
-                    })))
+                    router::RequestBody::stream(router::body::from_result_stream(
+                        body.into_data_stream().inspect(move |res| {
+                            if let Ok(bytes) = res {
+                                u64_counter!(
+                                    "apollo.router.operations.request_size",
+                                    "Total number of request bytes from clients",
+                                    bytes.len() as u64
+                                );
+                            }
+                        }),
+                    ))
                 }),
                 context: req.context,
             })
@@ -612,7 +614,7 @@ mod tests {
                                 .status(StatusCode::BAD_REQUEST)
                                 .header("content-type", "application/json")
                                 // making sure the request body is consumed
-                                .body(req.router_request.into_body())
+                                .body(req.router_request.into_body().into_router_body())
                                 .unwrap(),
                         )
                         .build()

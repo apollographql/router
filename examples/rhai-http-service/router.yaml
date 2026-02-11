@@ -1,0 +1,9 @@
+supergraph:
+  introspection: true
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+rhai:
+  scripts: examples/rhai-http-service/src
+  main: http_service.rhai

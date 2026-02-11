@@ -7,8 +7,8 @@ use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Instant;
 
-use axum::body::Body as AxumBody;
 use axum::Router;
+use axum::body::Body as AxumBody;
 use axum::extract::Extension;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -29,14 +29,14 @@ use multimap::MultiMap;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::json;
-use tower::buffer::Buffer;
-use tower::BoxError;
-use tower::Service;
-use tower::ServiceExt;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
+use tower::BoxError;
+use tower::Service;
+use tower::ServiceExt;
+use tower::buffer::Buffer;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use tracing::instrument::WithSubscriber;
@@ -56,9 +56,9 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::telemetry::SpanMode;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
@@ -509,13 +509,13 @@ struct HandlerOptions {
     experimental_log_on_broken_pipe: bool,
 }
 
-pub(super) fn main_router<S>(configuration: &Configuration, http_layer_service: S) -> axum::Router<()>
+pub(super) fn main_router<S>(
+    configuration: &Configuration,
+    http_layer_service: S,
+) -> axum::Router<()>
 where
-    S: Service<
-            http_layer::HttpRequest,
-            Response = http_layer::HttpResponse,
-            Error = BoxError,
-        > + Clone
+    S: Service<http_layer::HttpRequest, Response = http_layer::HttpResponse, Error = BoxError>
+        + Clone
         + Send
         + Sync
         + 'static,
@@ -527,14 +527,19 @@ where
     );
 
     if BARE_WILDCARD_PATH_REGEX.is_match(configuration.supergraph.path.as_str()) {
-        router = router.route("/", get(handle_http_layer::<S>).post(handle_http_layer::<S>));
+        router = router.route(
+            "/",
+            get(handle_http_layer::<S>).post(handle_http_layer::<S>),
+        );
     }
 
     router = router
         .layer(Extension(http_layer_service))
         .route_layer(Extension(HandlerOptions {
             early_cancel: configuration.supergraph.early_cancel,
-            experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
+            experimental_log_on_broken_pipe: configuration
+                .supergraph
+                .experimental_log_on_broken_pipe,
         }));
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     {
@@ -557,11 +562,8 @@ async fn handle_http_layer<S>(
     request: Request<AxumBody>,
 ) -> axum::response::Response
 where
-    S: Service<
-            http_layer::HttpRequest,
-            Response = http_layer::HttpResponse,
-            Error = BoxError,
-        > + Clone
+    S: Service<http_layer::HttpRequest, Response = http_layer::HttpResponse, Error = BoxError>
+        + Clone
         + Send
         + Sync
         + 'static,
@@ -597,10 +599,13 @@ where
     let body = match opt_compressor {
         None => router::body::from_bytes(body_bytes),
         Some(compressor) => {
-            parts
-                .headers
-                .insert(CONTENT_ENCODING, HeaderValue::from_static(compressor.content_encoding()));
-            router::body::from_result_stream(compressor.process(router::body::from_bytes(body_bytes)))
+            parts.headers.insert(
+                CONTENT_ENCODING,
+                HeaderValue::from_static(compressor.content_encoding()),
+            );
+            router::body::from_result_stream(
+                compressor.process(router::body::from_bytes(body_bytes)),
+            )
         }
     };
 

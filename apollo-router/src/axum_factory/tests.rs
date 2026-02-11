@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
+use bytes::Bytes;
 use futures::Future;
 use futures::StreamExt;
 use futures::future::BoxFuture;
@@ -83,16 +84,15 @@ use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
+use crate::services::http_layer;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
-use crate::services::http_layer;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
-use bytes::Bytes;
 
 macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -2451,7 +2451,7 @@ async fn http_layer_service_with_hook(
         .build_http_service()
         .await
         .unwrap()
-        .map_err(Into::into);
+        .map_err(Into::<BoxError>::into);
 
     let service = TowerServiceBuilder::new()
         .map_future(|future| async move {
@@ -2460,7 +2460,7 @@ async fn http_layer_service_with_hook(
             let bytes = body
                 .collect()
                 .await
-                .map_err(|e| BoxError::from(e))?
+                .map_err(BoxError::from)?
                 .to_bytes();
             Ok::<_, BoxError>(http::Response::from_parts(
                 parts,
@@ -2477,9 +2477,10 @@ async fn http_layer_mutate_body_to_valid_graphql_query() {
     // The router should execute the replaced query and return its result.
     let replaced_query = json!({ "query": "query { __typename }" });
     let service = http_layer_service_with_hook(move |inner| {
+        let value = replaced_query.clone();
         TowerServiceBuilder::new()
             .map_request(move |mut req: http_layer::HttpRequest| {
-                *req.body_mut() = Bytes::from(serde_json::to_string(&replaced_query).unwrap());
+                *req.body_mut() = Bytes::from(serde_json::to_string(&value).unwrap());
                 req
             })
             .service(inner)
@@ -2496,10 +2497,21 @@ async fn http_layer_mutate_body_to_valid_graphql_query() {
         .unwrap();
 
     let response = service.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), 200, "expected success after body mutation");
+    assert_eq!(
+        response.status(),
+        200,
+        "expected success after body mutation"
+    );
     let body = response.into_body().expect_not_multipart();
-    assert!(body.get("data").is_some(), "expected data in response: {:?}", body);
-    assert_eq!(body.get("data").and_then(|d| d.get("__typename")), Some(&json!("Query")));
+    assert!(
+        body.get("data").is_some(),
+        "expected data in response: {:?}",
+        body
+    );
+    assert_eq!(
+        body.get("data").and_then(|d| d.get("__typename")),
+        Some(&json!("Query"))
+    );
 }
 
 #[tokio::test]

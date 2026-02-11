@@ -52,11 +52,7 @@ pub type HttpResponse = Response<Bytes>;
 /// Plugins implement `http_service` by wrapping this service. The inner service
 /// (closest to the router) converts `HttpRequest` to `router::Request`,
 /// calls the router, and converts the response to `HttpResponse`.
-pub type BoxService = tower::util::BoxService<
-    HttpRequest,
-    HttpResponse,
-    BoxError,
->;
+pub type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 
 /// Extension trait to allow cloning the service type for use in layers.
 #[allow(dead_code)]

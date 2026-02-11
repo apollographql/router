@@ -1,0 +1,15 @@
+# Coprocessor with service_http stage (outbound HTTP hook for subgraphs and connectors).
+# Used by test_coprocessor_service_http_stage to verify ServiceHttpRequest/ServiceHttpResponse.
+coprocessor:
+  url: "<replace>"
+  service_http:
+    request:
+      body: true
+      headers: true
+      service_name: true
+      uri: true
+    response:
+      body: true
+      headers: true
+      status_code: true
+      service_name: true

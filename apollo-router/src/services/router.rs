@@ -143,7 +143,10 @@ impl Request {
         let mut router_request = http::Request::builder()
             .uri(uri.unwrap_or_else(|| http::Uri::from_static("http://example.com/")))
             .method(method.unwrap_or(Method::GET))
-            .body(body.map_or_else(|| RequestBody::stream(body::empty()), |constructed| constructed.0))?;
+            .body(body.map_or_else(
+                || RequestBody::stream(body::empty()),
+                |constructed| constructed.0,
+            ))?;
         *router_request.headers_mut() = header_map(headers)?;
         Ok(Self {
             router_request,
@@ -509,9 +512,7 @@ impl From<Request> for http::Request<Body> {
             .router_request
             .extensions_mut()
             .insert(request.context);
-        request
-            .router_request
-            .map(|rb| rb.into_router_body())
+        request.router_request.map(|rb| rb.into_router_body())
     }
 }
 

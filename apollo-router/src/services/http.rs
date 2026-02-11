@@ -66,12 +66,12 @@ impl HttpClientServiceFactory {
 
     pub(crate) fn create(&self, name: &str) -> BoxService {
         let service = self.service.clone();
-        self.plugins
-            .iter()
-            .rev()
-            .fold(service.boxed(), |acc, (_, e)| {
-                e.http_client_service(name, acc)
-            })
+        let inner = self.plugins.iter().rev().fold(service.boxed(), |acc, (_, e)| {
+            e.http_client_service(name, acc)
+        });
+        self.plugins.iter().rev().fold(inner, |acc, (_, e)| {
+            e.service_http(name, acc)
+        })
     }
 }
 

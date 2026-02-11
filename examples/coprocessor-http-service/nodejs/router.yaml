@@ -1,0 +1,30 @@
+# Router config: coprocessor http_service (router front) and service_http (outbound subgraph/connector).
+supergraph:
+  introspection: true
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+
+coprocessor:
+  url: http://127.0.0.1:3000
+  timeout: 5s
+  http_service:
+    request:
+      body: true
+      headers: true
+    response:
+      body: true
+      headers: true
+      status_code: true
+  service_http:
+    request:
+      body: true
+      headers: true
+      service_name: true
+      uri: true
+    response:
+      body: true
+      headers: true
+      status_code: true
+      service_name: true

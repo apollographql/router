@@ -38,10 +38,10 @@ pub(crate) const EXTERNALIZABLE_VERSION: u8 = 1;
 
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub(crate) enum PipelineStep {
-    /// HTTP service request stage (raw request, http_service plugin hook).
-    HttpRequest,
-    /// HTTP service response stage (raw response, http_service plugin hook).
-    HttpResponse,
+    /// Router HTTP request stage (raw request, http_service plugin hook).
+    RouterHttpRequest,
+    /// Router HTTP response stage (raw response, http_service plugin hook).
+    RouterHttpResponse,
     RouterRequest,
     RouterResponse,
     SupergraphRequest,
@@ -50,6 +50,10 @@ pub(crate) enum PipelineStep {
     ExecutionResponse,
     SubgraphRequest,
     SubgraphResponse,
+    /// Outbound service HTTP request (subgraph/connector/future data sources).
+    ServiceHttpRequest,
+    /// Outbound service HTTP response (subgraph/connector/future data sources).
+    ServiceHttpResponse,
 }
 
 impl From<PipelineStep> for opentelemetry::Value {
@@ -136,8 +140,8 @@ where
     ) -> Self {
         assert!(matches!(
             stage,
-            PipelineStep::HttpRequest
-                | PipelineStep::HttpResponse
+            PipelineStep::RouterHttpRequest
+                | PipelineStep::RouterHttpResponse
                 | PipelineStep::RouterRequest
                 | PipelineStep::RouterResponse
         ));
@@ -280,6 +284,48 @@ where
         }
     }
 
+    /// This is the constructor (or builder) to use when constructing a Service HTTP
+    /// `Externalizable` (outbound request/response to subgraph, connector, etc.).
+    #[allow(dead_code)] // Used via service_http_builder() from coprocessor service HTTP stages.
+    #[builder(visibility = "pub(crate)")]
+    fn service_http_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: String,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        path: Option<String>,
+        service_name: Option<String>,
+        uri: Option<String>,
+        subgraph_request_id: Option<SubgraphRequestId>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::ServiceHttpRequest | PipelineStep::ServiceHttpResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id: Some(id),
+            headers,
+            body,
+            context,
+            status_code,
+            sdl: None,
+            uri,
+            path,
+            method,
+            service_name,
+            has_next: None,
+            query_plan: None,
+            subgraph_request_id,
+        }
+    }
+
     pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
     where
         C: Service<
@@ -371,11 +417,11 @@ mod test {
     #[test]
     fn it_will_build_router_externalizable_correctly() {
         Externalizable::<String>::router_builder()
-            .stage(PipelineStep::HttpRequest)
+            .stage(PipelineStep::RouterHttpRequest)
             .id(String::default())
             .build();
         Externalizable::<String>::router_builder()
-            .stage(PipelineStep::HttpResponse)
+            .stage(PipelineStep::RouterHttpResponse)
             .id(String::default())
             .build();
         Externalizable::<String>::router_builder()
@@ -435,6 +481,29 @@ mod test {
             .build();
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::RouterResponse)
+            .id(String::default())
+            .build();
+    }
+
+    #[test]
+    fn it_will_build_service_http_externalizable_correctly() {
+        let req = Externalizable::<String>::service_http_builder()
+            .stage(PipelineStep::ServiceHttpRequest)
+            .id(String::default())
+            .build();
+        assert_eq!(req.stage, "ServiceHttpRequest");
+        let res = Externalizable::<String>::service_http_builder()
+            .stage(PipelineStep::ServiceHttpResponse)
+            .id(String::default())
+            .build();
+        assert_eq!(res.stage, "ServiceHttpResponse");
+    }
+
+    #[test]
+    #[should_panic]
+    fn it_will_not_build_service_http_externalizable_incorrectly() {
+        Externalizable::<String>::service_http_builder()
+            .stage(PipelineStep::RouterRequest)
             .id(String::default())
             .build();
     }

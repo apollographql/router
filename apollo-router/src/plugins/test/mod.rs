@@ -250,6 +250,26 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         ServiceHandle::new(self.plugin.http_client_service(subgraph, service))
     }
 
+    /// Used by tests in this module; harness is compiled for non-test builds.
+    #[allow(dead_code)]
+    pub(crate) fn service_http<F>(
+        &self,
+        service_name: &str,
+        response_fn: impl Fn(http::HttpRequest) -> F + Send + Sync + Clone + 'static,
+    ) -> ServiceHandle<http::HttpRequest, http::BoxService>
+    where
+        F: Future<Output = Result<http::HttpResponse, BoxError>> + Send + 'static,
+    {
+        let service: http::BoxService = http::BoxService::new(ServiceBuilder::new().service_fn(
+            move |req: http::HttpRequest| {
+                let response_fn = response_fn.clone();
+                async move { (response_fn)(req).await }
+            },
+        ));
+
+        ServiceHandle::new(self.plugin.service_http(service_name, service))
+    }
+
     #[allow(dead_code)]
     pub(crate) async fn call_connector_request_service(
         &self,
@@ -451,19 +471,30 @@ pub(crate) trait ResponseTestExt {
 mod test_for_harness {
     use ::http::HeaderMap;
     use ::http::HeaderValue;
+    use ::http::StatusCode;
     use async_trait::async_trait;
+    use axum::routing::any;
+    use axum::Router;
+    use indexmap::IndexMap;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use tokio::join;
+    use tokio::net::TcpListener;
+    use tower::ServiceExt;
 
     use super::*;
+    use crate::plugin::DynPlugin;
+    use crate::services::http::HttpClientService;
+    use crate::services::http::HttpClientServiceFactory;
+    use crate::services::http::HttpRequest;
+    use crate::services::router::body;
+    use crate::Configuration;
     use crate::Context;
     use crate::graphql;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::Plugin;
     use crate::services::router;
     use crate::services::router::BoxService;
-    use crate::services::router::body;
 
     /// Config for the test plugin
     #[derive(JsonSchema, Deserialize)]
@@ -495,6 +526,27 @@ mod test_for_harness {
                 .concurrency_limit(1)
                 .service(service)
                 .boxed()
+        }
+
+        fn service_http(
+            &self,
+            _service_name: &str,
+            service: http::BoxService,
+        ) -> http::BoxService {
+            let service = Arc::new(tokio::sync::Mutex::new(service));
+            http::BoxService::new(ServiceBuilder::new().service_fn(
+                move |req: http::HttpRequest| {
+                    let service = service.clone();
+                    async move {
+                        let mut response = service.lock().await.call(req).await?;
+                        response
+                            .http_response
+                            .headers_mut()
+                            .insert("x-service-http", "called".parse().unwrap());
+                        Ok(response)
+                    }
+                },
+            ))
         }
     }
     register_plugin!("apollo_testing", "my_test_plugin", MyTestPlugin);
@@ -665,6 +717,75 @@ mod test_for_harness {
         assert_eq!(
             response.http_response.headers().get("x-custom-header"),
             Some(&HeaderValue::from_static("test-value"))
+        );
+    }
+
+    #[tokio::test]
+    async fn service_http_includes_plugin_response_headers_when_called() {
+        let test_harness: PluginTestHarness<MyTestPlugin> = PluginTestHarness::builder()
+            .build()
+            .await
+            .expect("test harness");
+
+        let service = test_harness.service_http("test_subgraph", |req| async {
+            Ok(http::HttpResponse {
+                http_response: ::http::Response::builder()
+                    .status(200)
+                    .body(body::empty())
+                    .expect("valid response"),
+                context: req.context,
+            })
+        });
+
+        let response = service.call_default().await.unwrap();
+        assert_eq!(
+            response.http_response.headers().get("x-service-http"),
+            Some(&HeaderValue::from_static("called"))
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn service_http_plugin_invoked_via_http_client_factory_returns_expected_headers() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let app = Router::new().route(
+            "/",
+            any(|| async { (StatusCode::OK, "{}") }),
+        );
+        tokio::task::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service()).await;
+        });
+
+        let http_service = HttpClientService::from_config_for_subgraph(
+            "test",
+            &Configuration::default(),
+            &rustls::RootCertStore::empty(),
+            crate::configuration::shared::Client::default(),
+        )
+        .unwrap();
+
+        let mut plugins: IndexMap<String, Box<dyn DynPlugin>> = IndexMap::new();
+        plugins.insert(
+            "my_test_plugin".to_string(),
+            Box::new(MyTestPlugin {}) as Box<dyn DynPlugin>,
+        );
+
+        let factory =
+            HttpClientServiceFactory::new(http_service, std::sync::Arc::new(plugins));
+        let client = factory.create("test");
+
+        let req = HttpRequest {
+            http_request: ::http::Request::builder()
+                .uri(format!("http://{socket_addr}/"))
+                .body(body::empty())
+                .unwrap(),
+            context: Context::new(),
+        };
+
+        let response = client.oneshot(req).await.unwrap();
+        assert_eq!(
+            response.http_response.headers().get("x-service-http"),
+            Some(&HeaderValue::from_static("called"))
         );
     }
 
