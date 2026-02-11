@@ -5,6 +5,7 @@ use serde::Serialize;
 use serde::de::Error as _;
 
 use super::query::parse_hir_value;
+use crate::configuration::mode::WarnOrEnforceMode;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
@@ -123,6 +124,7 @@ fn validate_input_value(
     value: Option<&Value>,
     schema: &Schema,
     path: &JsonValuePath<'_>,
+    strict_variable_validation: WarnOrEnforceMode, // todo
 ) -> Result<(), InvalidInputValue> {
     let fmt_path = |var_path: &JsonValuePath<'_>| match var_path {
         JsonValuePath::Variable { .. } => format!("variable `{var_path}`"),
@@ -161,12 +163,24 @@ fn validate_input_value(
                         index: i,
                         parent: path,
                     };
-                    validate_input_value(inner_type, Some(x), schema, &path)?
+                    validate_input_value(
+                        inner_type,
+                        Some(x),
+                        schema,
+                        &path,
+                        strict_variable_validation,
+                    )?
                 }
                 return Ok(());
             } else {
                 // For coercion from single value to list
-                return validate_input_value(inner_type, Some(value), schema, path);
+                return validate_input_value(
+                    inner_type,
+                    Some(value),
+                    schema,
+                    path,
+                    strict_variable_validation,
+                );
             }
         }
     };
@@ -217,7 +231,7 @@ fn validate_input_value(
                 ))
             };
 
-            let unknown = obj.keys().find_map(|k| {
+            let mut unknown_input_fields = obj.keys().filter_map(|k| {
                 let k = k.as_str();
                 if !def.fields.contains_key(k) {
                     Some(k)
@@ -226,8 +240,18 @@ fn validate_input_value(
                 }
             });
 
-            if let Some(unknown) = unknown {
-                return Err(unknown_field(unknown));
+            match strict_variable_validation {
+                WarnOrEnforceMode::Enforce => {
+                    if let Some(field) = unknown_input_fields.next() {
+                        return Err(unknown_field(field));
+                    }
+                }
+                WarnOrEnforceMode::Warn => {
+                    let unknown_fields: Vec<&str> = unknown_input_fields.collect();
+                    if !unknown_fields.is_empty() {
+                        tracing::warn!(variables = ?unknown_fields, "encountered unexpected variable(s)"); // consider just doing first? based on comment at top of fn
+                    }
+                }
             }
 
             // Validate all fields present on def
@@ -242,9 +266,21 @@ fn validate_input_value(
                             .default_value
                             .as_ref()
                             .and_then(|v| parse_hir_value(v));
-                        validate_input_value(&field.ty, default.as_ref(), schema, &path)
+                        validate_input_value(
+                            &field.ty,
+                            default.as_ref(),
+                            schema,
+                            &path,
+                            strict_variable_validation,
+                        )
                     }
-                    value => validate_input_value(&field.ty, value, schema, &path),
+                    value => validate_input_value(
+                        &field.ty,
+                        value,
+                        schema,
+                        &path,
+                        strict_variable_validation,
+                    ),
                 }
             })
         }
@@ -264,8 +300,9 @@ impl FieldType {
         value: Option<&Value>,
         schema: &Schema,
         path: &JsonValuePath<'_>,
+        strict_variable_validation: WarnOrEnforceMode,
     ) -> Result<(), InvalidInputValue> {
-        validate_input_value(&self.0, value, schema, path)
+        validate_input_value(&self.0, value, schema, path, strict_variable_validation)
     }
 
     pub(crate) fn is_non_null(&self) -> bool {

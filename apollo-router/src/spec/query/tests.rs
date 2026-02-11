@@ -2515,7 +2515,7 @@ fn reformat_response_unknown_typename() {
         .test();
 }
 
-macro_rules! run_validation {
+macro_rules! run_validation_enforce_mode {
     ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
         let variables = match $variables {
             Value::Object(object) => object,
@@ -2536,13 +2536,38 @@ macro_rules! run_validation {
             &Default::default(),
         )
         .expect("could not parse query");
-        query.validate_variables(&request, &schema)
+        query.validate_variables(&request, &schema, WarnOrEnforceMode::Enforce)
+    }};
+}
+
+macro_rules! run_validation_warn_mode {
+    ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
+        let variables = match $variables {
+            Value::Object(object) => object,
+            _ => unreachable!("variables must be an object"),
+        };
+        let schema = Schema::parse(&$schema, &Default::default()).expect("could not parse schema");
+        let request = Request::builder()
+            .variables(variables)
+            .query($query.to_string())
+            .build();
+        let query = Query::parse(
+            request
+                .query
+                .as_ref()
+                .expect("query has been added right above; qed"),
+            None,
+            &schema,
+            &Default::default(),
+        )
+        .expect("could not parse query");
+        query.validate_variables(&request, &schema, WarnOrEnforceMode::Warn)
     }};
 }
 
 macro_rules! assert_validation {
     ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-        let res = run_validation!(
+        let res = run_validation_enforce_mode!(
             with_supergraph_boilerplate($schema, "Query"),
             $query,
             $variables
@@ -2553,7 +2578,7 @@ macro_rules! assert_validation {
 
 macro_rules! assert_validation_error {
     ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-        let res = run_validation!(
+        let res = run_validation_enforce_mode!(
             with_supergraph_boilerplate($schema, "Query"),
             $query,
             $variables
@@ -3009,7 +3034,200 @@ fn variable_validation() {
         }
         "#;
 
-    let res = run_validation!(
+    let res = run_validation_enforce_mode!(
+        schema,
+        "mutation foo($input: FooInput!) {
+            foo (input: $input) {
+            __typename
+        }}",
+        json!({"input":{}})
+    );
+    assert!(res.is_ok(), "validation should have succeeded: {res:?}");
+}
+
+#[test]
+fn variable_validation_v2() {
+    let res = run_validation_warn_mode!(
+        with_supergraph_boilerplate(
+            "input MessageInput {
+            content: String
+            author: String
+          }
+          type Receipt {
+              id: ID!
+          }
+          type Query{
+              send(message: MessageInput): Receipt}",
+            "Query"
+        ),
+        "query($msg: MessageInput) {
+            send(message: $msg) {
+                id
+            }}",
+        json!({"msg":  {
+            "content": "Hello",
+            "author": "Me",
+            "unknownField": "unknown",
+        }})
+    );
+    assert!(
+        res.is_ok(),
+        "validation should have warned rather than failed"
+    );
+
+    // Tests if nested inputs are correctly validated
+    let res = run_validation_warn_mode!(
+        with_supergraph_boilerplate(
+            "input MessageInput {
+            content: String
+            author: String
+            canvas: [CanvasInput]
+          }
+        input CanvasInput {
+            input: Int
+          }
+          type Receipt {
+              id: ID!
+          }
+          type Query{
+              send(message: MessageInput): Receipt}",
+            "Query"
+        ),
+        "query($msg: MessageInput) {
+            send(message: $msg) {
+                id
+            }}",
+        json!({"msg":  {
+            "content": "Hello",
+            "author": "Me",
+            "canvas": [
+                {"input": 3},
+                {"input": 4},
+                {"input": 5, "unknownField": "unknown"}
+                ],
+        }})
+    );
+    assert!(
+        res.is_ok(),
+        "validation should have warned rather than failed"
+    );
+
+    // Tests if nested inputs are correctly validated
+    let res = run_validation_warn_mode!(
+        with_supergraph_boilerplate(
+            "
+            input MessageInput {
+                content: String
+                author: String
+                canvas: [CanvasInput]
+            }
+            input CanvasInput {
+                input: Int!
+            }
+            type Receipt {
+                id: ID!
+            }
+            type Query {
+                send(message: MessageInput): Receipt
+            }
+            ",
+            "Query"
+        ),
+        "query($msg: MessageInput) {
+            send(message: $msg) {
+                id
+            }
+        }",
+        json!({"msg": {
+            "content": "Hello",
+            "author": "Me",
+            "canvas": [{"innput": 4}],
+        }})
+    );
+    assert!(res.is_err(), "validation should have failed");
+
+    // Tests if nested inputs are correctly validated
+    let res = run_validation_warn_mode!(
+        with_supergraph_boilerplate(
+            "
+            input MessageInput {
+                content: String
+                author: String
+                canvas: [CanvasInput]
+            }
+            input CanvasInput {
+                input: Int!
+            }
+            type Receipt {
+                id: ID!
+            }
+            type Query {
+                send(message: MessageInput): Receipt
+            }
+            ",
+            "Query"
+        ),
+        "query($msg: MessageInput) {
+            send(message: $msg) {
+                id
+            }
+        }",
+        json!({"msg": {
+            "content": "Hello",
+            "author": "Me",
+            "canvas": [{"input": 3, "innput": 4}],
+        }})
+    );
+    assert!(
+        res.is_ok(),
+        "validation should have warned rather than failed"
+    );
+
+    let schema = r#"
+        schema
+             @link(url: "https://specs.apollo.dev/link/v1.0")
+             @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
+            query: Query
+            mutation: Mutation
+        }
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @join__type( graph: join__Graph!  key: join__FieldSet extension: Boolean! = false resolvable: Boolean! = true isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+        scalar join__FieldSet
+        scalar link__Import
+
+        enum link__Purpose {
+            SECURITY
+            EXECUTION
+        }
+
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        type Mutation{
+            foo(input: FooInput!): FooResponse!
+        }
+        type Query @join__type(graph: TEST){
+            data: String
+        }
+
+        input FooInput {
+          enumWithDefault: EnumWithDefault! = WEB
+        }
+        type FooResponse {
+            id: ID!
+        }
+
+        enum EnumWithDefault {
+          WEB
+          MOBILE
+        }
+        "#;
+
+    let res = run_validation_warn_mode!(
         schema,
         "mutation foo($input: FooInput!) {
             foo (input: $input) {
