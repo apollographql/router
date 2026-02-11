@@ -181,7 +181,6 @@ impl Merger {
                     .keys()
                     .filter_map(|d| {
                         d.specified_argument_by_name(&arg_def.name)
-                            .or(arg_def.default_value.as_ref())
                             .map(|v| v.as_ref())
                     })
                     .cloned()
