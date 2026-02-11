@@ -256,7 +256,7 @@ impl Merger {
         Ok(())
     }
 
-    fn directive_arguments_with_defaults<'dir, 'def>(
+    fn directive_arguments_with_defaults<'dir>(
         &self,
         directive: &'dir Directive,
         definition: &'dir DirectiveDefinition,
