@@ -98,19 +98,19 @@ impl Multipart {
     }
 
     /// Checks if the errors indicate a reload-related termination and returns the appropriate end reason
-    fn detect_reload_end_reason(errors: &[graphql::Error]) -> SubscriptionEndReason {
+    fn detect_reload_end_reason(errors: &[graphql::Error]) -> Option<SubscriptionEndReason> {
         for error in errors {
             match error.extensions.get("code").and_then(|v| v.as_str()) {
                 Some(code) if code == SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE => {
-                    return SubscriptionEndReason::SchemaReload;
+                    return Some(SubscriptionEndReason::SchemaReload);
                 }
                 Some(code) if code == SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE => {
-                    return SubscriptionEndReason::ConfigReload;
+                    return Some(SubscriptionEndReason::ConfigReload);
                 }
                 _ => {}
             }
         }
-        SubscriptionEndReason::ServerClose
+        None
     }
 }
 
@@ -252,7 +252,7 @@ impl Stream for Multipart {
                         response.has_next.unwrap_or(false) || response.subscribed.unwrap_or(false);
 
                     // Check for reload-related termination before errors are moved
-                    let end_reason = Self::detect_reload_end_reason(&response.errors);
+                    let maybe_end_reason = Self::detect_reload_end_reason(&response.errors);
 
                     let mut buf = if self.is_first_chunk {
                         self.is_first_chunk = false;
@@ -310,7 +310,9 @@ impl Stream for Multipart {
                     } else {
                         self.is_terminated = true;
                         self.end_reason = Some(match self.mode {
-                            ProtocolMode::Subscription => EndReason::Subscription(end_reason),
+                            ProtocolMode::Subscription => EndReason::Subscription(
+                                maybe_end_reason.unwrap_or(SubscriptionEndReason::ServerClose),
+                            ),
                             ProtocolMode::Defer => EndReason::Defer(DeferEndReason::Completed),
                         });
                         buf.extend_from_slice(b"\r\n--graphql--\r\n");
