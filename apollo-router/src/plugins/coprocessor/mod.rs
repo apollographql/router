@@ -890,8 +890,15 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
+    // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+    // HttpClientService) intended for subgraph requests, not for the coprocessor
+    // endpoint
+    //
+    // WARN: be careful if you're changing out this context to using the request's context; see
+    // above, but also validate what happens downstream for that context
     let co_processor_result = payload
-        .call(http_client, &coprocessor_url, request.context.clone())
+        .call(http_client, &coprocessor_url, Context::new())
         .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
@@ -1067,12 +1074,15 @@ where
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
+    // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+    // HttpClientService) intended for subgraph requests, not for the coprocessor
+    // endpoint
+    //
+    // WARN: be careful if you're changing out this context to using the request's context; see
+    // above, but also validate what happens downstream for that context
     let co_processor_result = payload
-        .call(
-            http_client.clone(),
-            &coprocessor_url,
-            response.context.clone(),
-        )
+        .call(http_client.clone(), &coprocessor_url, Context::new())
         .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
@@ -1148,12 +1158,15 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
+                // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+                // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+                // HttpClientService) intended for subgraph requests, not for the coprocessor
+                // endpoint
+                //
+                // WARN: be careful if you're changing out this context to using the request's context; see
+                // above, but also validate what happens downstream for that context
                 let co_processor_result = payload
-                    .call(
-                        generator_client,
-                        &generator_coprocessor_url,
-                        generator_map_context.clone(),
-                    )
+                    .call(generator_client, &generator_coprocessor_url, Context::new())
                     .await;
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
@@ -1262,8 +1275,15 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
+    // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+    // HttpClientService) intended for subgraph requests, not for the coprocessor
+    // endpoint
+    //
+    // WARN: be careful if you're changing out this context to using the request's context; see
+    // above, but also validate what happens downstream for that context
     let co_processor_result = payload
-        .call(http_client, &coprocessor_url, request.context.clone())
+        .call(http_client, &coprocessor_url, Context::new())
         .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
@@ -1423,8 +1443,15 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
+    // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+    // HttpClientService) intended for subgraph requests, not for the coprocessor
+    // endpoint
+    //
+    // WARN: be careful if you're changing out this context to using the request's context; see
+    // above, but also validate what happens downstream for that context
     let co_processor_result = payload
-        .call(http_client, &coprocessor_url, response.context.clone())
+        .call(http_client, &coprocessor_url, Context::new())
         .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
