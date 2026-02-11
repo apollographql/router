@@ -1,0 +1,9 @@
+---
+source: apollo-federation/src/connectors/expand/visitors/selection.rs
+expression: target.schema().serialize().to_string()
+---
+union Pet = Cat | Dog
+
+type Query {
+  pet: Pet
+}

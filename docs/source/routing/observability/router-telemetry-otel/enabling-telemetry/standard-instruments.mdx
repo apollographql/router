@@ -39,7 +39,7 @@ The `apollo.router.overhead` histogram provides a more direct measurement of rou
 - Response parsing and composition
 - Plugin execution, including Coprocessors and Rhai scripts
 
-The overhead calculation excludes time spent waiting for downstream HTTP services (subgraphs and connectors), giving you visibility into the router's actual processing time versus downstream latency. This metric helps identify when the router itself is a bottleneck versus when delays are caused by downstream services.
+The default unit is seconds, but this can be changed to other units using [router selectors](/router/configuration/telemetry/instrumentation/selectors#router). The overhead calculation excludes time spent waiting for downstream HTTP services (subgraphs and connectors), giving you visibility into the router's actual processing time versus downstream latency. This metric helps identify when the router itself is a bottleneck versus when delays are caused by downstream services.
 
 Default attributes:
 - `subgraph.active_requests`: A boolean indicating whether any subgraph requests were active at the time the overhead was calculated. This attribute is critical for filtering meaningful overhead measurements.
@@ -155,6 +155,9 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 ## Performance
 
 - `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
+- `apollo.router.request.memory` - Histogram of memory allocated during request processing, in bytes. Tracks memory allocation patterns for the entire request lifecycle, including GraphQL parsing, validation, query planning, response composition, and plugin execution. Attributes:
+  - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
+  - `context`: The context name where the allocation occurred (e.g., `router.request`)
 
 ## Query planning
 
@@ -162,6 +165,9 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
 - `apollo.router.query_planning.plan.evaluated_plans` - Histogram of the number of evaluated query plans.
+- `apollo.router.query_planner.memory` - Histogram of memory allocated during query planning, in bytes. Tracks memory allocation patterns specifically for query planning operations executed in the compute job thread pool. Attributes:
+  - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
+  - `context`: The context name where the allocation occurred (e.g., `query_planning`)
 
 ## Compute jobs
 
@@ -226,7 +232,7 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
 
 </Note>
 
-### Subscriptions
+## Subscriptions
 
 <Tip>
 

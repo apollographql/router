@@ -295,6 +295,9 @@ pub(crate) enum QueryPlannerError {
 
     /// Query planning timed out: {0}
     Timeout(String),
+
+    /// Query planning memory limit exceeded: {0}
+    MemoryLimitExceeded(String),
 }
 
 impl From<FederationErrorBridge> for QueryPlannerError {

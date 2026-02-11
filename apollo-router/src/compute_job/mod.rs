@@ -156,6 +156,7 @@ pub(crate) struct Job {
     ty: ComputeJobType,
     queue_start: Instant,
     job_fn: Box<dyn FnOnce() + Send + 'static>,
+    allocation_stats: Option<std::sync::Arc<crate::allocator::AllocationStats>>,
 }
 
 pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
@@ -193,10 +194,33 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                                 job.type = job.ty
                             );
                             let job_start = Instant::now();
-                            (job.job_fn)();
+
+                            // Execute job with memory tracking if stats are available
+                            if let Some(stats) = job.allocation_stats {
+                                // Create a child context with the job type as the name
+                                let job_name: &'static str = job.ty.into();
+                                crate::allocator::with_parented_memory_tracking(
+                                    job_name,
+                                    stats,
+                                    || {
+                                        (job.job_fn)();
+                                        #[cfg(all(
+                                            feature = "global-allocator",
+                                            not(feature = "dhat-heap"),
+                                            unix
+                                        ))]
+                                        if let Some(allocation_stats) = crate::allocator::current()
+                                        {
+                                            record_metrics(&allocation_stats);
+                                        }
+                                    },
+                                );
+                            } else {
+                                (job.job_fn)();
+                            }
                             observe_compute_duration(job.ty, job_start.elapsed());
                         })
-                    })
+                    });
                 }
             });
         }
@@ -207,6 +231,55 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
         );
         AgeingPriorityQueue::bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
     })
+}
+
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+fn record_metrics(stats: &crate::allocator::AllocationStats) {
+    let bytes_allocated = stats.bytes_allocated() as u64;
+    let bytes_deallocated = stats.bytes_deallocated() as u64;
+    let bytes_zeroed = stats.bytes_zeroed() as u64;
+    let bytes_reallocated = stats.bytes_reallocated() as u64;
+    let context_name = stats.name();
+
+    // Record total bytes allocated
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_allocated,
+        allocation.type = "allocated",
+        context = context_name
+    );
+
+    // Record bytes deallocated
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_deallocated,
+        allocation.type = "deallocated",
+        context = context_name
+    );
+
+    // Record bytes zeroed
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_zeroed,
+        allocation.type = "zeroed",
+        context = context_name
+    );
+
+    // Record bytes reallocated
+    u64_histogram_with_unit!(
+        "apollo.router.query_planner.memory",
+        "Memory allocated during query planning",
+        "By",
+        bytes_reallocated,
+        allocation.type = "reallocated",
+        context = context_name
+    );
 }
 
 task_local! {
@@ -260,6 +333,7 @@ where
             ty: compute_job_type,
             job_fn: wrapped_job_fn,
             queue_start: Instant::now(),
+            allocation_stats: crate::allocator::current(),
         };
 
         queue

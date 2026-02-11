@@ -225,13 +225,15 @@ mod fieldset_based_directives {
 
     #[test]
     fn rejects_non_string_argument_to_key() {
+        // Use a multi-element list which cannot be coerced to a single string
         let schema_str = r#"
             type Query {
                 t: T
             }
 
-            type T @key(fields: ["f"]) {
+            type T @key(fields: ["f", "g"]) {
                 f: Int
+                g: Int
             }
         "#;
         let err = build_for_errors(schema_str);
@@ -240,20 +242,22 @@ mod fieldset_based_directives {
             err,
             [(
                 "KEY_INVALID_FIELDS_TYPE",
-                r#"[S] On type "T", for @key(fields: ["f"]): Invalid value for argument "fields": must be a string."#,
+                r#"[S] On type "T", for @key(fields: ["f", "g"]): Invalid value for argument "fields": must be a string."#,
             )]
         );
     }
 
     #[test]
     fn rejects_non_string_argument_to_provides() {
+        // Use a multi-element list which cannot be coerced to a single string
         let schema_str = r#"
             type Query {
-                t: T @provides(fields: ["f"])
+                t: T @provides(fields: ["f", "g"])
             }
 
             type T {
                 f: Int @external
+                g: Int @external
             }
         "#;
         let err = build_for_errors(schema_str);
@@ -266,11 +270,15 @@ mod fieldset_based_directives {
             [
                 (
                     "PROVIDES_INVALID_FIELDS_TYPE",
-                    r#"[S] On field "Query.t", for @provides(fields: ["f"]): Invalid value for argument "fields": must be a string."#,
+                    r#"[S] On field "Query.t", for @provides(fields: ["f", "g"]): Invalid value for argument "fields": must be a string."#,
                 ),
                 (
                     "EXTERNAL_UNUSED",
                     r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#,
+                ),
+                (
+                    "EXTERNAL_UNUSED",
+                    r#"[S] Field "T.g" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#,
                 ),
             ]
         );
@@ -278,6 +286,7 @@ mod fieldset_based_directives {
 
     #[test]
     fn rejects_non_string_argument_to_requires() {
+        // Use a multi-element list which cannot be coerced to a single string
         let schema_str = r#"
             type Query {
                 t: T
@@ -285,7 +294,8 @@ mod fieldset_based_directives {
 
             type T {
                 f: Int @external
-                g: Int @requires(fields: ["f"])
+                h: Int @external
+                g: Int @requires(fields: ["f", "h"])
             }
         "#;
         let err = build_for_errors(schema_str);
@@ -298,11 +308,15 @@ mod fieldset_based_directives {
             [
                 (
                     "REQUIRES_INVALID_FIELDS_TYPE",
-                    r#"[S] On field "T.g", for @requires(fields: ["f"]): Invalid value for argument "fields": must be a string."#,
+                    r#"[S] On field "T.g", for @requires(fields: ["f", "h"]): Invalid value for argument "fields": must be a string."#,
                 ),
                 (
                     "EXTERNAL_UNUSED",
                     r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#,
+                ),
+                (
+                    "EXTERNAL_UNUSED",
+                    r#"[S] Field "T.h" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#,
                 ),
             ]
         );
@@ -973,7 +987,6 @@ Did you mean "@shareable"?{}"#,
 }
 
 // PORT_NOTE: Corresponds to '@core/@link handling' tests in JS
-#[cfg(test)]
 mod link_handling_tests {
     use similar::TextDiff;
 
@@ -2325,6 +2338,68 @@ mod tag_tests {
                     "[S] Schema element T has invalid @tag directive value '{invalid}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                 )
             )]
+        );
+    }
+}
+
+mod authentication_validations {
+    use apollo_federation::assert_errors;
+    use apollo_federation::subgraph::test_utils::build_for_errors;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case::authenticated("@authenticated", "@authenticated")]
+    #[case::requires_scopes("@requiresScopes", "@requiresScopes(scopes: [[\"scope1\"]])")]
+    #[case::policy("@policy", "@policy(policies: [[\"policy1\"]])")]
+    fn rejects_directive_applications_on_interfaces_and_interface_objects(
+        #[case] directive_name: &str,
+        #[case] directive_string: &str,
+    ) {
+        let schema_str = format!(
+            r###"
+          type Query {{
+            i: I
+            o: O
+          }}
+
+          interface I {directive_string} {{
+            x: Int {directive_string}
+          }}
+
+          type T implements I {{
+            x: Int
+          }}
+
+          type O @key(fields: "id") @interfaceObject {directive_string} {{
+            id: ID!
+            y: Int {directive_string}
+          }}
+        "###
+        );
+
+        let err = build_for_errors(&schema_str);
+        assert_errors!(
+            err,
+            [
+                (
+                    "AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE",
+                    &format!(
+                        r#"[S] Invalid use of {directive_name} on field "I.x": {directive_name} cannot be applied on interfaces, interface fields and interface objects"#
+                    ),
+                ),
+                (
+                    "AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE",
+                    &format!(
+                        r#"[S] Invalid use of {directive_name} on interface "I": {directive_name} cannot be applied on interfaces, interface fields and interface objects"#
+                    ),
+                ),
+                (
+                    "AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE",
+                    &format!(
+                        r#"[S] Invalid use of {directive_name} on interface object "O": {directive_name} cannot be applied on interfaces, interface fields and interface objects"#
+                    ),
+                ),
+            ]
         );
     }
 }

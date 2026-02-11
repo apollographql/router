@@ -13,6 +13,7 @@ use oci_client::Reference;
 use oci_client::client::ClientConfig;
 use oci_client::client::ClientProtocol;
 use oci_client::errors::OciDistributionError;
+use oci_client::errors::OciErrorCode;
 use oci_client::secrets::RegistryAuth;
 use thiserror::Error;
 use tokio::sync::mpsc::channel;
@@ -432,6 +433,7 @@ pub(crate) fn stream_from_oci(
 
     let task = async move {
         let mut last_digest: Option<String> = None;
+        let mut polling_time = oci_config.poll_interval;
         loop {
             match fetch_oci_manifest_digest(&oci_config).await {
                 Ok(current_digest) => {
@@ -441,7 +443,6 @@ pub(crate) fn stream_from_oci(
                     } else {
                         // Digest changed, fetch the full schema
                         tracing::debug!("oci manifest digest changed, fetching schema");
-                        last_digest = Some(current_digest);
 
                         match fetch_oci(&oci_config).await {
                             Ok(oci_result) => {
@@ -455,9 +456,16 @@ pub(crate) fn stream_from_oci(
                                         "failed to push to stream. This is likely to be because the router is shutting down: {e}"
                                     );
                                     break;
+                                } else {
+                                    // Only update the digest if the schema fetch was successful
+                                    last_digest = Some(current_digest);
                                 }
                             }
                             Err(err) => {
+                                if let Some(retry_after) = parse_rate_limit_error(&err) {
+                                    polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
+                                }
+
                                 // Error logging is now handled in fetch_oci
                                 if let Err(e) = sender.send(Err(err)).await {
                                     tracing::debug!(
@@ -470,6 +478,11 @@ pub(crate) fn stream_from_oci(
                     }
                 }
                 Err(err) => {
+                    // It should not be possible to get a rate limit error here since the client will automatically move to a get request if the digest is not found, but just in case
+                    if let Some(retry_after) = parse_rate_limit_error(&err) {
+                        polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
+                    }
+
                     if let Err(e) = sender.send(Err(err)).await {
                         tracing::debug!(
                             "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
@@ -479,12 +492,29 @@ pub(crate) fn stream_from_oci(
                 }
             }
 
-            tokio::time::sleep(oci_config.poll_interval).await;
+            tokio::time::sleep(polling_time).await;
+            polling_time = oci_config.poll_interval;
         }
     };
     drop(tokio::task::spawn(task.with_current_subscriber()));
 
     ReceiverStream::new(receiver).boxed()
+}
+
+fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
+    if let OciError::Distribution(OciDistributionError::RegistryError { envelope, .. }) = error
+        && let Some(error) = envelope
+            .errors
+            .iter()
+            .find(|error| error.code == OciErrorCode::Toomanyrequests)
+    {
+        return error
+            .detail
+            .get("retryAfter")
+            .and_then(|value| value.as_u64())
+            .map(Duration::from_secs);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1486,6 +1516,142 @@ mod tests {
             blob_request_count.load(Ordering::Relaxed),
             2,
             "Both blobs should be fetched when digest changes"
+        );
+    }
+
+    struct SequentialBackoffResponse {
+        responses: Mutex<VecDeque<ResponseTemplate>>,
+    }
+
+    impl Respond for SequentialBackoffResponse {
+        fn respond(&self, _request: &Request) -> ResponseTemplate {
+            self.responses
+                .lock()
+                .pop_front()
+                .expect("should have enough responses")
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_oci_backoff_error_retry() {
+        let mock_server = &MockServer::start().await;
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+
+        let manifest_info = create_manifest_from_schema_layer("test schema", None);
+        let blob_url = Url::parse(&format!(
+            "{}/v2/{graph_id}/blobs/{}",
+            mock_server.uri(),
+            manifest_info.blob_digest
+        ))
+        .expect("url must be valid");
+
+        Mock::given(method("GET"))
+            .and(path(blob_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(manifest_info.schema_data.clone()),
+            )
+            .mount(mock_server)
+            .await;
+
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+
+        // First GET request returns 429 with Retry-After header and OCI error envelope, second returns 200
+        let oci_error_body = serde_json::json!({
+            "errors": [{
+                "code": "TOOMANYREQUESTS",
+                "message": "pull request limit exceeded",
+                "detail": {
+                    "retryAfter": 10
+                }
+            }]
+        });
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .expect(2)
+            .mount(mock_server)
+            .await;
+
+        // GET request for manifest
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(SequentialBackoffResponse {
+                responses: Mutex::new(VecDeque::from([
+                    // First response 429 to rate limit
+                    ResponseTemplate::new(429)
+                        .append_header("Retry-After", "10")
+                        .append_header(http::header::CONTENT_TYPE, "application/json")
+                        .set_body_json(&oci_error_body),
+                    // Second response 200 to return the manifest
+                    ResponseTemplate::new(200)
+                        .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                        .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                        .set_body_bytes(serde_json::to_vec(&manifest_info.oci_manifest).unwrap()),
+                ])),
+            })
+            .mount(mock_server)
+            .await;
+
+        let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid");
+        let oci_config = OciConfig {
+            apollo_key: "test-api-key".to_string(),
+            reference: image_reference.to_string(),
+            hot_reload: true,
+            poll_interval: Duration::from_millis(10),
+        };
+
+        let start_time = tokio::time::Instant::now();
+        let mut stream = stream_from_oci(oci_config);
+
+        // The stream should eventually succeed after the backoff period
+        // Use a timeout to ensure the test completes
+        let result = timeout(Duration::from_secs(20), stream.next()).await;
+        assert!(
+            result.is_ok(),
+            "Stream should produce an error first within timeout"
+        );
+        let first_result = result.unwrap();
+        assert!(
+            first_result.is_some() && first_result.as_ref().unwrap().is_err(),
+            "First result should be an error"
+        );
+
+        let result = timeout(Duration::from_secs(20), stream.next()).await;
+        assert!(
+            result.is_ok(),
+            "Stream should produce a result after the backoff period second within timeout"
+        );
+
+        let elapsed = start_time.elapsed();
+
+        match result.unwrap() {
+            Some(Ok(schema_state)) => {
+                assert_eq!(schema_state.sdl, "test schema");
+            }
+            Some(Err(e)) => panic!("expected success after backoff retry, got error: {e}"),
+            None => panic!("expected stream to yield a result"),
+        }
+
+        // Verify that at least 10 seconds elapsed (the retry_after_secs from Retry-After header)
+        assert!(
+            elapsed >= Duration::from_secs(10),
+            "Should have slept for at least 10 seconds due to backoff, but elapsed time was {:?}",
+            elapsed
         );
     }
 }

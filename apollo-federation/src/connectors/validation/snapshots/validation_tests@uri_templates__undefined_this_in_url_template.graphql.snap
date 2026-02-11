@@ -8,6 +8,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Something.resources`: `$this` doesn't have a field named `blah`",
         locations: [
+            19:39..19:44,
             19:45..19:49,
         ],
     },
@@ -15,6 +16,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Something.resources`: `$this` doesn't have a field named `something`",
         locations: [
+            19:62..19:67,
             19:68..19:77,
         ],
     },
