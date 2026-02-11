@@ -1,6 +1,6 @@
-# Coprocessor http_service example
+# Coprocessor router_http example
 
-This example shows the **http_service** coprocessor stage: the hook that runs at the raw HTTP layer in front of the router (before GraphQL parsing). You can read and mutate request/response headers and body as bytes.
+This example shows the **router_http** coprocessor stage: the hook that runs at the raw HTTP layer in front of the router (before GraphQL parsing). You can read and mutate request/response headers and body as bytes.
 
 The Node.js coprocessor adds the response header `x-http-service-stage: response` so you can verify the hook ran.
 
@@ -52,12 +52,12 @@ The Node.js coprocessor adds the response header `x-http-service-stage: response
    x-http-service-stage: response
    ```
 
-   That confirms the coprocessor’s **http_service** response stage ran and its header was applied to the client response.
+   That confirms the coprocessor’s **router_http** response stage ran and its header was applied to the client response.
 
 ## Config reference
 
 - `coprocessor.url`: address of this coprocessor.
-- `coprocessor.http_service.request`: what to send on the HTTP request stage (e.g. `body`, `headers`).
-- `coprocessor.http_service.response`: what to send on the HTTP response stage (e.g. `body`, `headers`, `status_code`).
+- `coprocessor.router_http.request`: what to send on the HTTP request stage (e.g. `body`, `headers`).
+- `coprocessor.router_http.response`: what to send on the HTTP response stage (e.g. `body`, `headers`, `status_code`).
 
 Payload shape for these stages matches the router request/response externalization format (version, stage, id, headers, body, etc.).

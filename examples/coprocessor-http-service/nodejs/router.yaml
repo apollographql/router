@@ -1,4 +1,4 @@
-# Router config: coprocessor http_service (router front) and service_http (outbound subgraph/connector).
+# Router config: coprocessor router_http (router front) and service_http (outbound subgraph/connector).
 supergraph:
   introspection: true
 sandbox:
@@ -9,7 +9,7 @@ homepage:
 coprocessor:
   url: http://127.0.0.1:3000
   timeout: 5s
-  http_service:
+  router_http:
     request:
       body: true
       headers: true

@@ -723,7 +723,7 @@ impl Service<service_http::HttpRequest> for ServiceHttpRequestLayer {
                         error_details,
                     ));
                 }
-                shared.lock().take().unwrap().into_http_request(req.context)
+                shared.lock().take().unwrap().into_http_request(req.context)?
             } else {
                 let http_request = http::Request::from_parts(
                     parts,
@@ -801,7 +801,7 @@ impl Service<service_http::HttpRequest> for ServiceHttpResponseLayer {
                         error_details,
                     ));
                 }
-                shared.lock().take().unwrap().into_http_response(response.context)
+                shared.lock().take().unwrap().into_http_response(response.context)?
             } else {
                 response
             };
@@ -841,7 +841,7 @@ impl ServiceStep {
                             }
                             let request_opt = shared_request.lock().take();
                             Ok(ControlFlow::Continue(
-                                request_opt.unwrap().into_http_request(),
+                                request_opt.unwrap().into_http_request()?,
                             ))
                         })
                         .service(inner)
@@ -902,7 +902,20 @@ impl ServiceStep {
                                 }
                                 return rhai_http::response_failure(error_details);
                             }
-                            shared_response.lock().take().unwrap().into_http_response()
+                            shared_response
+                                .lock()
+                                .take()
+                                .unwrap()
+                                .into_http_response()
+                                .unwrap_or_else(|e| {
+                                    tracing::error!("failed to build HTTP response: {e}");
+                                    http::Response::builder()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .body(bytes::Bytes::from(
+                                            r#"{"errors":[{"message":"internal error"}]}"#,
+                                        ))
+                                        .expect("minimal 500 response is always valid")
+                                })
                         },
                     )
                     .boxed()

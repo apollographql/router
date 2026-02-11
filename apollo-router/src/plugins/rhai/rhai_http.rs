@@ -36,14 +36,13 @@ impl RhaiHttpRequest {
         }
     }
 
-    pub(crate) fn into_http_request(self) -> http_layer::HttpRequest {
+    pub(crate) fn into_http_request(self) -> Result<http_layer::HttpRequest, BoxError> {
         let mut req = Request::builder()
             .method(self.method)
             .uri(self.uri)
-            .body(Bytes::from(self.body))
-            .expect("valid HTTP request");
+            .body(Bytes::from(self.body))?;
         *req.headers_mut() = self.headers;
-        req
+        Ok(req)
     }
 }
 
@@ -66,13 +65,12 @@ impl RhaiHttpResponse {
         }
     }
 
-    pub(crate) fn into_http_response(self) -> http_layer::HttpResponse {
+    pub(crate) fn into_http_response(self) -> Result<http_layer::HttpResponse, BoxError> {
         let mut res = Response::builder()
             .status(self.status_code)
-            .body(Bytes::from(self.body))
-            .expect("valid HTTP response");
+            .body(Bytes::from(self.body))?;
         *res.headers_mut() = self.headers;
-        res
+        Ok(res)
     }
 }
 
@@ -127,17 +125,19 @@ impl RhaiServiceHttpRequest {
         }
     }
 
-    pub(crate) fn into_http_request(self, context: crate::Context) -> service_http::HttpRequest {
+    pub(crate) fn into_http_request(
+        self,
+        context: crate::Context,
+    ) -> Result<service_http::HttpRequest, BoxError> {
         let mut req = Request::builder()
             .method(self.method)
             .uri(self.uri)
-            .body(router::body::from_bytes(Bytes::from(self.body)))
-            .expect("valid HTTP request");
+            .body(router::body::from_bytes(Bytes::from(self.body)))?;
         *req.headers_mut() = self.headers;
-        service_http::HttpRequest {
+        Ok(service_http::HttpRequest {
             http_request: req,
             context,
-        }
+        })
     }
 }
 
@@ -158,23 +158,28 @@ impl RhaiServiceHttpResponse {
         }
     }
 
-    pub(crate) fn into_http_response(self, context: crate::Context) -> service_http::HttpResponse {
+    pub(crate) fn into_http_response(
+        self,
+        context: crate::Context,
+    ) -> Result<service_http::HttpResponse, BoxError> {
         let mut res = Response::builder()
             .status(self.status_code)
-            .body(router::body::from_bytes(Bytes::from(self.body)))
-            .expect("valid HTTP response");
+            .body(router::body::from_bytes(Bytes::from(self.body)))?;
         *res.headers_mut() = self.headers;
-        service_http::HttpResponse {
+        Ok(service_http::HttpResponse {
             http_response: res,
             context,
-        }
+        })
     }
 }
 
 /// Build an HTTP layer error response for response-stage failures.
 pub(super) fn response_failure(error_details: ErrorDetails) -> http_layer::HttpResponse {
     let body_str = if let Some(graphql_body) = error_details.body {
-        serde_json::to_string(&graphql_body).unwrap_or_default()
+        serde_json::to_string(&graphql_body).unwrap_or_else(|e| {
+            tracing::error!("failed to serialize error response: {e}");
+            r#"{"errors":[{"message":"Internal error"}]}"#.to_string()
+        })
     } else {
         let err = Error::builder()
             .message(error_details.message.unwrap_or_default())
@@ -184,7 +189,10 @@ pub(super) fn response_failure(error_details: ErrorDetails) -> http_layer::HttpR
                 .errors(vec![err])
                 .build(),
         )
-        .unwrap_or_default()
+        .unwrap_or_else(|e| {
+            tracing::error!("failed to serialize error response: {e}");
+            r#"{"errors":[{"message":"Internal error"}]}"#.to_string()
+        })
     };
     Response::builder()
         .status(error_details.status)
@@ -199,7 +207,10 @@ pub(super) fn service_http_response_failure(
     error_details: ErrorDetails,
 ) -> service_http::HttpResponse {
     let body_str = if let Some(graphql_body) = error_details.body {
-        serde_json::to_string(&graphql_body).unwrap_or_default()
+        serde_json::to_string(&graphql_body).unwrap_or_else(|e| {
+            tracing::error!("failed to serialize error response: {e}");
+            r#"{"errors":[{"message":"Internal error"}]}"#.to_string()
+        })
     } else {
         let err = Error::builder()
             .message(error_details.message.unwrap_or_default())
@@ -209,7 +220,10 @@ pub(super) fn service_http_response_failure(
                 .errors(vec![err])
                 .build(),
         )
-        .unwrap_or_default()
+        .unwrap_or_else(|e| {
+            tracing::error!("failed to serialize error response: {e}");
+            r#"{"errors":[{"message":"Internal error"}]}"#.to_string()
+        })
     };
     let http_response = Response::builder()
         .status(error_details.status)

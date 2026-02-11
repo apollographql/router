@@ -603,7 +603,7 @@ where
     }
 
     fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService {
-        let http_service_config = &self.configuration.http_service;
+        let http_service_config = &self.configuration.router_http;
         let run_request = http_service_config.request != RouterRequestConf::default();
         let run_response = http_service_config.response != RouterResponseConf::default();
         if !run_request && !run_response {
@@ -833,9 +833,9 @@ struct Conf {
     /// Response validation defaults to true
     #[serde(default = "default_response_validation")]
     response_validation: bool,
-    /// The http_service stage request/response configuration (runs at http_service plugin hook)
-    #[serde(default)]
-    http_service: HttpServiceStage,
+    /// The router_http stage request/response configuration (runs at http_service plugin hook)
+    #[serde(default, rename = "router_http", alias = "http_service")]
+    router_http: HttpServiceStage,
     /// The router stage request/response configuration
     #[serde(default)]
     router: RouterStage,
@@ -1331,8 +1331,9 @@ where
     let mut co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterHttpRequest)?;
-    // Safe: validate_coprocessor_output guarantees control is Some.
-    let control = co_processor_output.control.expect("validated above; qed");
+    let control = co_processor_output.control.ok_or_else(|| {
+        BoxError::from("validate_coprocessor_output ensures control is Some for Request stages; invariant violated")
+    })?;
 
     if matches!(control, Control::Break(_)) {
         let code = control.get_http_status()?;
@@ -1485,8 +1486,9 @@ where
     let mut co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
-    // unwrap is safe here because validate_coprocessor_output made sure control is available
-    let control = co_processor_output.control.expect("validated above; qed");
+    let control = co_processor_output.control.ok_or_else(|| {
+        BoxError::from("validate_coprocessor_output ensures control is Some for Request stages; invariant violated")
+    })?;
 
     // Thirdly, we need to interpret the control flow which may have been
     // updated by our co-processor and decide if we should proceed or stop.
@@ -1805,8 +1807,9 @@ where
 
     let mut co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::ServiceHttpRequest)?;
-    // Safe: validate_coprocessor_output guarantees control is Some.
-    let control = co_processor_output.control.expect("validated above; qed");
+    let control = co_processor_output.control.ok_or_else(|| {
+        BoxError::from("validate_coprocessor_output ensures control is Some for Request stages; invariant violated")
+    })?;
 
     if matches!(control, Control::Break(_)) {
         let code = control.get_http_status()?;
@@ -2206,8 +2209,9 @@ where
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
-    // unwrap is safe here because validate_coprocessor_output made sure control is available
-    let control = co_processor_output.control.expect("validated above; qed");
+    let control = co_processor_output.control.ok_or_else(|| {
+        BoxError::from("validate_coprocessor_output ensures control is Some for Request stages; invariant violated")
+    })?;
 
     // Thirdly, we need to interpret the control flow which may have been
     // updated by our co-processor and decide if we should proceed or stop.

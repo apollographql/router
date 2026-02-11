@@ -1,8 +1,8 @@
-# Coprocessor with only http_service stage (router front HTTP hook).
+# Coprocessor with only router_http stage (router front HTTP hook).
 # Used by test_coprocessor_http_service_stage to verify the hook runs in the real binary.
 coprocessor:
   url: "<replace>"
-  http_service:
+  router_http:
     request:
       body: true
       headers: true

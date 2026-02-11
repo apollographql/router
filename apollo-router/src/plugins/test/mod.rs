@@ -251,7 +251,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     }
 
     /// Used by tests in this module; harness is compiled for non-test builds.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Test harness method; only called from #[cfg(test)] code.
     pub(crate) fn service_http<F>(
         &self,
         service_name: &str,

@@ -854,10 +854,12 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService;
 
-    /// Raw HTTP layer in front of the router (after license/rate-limit).
+    /// Incoming HTTP layer in front of the router (after license/rate-limit).
+    /// Use for customizations that need raw HTTP (method, URI, headers, body as bytes) before GraphQL parsing.
     fn http_service(&self, service: http_layer::BoxService) -> http_layer::BoxService;
 
-    /// Outer hook around outbound service HTTP (subgraphs and connectors; no internal plugins between hook and wire).
+    /// Outgoing HTTP layer for subgraphs and connectors.
+    /// Use for customizations that need to mutate outbound HTTP requests/responses to subgraphs. No internal plugins between this hook and the wire.
     #[allow(private_interfaces)]
     fn service_http(
         &self,

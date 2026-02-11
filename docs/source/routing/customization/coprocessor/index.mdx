@@ -124,19 +124,19 @@ coprocessor:
 
 This enables targeted coprocessors for individual stages.
 
-### Configure the HTTP layer (http_service) stage
+### Configure the HTTP layer (router_http) stage
 
-You can run the coprocessor at the **HTTP layer** (before RouterService) by configuring `http_service`:
+You can run the coprocessor at the **HTTP layer** (before RouterService) by configuring `router_http`:
 
-- **`coprocessor.http_service.request`** – Same structure as `router.request`: `headers`, `body`, `context`, `path`, `method`, `sdl`, `condition`, and optional `url`. When set, the router sends a coprocessor request at the **HttpRequest** stage when it receives the raw HTTP request.
-- **`coprocessor.http_service.response`** – Same structure as `router.response`: `headers`, `body`, `context`, `sdl`, `status_code`, `condition`, and optional `url`. When set, the router sends a coprocessor request at the **HttpResponse** stage when it has the raw HTTP response to send to the client.
+- **`coprocessor.router_http.request`** – Same structure as `router.request`: `headers`, `body`, `context`, `path`, `method`, `sdl`, `condition`, and optional `url`. When set, the router sends a coprocessor request at the **HttpRequest** stage when it receives the raw HTTP request.
+- **`coprocessor.router_http.response`** – Same structure as `router.response`: `headers`, `body`, `context`, `sdl`, `status_code`, `condition`, and optional `url`. When set, the router sends a coprocessor request at the **HttpResponse** stage when it has the raw HTTP response to send to the client.
 
 Example:
 
 ```yaml title="router.yaml"
 coprocessor:
   url: http://127.0.0.1:8081
-  http_service:
+  router_http:
     request:
       headers: true
       body: true

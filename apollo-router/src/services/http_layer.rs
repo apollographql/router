@@ -54,8 +54,8 @@ pub type HttpResponse = Response<Bytes>;
 /// calls the router, and converts the response to `HttpResponse`.
 pub type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 
-/// Extension trait to allow cloning the service type for use in layers.
-#[allow(dead_code)]
+/// Extension trait for future layer composition; used via trait bounds.
+#[allow(dead_code)] // Trait reserved for HttpLayerService extension; no direct use yet.
 pub(crate) trait HttpLayerService:
     Service<HttpRequest, Response = HttpResponse, Error = BoxError> + Send + 'static
 {

@@ -2,7 +2,7 @@
 coprocessor:
   url: http://127.0.0.1:8081 # Required. Replace with the URL of your coprocessor's HTTP endpoint.
   timeout: 2s # The timeout for all coprocessor requests. Defaults to 1 second (1s)
-  http_service: # This coprocessor hooks into the HTTP layer (before RouterService)
+  router_http: # This coprocessor hooks into the HTTP layer (before RouterService)
     request: # HttpRequest stage: when the router receives the raw HTTP request
       headers: true
       body: false
