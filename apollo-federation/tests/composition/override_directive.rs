@@ -945,7 +945,7 @@ mod progressive_override {
           name: String!
           type: String!
           context: String!
-          selection: join__FieldValue
+          selection: join__FieldValue!
         }
 
         type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
