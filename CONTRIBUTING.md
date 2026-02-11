@@ -42,6 +42,16 @@ XTASKs:
 
 After you have opened your PR and all of the status checks are passing, please assign it to one of the maintainers (found in the bottom of [the README](./README.md#contributing) who will review it and give feedback.
 
+## Changesets
+
+Every PR that changes user-facing behavior needs a changeset entry for the changelog. From the repository root, run:
+
+```bash
+cargo xtask changeset create
+```
+
+Then follow the prompts to classify your change (feature, fix, breaking, etc.) and add a description. The tool can use the GitHub CLI to pre-populate from your PR title and body. Add, commit, and push the generated file from `.changesets/` with your PR. See [`.changesets/README.md`](./.changesets/README.md) for conventions and format details.
+
 # Code of Conduct
 
 The project has a [Code of Conduct] that _all_ contributors are expected to follow. This code describes the _minimum_
