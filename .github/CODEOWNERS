@@ -4,6 +4,6 @@
 /apollo-router/ @apollographql/graphos
 /apollo-router/src/plugins/connectors @apollographql/orchestration-language
 /apollo-router/src/plugins/fleet_detector.rs @apollographql/runtime-readiness
-/apollo-router-benchmarks/ @apollographql/router-core @apollographql/orchestration-language
+/apollo-router-benchmarks/ @apollographql/graphos @apollographql/orchestration-language
 /examples/ @apollographql/graphos
 /.github/CODEOWNERS @apollographql/graphos
