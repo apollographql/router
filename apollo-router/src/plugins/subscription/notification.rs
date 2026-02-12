@@ -37,7 +37,7 @@ static NOTIFY_CHANNEL_SIZE: usize = 1024;
 static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
 
 #[derive(Error, Debug)]
-pub(crate) enum NotifyError<K, V> {
+pub enum NotifyError<K, V> {
     #[error("cannot receive data from pubsub")]
     RecvError(#[from] RecvError),
     #[error("cannot send data to pubsub")]
@@ -52,19 +52,19 @@ pub(crate) enum NotifyError<K, V> {
     UnknownTopic,
 }
 
-type ResponseSender<V> =
+pub type ResponseSender<V> =
     oneshot::Sender<Option<(broadcast::Sender<Option<V>>, broadcast::Receiver<Option<V>>)>>;
 
-pub(crate) struct CreatedTopicPayload<V> {
-    msg_sender: broadcast::Sender<Option<V>>,
-    msg_receiver: broadcast::Receiver<Option<V>>,
-    closing_signal: broadcast::Receiver<()>,
-    created: bool,
+pub struct CreatedTopicPayload<V> {
+    pub msg_sender: broadcast::Sender<Option<V>>,
+    pub msg_receiver: broadcast::Receiver<Option<V>>,
+    pub closing_signal: broadcast::Receiver<()>,
+    pub created: bool,
 }
 
-type ResponseSenderWithCreated<V> = oneshot::Sender<CreatedTopicPayload<V>>;
+pub type ResponseSenderWithCreated<V> = oneshot::Sender<CreatedTopicPayload<V>>;
 
-pub(crate) enum Notification<K, V> {
+pub enum Notification<K, V> {
     CreateOrSubscribe {
         topic: K,
         // Sender connected to the original source stream
@@ -270,7 +270,7 @@ where
     /// 4. This updates each valid subscription's timestamp via `touch()`
     /// 5. The TTL checker uses these timestamps to determine if subscriptions are alive
     ///    and closes those that haven't been touched within the TTL period
-    pub(crate) async fn create_or_subscribe(
+    pub async fn create_or_subscribe(
         &mut self,
         topic: K,
         heartbeat_enabled: bool,
@@ -306,7 +306,7 @@ where
         Ok((handle, created, closing_signal))
     }
 
-    pub(crate) async fn subscribe(&mut self, topic: K) -> Result<Handle<K, V>, NotifyError<K, V>> {
+    pub async fn subscribe(&mut self, topic: K) -> Result<Handle<K, V>, NotifyError<K, V>> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
@@ -529,14 +529,14 @@ where
         }
     }
 
-    pub(crate) fn into_stream(self) -> HandleStream<K, V> {
+    pub fn into_stream(self) -> HandleStream<K, V> {
         HandleStream {
             handle_guard: self.handle_guard,
             msg_receiver: self.msg_receiver,
         }
     }
 
-    pub(crate) fn into_sink(self) -> HandleSink<K, V> {
+    pub fn into_sink(self) -> HandleSink<K, V> {
         HandleSink {
             handle_guard: self.handle_guard,
             msg_sender: self.msg_sender,
@@ -613,7 +613,7 @@ where
     V: Clone + 'static + Send,
 {
     /// Send data to the subscribed topic
-    pub(crate) fn send_sync(&mut self, data: V) -> Result<(), NotifyError<K, V>> {
+    pub fn send_sync(&mut self, data: V) -> Result<(), NotifyError<K, V>> {
         self.msg_sender.send(data.into()).map_err(|err| {
             NotifyError::BroadcastSendError(broadcast::error::SendError(err.0.unwrap()))
         })?;
