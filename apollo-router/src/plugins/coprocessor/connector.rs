@@ -346,7 +346,7 @@ where
         return Ok(ControlFlow::Break(res));
     }
 
-    // Continue flow - apply modifications
+    // Continue flow - apply modifications: Body, headers, uri, and context.
     let new_body = match co_processor_output.body {
         Some(Value::String(s)) => s.as_str().to_owned(),
         Some(other) => other.to_string(),
