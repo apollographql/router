@@ -1,9 +1,8 @@
 /docs/ @apollographql/docs
-/.changesets/ @apollographql/docs
-/apollo-federation/ @apollographql/orchestration-language @apollographql/rust-platform
-/apollo-router/ @apollographql/router-core
+/apollo-federation/ @apollographql/orchestration-language
+/apollo-router/ @apollographql/graphos
 /apollo-router/src/plugins/connectors @apollographql/orchestration-language
 /apollo-router/src/plugins/fleet_detector.rs @apollographql/runtime-readiness
-/apollo-router-benchmarks/ @apollographql/router-core @apollographql/orchestration-language
-/examples/ @apollographql/router-core
-/.github/CODEOWNERS @apollographql/router-core @apollographql/fed-core
+/apollo-router-benchmarks/ @apollographql/graphos @apollographql/orchestration-language
+/examples/ @apollographql/graphos
+/.github/CODEOWNERS @apollographql/graphos
