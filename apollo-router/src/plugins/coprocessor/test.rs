@@ -54,6 +54,9 @@ pub(crate) fn assert_coprocessor_operations_metrics(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
     use futures::future::BoxFuture;
     use http::HeaderMap;
     use http::HeaderValue;
@@ -66,8 +69,6 @@ mod tests {
     use router::body::RouterBody;
     use serde_json_bytes::json;
     use services::subgraph::SubgraphRequestId;
-    use std::collections::HashMap;
-    use std::sync::Arc;
     use tower::BoxError;
     use tower::ServiceExt;
 
