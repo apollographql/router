@@ -2540,29 +2540,31 @@ macro_rules! run_validation_enforce_mode {
     }};
 }
 
-macro_rules! run_validation_warn_mode {
-    ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-        let variables = match $variables {
-            Value::Object(object) => object,
-            _ => unreachable!("variables must be an object"),
-        };
-        let schema = Schema::parse(&$schema, &Default::default()).expect("could not parse schema");
-        let request = Request::builder()
-            .variables(variables)
-            .query($query.to_string())
-            .build();
-        let query = Query::parse(
-            request
-                .query
-                .as_ref()
-                .expect("query has been added right above; qed"),
-            None,
-            &schema,
-            &Default::default(),
-        )
-        .expect("could not parse query");
-        query.validate_variables(&request, &schema, WarnOrEnforceMode::Warn)
-    }};
+fn run_validation_warn_mode(
+    schema: String,
+    query: &str,
+    variables: serde_json_bytes::Value,
+) -> Result<(), Response> {
+    let variables = match variables {
+        Value::Object(object) => object,
+        _ => unreachable!("variables must be an object"),
+    };
+    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
+    let request = Request::builder()
+        .variables(variables)
+        .query(query.to_string())
+        .build();
+    let query = Query::parse(
+        request
+            .query
+            .as_ref()
+            .expect("query has been added right above; qed"),
+        None,
+        &schema,
+        &Default::default(),
+    )
+    .expect("could not parse query");
+    query.validate_variables(&request, &schema, WarnOrEnforceMode::Warn)
 }
 
 macro_rules! assert_validation {
@@ -3046,8 +3048,9 @@ fn variable_validation() {
 }
 
 #[test]
-fn variable_validation_v2() {
-    let res = run_validation_warn_mode!(
+fn variable_validation_warn_mode() {
+    // Tests validation of variable fields
+    let res = run_validation_warn_mode(
         with_supergraph_boilerplate(
             "input MessageInput {
             content: String
@@ -3058,7 +3061,7 @@ fn variable_validation_v2() {
           }
           type Query{
               send(message: MessageInput): Receipt}",
-            "Query"
+            "Query",
         ),
         "query($msg: MessageInput) {
             send(message: $msg) {
@@ -3068,7 +3071,7 @@ fn variable_validation_v2() {
             "content": "Hello",
             "author": "Me",
             "unknownField": "unknown",
-        }})
+        }}),
     );
     assert!(
         res.is_ok(),
@@ -3076,7 +3079,7 @@ fn variable_validation_v2() {
     );
 
     // Tests if nested inputs are correctly validated
-    let res = run_validation_warn_mode!(
+    let res = run_validation_warn_mode(
         with_supergraph_boilerplate(
             "input MessageInput {
             content: String
@@ -3091,7 +3094,7 @@ fn variable_validation_v2() {
           }
           type Query{
               send(message: MessageInput): Receipt}",
-            "Query"
+            "Query",
         ),
         "query($msg: MessageInput) {
             send(message: $msg) {
@@ -3105,7 +3108,7 @@ fn variable_validation_v2() {
                 {"input": 4},
                 {"input": 5, "unknownField": "unknown"}
                 ],
-        }})
+        }}),
     );
     assert!(
         res.is_ok(),
@@ -3113,7 +3116,7 @@ fn variable_validation_v2() {
     );
 
     // Tests if nested inputs are correctly validated
-    let res = run_validation_warn_mode!(
+    let res = run_validation_warn_mode(
         with_supergraph_boilerplate(
             "
             input MessageInput {
@@ -3131,7 +3134,7 @@ fn variable_validation_v2() {
                 send(message: MessageInput): Receipt
             }
             ",
-            "Query"
+            "Query",
         ),
         "query($msg: MessageInput) {
             send(message: $msg) {
@@ -3142,12 +3145,12 @@ fn variable_validation_v2() {
             "content": "Hello",
             "author": "Me",
             "canvas": [{"innput": 4}],
-        }})
+        }}),
     );
     assert!(res.is_err(), "validation should have failed");
 
     // Tests if nested inputs are correctly validated
-    let res = run_validation_warn_mode!(
+    let res = run_validation_warn_mode(
         with_supergraph_boilerplate(
             "
             input MessageInput {
@@ -3165,7 +3168,7 @@ fn variable_validation_v2() {
                 send(message: MessageInput): Receipt
             }
             ",
-            "Query"
+            "Query",
         ),
         "query($msg: MessageInput) {
             send(message: $msg) {
@@ -3176,7 +3179,7 @@ fn variable_validation_v2() {
             "content": "Hello",
             "author": "Me",
             "canvas": [{"input": 3, "innput": 4}],
-        }})
+        }}),
     );
     assert!(
         res.is_ok(),
@@ -3227,13 +3230,13 @@ fn variable_validation_v2() {
         }
         "#;
 
-    let res = run_validation_warn_mode!(
-        schema,
+    let res = run_validation_warn_mode(
+        schema.to_string(),
         "mutation foo($input: FooInput!) {
             foo (input: $input) {
             __typename
         }}",
-        json!({"input":{}})
+        json!({"input":{}}),
     );
     assert!(res.is_ok(), "validation should have succeeded: {res:?}");
 }
