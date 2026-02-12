@@ -50,8 +50,7 @@ macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
         match $object.remove($key) {
             Some($pattern) => Ok(Some($var)),
-            Some(crate::json_ext::Value::Null) => Ok(None),
-            None => Ok(None),
+            None | Some(crate::json_ext::Value::Null) => Ok(None),
             _ => Err(concat!("invalid type for key: ", $key)),
         }
     }};
