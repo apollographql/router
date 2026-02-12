@@ -60,7 +60,7 @@ flowchart TB;
 
 This diagram shows request execution proceeding "down" from a client, through the router, to individual subgraphs. Execution then proceeds back "up" to the client in the reverse order.
 
-As shown in the diagram above, the `RouterService`, `SupergraphService`, `ExecutionService`, `SubgraphService`, and `ConnectorRequestService` steps of the [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
+As shown in the diagram, the `RouterService`, `SupergraphService`, `ExecutionService`, `SubgraphService`, and `ConnectorRequestService` steps of the [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle) can send these POST requests (also called "coprocessor requests").
 
 Each supported service can send its coprocessor requests at two different **stages**:
 
@@ -78,7 +78,7 @@ If your coprocessor hooks into your router's `SubgraphService`, the router sends
 
 ### Multiple requests with `ConnectorRequestService`
 
-If your coprocessor hooks into your router's `ConnectorRequestService`, the router sends a separate coprocessor request _for each connector HTTP request._ If your router needs to make multiple REST API calls via [connectors](/graphos/schema-design/connectors/) to resolve a client operation, it sends a separate coprocessor request for each one. Each coprocessor request includes the connector source [name](#servicename) and the target [URL](#uri).
+If your coprocessor hooks into your router's `ConnectorRequestService`, the router sends a separate coprocessor request _for each connector HTTP request_. If your router makes multiple REST API calls via [connectors](/graphos/schema-design/connectors/) to resolve a client operation, it sends a separate coprocessor request for each call. Each coprocessor request includes the connector source [name](#servicename) and the target [URL](#uri).
 
 ## Setup
 
