@@ -281,9 +281,9 @@ telemetry:
               active_subgraph_requests: count
 ```
 
-### Capturing HTTP client request and response headers
+### Capture HTTP client request and response headers
 
-The `request_header` and `response_header` selectors on `http_client` spans let you capture headers from the actual HTTP requests sent to subgraphs and REST services. Because `http_client` executes after Rhai scripts, these selectors observe any headers added by scripts.
+Use the `request_header` and `response_header` selectors on `http_client` spans to capture headers from HTTP requests sent to subgraphs and REST services. Because `http_client` executes after Rhai scripts, these selectors observe headers added by scripts.
 
 ```yaml title="router.yaml"
 telemetry:
