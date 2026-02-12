@@ -297,7 +297,9 @@ impl Plugin for Subscription {
         service: crate::services::subgraph::BoxService,
     ) -> crate::services::subgraph::BoxService {
         let enabled = self.config.enabled
-            && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
+            && (self.config.mode.callback.is_some()
+                || self.config.mode.passthrough.is_some()
+                || self.config.mode.custom.is_some());
         ServiceBuilder::new()
             .checkpoint(move |req: SubgraphRequest| {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
