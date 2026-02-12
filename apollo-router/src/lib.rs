@@ -43,7 +43,7 @@ macro_rules! failfast_error {
 }
 
 #[macro_use]
-mod json_ext;
+pub mod json_ext;
 #[macro_use]
 pub mod plugin;
 
@@ -68,13 +68,13 @@ mod introspection;
 pub mod layers;
 pub(crate) mod logging;
 mod orbiter;
-mod plugins;
+pub mod plugins;
 pub(crate) mod protocols;
 mod query_planner;
 mod router;
 mod router_factory;
 pub mod services;
-pub(crate) mod spec;
+pub mod spec;
 mod state_machine;
 pub mod test_harness;
 pub mod tracer;

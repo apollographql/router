@@ -21,7 +21,7 @@ use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
 /// A JSON object.
-pub(crate) type Object = Map<ByteString, Value>;
+pub type Object = Map<ByteString, Value>;
 
 const FRAGMENT_PREFIX: &str = "... on ";
 
@@ -50,7 +50,8 @@ macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
         match $object.remove($key) {
             Some($pattern) => Ok(Some($var)),
-            None | Some(crate::json_ext::Value::Null) => Ok(None),
+            Some(crate::json_ext::Value::Null) => Ok(None),
+            None => Ok(None),
             _ => Err(concat!("invalid type for key: ", $key)),
         }
     }};
