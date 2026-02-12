@@ -270,7 +270,7 @@ telemetry:
 
 The `http_client` span is created for each HTTP request to a subgraph or REST service. It executes after any [Rhai scripts](/router/customizations/rhai) that modify subgraph requests, so its selectors can observe headers added by scripts.
 
-Custom attributes can be extracted from request and response headers using the `request_header` and `response_header` [selectors](/router/configuration/telemetry/instrumentation/selectors).
+Extract custom attributes from request and response headers using the `request_header` and `response_header` [selectors](/router/configuration/telemetry/instrumentation/selectors).
 
 ```yaml title="router.yaml"
 telemetry:
