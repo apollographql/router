@@ -125,7 +125,7 @@ enum EndReason {
 /// Reasons why a subscription ended
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SubscriptionEndReason {
-    /// Server closed the connection gracefully
+    /// Server closed the connection successfully
     ServerClose,
     /// Stream source ended (e.g., subgraph closed the connection)
     StreamEnd,
@@ -413,7 +413,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscription_end_reason_server_close_empty_response() {
-        // Test: Server closes connection gracefully (empty response)
+        // Test: Server closes connection successfully (empty response)
         let (_guard, layer) = setup_tracing();
         let span = tracing::info_span!("test_span");
         let span_guard = span.enter();
@@ -423,7 +423,7 @@ mod tests {
                 .data(serde_json_bytes::Value::String(ByteString::from("data")))
                 .subscribed(true)
                 .build(),
-            // Empty response signals server-side graceful close
+            // Empty response signals server-side close
             graphql::Response::builder().build(),
         ];
         let gql_responses = stream::iter(responses);
@@ -459,7 +459,7 @@ mod tests {
                 .build(),
             graphql::Response::builder()
                 .data(serde_json_bytes::Value::String(ByteString::from("final")))
-                .subscribed(false) // Graceful close with final data
+                .subscribed(false) // Server close with final data
                 .build(),
         ];
         let gql_responses = stream::iter(responses);
