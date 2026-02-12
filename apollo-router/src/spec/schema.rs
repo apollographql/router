@@ -34,7 +34,7 @@ use crate::query_planner::OperationKind;
 use crate::uplink::schema::SchemaState;
 
 /// A GraphQL schema.
-pub(crate) struct Schema {
+pub struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     supergraph: Supergraph,
     subgraphs: HashMap<String, Uri>,
@@ -50,7 +50,7 @@ pub(crate) struct Schema {
 pub(crate) struct ApiSchema(pub(crate) ValidFederationSchema);
 
 impl Schema {
-    pub(crate) fn parse(raw_sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
+    pub fn parse(raw_sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
         Self::parse_arc(raw_sdl.parse::<SchemaState>().unwrap().into(), config)
     }
 
@@ -189,7 +189,7 @@ impl Schema {
         &self.supergraph
     }
 
-    pub(crate) fn supergraph_schema(&self) -> &Valid<apollo_compiler::Schema> {
+    pub fn supergraph_schema(&self) -> &Valid<apollo_compiler::Schema> {
         self.supergraph.schema.schema()
     }
 
@@ -199,7 +199,7 @@ impl Schema {
     }
 
     /// Extracts a string containing the entire [`Schema`].
-    pub(crate) fn as_string(&self) -> &Arc<String> {
+    pub fn as_string(&self) -> &Arc<String> {
         &self.raw_sdl
     }
 
@@ -225,7 +225,7 @@ impl Schema {
     }
 
     // given two field, returns the one that implements the other, if applicable
-    pub(crate) fn most_precise<'f>(&self, a: &'f str, b: &'f str) -> Option<&'f str> {
+    pub fn most_precise<'f>(&self, a: &'f str, b: &'f str) -> Option<&'f str> {
         let typename_a = a;
         let typename_b = b;
         if typename_a == typename_b {
@@ -259,7 +259,7 @@ impl Schema {
         &self.api_schema
     }
 
-    pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
+    pub fn root_operation_name(&self, kind: OperationKind) -> &str {
         if let Some(name) = self.supergraph_schema().root_operation(kind.into()) {
             name.as_str()
         } else {
