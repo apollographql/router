@@ -821,3 +821,73 @@ async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
     router.graceful_shutdown().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connector_coprocessor_failure_returns_graphql_error() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Set up a coprocessor that returns a 500 error for connector stages
+    let mock_coprocessor = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&mock_coprocessor)
+        .await;
+
+    let config = format!(
+        r#"
+        include_subgraph_errors:
+            all: true
+        coprocessor:
+            url: {}
+            connector:
+                all:
+                    request:
+                        body: true
+        "#,
+        mock_coprocessor.uri()
+    );
+
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "title": "Awesome post",
+            "body": "This is a really great post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query { posts { id title } }"}))
+                .build(),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+
+    let body = response.json::<serde_json::Value>().await?;
+    assert!(
+        body.get("errors")
+            .and_then(|e| e.as_array())
+            .is_some_and(|errors| !errors.is_empty()),
+        "expected GraphQL errors in response body, got: {body}"
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
