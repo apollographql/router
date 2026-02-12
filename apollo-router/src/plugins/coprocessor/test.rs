@@ -54,23 +54,6 @@ pub(crate) fn assert_coprocessor_operations_metrics(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::str::FromStr;
-    use std::sync::Arc;
-    use std::sync::Mutex;
-
-    use apollo_compiler::name;
-    use apollo_federation::connectors::ConnectId;
-    use apollo_federation::connectors::ConnectSpec;
-    use apollo_federation::connectors::Connector;
-    use apollo_federation::connectors::HttpJsonTransport;
-    use apollo_federation::connectors::JSONSelection;
-    use apollo_federation::connectors::SourceName;
-    use apollo_federation::connectors::StringTemplate;
-    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
-    use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-    use apollo_federation::connectors::runtime::key::ResponseKey;
-    use apollo_federation::connectors::runtime::responses::MappedResponse;
     use futures::future::BoxFuture;
     use http::HeaderMap;
     use http::HeaderValue;
@@ -83,6 +66,8 @@ mod tests {
     use router::body::RouterBody;
     use serde_json_bytes::json;
     use services::subgraph::SubgraphRequestId;
+    use std::collections::HashMap;
+    use std::sync::Arc;
     use tower::BoxError;
     use tower::ServiceExt;
 
@@ -100,9 +85,6 @@ mod tests {
     use crate::plugins::coprocessor::RouterResponseConf;
     use crate::plugins::coprocessor::SubgraphRequestConf;
     use crate::plugins::coprocessor::SubgraphResponseConf;
-    use crate::plugins::coprocessor::connector::ConnectorRequestConf;
-    use crate::plugins::coprocessor::connector::ConnectorResponseConf;
-    use crate::plugins::coprocessor::connector::ConnectorStage;
     use crate::plugins::coprocessor::handle_graphql_response;
     use crate::plugins::coprocessor::is_graphql_response_minimally_valid;
     use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
@@ -110,7 +92,6 @@ mod tests {
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::coprocessor::was_incoming_payload_valid;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
-    use crate::services::connector::request_service;
     use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::external::Externalizable;
     use crate::services::external::PipelineStep;
@@ -4856,6 +4837,60 @@ mod tests {
 
     #[cfg(test)]
     mod connector_tests {
+        use std::str::FromStr;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+
+        use apollo_compiler::name;
+        use apollo_federation::connectors::ConnectId;
+        use apollo_federation::connectors::ConnectSpec;
+        use apollo_federation::connectors::Connector;
+        use apollo_federation::connectors::HttpJsonTransport;
+        use apollo_federation::connectors::JSONSelection;
+        use apollo_federation::connectors::SourceName;
+        use apollo_federation::connectors::StringTemplate;
+        use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+        use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+        use apollo_federation::connectors::runtime::key::ResponseKey;
+        use apollo_federation::connectors::runtime::responses::MappedResponse;
+        use futures::future::BoxFuture;
+        use router::body::RouterBody;
+        use tower::BoxError;
+        use tower::ServiceExt;
+
+        use crate::metrics::FutureMetricsExt;
+        use crate::plugin::test::MockInternalHttpClientService;
+        use crate::plugins::coprocessor::ContextConf;
+        use crate::plugins::coprocessor::NewContextConf;
+        use crate::plugins::coprocessor::connector::ConnectorRequestConf;
+        use crate::plugins::coprocessor::connector::ConnectorResponseConf;
+        use crate::plugins::coprocessor::connector::ConnectorStage;
+        use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
+        use crate::plugins::telemetry::config_new::conditions::Condition;
+        use crate::services::connector::request_service;
+        use crate::services::external::PipelineStep;
+        use crate::services::router;
+
+        #[allow(clippy::type_complexity)]
+        fn mock_with_callback(
+            callback: fn(
+                http::Request<RouterBody>,
+            )
+                -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
+        ) -> MockInternalHttpClientService {
+            let mut mock_http_client = MockInternalHttpClientService::new();
+            mock_http_client.expect_clone().returning(move || {
+                let mut mock_http_client = MockInternalHttpClientService::new();
+                mock_http_client.expect_clone().returning(move || {
+                    let mut mock_http_client = MockInternalHttpClientService::new();
+                    mock_http_client.expect_call().returning(callback);
+                    mock_http_client
+                });
+                mock_http_client
+            });
+
+            mock_http_client
+        }
 
         fn create_test_connector() -> Arc<Connector> {
             Arc::new(Connector {
