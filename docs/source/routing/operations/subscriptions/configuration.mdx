@@ -455,24 +455,24 @@ subscription:
 
 If a client attempts to execute a subscription on your router when it's already at `max_open_subscriptions`, the router rejects the client's request with an error.
 
-### Subscription end reason telemetry
+### Tracking causes of ending subscriptions
 
-The router records an `apollo.subscription.end_reason` attribute on the `router` span for subscription operations. This attribute indicates why a subscription ended, which is useful for debugging and monitoring subscription lifecycle in your observability tools.
+Apollo Router records an `apollo.subscription.end_reason` attribute on the `router` span for subscription operations. This attribute indicates why a subscription ended, which helps you debug and monitor subscription lifecycles using observability tools.
 
-The possible values for `apollo.subscription.end_reason` are:
+The `apollo.subscription.end_reason` attribute can have these values:
 
 | Value | Description |
 |-------|-------------|
 | `server_close` | The server (subgraph) closed the connection gracefully. This occurs when the subgraph ends the subscription. |
-| `stream_end` | The underlying data stream ended. This typically happens when the subgraph closes the WebSocket connection or the stream source terminates. |
-| `heartbeat_delivery_failed` | A heartbeat message could not be delivered to the client. This usually indicates the client disconnected unexpectedly while the router was sending a keepalive heartbeat. |
+| `stream_end` | The underlying data stream ended. This typically occurs when the subgraph closes the WebSocket connection or the stream source terminates. |
+| `heartbeat_delivery_failed` | Apollo Router failed to deliver a heartbeat message to the client. This usually indicates the client disconnected unexpectedly when a keepalive heartbeat was sent. |
 | `client_disconnect` | The client disconnected after receiving subscription data (not during a heartbeat). This indicates the client closed the connection mid-subscription. |
-| `schema_reload` | The subscription was terminated because the router's supergraph schema was updated. Clients can reconnect to resume the subscription. |
-| `config_reload` | The subscription was terminated because the router's configuration was updated. Clients can reconnect to resume the subscription. |
+| `schema_reload` | The subscription was terminated because Apollo Router's supergraph schema was updated. Clients can reconnect to resume the subscription. |
+| `config_reload` | The subscription was terminated because Apollo Router's configuration was updated. Clients can reconnect to resume the subscription. |
 
-#### Example: Monitoring subscription health
+#### Example: Monitor subscription health
 
-You can use the `apollo.subscription.end_reason` attribute to monitor the health of your subscriptions:
+Use the `apollo.subscription.end_reason` attribute to monitor the health of your subscriptions:
 
-- Frequent `stream_end` values may indicate issues with your subgraph subscription sources closing unexpectedly.
+- Frequent `stream_end` values might indicate issues with your subgraph subscription sources closing unexpectedly.
 - The `server_close` value indicates healthy subscription lifecycles where the subgraph properly signals closure.
