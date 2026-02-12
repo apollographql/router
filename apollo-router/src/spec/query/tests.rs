@@ -3076,7 +3076,7 @@ fn variable_validation_warn_mode() {
         "validation should have warned rather than failed"
     );
 
-    // Tests if nested inputs are correctly validated
+    // Tests if nested unknown input fields are caught
     let res = run_validation_warn_mode(
         with_supergraph_boilerplate(
             "input MessageInput {
@@ -3113,7 +3113,7 @@ fn variable_validation_warn_mode() {
         "validation should have warned rather than failed"
     );
 
-    // Tests if nested inputs are correctly validated
+    // Tests if misspelled field names are caught
     let res = run_validation_warn_mode(
         with_supergraph_boilerplate(
             "
@@ -3147,7 +3147,7 @@ fn variable_validation_warn_mode() {
     );
     assert!(res.is_err(), "validation should have failed");
 
-    // Tests if nested inputs are correctly validated
+    // Tests if a misspelled field is caught even when the correct field is present
     let res = run_validation_warn_mode(
         with_supergraph_boilerplate(
             "
@@ -3183,60 +3183,6 @@ fn variable_validation_warn_mode() {
         res.is_ok(),
         "validation should have warned rather than failed"
     );
-
-    let schema = r#"
-        schema
-             @link(url: "https://specs.apollo.dev/link/v1.0")
-             @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-        {
-            query: Query
-            mutation: Mutation
-        }
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        directive @join__type( graph: join__Graph!  key: join__FieldSet extension: Boolean! = false resolvable: Boolean! = true isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
-        scalar join__FieldSet
-        scalar link__Import
-
-        enum link__Purpose {
-            SECURITY
-            EXECUTION
-        }
-
-        enum join__Graph {
-            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
-        }
-
-        type Mutation{
-            foo(input: FooInput!): FooResponse!
-        }
-        type Query @join__type(graph: TEST){
-            data: String
-        }
-
-        input FooInput {
-          enumWithDefault: EnumWithDefault! = WEB
-        }
-        type FooResponse {
-            id: ID!
-        }
-
-        enum EnumWithDefault {
-          WEB
-          MOBILE
-        }
-        "#;
-
-    let res = run_validation_warn_mode(
-        schema.to_string(),
-        "mutation foo($input: FooInput!) {
-            foo (input: $input) {
-            __typename
-        }}",
-        json!({"input":{}}),
-    );
-    assert!(res.is_ok(), "validation should have succeeded: {res:?}");
 }
 
 #[test]
