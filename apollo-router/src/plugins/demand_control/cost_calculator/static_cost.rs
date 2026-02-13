@@ -190,7 +190,7 @@ impl StaticCostCalculator {
         field: &Field,
         parent_type: &NamedType,
         list_size_from_upstream: Option<i32>,
-        inherited_list_size: Option<ListSizeDirective>,
+        inherited_list_sizes: &[ListSizeDirective],
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         // When we pre-process the schema, __typename isn't included. So, we short-circuit here to avoid failed lookups.
@@ -210,30 +210,31 @@ impl StaticCostCalculator {
                     field.name
                 ))
             })?;
-        let own_list_size_directive = match definition.list_size_directive() {
-            Some(dir) => Some(ListSizeDirective::new(
-                dir,
-                field,
-                ctx.variables,
-                definition.parsed_sized_fields().map(Arc::clone),
-            )?),
-            None => None,
-        };
+        let own_list_size_directives: Vec<ListSizeDirective> = definition
+            .list_size_directive_entries()
+            .iter()
+            .map(|entry| {
+                ListSizeDirective::new(
+                    &entry.directive,
+                    field,
+                    ctx.variables,
+                    entry.parsed_sized_fields.clone(),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let effective_expected_size = own_list_size_directives
+            .iter()
+            .chain(inherited_list_sizes)
+            .filter_map(|dir| dir.expected_size)
+            .max();
 
         let instance_count = if !field.ty().is_list() {
             1
         } else if let Some(value) = list_size_from_upstream {
             // This is a sized field whose length is defined by the `@listSize` directive on the parent field
             value
-        } else if let Some(expected_size) = own_list_size_directive
-            .as_ref()
-            .and_then(|dir| dir.expected_size)
-        {
-            expected_size
-        } else if let Some(expected_size) = inherited_list_size
-            .as_ref()
-            .and_then(|dir| dir.expected_size)
-        {
+        } else if let Some(expected_size) = effective_expected_size {
             expected_size
         } else if let Some(subgraph_list_size) = self.subgraph_list_size(subgraph) {
             subgraph_list_size as i32
@@ -257,8 +258,8 @@ impl StaticCostCalculator {
             ctx,
             &field.selection_set,
             field.ty().inner_named_type(),
-            own_list_size_directive.as_ref(),
-            inherited_list_size,
+            &own_list_size_directives,
+            inherited_list_sizes,
             subgraph,
         )?;
 
@@ -290,8 +291,8 @@ impl StaticCostCalculator {
                     ctx,
                     selection_set,
                     parent_type,
-                    own_list_size_directive.as_ref(),
-                    None,
+                    &own_list_size_directives,
+                    &[],
                     subgraph,
                 )?;
             }
@@ -315,8 +316,8 @@ impl StaticCostCalculator {
         &self,
         ctx: &ScoringContext,
         fragment_spread: &FragmentSpread,
-        list_size_directive: Option<&ListSizeDirective>,
-        inherited_list_size: Option<&ListSizeDirective>,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
@@ -329,8 +330,8 @@ impl StaticCostCalculator {
             ctx,
             &fragment.selection_set,
             fragment.type_condition(),
-            list_size_directive,
-            inherited_list_size.cloned(),
+            list_size_directives,
+            inherited_list_sizes,
             subgraph,
         )
     }
@@ -340,8 +341,8 @@ impl StaticCostCalculator {
         ctx: &ScoringContext,
         inline_fragment: &InlineFragment,
         parent_type: &NamedType,
-        list_size_directive: Option<&ListSizeDirective>,
-        inherited_list_size: Option<&ListSizeDirective>,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         self.score_selection_set(
@@ -351,8 +352,8 @@ impl StaticCostCalculator {
                 .type_condition
                 .as_ref()
                 .unwrap_or(parent_type),
-            list_size_directive,
-            inherited_list_size.cloned(),
+            list_size_directives,
+            inherited_list_sizes,
             subgraph,
         )
     }
@@ -376,8 +377,8 @@ impl StaticCostCalculator {
             ctx,
             &operation.selection_set,
             root_type_name,
-            None,
-            None,
+            &[],
+            &[],
             subgraph,
         )?;
 
@@ -389,46 +390,55 @@ impl StaticCostCalculator {
         ctx: &ScoringContext,
         selection: &Selection,
         parent_type: &NamedType,
-        list_size_directive: Option<&ListSizeDirective>,
-        inherited_list_size: Option<&ListSizeDirective>,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         match selection {
             Selection::Field(f) => {
                 // We need two things for scoring this field: (1) the list size to use for
                 // instance_count if this field is a list (list_size_from_upstream), and (2) the
-                // directive to pass to this field's selection set so nested lists (e.g. "page" under
-                // "results") get the right sizing (descended).
-                let size_from_parent = list_size_directive.and_then(|dir| dir.size_of(f));
-                let size_from_inherited = inherited_list_size.and_then(|dir| dir.size_of(f));
+                // directive(s) to pass to this field's selection set so nested lists (e.g. "page"
+                // under "results") get the right sizing (descended). With repeatable @listSize,
+                // multiple directives can descend to the same field, so we collect all of them.
+                let size_from_parent = list_size_directives
+                    .iter()
+                    .filter_map(|dir| dir.size_of(f))
+                    .max();
+                let size_from_inherited = inherited_list_sizes
+                    .iter()
+                    .filter_map(|dir| dir.size_of(f))
+                    .max();
                 let list_size_from_upstream = size_from_parent.or(size_from_inherited);
 
-                let descended = list_size_directive
-                    .and_then(|dir| dir.descend(f.name.as_str()))
-                    .or_else(|| inherited_list_size.and_then(|dir| dir.descend(f.name.as_str())));
+                let descended: Vec<ListSizeDirective> = list_size_directives
+                    .iter()
+                    .chain(inherited_list_sizes.iter())
+                    .filter_map(|dir| dir.descend(f.name.as_str()))
+                    .collect();
 
                 self.score_field(
                     ctx,
                     f,
                     parent_type,
                     list_size_from_upstream,
-                    descended,
+                    &descended,
                     subgraph,
                 )
             }
             Selection::FragmentSpread(s) => self.score_fragment_spread(
                 ctx,
                 s,
-                list_size_directive,
-                inherited_list_size,
+                list_size_directives,
+                inherited_list_sizes,
                 subgraph,
             ),
             Selection::InlineFragment(i) => self.score_inline_fragment(
                 ctx,
                 i,
                 parent_type,
-                list_size_directive,
-                inherited_list_size,
+                list_size_directives,
+                inherited_list_sizes,
                 subgraph,
             ),
         }
@@ -439,8 +449,8 @@ impl StaticCostCalculator {
         ctx: &ScoringContext,
         selection_set: &SelectionSet,
         parent_type_name: &NamedType,
-        list_size_directive: Option<&ListSizeDirective>,
-        inherited_list_size: Option<ListSizeDirective>,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
@@ -449,8 +459,8 @@ impl StaticCostCalculator {
                 ctx,
                 selection,
                 parent_type_name,
-                list_size_directive,
-                inherited_list_size.as_ref(),
+                list_size_directives,
+                inherited_list_sizes,
                 subgraph,
             )?;
         }
@@ -1300,6 +1310,49 @@ mod tests {
         assert_eq!(estimated_cost(schema, query, variables), 1.0);
         assert_eq!(planned_cost_js(schema, query, variables).await, 1.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 1.0);
+    }
+
+    /// Tests to ensure Vec-based implementation (for supporting multiple @listSize directives)
+    /// maintains backward compatibility with existing single-directive behavior
+    mod backward_compatibility_tests {
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
+
+        #[rstest::rstest]
+        #[case::no_directive("query { enumWithCost }", "{}", 15.0)]
+        #[case::single_slicing_argument_with_array(
+            r#"query { itemsByIds(ids: ["a", "b"]) { id } }"#,
+            "{}",
+            2.0
+        )]
+        #[case::slicing_argument_with_variable(
+            r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
+            r#"{"ids": ["x", "y", "z"]}"#,
+            3.0
+        )]
+        #[case::nested_sized_fields(
+            r#"query { containerWithNestedList(first: 5) { page { id } } }"#,
+            "{}",
+            6.0
+        )]
+        #[case::assumed_size_fallback(
+            r#"query Q($ids: [ID!]) { itemsByIdsWithAssumedSize(ids: $ids) { id } }"#,
+            r#"{"ids": null}"#,
+            50.0
+        )]
+        #[case::sized_fields_propagate_to_nested_lists(
+            r#"query { fieldWithDynamicListSize { items { id } } }"#,
+            "{}",
+            11.0  // SizedField: 1, items: 10 * 1 = 10 (from default first: 10)
+        )]
+        fn vec_based_implementation_maintains_backward_compatibility(
+            #[case] query: &str,
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
     }
 
     /// Tests for array-based slicing arguments in @listSize directive
