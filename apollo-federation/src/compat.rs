@@ -180,13 +180,6 @@ fn coerce_value(
                 coerce_value(types, element, ty.item_type())?;
             }
         }
-        // Coerce single-element list to a non-list type.
-        // This is the reverse of the scalar-to-list coercion below.
-        (Value::List(list), Some(_)) if !ty.is_list() && list.len() == 1 => {
-            let element = list.pop().unwrap();
-            *target.make_mut() = element.as_ref().clone();
-            coerce_value(types, target, ty)?;
-        }
         // Coerce single values (except null) to a list.
         (
             Value::Object(_)
@@ -217,6 +210,11 @@ fn coerce_value(
         (Value::Object(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::List(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::Enum(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
+        (Value::Enum(_), Some(ExtendedType::Scalar(scalar)))
+            if scalar.is_built_in() && matches!(scalar.name.as_str(), "String") =>
+        {
+            *target.make_mut() = Value::String(target.as_enum().unwrap().to_string());
+        }
         // Enums must match the type.
         (Value::Enum(value), Some(ExtendedType::Enum(enum_)))
             if enum_.values.contains_key(value) => {}
@@ -323,15 +321,35 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
             }
             ExtendedType::Interface(interface) => {
                 let interface = interface.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut interface.directives,
+                );
                 for field in interface.fields.values_mut() {
                     let field = field.make_mut();
                     coerce_arguments_default_values(&types, &mut field.arguments);
+                    coerce_directive_application_values_ast(
+                        &directive_definitions,
+                        &types,
+                        &mut field.directives,
+                    );
                 }
             }
             ExtendedType::InputObject(input_object) => {
                 let input_object = input_object.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut input_object.directives,
+                );
                 for field in input_object.fields.values_mut() {
                     let field = field.make_mut();
+                    coerce_directive_application_values_ast(
+                        &directive_definitions,
+                        &types,
+                        &mut field.directives,
+                    );
                     let Some(default_value) = &mut field.default_value else {
                         continue;
                     };
@@ -341,8 +359,37 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                     }
                 }
             }
-            ExtendedType::Union(_) | ExtendedType::Scalar(_) | ExtendedType::Enum(_) => {
-                // Nothing to do
+            ExtendedType::Union(union_) => {
+                let union_ = union_.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut union_.directives,
+                );
+            }
+            ExtendedType::Scalar(scalar) => {
+                let scalar = scalar.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut scalar.directives,
+                );
+            }
+            ExtendedType::Enum(enum_) => {
+                let enum_ = enum_.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut enum_.directives,
+                );
+                for value in enum_.values.values_mut() {
+                    let value = value.make_mut();
+                    coerce_directive_application_values_ast(
+                        &directive_definitions,
+                        &types,
+                        &mut value.directives,
+                    );
+                }
             }
         }
     }
@@ -553,7 +600,7 @@ mod tests {
         }
         "#), @r###"
         {
-          test(string: enumVal1, strings: enumVal2, custom: enumVal1, customList: [enumVal2])
+          test(string: "enumVal1", strings: ["enumVal2"], custom: enumVal1, customList: [enumVal2])
         }
         "###);
     }
