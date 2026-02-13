@@ -1,3 +1,5 @@
+use std::iter::once;
+
 use apollo_compiler::Name;
 use apollo_compiler::schema;
 use serde::Deserialize;
@@ -231,26 +233,22 @@ fn validate_input_value(
                 ))
             };
 
-            let mut unknown_input_fields = obj.keys().filter_map(|k| {
-                let k = k.as_str();
-                if !def.fields.contains_key(k) {
-                    Some(k)
-                } else {
-                    None
-                }
-            });
-
-            match strict_variable_validation {
-                Mode::Enforce => {
-                    if let Some(field) = unknown_input_fields.next() {
-                        return Err(unknown_field(field));
+            let mut unknown_input_fields = obj
+                .keys()
+                .map(|k| k.as_str())
+                .filter(|&k| !def.fields.contains_key(k));
+            if let Some(unknown_input_field) = unknown_input_fields.next() {
+                match strict_variable_validation {
+                    Mode::Enforce => {
+                        return Err(unknown_field(unknown_input_field));
                     }
-                }
-                Mode::Measure => {
-                    // TODO(@caroline): increment counter
-                    let unknown_fields: Vec<&str> = unknown_input_fields.collect();
-                    if !unknown_fields.is_empty() {
-                        tracing::warn!(variables = ?unknown_fields, "encountered unexpected variable(s)"); // TODO(@caroline): consider just doing first? based on comment at top of fn
+                    Mode::Measure => {
+                        let unknown_fields: Vec<&str> = once(unknown_input_field)
+                            .chain(unknown_input_fields)
+                            .collect();
+                        // NB: warning will be attached to the span via trace id, so you can figure out
+                        //  operation name from parent span
+                        tracing::warn!(variables = ?unknown_fields, "encountered unexpected variable(s)");
                     }
                 }
             }
