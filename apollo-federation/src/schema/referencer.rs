@@ -16,6 +16,7 @@ use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::InputObjectFieldDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceFieldArgumentDefinitionPosition;

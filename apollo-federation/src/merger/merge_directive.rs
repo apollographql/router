@@ -19,6 +19,7 @@ use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
