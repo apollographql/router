@@ -112,7 +112,7 @@ where
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
-        // Check for Custom Mode (e.g., Distributed Callback Plugin)
+        // Check for Custom Mode
         if let Some(config) = &self.subscription_config {
              if let Some(SubscriptionMode::Custom(custom_cfg)) = config.mode.get_subgraph_config(&self.service_name) {
                  if let Some(provider) = provider::get_provider(&custom_cfg.provider_name) {
