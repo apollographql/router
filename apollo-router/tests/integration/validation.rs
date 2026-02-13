@@ -213,9 +213,9 @@ async fn test_lots_of_validation_errors() {
 }
 
 #[rstest::rstest]
-#[case(Some("enforce"), true, false)]
-#[case(Some("measure"), false, true)]
-#[case(None, true, false)]
+#[case::enforce(Some("enforce"), true, false)]
+#[case::measure(Some("measure"), false, true)]
+#[case::missing(None, true, false)]
 #[tokio::test(flavor = "multi_thread")]
 async fn variable_validation_mode_propagates_fully(
     #[case] strict_variable_validation: Option<&str>,
