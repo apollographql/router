@@ -492,7 +492,7 @@ supergraph:
   strict_variable_validation: enforce
 ```
 
-If your implementation requires the use of unknown fields on a defined type, you can opt out of stricter validation by specifying `strict_variable_validation: warn`.
+If your implementation requires the use of unknown fields on a defined type, you can opt out of stricter validation by specifying `strict_variable_validation: measure`.
 In this case, the router will not error when encountering unknown fields, but will log the field for reference.
 
 ---

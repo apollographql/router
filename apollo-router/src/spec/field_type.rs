@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde::de::Error as _;
 
 use super::query::parse_hir_value;
-use crate::configuration::mode::WarnOrEnforceMode;
+use crate::configuration::mode::Mode;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
@@ -124,7 +124,7 @@ fn validate_input_value(
     value: Option<&Value>,
     schema: &Schema,
     path: &JsonValuePath<'_>,
-    strict_variable_validation: WarnOrEnforceMode, // todo
+    strict_variable_validation: Mode,
 ) -> Result<(), InvalidInputValue> {
     let fmt_path = |var_path: &JsonValuePath<'_>| match var_path {
         JsonValuePath::Variable { .. } => format!("variable `{var_path}`"),
@@ -241,15 +241,16 @@ fn validate_input_value(
             });
 
             match strict_variable_validation {
-                WarnOrEnforceMode::Enforce => {
+                Mode::Enforce => {
                     if let Some(field) = unknown_input_fields.next() {
                         return Err(unknown_field(field));
                     }
                 }
-                WarnOrEnforceMode::Warn => {
+                Mode::Measure => {
+                    // TODO(@caroline): increment counter
                     let unknown_fields: Vec<&str> = unknown_input_fields.collect();
                     if !unknown_fields.is_empty() {
-                        tracing::warn!(variables = ?unknown_fields, "encountered unexpected variable(s)"); // consider just doing first? based on comment at top of fn
+                        tracing::warn!(variables = ?unknown_fields, "encountered unexpected variable(s)"); // TODO(@caroline): consider just doing first? based on comment at top of fn
                     }
                 }
             }
@@ -300,7 +301,7 @@ impl FieldType {
         value: Option<&Value>,
         schema: &Schema,
         path: &JsonValuePath<'_>,
-        strict_variable_validation: WarnOrEnforceMode,
+        strict_variable_validation: Mode,
     ) -> Result<(), InvalidInputValue> {
         validate_input_value(&self.0, value, schema, path, strict_variable_validation)
     }

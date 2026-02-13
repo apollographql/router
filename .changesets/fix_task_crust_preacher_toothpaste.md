@@ -35,7 +35,7 @@ query($msg: MessageInput) {
 This request would pass validation because the variable `msg` from the query was present in the input, however, the fields of `msg` from the input were not being validated against the `MessageInput` type.
 
 > [!WARNING]
-> If you need to opt out, you must set the `supergraph.strict_variable_validation` config option to `warn` instead.
+> If you need to opt out, you must set the `supergraph.strict_variable_validation` config option to `measure` instead.
 
 Enabled:
 ```yaml
@@ -46,7 +46,7 @@ supergraph:
 Disabled:
 ```yaml
 supergraph:
-  strict_variable_validation: warn
+  strict_variable_validation: measure
 ```
 
 By [@conwuegb](https://github.com/conwuegb) in https://github.com/apollographql/router/pull/8821 and https://github.com/apollographql/router/pull/8884

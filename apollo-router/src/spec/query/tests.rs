@@ -2539,7 +2539,7 @@ fn run_validation_enforce_mode(
         &Default::default(),
     )
     .expect("could not parse query");
-    query.validate_variables(&request, &schema, WarnOrEnforceMode::Enforce)
+    query.validate_variables(&request, &schema, Mode::Enforce)
 }
 
 fn run_validation_warn_mode(
@@ -2566,7 +2566,7 @@ fn run_validation_warn_mode(
         &Default::default(),
     )
     .expect("could not parse query");
-    query.validate_variables(&request, &schema, WarnOrEnforceMode::Warn)
+    query.validate_variables(&request, &schema, Mode::Measure)
 }
 
 fn assert_validation(schema: &str, query: &str, variables: serde_json_bytes::Value) -> () {

@@ -25,7 +25,7 @@ use crate::Context;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
-use crate::configuration::mode::WarnOrEnforceMode;
+use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
@@ -80,7 +80,7 @@ pub(crate) struct SupergraphService {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
-    strict_variable_validation: WarnOrEnforceMode,
+    strict_variable_validation: Mode,
 }
 
 #[buildstructor::buildstructor]
@@ -90,7 +90,7 @@ impl SupergraphService {
         query_planner_service: CachingQueryPlanner<QueryPlannerService>,
         execution_service: execution::BoxCloneService,
         schema: Arc<Schema>,
-        strict_variable_validation: WarnOrEnforceMode,
+        strict_variable_validation: Mode,
     ) -> Self {
         SupergraphService {
             query_planner_service,
@@ -157,7 +157,7 @@ async fn service_call(
     execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
-    strict_variable_validation: WarnOrEnforceMode, // todo
+    strict_variable_validation: Mode,
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();

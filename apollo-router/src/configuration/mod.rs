@@ -49,7 +49,7 @@ use self::subgraph::SubgraphConfiguration;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
-use crate::configuration::mode::WarnOrEnforceMode;
+use crate::configuration::mode::Mode;
 use crate::graphql;
 use crate::plugin::plugins;
 use crate::plugins::chaos;
@@ -747,7 +747,7 @@ pub(crate) struct Supergraph {
 
     /// TODO(@caroline) docs
     #[serde(default = "default_strict_variable_validation")]
-    pub(crate) strict_variable_validation: WarnOrEnforceMode,
+    pub(crate) strict_variable_validation: Mode,
 }
 
 const fn default_generate_query_fragments() -> bool {
@@ -772,7 +772,7 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
-        strict_variable_validation: Option<WarnOrEnforceMode>,
+        strict_variable_validation: Option<Mode>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -808,7 +808,7 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
-        strict_variable_validation: Option<WarnOrEnforceMode>,
+        strict_variable_validation: Option<Mode>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -1517,8 +1517,8 @@ fn default_connection_shutdown_timeout() -> Duration {
     Duration::from_secs(60)
 }
 
-fn default_strict_variable_validation() -> WarnOrEnforceMode {
-    WarnOrEnforceMode::Enforce
+fn default_strict_variable_validation() -> Mode {
+    Mode::Enforce
 }
 
 #[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]

@@ -24,7 +24,7 @@ use self::subselections::SubSelectionValue;
 use super::Fragment;
 use super::QueryHash;
 use crate::Configuration;
-use crate::configuration::mode::WarnOrEnforceMode;
+use crate::configuration::mode::Mode;
 use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -1036,7 +1036,7 @@ impl Query {
         &self,
         request: &Request,
         schema: &Schema,
-        strict_variable_validation: WarnOrEnforceMode, // todo
+        strict_variable_validation: Mode,
     ) -> Result<(), Response> {
         if LevelFilter::current() >= LevelFilter::DEBUG {
             let known_variables = self
