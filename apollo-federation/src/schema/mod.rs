@@ -55,6 +55,7 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
