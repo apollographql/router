@@ -2515,10 +2515,11 @@ fn reformat_response_unknown_typename() {
         .test();
 }
 
-fn run_validation_enforce_mode(
+fn run_validation(
     schema: String,
     query: &str,
     variables: serde_json_bytes::Value,
+    mode: Mode,
 ) -> Result<(), Response> {
     let variables = match variables {
         Value::Object(object) => object,
@@ -2539,50 +2540,25 @@ fn run_validation_enforce_mode(
         &Default::default(),
     )
     .expect("could not parse query");
-    query.validate_variables(&request, &schema, Mode::Enforce)
-}
-
-fn run_validation_warn_mode(
-    schema: String,
-    query: &str,
-    variables: serde_json_bytes::Value,
-) -> Result<(), Response> {
-    let variables = match variables {
-        Value::Object(object) => object,
-        _ => unreachable!("variables must be an object"),
-    };
-    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
-    let request = Request::builder()
-        .variables(variables)
-        .query(query.to_string())
-        .build();
-    let query = Query::parse(
-        request
-            .query
-            .as_ref()
-            .expect("query has been added right above; qed"),
-        None,
-        &schema,
-        &Default::default(),
-    )
-    .expect("could not parse query");
-    query.validate_variables(&request, &schema, Mode::Measure)
+    query.validate_variables(&request, &schema, mode)
 }
 
 fn assert_validation(schema: &str, query: &str, variables: serde_json_bytes::Value) -> () {
-    let res = run_validation_enforce_mode(
+    let res = run_validation(
         with_supergraph_boilerplate(schema, "Query"),
         query,
         variables,
+        Mode::Enforce,
     );
     assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
 }
 
 fn assert_validation_error(schema: &str, query: &str, variables: serde_json_bytes::Value) -> () {
-    let res = run_validation_enforce_mode(
+    let res = run_validation(
         with_supergraph_boilerplate(schema, "Query"),
         query,
         variables,
+        Mode::Enforce,
     );
     assert!(res.is_err(), "validation should have failed");
 }
@@ -3034,155 +3010,75 @@ fn variable_validation_enforce_mode() {
         }
         "#;
 
-    let res = run_validation_enforce_mode(
+    let res = run_validation(
         schema.to_string(),
         "mutation foo($input: FooInput!) {
             foo (input: $input) {
             __typename
         }}",
         json!({"input":{}}),
+        Mode::Enforce,
     );
     assert!(res.is_ok(), "validation should have succeeded: {res:?}");
 }
 
 #[test]
-fn variable_validation_warn_mode() {
-    // Tests validation of variable fields
-    let res = run_validation_warn_mode(
-        with_supergraph_boilerplate(
-            "input MessageInput {
+#[rstest::rstest]
+#[case::top_level_unexpected_field(
+    json!({"content": "Hello", "canvas": [], "unknownField": "unknown"}),
+    Ok(())
+)]
+#[case::nested_unexpected_field(
+    json!({"canvas": [{"input": 3}, {"input": 5, "unknownField": "unknown"}]}),
+    Ok(())
+)]
+#[case::top_level_missing_field(
+    json!({}),
+    Err("VALIDATION_INVALID_TYPE_VARIABLE")
+)]
+#[case::nested_missing_field(
+    json!({"canvas": [{"unknownField": 3}, {"input": 4}]}),
+    Err("VALIDATION_INVALID_TYPE_VARIABLE")
+)]
+fn variable_validation_measure_mode(
+    #[case] msg_variables: Value,
+    #[case] expected_result: Result<(), &str>,
+) {
+    let schema = "
+        input MessageInput {
             content: String
-            author: String
-          }
-          type Receipt {
-              id: ID!
-          }
-          type Query{
-              send(message: MessageInput): Receipt}",
-            "Query",
-        ),
-        "query($msg: MessageInput) {
-            send(message: $msg) {
-                id
-            }}",
-        json!({"msg":  {
-            "content": "Hello",
-            "author": "Me",
-            "unknownField": "unknown",
-        }}),
-    );
-    assert!(
-        res.is_ok(),
-        "validation should have warned rather than failed"
-    );
-
-    // Tests if nested unknown input fields are caught
-    let res = run_validation_warn_mode(
-        with_supergraph_boilerplate(
-            "input MessageInput {
-            content: String
-            author: String
-            canvas: [CanvasInput]
-          }
+            canvas: [CanvasInput]!
+        }
         input CanvasInput {
-            input: Int
-          }
-          type Receipt {
-              id: ID!
-          }
-          type Query{
-              send(message: MessageInput): Receipt}",
-            "Query",
-        ),
-        "query($msg: MessageInput) {
-            send(message: $msg) {
-                id
-            }}",
-        json!({"msg":  {
-            "content": "Hello",
-            "author": "Me",
-            "canvas": [
-                {"input": 3},
-                {"input": 4},
-                {"input": 5, "unknownField": "unknown"}
-                ],
-        }}),
-    );
-    assert!(
-        res.is_ok(),
-        "validation should have warned rather than failed"
+            input: Int!
+        }
+        type Query {
+            send(message: MessageInput): ID
+        }";
+
+    // Tests validation of variable fields
+    let result = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        "query($msg: MessageInput) { send(message: $msg) }",
+        json!({"msg": msg_variables}),
+        Mode::Measure,
     );
 
-    // Tests if misspelled field names are caught
-    let res = run_validation_warn_mode(
-        with_supergraph_boilerplate(
-            "
-            input MessageInput {
-                content: String
-                author: String
-                canvas: [CanvasInput]
-            }
-            input CanvasInput {
-                input: Int!
-            }
-            type Receipt {
-                id: ID!
-            }
-            type Query {
-                send(message: MessageInput): Receipt
-            }
-            ",
-            "Query",
-        ),
-        "query($msg: MessageInput) {
-            send(message: $msg) {
-                id
-            }
-        }",
-        json!({"msg": {
-            "content": "Hello",
-            "author": "Me",
-            "canvas": [{"innput": 4}],
-        }}),
-    );
-    assert!(res.is_err(), "validation should have failed");
-
-    // Tests if a misspelled field is caught even when the correct field is present
-    let res = run_validation_warn_mode(
-        with_supergraph_boilerplate(
-            "
-            input MessageInput {
-                content: String
-                author: String
-                canvas: [CanvasInput]
-            }
-            input CanvasInput {
-                input: Int!
-            }
-            type Receipt {
-                id: ID!
-            }
-            type Query {
-                send(message: MessageInput): Receipt
-            }
-            ",
-            "Query",
-        ),
-        "query($msg: MessageInput) {
-            send(message: $msg) {
-                id
-            }
-        }",
-        json!({"msg": {
-            "content": "Hello",
-            "author": "Me",
-            "canvas": [{"input": 3, "innput": 4}],
-        }}),
-    );
-    assert!(
-        res.is_ok(),
-        "validation should have warned rather than failed"
-    );
+    match (result, expected_result) {
+        (Ok(()), Ok(())) => {}
+        (Err(response), Err(expected_code)) => {
+            assert!(
+                response.contains_error_code(expected_code),
+                "response = {response:?}"
+            );
+        }
+        (Err(response), Ok(())) => {
+            panic!("expected validation to pass: response = {response:?}");
+        }
+        (Ok(()), Err(code)) => {
+            panic!("expected validation to fail with code {code}");
+        }
+    }
 }
 
 #[test]
