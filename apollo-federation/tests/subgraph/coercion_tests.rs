@@ -21,10 +21,16 @@ fn coerces_directive_argument_values() {
     "#;
 
     let subgraph = build_and_validate(schema);
-    let Some(ExtendedType::Object(t_type)) = subgraph.validated_schema().schema().types.get("T")
-    else {
-        panic!("T type not found");
-    };
+    let t_type = subgraph
+        .validated_schema()
+        .schema()
+        .types
+        .get("T")
+        .and_then(|ty| match ty {
+            ExtendedType::Object(t) => Some(t),
+            _ => None::<&Node<apollo_compiler::schema::ObjectType>>,
+        })
+        .expect("T type not found");
     let key_directive = t_type
         .directives
         .iter()
@@ -57,10 +63,16 @@ fn coerces_field_argument_default_values() {
     "#;
 
     let subgraph = build_and_validate(schema);
-    let Some(ExtendedType::Object(t_type)) = subgraph.validated_schema().schema().types.get("T")
-    else {
-        panic!("T type not found");
-    };
+    let t_type = subgraph
+        .validated_schema()
+        .schema()
+        .types
+        .get("T")
+        .and_then(|ty| match ty {
+            ExtendedType::Object(t) => Some(t),
+            _ => None::<&Node<apollo_compiler::schema::ObjectType>>,
+        })
+        .expect("T type not found");
     let name_field = t_type.fields.get("name").expect("name field exists");
     let arg = name_field
         .argument_by_name("arg")
@@ -89,11 +101,19 @@ fn coerces_input_field_default_values() {
     "#;
 
     let subgraph = build_and_validate(schema);
-    let Some(ExtendedType::InputObject(user_input)) =
-        subgraph.validated_schema().schema().types.get("UserInput")
-    else {
-        panic!("UserInput type not found");
-    };
+    let user_input = subgraph
+        .validated_schema()
+        .schema()
+        .types
+        .get("UserInput")
+        .and_then(|ty| {
+            if let ExtendedType::InputObject(i) = ty {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .expect("UserInput type not found");
 
     // Enum literal coerced to string
     let name_field = user_input.fields.get("name").expect("name field exists");
@@ -124,11 +144,19 @@ fn coerces_enum_value_to_non_null_string_on_custom_directive() {
     "#;
 
     let subgraph = build_and_validate(schema);
-    let Some(ExtendedType::Interface(t_interface)) =
-        subgraph.validated_schema().schema().types.get("T")
-    else {
-        panic!("T interface not found");
-    };
+    let t_interface = subgraph
+        .validated_schema()
+        .schema()
+        .types
+        .get("T")
+        .and_then(|ty| {
+            if let ExtendedType::Interface(i) = ty {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .expect("T interface not found");
     let id_field = t_interface.fields.get("id").expect("id field exists");
     let directive = id_field
         .directives
@@ -167,14 +195,19 @@ fn coerces_enum_literal_to_string_on_union_directive() {
     "#;
 
     let subgraph = build_and_validate(schema);
-    let Some(ExtendedType::Union(search_result)) = subgraph
+    let search_result = subgraph
         .validated_schema()
         .schema()
         .types
         .get("SearchResult")
-    else {
-        panic!("SearchResult union not found");
-    };
+        .and_then(|ty| {
+            if let ExtendedType::Union(u) = ty {
+                Some(u)
+            } else {
+                None
+            }
+        })
+        .expect("SearchResult union not found");
     let directive = search_result
         .directives
         .iter()
@@ -204,11 +237,19 @@ fn coerces_enum_literal_to_string_on_scalar_directive() {
     "#;
 
     let subgraph = build_and_validate(schema);
-    let Some(ExtendedType::Scalar(json_scalar)) =
-        subgraph.validated_schema().schema().types.get("JSON")
-    else {
-        panic!("JSON scalar not found");
-    };
+    let json_scalar = subgraph
+        .validated_schema()
+        .schema()
+        .types
+        .get("JSON")
+        .and_then(|ty| {
+            if let ExtendedType::Scalar(s) = ty {
+                Some(s)
+            } else {
+                None
+            }
+        })
+        .expect("JSON scalar not found");
     let directive = json_scalar
         .directives
         .iter()
@@ -241,11 +282,19 @@ fn coerces_enum_literal_to_string_on_enum_type_directive() {
     "#;
 
     let subgraph = build_and_validate(schema);
-    let Some(ExtendedType::Enum(status_enum)) =
-        subgraph.validated_schema().schema().types.get("Status")
-    else {
-        panic!("Status enum not found");
-    };
+    let status_enum = subgraph
+        .validated_schema()
+        .schema()
+        .types
+        .get("Status")
+        .and_then(|ty| {
+            if let ExtendedType::Enum(e) = ty {
+                Some(e)
+            } else {
+                None
+            }
+        })
+        .expect("Status enum not found");
     let directive = status_enum
         .directives
         .iter()
@@ -279,11 +328,19 @@ fn coerces_enum_literal_to_string_on_enum_value_directive() {
     "#;
 
     let subgraph = build_and_validate(schema);
-    let Some(ExtendedType::Enum(priority_enum)) =
-        subgraph.validated_schema().schema().types.get("Priority")
-    else {
-        panic!("Priority enum not found");
-    };
+    let priority_enum = subgraph
+        .validated_schema()
+        .schema()
+        .types
+        .get("Priority")
+        .and_then(|ty| {
+            if let ExtendedType::Enum(e) = ty {
+                Some(e)
+            } else {
+                None
+            }
+        })
+        .expect("Priority enum not found");
     let high_value = priority_enum.values.get("HIGH").expect("HIGH value exists");
     let directive = high_value
         .directives
@@ -313,10 +370,19 @@ fn coerces_string_to_enum() {
     "#;
 
     let subgraph = build_and_validate(schema);
-    let Some(ExtendedType::Object(query)) = subgraph.validated_schema().schema().types.get("Query")
-    else {
-        panic!("Query type not found");
-    };
+    let query = subgraph
+        .validated_schema()
+        .schema()
+        .types
+        .get("Query")
+        .and_then(|ty| {
+            if let ExtendedType::Object(obj) = ty {
+                Some(obj)
+            } else {
+                None
+            }
+        })
+        .expect("Query type not found");
     let foo = query.fields.get("foo").expect("foo field exists");
     let arg = foo.argument_by_name("arg").expect("arg argument exists");
 
