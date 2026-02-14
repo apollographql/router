@@ -193,6 +193,8 @@ items:
             href: "./performance/traffic-shaping"
           - label: "Query Batching"
             href: "./performance/query-batching"
+          - label: "Circuit Breaking"
+            href: "./performance/circuit-breaking"
       - label: "Client Features"
         children:
           - label: "APQ"
