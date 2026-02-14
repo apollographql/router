@@ -1,10 +1,13 @@
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
+use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Type;
 use apollo_compiler::ty;
+use itertools::Itertools;
 
 use crate::schema::FederationSchema;
 
@@ -19,6 +22,7 @@ pub(crate) enum ArgumentCompositionStrategy {
     NullableAnd,
     NullableMax,
     NullableUnion,
+    DnfConjunction,
 }
 
 pub(crate) static MAX_STRATEGY: LazyLock<MaxArgumentCompositionStrategy> =
@@ -37,6 +41,8 @@ pub(crate) static NULLABLE_MAX_STRATEGY: LazyLock<NullableMaxArgumentComposition
     LazyLock::new(NullableMaxArgumentCompositionStrategy::new);
 pub(crate) static NULLABLE_UNION_STRATEGY: LazyLock<NullableUnionArgumentCompositionStrategy> =
     LazyLock::new(|| NullableUnionArgumentCompositionStrategy {});
+pub(crate) static DNF_CONJUNCTION_STRATEGY: LazyLock<DnfConjunctionArgumentCompositionStrategy> =
+    LazyLock::new(|| DnfConjunctionArgumentCompositionStrategy {});
 
 impl ArgumentCompositionStrategy {
     fn get_impl(&self) -> &dyn ArgumentComposition {
@@ -49,6 +55,7 @@ impl ArgumentCompositionStrategy {
             Self::NullableAnd => &*NULLABLE_AND_STRATEGY,
             Self::NullableMax => &*NULLABLE_MAX_STRATEGY,
             Self::NullableUnion => &*NULLABLE_UNION_STRATEGY,
+            Self::DnfConjunction => &*DNF_CONJUNCTION_STRATEGY,
         }
     }
 
@@ -132,6 +139,20 @@ fn support_any_array(ty: &Type) -> Result<(), String> {
     }
 }
 
+/// Support for doubly nested non-nullable list types of any non-nullable type `[[Foo!]!]!`.
+/// PORT_NOTE: This differs slightly from JS behavior, which would allow the innermost type to be
+/// nullable.
+fn support_any_non_null_nested_array(ty: &Type) -> Result<(), String> {
+    if matches!(ty, Type::NonNullList(_))
+        && matches!(ty.item_type(), Type::NonNullList(_))
+        && ty.item_type().item_type().is_non_null()
+    {
+        Ok(())
+    } else {
+        Err("non-nullable doubly nested list of any type".to_string())
+    }
+}
+
 fn max_int_value<'a>(values: impl Iterator<Item = &'a Value>) -> Value {
     values
         .filter_map(|val| match val {
@@ -191,6 +212,148 @@ fn merge_nullable_values(
         return None; // No values to merge, return None (instead of null)
     }
     merge_values(&values).into()
+}
+
+/// Performs conjunction of 2d arrays that represent conditions in Disjunctive Normal Form.
+///
+/// Each 2D array is interpreted as follows
+///  * Inner array is interpreted as the conjunction (an AND) of the conditions in the array.
+///  * Outer array is interpreted as the disjunction (an OR) of the inner arrays.
+///
+/// Algorithm
+///  * filter out duplicate entries to limit the amount of necessary computations
+///  * calculate cartesian product of the arrays to find all possible combinations
+///    * simplify combinations by dropping duplicate conditions (i.e. p ^ p = p, p ^ q = q ^ p)
+///  * eliminate entries that are subsumed by others (i.e. (p ^ q) subsumes (p ^ q ^ r))
+///
+/// PORT_NOTE: While JS has a poor representation for sets, that's not true in Rust, and accordingly
+/// data structures here have been changed to account for that. As part of this change, this
+/// function will now always deduplicate elements of a conjunction, whereas the JS code would only
+/// sometimes deduplicate that.
+pub(crate) fn dnf_conjunction(values: &[Value]) -> Value {
+    // Copy the 2D arrays to sort them and remove duplicates. Note that we assume the arrays here
+    // are lists-of-lists-of-values, as GraphQL validation should have already verified this.
+    let mut filtered = values
+        .iter()
+        .flat_map(Value::as_list)
+        .map(|disjunction| {
+            // Normally for DNF, you'd consider [] to be always false and [[]] to be always true,
+            // and code that uses any()/all() needs no special-casing to work with these
+            // definitions. However, router special-cases [] to also mean true, and so if we're
+            // about to do any evaluation on DNFs, we need to do these conversions beforehand.
+            if disjunction.is_empty() {
+                std::iter::once(Default::default()).collect()
+            } else {
+                disjunction
+                    .iter()
+                    .map(Node::as_ref)
+                    .flat_map(Value::as_list)
+                    .map(|conjunction| conjunction.iter().cloned().map(DnfMember::from).collect())
+                    .collect()
+            }
+        })
+        .collect::<IndexSet<BTreeSet<BTreeSet<DnfMember>>>>()
+        .into_iter();
+
+    // Initialize with the first entry.
+    let Some(first) = filtered
+        .next()
+        .map(|first| first.into_iter().collect::<IndexSet<BTreeSet<DnfMember>>>())
+    else {
+        // Should never be the case this is empty, but if it occurs, we effectively echo the input.
+        return Value::List(vec![]);
+    };
+
+    // Perform cartesian product to find all possible entries
+    let result = filtered.fold(first, |result_disjunction, current_disjunction| {
+        let accumulated = result_disjunction
+            .into_iter()
+            .cartesian_product(current_disjunction.iter())
+            .map(|(result_conjunction, current_conjunction)| {
+                result_conjunction
+                    .union(current_conjunction)
+                    .cloned()
+                    .collect()
+            })
+            .collect::<IndexSet<BTreeSet<DnfMember>>>();
+        deduplicate_subsumed_values(accumulated)
+    });
+    Value::List(
+        result
+            .into_iter()
+            .map(|conjunction| {
+                Node::new(Value::List(
+                    conjunction.into_iter().map(Node::<Value>::from).collect(),
+                ))
+            })
+            .collect(),
+    )
+}
+
+/// Deduplicate subsumed values from 2D arrays.
+///
+/// Given that
+/// - outer array implies OR requirements
+/// - inner array implies AND requirements
+///
+/// We can filter out any inner arrays that fully contain other inner arrays, i.e.
+///   A OR B OR (A AND B) OR (A AND B AND C) => A OR B
+fn deduplicate_subsumed_values(
+    mut value: IndexSet<BTreeSet<DnfMember>>,
+) -> IndexSet<BTreeSet<DnfMember>> {
+    // We first sort by length as the longer ones might be dropped
+    value.sort_by_key(BTreeSet::len);
+
+    value
+        .into_iter()
+        .fold(Default::default(), |mut result, candidate| {
+            // if `r` is a subset of a `candidate` then it means `candidate` is redundant
+            if !result.iter().any(|r| r.is_subset(&candidate)) {
+                result.insert(candidate);
+            }
+            result
+        })
+}
+
+#[derive(Clone, Debug)]
+struct DnfMember(Node<str>, Node<Value>);
+
+impl PartialEq for DnfMember {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl Eq for DnfMember {}
+
+impl std::hash::Hash for DnfMember {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl PartialOrd for DnfMember {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DnfMember {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl From<Node<Value>> for DnfMember {
+    fn from(node: Node<Value>) -> Self {
+        Self(node.to_string().into(), node)
+    }
+}
+
+impl From<DnfMember> for Node<Value> {
+    fn from(node: DnfMember) -> Self {
+        node.1
+    }
 }
 
 // MAX
@@ -433,5 +596,161 @@ impl ArgumentComposition for NullableUnionArgumentCompositionStrategy {
 
     fn merge_values(&self, values: &[Value]) -> Option<Value> {
         merge_nullable_values(values, |values| union_list_values(values.iter().copied()))
+    }
+}
+
+// DNF_CONJUNCTION
+#[derive(Clone)]
+pub(crate) struct DnfConjunctionArgumentCompositionStrategy {}
+
+impl ArgumentComposition for DnfConjunctionArgumentCompositionStrategy {
+    fn name(&self) -> &str {
+        "DNF_CONJUNCTION"
+    }
+
+    fn is_type_supported(&self, _schema: &FederationSchema, ty: &Type) -> Result<(), String> {
+        support_any_non_null_nested_array(ty)
+    }
+
+    fn merge_values(&self, values: &[Value]) -> Option<Value> {
+        dnf_conjunction(values).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use apollo_compiler::Node;
+    use apollo_compiler::ast::Type;
+    use apollo_compiler::ast::Value;
+    use apollo_compiler::collections::IndexSet;
+
+    use crate::schema::argument_composition_strategies::ArgumentComposition;
+    use crate::schema::argument_composition_strategies::DnfConjunctionArgumentCompositionStrategy;
+    use crate::schema::argument_composition_strategies::DnfMember;
+    use crate::schema::argument_composition_strategies::deduplicate_subsumed_values;
+    use crate::schema::argument_composition_strategies::support_any_non_null_nested_array;
+
+    #[test]
+    fn verify_support_any_non_null_nested_array() {
+        for unsupported_type in [
+            "String",
+            "String!",
+            "[String]",
+            "[String!]",
+            "[String]!",
+            "[String!]!",
+            "[[String]]",
+            "[[String!]]",
+            "[[String]!]",
+            "[[String!]!]",
+            "[[String]]!",
+            "[[String!]]!",
+            "[[String]!]!", // this one is incorrectly allowed by JS
+        ] {
+            let _type = Type::parse(unsupported_type, "schema.graphql").expect("valid type");
+            assert!(support_any_non_null_nested_array(&_type).is_err());
+        }
+
+        for supported_type in ["[[String!]!]!", "[[Foo!]!]!"] {
+            let _type = Type::parse(supported_type, "schema.graphql").expect("valid type");
+            assert!(support_any_non_null_nested_array(&_type).is_ok());
+        }
+    }
+
+    #[test]
+    fn verify_deduplicate_subsumed_values() {
+        let value = parse_for_deduplicate_subsumed_values(vec![
+            vec!["A", "B", "C"],
+            vec!["A", "B"],
+            vec!["A"],
+        ]);
+        let result = deduplicate_subsumed_values(value);
+        assert_eq!(
+            parse_for_deduplicate_subsumed_values(vec![vec!["A"]]),
+            result
+        );
+
+        let value = parse_for_deduplicate_subsumed_values(vec![
+            vec!["A", "B"],
+            vec!["A", "B", "C"],
+            vec!["A", "B", "C", "D"],
+            vec!["A", "B", "D"],
+            vec!["A", "B"],
+            vec!["A", "D"],
+            vec!["A", "B"],
+        ]);
+        let result = deduplicate_subsumed_values(value);
+        assert_eq!(
+            parse_for_deduplicate_subsumed_values(vec![vec!["A", "B"], vec!["A", "D"]]),
+            result
+        );
+    }
+
+    #[test]
+    fn dnf_conjunction_of_empty_values() {
+        let strategy = DnfConjunctionArgumentCompositionStrategy {};
+        let value = strategy
+            .merge_values(&[])
+            .expect("successfully computed DNF conjunction value");
+        assert_eq!(parse_into_ast_value_list(vec![]), value);
+    }
+
+    #[test]
+    fn dnf_conjunction_of_multiple_lists() {
+        let strategy = DnfConjunctionArgumentCompositionStrategy {};
+        let values = parse_into_ast_vec_value_list(vec![
+            vec![vec!["C", "B", "D"], vec!["B", "A"]],
+            vec![vec!["A", "D"]],
+            vec![vec!["A"]],
+            vec![vec!["A"], vec!["B"]],
+            vec![vec!["C", "B"]],
+            vec![vec!["A", "D"]],
+            vec![vec!["A", "A"]],
+        ]);
+        let result = strategy
+            .merge_values(&values)
+            .expect("computed DNF conjunction value");
+        assert_eq!(
+            parse_into_ast_value_list(vec![vec!["A", "B", "C", "D"]]),
+            result
+        );
+    }
+
+    fn parse_into_ast_vec_value_list(values: Vec<Vec<Vec<&str>>>) -> Vec<Value> {
+        let mut result = vec![];
+        // each outer_array is a specific directive application value of [[Policy!]!]! and/or [[Scope!]!]!
+        for outer_array in values {
+            result.push(parse_into_ast_value_list(outer_array));
+        }
+        result
+    }
+
+    fn parse_into_ast_value_list(value: Vec<Vec<&str>>) -> Value {
+        // outer array is interpreted as the disjunction (an OR) of the inner arrays.
+        let mut disjunctions = vec![];
+        for inner_array in value {
+            // inner array is interpreted as the conjunction (an AND) of the conditions in the array.
+            let mut conjunctions = vec![];
+            for value in inner_array {
+                conjunctions.push(Node::new(Value::String(value.to_string())));
+            }
+            disjunctions.push(Node::new(Value::List(conjunctions)));
+        }
+        Value::List(disjunctions)
+    }
+
+    fn parse_for_deduplicate_subsumed_values(
+        value: Vec<Vec<&str>>,
+    ) -> IndexSet<BTreeSet<DnfMember>> {
+        parse_into_ast_value_list(value)
+            .as_list()
+            .expect("Test unexpectedly provided a non-list value")
+            .iter()
+            .map(Node::as_ref)
+            .flat_map(Value::as_list)
+            .map(|conjunction| conjunction.iter().cloned().map(DnfMember::from).collect())
+            .collect()
     }
 }

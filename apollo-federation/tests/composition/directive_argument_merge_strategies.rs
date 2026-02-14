@@ -399,7 +399,7 @@ mod tests {
             .expect("@listSize directive should be present on T");
         assert_eq!(
             t_requires_scopes_directive.to_string(),
-            r#"@listSize(assumedSize: 20, requireOneSlicingArgument: true)"#
+            r#"@listSize(assumedSize: 20)"#
         );
 
         let k = coord!(T.k)
@@ -412,7 +412,7 @@ mod tests {
             .expect("@listSize directive should be present on T.k");
         assert_eq!(
             k_requires_scopes_directive.to_string(),
-            r#"@listSize(assumedSize: 3, requireOneSlicingArgument: true)"#
+            r#"@listSize(assumedSize: 3)"#
         );
 
         let b = coord!(T.b)
@@ -425,7 +425,7 @@ mod tests {
             .expect("@listSize directive should be present on T.b");
         assert_eq!(
             b_requires_scopes_directive.to_string(),
-            r#"@listSize(assumedSize: null, requireOneSlicingArgument: true)"#
+            r#"@listSize(assumedSize: null)"#
         );
     }
 
@@ -535,7 +535,7 @@ mod tests {
             .expect("@listSize directive should be present on T.k");
         assert_eq!(
             k_requires_scopes_directive.to_string(),
-            r#"@listSize(slicingArguments: ["first", "last"], requireOneSlicingArgument: true)"#
+            r#"@listSize(slicingArguments: ["first", "last"])"#
         );
 
         let b = coord!(T.b)
@@ -548,7 +548,7 @@ mod tests {
             .expect("@listSize directive should be present on T.b");
         assert_eq!(
             b_requires_scopes_directive.to_string(),
-            r#"@listSize(sizedFields: ["page", "nextPageToken"], requireOneSlicingArgument: true)"#
+            r#"@listSize(sizedFields: ["page", "nextPageToken"])"#
         );
 
         let c = coord!(T.c)
@@ -561,7 +561,7 @@ mod tests {
             .expect("@listSize directive should be present on T.c");
         assert_eq!(
             c_requires_scopes_directive.to_string(),
-            r#"@listSize(sizedFields: ["nextPageToken"], requireOneSlicingArgument: true)"#
+            r#"@listSize(sizedFields: ["nextPageToken"])"#
         );
     }
 }

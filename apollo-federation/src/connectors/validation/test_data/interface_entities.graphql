@@ -37,7 +37,7 @@ type Query {
       id
       ... $(name ?? null)->match(
         [null, { __typename: "Anon" }],
-        [@, { __typename: "Named", name: name }],
+        [@, { __typename: "Named", name }],
       )
     """
   )

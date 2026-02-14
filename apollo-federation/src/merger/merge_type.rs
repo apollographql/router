@@ -13,6 +13,7 @@ use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources_with_index;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::TypeDefinitionPosition;
 
 impl Merger {

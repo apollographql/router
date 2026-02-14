@@ -105,6 +105,8 @@ This value is one of the following:
 - `ExecutionResponse`: The `ExecutionService` has a response from all subgraphs.
 - `SubgraphRequest`: The `SubgraphService` is about to send a request to a subgraph.
 - `SubgraphResponse`: The `SubgraphService` has just received a subgraph response.
+- `ConnectorRequest`: The `ConnectorRequestService` is about to send an HTTP request to a REST API.
+- `ConnectorResponse`: The `ConnectorRequestService` has just received an HTTP response from a REST API.
 
 **Do not return a _different_ value for this property.** If you do, the router treats the coprocessor request as if it failed.
 
@@ -161,6 +163,9 @@ This field's type depends on the coprocessor request's [`stage`](#stage):
 - For `RouterService` stages, `body` is a JSON _string_.
   - This is necessary to support handling [deferred queries](#handling-deferred-query-responses).
   - If you modify `body` during the `RouterRequest` stage, the new value must be a valid string serialization of a JSON object. If it isn't, the router detects that the body is malformed and returns an error to the client.
+- For connector stages, `body` is a JSON _object_ for both requests and responses when the body is valid JSON, or a JSON _string_ if the request body is not valid JSON.
+  - If the request body is valid JSON, it is sent as a parsed JSON object. Otherwise, it is sent as a raw string.
+  - The response body is the parsed JSON data or an error object.
 
 This field's structure depends on whether the coprocessor request corresponds to a request, a standard response, or a response "chunk" for a deferred query:
 
@@ -287,9 +292,9 @@ The router ignores modifications to this value.
 </td>
 <td>
 
-The name of the subgraph that this coprocessor request pertains to.
+The name of the subgraph or connector source that this coprocessor request pertains to.
 
-This value is present only for coprocessor requests from the router's `SubgraphService`.
+This value is present for coprocessor requests from the router's `SubgraphService` and connector stages.
 
 **Do not return a _different_ value for this property.** If you do, the router treats the coprocessor request as if it failed.
 
@@ -321,7 +326,7 @@ The HTTP status code returned with a response.
 </td>
 <td>
 
-When `stage` is `SubgraphRequest`, this is the full URI of the subgraph the router will query.
+When `stage` is `SubgraphRequest` or `ConnectorRequest`, this is the full URI of the subgraph or API endpoint the router will query.
 
 </td>
 </tr>
@@ -359,10 +364,12 @@ List of context keys available from the router's request context, which is share
 ### Authentication and authorization
 
 #### Authentication
+
 - `apollo::authentication::jwt_claims` - Claims extracted from a JWT if present in the request
 - `apollo::authentication::jwt_status` - JWT validation status (internal only)
 
 #### Authorization
+
 - `apollo::authorization::authentication_required` - `true` if the operation contains fields marked with `@authenticated`
 - `apollo::authorization::required_scopes` - If the operation contains fields marked with `@requiresScopes`, it contains the list of scopes used
 - `apollo::authorization::required_policies` - If the query contains fields marked with `@policy`, it contains a map of `policy name -> Option<bool>`. A coprocessor or Rhai script can edit this map to mark `true` on authorization policies that succeed or `false` on ones that fail
@@ -370,12 +377,14 @@ List of context keys available from the router's request context, which is share
 ### Telemetry
 
 #### Client information
+
 - `apollo::telemetry::client_name` - Client name extracted from the client name header
 - `apollo::telemetry::client_version` - Client version extracted from the client version header
 - `apollo::telemetry::client_library_name` - Client library name
 - `apollo::telemetry::client_library_version` - Client library version
 
 #### Telemetry control
+
 - `apollo::telemetry::subgraph_ftv1` - JSON-serialized trace data returned by the subgraph when FTV1 is enabled
 - `apollo::telemetry::studio_exclude` - `true` if the current request's trace details should be excluded from Studio
 - `apollo::telemetry::contains_graphql_error` - `true` if the response contains at least one error
@@ -389,16 +398,21 @@ The following keys are populated by the demand control plugin:
 - `apollo::demand_control::estimated_cost` - Estimated cost of the requests to be sent to the subgraphs
 - `apollo::demand_control::actual_cost` - Actual calculated cost of the responses returned by the subgraphs
 - `apollo::demand_control::result` - `COST_OK` if allowed, and `COST_TOO_EXPENSIVE` if rejected due to cost limits
+- `apollo::demand_control::estimated_cost_by_subgraph` - Map of estimated cost of the requests to be sent to the subgraphs, by subgraph
+- `apollo::demand_control::actual_cost_by_subgraph` - Map of actual calculated cost of the responses returned by the subgraphs, by subgraph
+- `apollo::demand_control::result_by_subgraph` - Map of result by subgraph, `COST_OK` if allowed, and `COST_TOO_EXPENSIVE` if rejected due to cost limits
 - `apollo::demand_control::strategy` - Name of the cost calculation strategy used
 
 ### Caching
 
 #### Response cache
+
 - `apollo::response_cache::key` - Response cache key
 - `apollo::response_cache::debug_cached_keys` - Debug info for cached keys
 - `apollo::router::response_cache::cache_info_subgraph_{subgraph_name}` - Response cache info per subgraph (dynamic key with subgraph name suffix)
 
 #### Automatic persisted queries (APQ)
+
 - `apollo::apq::cache_hit` - Present if the request used APQ; true if we got a cache hit for the query ID, false otherwise
 - `apollo::apq::registered` - `true` if the request registered a query in APQ
 
@@ -925,6 +939,76 @@ The following keys are populated by the demand control plugin:
     }
   },
   "serviceName": "reviews",
+  "statusCode": 200
+}
+```
+
+</ExpansionPanel>
+
+### `ConnectorRequest`
+
+<ExpansionPanel title="Click to expand">
+
+```json
+{
+  // Control properties
+  "version": 1,
+  "stage": "ConnectorRequest",
+  "control": "continue",
+  "id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+
+  // Data properties
+  "headers": {
+    "content-type": ["application/json"],
+    "accept": ["application/json"]
+  },
+  "body": { "query": "query { users { id name } }" },
+  "context": {
+    "entries": {
+      "apollo::supergraph::operation_name": "GetUsers",
+      "apollo::telemetry::client_name": "web-app"
+    }
+  },
+  "uri": "https://api.example.com/v1/users",
+  "method": "GET",
+  "serviceName": "my_subgraph_name.my_source_name"
+}
+```
+
+</ExpansionPanel>
+
+### `ConnectorResponse`
+
+<ExpansionPanel title="Click to expand">
+
+```json
+{
+  // Control properties
+  "version": 1,
+  "stage": "ConnectorResponse",
+  "id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+  "control": "continue",
+
+  // Data properties
+  "headers": {
+    "content-type": ["application/json"],
+    "x-request-id": ["req-abc-123"]
+  },
+  "body": {
+    "data": {
+      "users": [
+        { "id": "1", "name": "Ada Lovelace" },
+        { "id": "2", "name": "Grace Hopper" }
+      ]
+    }
+  },
+  "context": {
+    "entries": {
+      "apollo::supergraph::operation_name": "GetUsers",
+      "apollo::telemetry::client_name": "web-app"
+    }
+  },
+  "serviceName": "my_subgraph_name.my_source_name",
   "statusCode": 200
 }
 ```

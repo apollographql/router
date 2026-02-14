@@ -55,6 +55,7 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -413,7 +414,7 @@ impl FederationSchema {
         let context_directive_definition = federation_spec.context_directive_definition(self)?;
         let context_directive_referencers = self
             .referencers()
-            .get_directive(&context_directive_definition.name)?;
+            .get_directive(&context_directive_definition.name);
 
         let mut applications = Vec::new();
         for interface_type_position in &context_directive_referencers.interface_types {
@@ -472,7 +473,7 @@ impl FederationSchema {
         let context_directive_definition = context_spec.context_directive_definition(self)?;
         let context_directive_referencers = self
             .referencers()
-            .get_directive(&context_directive_definition.name)?;
+            .get_directive(&context_directive_definition.name);
         let mut applications = Vec::new();
         for type_pos in context_directive_referencers.composite_type_positions() {
             let directive_apps =
@@ -499,7 +500,7 @@ impl FederationSchema {
             federation_spec.from_context_directive_definition(self)?;
         let from_context_directive_referencers = self
             .referencers()
-            .get_directive(&from_context_directive_definition.name)?;
+            .get_directive(&from_context_directive_definition.name);
 
         let mut applications = Vec::new();
 
@@ -555,7 +556,7 @@ impl FederationSchema {
         let key_directive_definition = federation_spec.key_directive_definition(self)?;
         let key_directive_referencers = self
             .referencers()
-            .get_directive(&key_directive_definition.name)?;
+            .get_directive(&key_directive_definition.name);
 
         let mut applications: Vec<Result<KeyDirective, FederationError>> = Vec::new();
         for object_type_position in &key_directive_referencers.object_types {
@@ -617,7 +618,7 @@ impl FederationSchema {
         let provides_directive_definition = federation_spec.provides_directive_definition(self)?;
         let provides_directive_referencers = self
             .referencers()
-            .get_directive(&provides_directive_definition.name)?;
+            .get_directive(&provides_directive_definition.name);
 
         let mut applications: Vec<Result<ProvidesDirective, FederationError>> = Vec::new();
         for field_definition_position in provides_directive_referencers.object_or_interface_fields()
@@ -668,7 +669,7 @@ impl FederationSchema {
         let requires_directive_definition = federation_spec.requires_directive_definition(self)?;
         let requires_directive_referencers = self
             .referencers()
-            .get_directive(&requires_directive_definition.name)?;
+            .get_directive(&requires_directive_definition.name);
 
         let mut applications = Vec::new();
         for field_definition_position in requires_directive_referencers.object_or_interface_fields()
@@ -716,7 +717,7 @@ impl FederationSchema {
         let tag_directive_definition = federation_spec.tag_directive_definition(self)?;
         let tag_directive_referencers = self
             .referencers()
-            .get_directive(&tag_directive_definition.name)?;
+            .get_directive(&tag_directive_definition.name);
 
         let mut applications = Vec::new();
         // Schema
@@ -1026,12 +1027,9 @@ impl FederationSchema {
         else {
             return Ok(Vec::new());
         };
-        let Ok(list_size_directive_referencers) = self
+        let list_size_directive_referencers = self
             .referencers()
-            .get_directive(list_size_directive_name.as_str())
-        else {
-            return Ok(Vec::new());
-        };
+            .get_directive(list_size_directive_name.as_str());
 
         let mut applications = Vec::new();
         for field_definition_position in
@@ -1073,7 +1071,7 @@ impl FederationSchema {
 
         let result = self
             .referencers()
-            .get_directive_applications(self, &cache_tag_directive_definition.name)?
+            .get_directive_applications(self, &cache_tag_directive_definition.name)
             .map(|(pos, application)| {
                 let arguments = federation_spec.cache_tag_directive_arguments(application);
                 arguments.map(|args| CacheTagDirective {
