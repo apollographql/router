@@ -49,6 +49,6 @@ fuzz/timeout-*
 # Temporary skills checkout directory for GitHub Copilot setup
 .tmp/
 # Installed via Github Copilot Setup Steps, should not be committed
-.agents/skills/apollo-client
+.agents/skills/rust-best-practices
 .github/instructions/docs.instructions.md
-.github/skills/apollo-client
+.github/skills/rust-best-practices
