@@ -716,7 +716,8 @@ pub(crate) struct Supergraph {
     /// Default: false
     pub(crate) introspection: bool,
 
-    /// Whether query validation errors should be redacted. These errors could be abused to leak information like "field X not found on type Y", or "Field X argument Y of type Z is required".
+    /// Redact query validation errors to prevent potential information disclosure about the schema structure.
+    /// When enabled, detailed validation errors are replaced with a generic "invalid query" message.
     /// Default: false
     pub(crate) redact_query_validation_errors: bool,
 
