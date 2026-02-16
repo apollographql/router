@@ -433,18 +433,18 @@ limits:
   introspection_max_depth: false
 ```
 
-#### Redacting query validation errors
+#### Query validation error redaction
 
-Query validation errors can potentially reveal information about your schema structure, such as field names, types, and required arguments. While this is not typically a significant security concern (especially with persisted queries), you may want to redact these error details in production environments.
+Query validation errors might reveal information about your schema structure, such as field names, types, and required arguments. Although this is not typically a significant security concern (especially with persisted queries), you might want to redact these error details in production environments.
 
-By default, the router returns detailed validation error messages. To redact validation errors and return a generic error message instead, set the `supergraph.redact_query_validation_errors` flag:
+The router returns detailed validation error messages by default. To redact validation errors and return a generic error message, set the `supergraph.redact_query_validation_errors` flag:
 
 ```yaml title="router.yaml"
 supergraph:
   redact_query_validation_errors: true
 ```
 
-When enabled, any query validation errors are replaced with a single generic error:
+When you enable this setting, Apollo Router replaces any query validation errors with a single generic error:
 
 ```json
 {
