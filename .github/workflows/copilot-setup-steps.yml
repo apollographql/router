@@ -33,38 +33,24 @@ jobs:
         with:
           node-version: "24.x"
 
-      - name: Get upstream skills repository HEAD
-        id: skills-head
-        run: |
-          SKILLS_SHA=$(git ls-remote https://github.com/apollographql/skills.git HEAD | cut -f1)
-          echo "sha=${SKILLS_SHA}" >> $GITHUB_OUTPUT
-          echo "Upstream skills repository HEAD: ${SKILLS_SHA}"
-
-      - name: Cache downloaded skills and instructions
-        id: cache-skills
-        uses: actions/cache@v4
+      - name: Checkout skills repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          path: |
-            ~/.copilot
-          key: skills-${{ steps.skills-head.outputs.sha }}
-          restore-keys: |
-            skills-
+          repository: apollographql/skills
+          path: .tmp/skills
 
       - name: Install Rust Best Practices Skill
-        if: steps.cache-skills.outputs.cache-hit != 'true'
         run: |
           echo "Installing Rust Best Practices skill using npx skills CLI"
-          npx --yes skills add apollographql/skills --skill rust-best-practices --agent github-copilot --global --yes
+          npx --yes skills add .tmp/skills --skill rust-best-practices --agent github-copilot --global --yes
           echo "Rust Best Practices skill installed successfully"
 
       - name: Copy Documentation Instructions
-        if: steps.cache-skills.outputs.cache-hit != 'true'
         run: |
-          echo "Copying documentation instructions from apollographql/skills"
+          echo "Copying documentation instructions from cloned skills repository"
           mkdir -p ~/.copilot/instructions
-          # Download the docs instructions from the skills repository
-          curl -fsSL https://raw.githubusercontent.com/apollographql/skills/main/.github/instructions/docs.instructions.md \
-            -o ~/.copilot/instructions/docs.instructions.md
+          # Copy the docs instructions from the cloned repository
+          cp .tmp/skills/.github/instructions/docs.instructions.md ~/.copilot/instructions/docs.instructions.md
           echo "Documentation instructions copied to ~/.copilot/instructions/docs.instructions.md"
 
       - name: Install dev environment
