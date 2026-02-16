@@ -433,6 +433,34 @@ limits:
   introspection_max_depth: false
 ```
 
+#### Redacting query validation errors
+
+Query validation errors can potentially reveal information about your schema structure, such as field names, types, and required arguments. While this is not typically a significant security concern (especially with persisted queries), you may want to redact these error details in production environments.
+
+By default, the router returns detailed validation error messages. To redact validation errors and return a generic error message instead, set the `supergraph.redact_query_validation_errors` flag:
+
+```yaml title="router.yaml"
+supergraph:
+  redact_query_validation_errors: true
+```
+
+When enabled, any query validation errors are replaced with a single generic error:
+
+```json
+{
+  "message": "invalid query",
+  "extensions": {
+    "code": "UNKNOWN_ERROR"
+  }
+}
+```
+
+<Note>
+
+Enabling this option will make debugging more difficult, as clients won't receive specific information about what's wrong with their queries. Consider enabling it only in production environments where schema details should remain private.
+
+</Note>
+
 #### Early cancel
 
 Up until [Apollo Router Core v1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1), when the client closed the connection without waiting for the response, the entire request was cancelled and did not go through the entire pipeline. Since this causes issues with request monitoring, the router introduced a new behavior in 1.43.1. Now, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.
