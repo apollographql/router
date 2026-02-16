@@ -92,6 +92,7 @@ pub(crate) struct TypeDirectiveArguments<'doc> {
     pub(crate) is_interface_object: bool,
 }
 
+#[derive(Debug)]
 pub(crate) struct ContextArgument<'doc> {
     pub(crate) name: &'doc str,
     pub(crate) type_: &'doc str,
@@ -166,6 +167,7 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct FieldDirectiveArguments<'doc> {
     pub(crate) graph: Option<Name>,
     pub(crate) requires: Option<&'doc str>,
@@ -1240,7 +1242,7 @@ impl SpecDefinition for JoinSpecDefinition {
                                 let field_value_name = link.map_or(name!("FieldValue"), |link| {
                                     link.type_name_in_schema(&name!("FieldValue"))
                                 });
-                                Ok(Type::Named(field_value_name))
+                                Ok(Type::NonNullNamed(field_value_name))
                             },
                             default_value: None,
                         },
@@ -1547,7 +1549,7 @@ input join__ContextArgument {
   name: String!
   type: String!
   context: String!
-  selection: join__FieldValue
+  selection: join__FieldValue!
 }
 "#);
 

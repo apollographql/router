@@ -691,7 +691,10 @@ pub(crate) fn convert_key_algorithm(algorithm: KeyAlgorithm) -> Option<Algorithm
         KeyAlgorithm::PS512 => Algorithm::PS512,
         KeyAlgorithm::EdDSA => Algorithm::EdDSA,
         // We don't use these encryption algorithms
-        KeyAlgorithm::RSA1_5 | KeyAlgorithm::RSA_OAEP | KeyAlgorithm::RSA_OAEP_256 => return None,
+        KeyAlgorithm::RSA1_5
+        | KeyAlgorithm::RSA_OAEP
+        | KeyAlgorithm::RSA_OAEP_256
+        | KeyAlgorithm::UNKNOWN_ALGORITHM => return None,
     })
 }
 

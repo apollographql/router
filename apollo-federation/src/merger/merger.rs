@@ -65,6 +65,7 @@ use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::HasDescription;
 use crate::schema::position::HasMutableDirectives;
 use crate::schema::position::HasType;
@@ -79,6 +80,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
+use crate::schema::validators::access_control::validate_transitive_access_control_requirements_in_the_supergraph;
 use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
@@ -158,6 +160,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
     pub(in crate::merger) latest_federation_version_used: Version,
     pub(in crate::merger) applied_directives_to_merge: AppliedDirectivesToMerge,
+    pub(in crate::merger) access_control_directives_in_supergraph: Vec<(Name, Name)>,
 }
 
 #[allow(dead_code)]
@@ -230,6 +233,7 @@ impl Merger {
             join_spec_definition: join_spec,
             latest_federation_version_used,
             applied_directives_to_merge: Vec::new(),
+            access_control_directives_in_supergraph: Vec::new(),
         };
 
         // Now call prepare_supergraph as a member function
@@ -293,13 +297,14 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name()
-                    && let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
+                    let referencers = subgraph
                         .schema()
                         .referencers()
-                        .get_directive(&directive_name)
-                {
-                    acc.extend(referencers);
+                        .get_directive(&directive_name);
+                    if !referencers.is_empty() {
+                        acc.extend(referencers);
+                    }
                 }
                 acc
             })
@@ -311,13 +316,14 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.override_directive_name()
-                    && let Ok(referencers) = subgraph
+                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
+                    let referencers = subgraph
                         .schema()
                         .referencers()
-                        .get_directive(&directive_name)
-                {
-                    acc.extend(referencers);
+                        .get_directive(&directive_name);
+                    if !referencers.is_empty() {
+                        acc.extend(referencers);
+                    }
                 }
                 acc
             })
@@ -517,6 +523,15 @@ impl Merger {
             })
         } else {
             validate_merged_schema(&self.merged, &self.subgraphs, &mut errors)?;
+            if !self.access_control_directives_in_supergraph.is_empty() {
+                validate_transitive_access_control_requirements_in_the_supergraph(
+                    self.join_spec_definition,
+                    &self.subgraph_names_to_join_spec_name,
+                    &self.merged,
+                    &self.subgraphs,
+                    &mut errors,
+                )?;
+            }
             if !errors.is_empty() {
                 return Ok(MergeResult {
                     supergraph: None,
@@ -2489,7 +2504,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         let graph_enum_values: Vec<Name> = graph_enum.values.keys().cloned().collect();
 
         let referencers = self.merged.referencers();
-        let field_positions = referencers.get_directive(&join_field_directive_name)?;
+        let field_positions = referencers.get_directive(&join_field_directive_name);
         let positions_to_process: Vec<DirectiveTargetPosition> = field_positions.iter().collect();
 
         for pos in positions_to_process {

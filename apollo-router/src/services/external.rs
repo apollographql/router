@@ -46,6 +46,8 @@ pub(crate) enum PipelineStep {
     ExecutionResponse,
     SubgraphRequest,
     SubgraphResponse,
+    ConnectorRequest,
+    ConnectorResponse,
 }
 
 impl From<PipelineStep> for opentelemetry::Value {
@@ -273,6 +275,45 @@ where
         }
     }
 
+    /// This is the constructor (or builder) to use when constructing a Connector
+    /// `Externalizable`.
+    #[builder(visibility = "pub(crate)")]
+    fn connector_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: String,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        service_name: Option<String>,
+        uri: Option<String>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::ConnectorRequest | PipelineStep::ConnectorResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id: Some(id),
+            headers,
+            body,
+            context,
+            status_code,
+            sdl: None,
+            uri,
+            path: None,
+            method,
+            service_name,
+            has_next: None,
+            query_plan: None,
+            subgraph_request_id: None,
+        }
+    }
+
     pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
     where
         C: Service<
@@ -335,14 +376,20 @@ where
 /// Convert a HeaderMap into a HashMap
 pub(crate) fn externalize_header_map(
     input: &HeaderMap<HeaderValue>,
-) -> Result<HashMap<String, Vec<String>>, BoxError> {
-    let mut output = HashMap::new();
+) -> HashMap<String, Vec<String>> {
+    let mut output = HashMap::with_capacity(input.keys_len());
     for (k, v) in input {
         let k = k.as_str().to_owned();
-        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
-        output.entry(k).or_insert_with(Vec::new).push(v)
+        match String::from_utf8(v.as_bytes().to_vec()) {
+            Ok(v) => output.entry(k).or_insert_with(Vec::new).push(v),
+            Err(e) => tracing::warn!(
+                "unable to convert header value to utf-8 for {}, will not be sent to coprocessor: {}",
+                k,
+                e
+            ),
+        }
     }
-    Ok(output)
+    output
 }
 
 #[cfg(test)]
@@ -353,6 +400,7 @@ mod test {
 
     use super::*;
     use crate::assert_snapshot_subscriber;
+    use crate::test_harness::tracing_test;
 
     #[test]
     fn it_will_build_router_externalizable_correctly() {
@@ -444,5 +492,32 @@ mod test {
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await;
+    }
+
+    #[test]
+    fn it_will_externalize_headers_correctly() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        let mut headers = HeaderMap::new();
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
+        // Hyper uses this function internally to create HeaderValue structs
+        headers.insert("x-test-header", unsafe {
+            HeaderValue::from_maybe_shared_unchecked(b"invalid\xc0\xaf")
+        });
+
+        let externalized = externalize_header_map(&headers);
+
+        // x-test-header should be dropped because it is not valid UTF-8
+        assert_eq!(
+            externalized,
+            HashMap::from([(
+                "content-type".to_string(),
+                vec!["application/json".to_string()]
+            )])
+        );
+
+        assert!(tracing_test::logs_contain(
+            "unable to convert header value to utf-8 for x-test-header, will not be sent to coprocessor: invalid utf-8 sequence of 1 bytes from index 7"
+        ));
     }
 }

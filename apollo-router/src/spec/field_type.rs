@@ -124,15 +124,15 @@ fn validate_input_value(
     schema: &Schema,
     path: &JsonValuePath<'_>,
 ) -> Result<(), InvalidInputValue> {
-    let fmt_path = || match path {
-        JsonValuePath::Variable { .. } => format!("variable `{path}`"),
-        _ => format!("input value at `{path}`"),
+    let fmt_path = |var_path: &JsonValuePath<'_>| match var_path {
+        JsonValuePath::Variable { .. } => format!("variable `{var_path}`"),
+        _ => format!("input value at `{var_path}`"),
     };
     let Some(value) = value else {
         if ty.is_non_null() {
             return Err(InvalidInputValue(format!(
                 "missing {}: for required GraphQL type `{ty}`",
-                fmt_path(),
+                fmt_path(path),
             )));
         } else {
             return Ok(());
@@ -141,7 +141,7 @@ fn validate_input_value(
     let invalid = || {
         InvalidInputValue(format!(
             "invalid {}: found JSON {} for GraphQL type `{ty}`",
-            fmt_path(),
+            fmt_path(path),
             describe_json_value(value)
         ))
     };
@@ -205,7 +205,32 @@ fn validate_input_value(
         (schema::ExtendedType::Enum(_), _) => Err(invalid()),
 
         (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
-            // TODO: check keys in `obj` but not in `def.fields`?
+            // Check for extra/unknown fields in obj vs def
+            let unknown_field = |field_name| {
+                let path_string = JsonValuePath::ObjectKey {
+                    key: field_name,
+                    parent: path,
+                };
+                InvalidInputValue(format!(
+                    "unknown field {} found for GraphQL type `{def}`",
+                    fmt_path(&path_string),
+                ))
+            };
+
+            let unknown = obj.keys().find_map(|k| {
+                let k = k.as_str();
+                if !def.fields.contains_key(k) {
+                    Some(k)
+                } else {
+                    None
+                }
+            });
+
+            if let Some(unknown) = unknown {
+                return Err(unknown_field(unknown));
+            }
+
+            // Validate all fields present on def
             def.fields.values().try_for_each(|field| {
                 let path = JsonValuePath::ObjectKey {
                     key: &field.name,

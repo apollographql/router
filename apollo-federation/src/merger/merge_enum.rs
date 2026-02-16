@@ -451,6 +451,7 @@ pub(crate) mod tests {
             schema_to_import_to_feature_url: Default::default(),
             latest_federation_version_used: FEDERATION_VERSIONS.latest().version().clone(),
             applied_directives_to_merge: Default::default(),
+            access_control_directives_in_supergraph: Default::default(),
         })
     }
 }

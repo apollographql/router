@@ -1,6 +1,8 @@
 //! Demand control plugin.
 //! This plugin will use the cost calculation algorithm to determine if a query should be allowed to execute.
 //! On the request path it will use estimated
+
+use std::collections::HashSet;
 use std::future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -27,6 +29,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::Context;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::error::Error;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
@@ -34,6 +37,7 @@ use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::demand_control::cost_calculator::CostBySubgraph;
 use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
@@ -50,6 +54,12 @@ pub(crate) const COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_c
 pub(crate) const COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
 pub(crate) const COST_RESULT_KEY: &str = "apollo::demand_control::result";
 pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
+
+pub(crate) const COST_BY_SUBGRAPH_ACTUAL_KEY: &str =
+    "apollo::demand_control::actual_cost_by_subgraph";
+pub(crate) const COST_BY_SUBGRAPH_ESTIMATED_KEY: &str =
+    "apollo::demand_control::estimated_cost_by_subgraph";
+pub(crate) const COST_BY_SUBGRAPH_RESULT_KEY: &str = "apollo::demand_control::result_by_subgraph";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -73,6 +83,20 @@ pub(crate) enum StrategyConfig {
         list_size: u32,
         /// The maximum cost of a query
         max: f64,
+
+        /// The strategy used to calculate the actual cost incurred by an operation.
+        ///
+        /// * `by_subgraph` (default) computes the cost of each subgraph response and sums them
+        ///   to get the total query cost.
+        /// * `by_response_shape` computes the cost based on the final structure of the composed
+        ///   response, not including any interim structures from subgraph responses that did not
+        ///   make it to the composed response.
+        #[serde(default)]
+        actual_cost_mode: ActualCostMode,
+
+        /// Cost control by subgraph
+        #[serde(default)]
+        subgraph: SubgraphConfiguration<SubgraphStrategyConfig>,
     },
 
     #[cfg(test)]
@@ -80,6 +104,72 @@ pub(crate) enum StrategyConfig {
         stage: test::TestStage,
         error: test::TestError,
     },
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ActualCostMode {
+    /// Computes the cost of each subgraph response and sums them to get the total query cost.
+    #[default]
+    BySubgraph,
+
+    /// Computes the cost based on the final structure of the composed response, not including any
+    /// interim structures from subgraph responses that did not make it to the composed response.
+    #[deprecated(since = "TBD", note = "use `BySubgraph` instead")]
+    #[warn(deprecated_in_future)]
+    ByResponseShape,
+}
+
+#[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
+pub(crate) struct SubgraphStrategyConfig {
+    /// The assumed length of lists returned by the operation for this subgraph.
+    list_size: Option<u32>,
+
+    /// The maximum query cost routed to this subgraph.
+    max: Option<f64>,
+}
+
+impl StrategyConfig {
+    fn validate(&self, subgraph_names: HashSet<&String>) -> Result<(), BoxError> {
+        let (actual_cost_mode, subgraphs) = match self {
+            StrategyConfig::StaticEstimated {
+                actual_cost_mode,
+                subgraph,
+                ..
+            } => (actual_cost_mode, subgraph),
+            #[cfg(test)]
+            StrategyConfig::Test { .. } => return Ok(()),
+        };
+
+        #[allow(deprecated_in_future)]
+        if matches!(actual_cost_mode, ActualCostMode::ByResponseShape) {
+            tracing::warn!(
+                "Actual cost computation mode `by_response_shape` will be deprecated in the future; migrate to `by_subgraph` when possible",
+            );
+        }
+
+        if subgraphs.all.max.is_some_and(|s| s < 0.0) {
+            return Err("Maximum per-subgraph query cost for `all` is negative".into());
+        }
+
+        for (subgraph_name, subgraph_config) in subgraphs.subgraphs.iter() {
+            if !subgraph_names.contains(subgraph_name) {
+                tracing::warn!(
+                    "Subgraph `{subgraph_name}` missing from schema but was specified in per-subgraph demand cost; it will be ignored"
+                );
+                continue;
+            }
+
+            if subgraph_config.max.is_some_and(|s| s < 0.0) {
+                return Err(format!(
+                    "Maximum per-subgraph query cost for `{subgraph_name}` is negative"
+                )
+                .into());
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, Eq, PartialEq)]
@@ -112,7 +202,16 @@ pub(crate) enum DemandControlError {
         /// The maximum cost of the query
         max_cost: f64,
     },
-    /// auery actual cost {actual_cost} exceeded configured maximum {max_cost}
+    /// query estimated cost {estimated_cost} exceeded configured maximum {max_cost} for subgraph {subgraph}
+    EstimatedSubgraphCostTooExpensive {
+        /// The name of the subgraph
+        subgraph: String,
+        /// The estimated total cost of the subgraph queries
+        estimated_cost: f64,
+        /// The maximum total cost of the subgraph queries
+        max_cost: f64,
+    },
+    /// Query actual cost {actual_cost} exceeded configured maximum {max_cost}
     #[allow(dead_code)]
     ActualCostTooExpensive {
         /// The actual cost of the query
@@ -140,6 +239,23 @@ impl IntoGraphQLErrors for DemandControlError {
                 let mut extensions = Object::new();
                 extensions.insert("cost.estimated", estimated_cost.into());
                 extensions.insert("cost.max", max_cost.into());
+                Ok(vec![
+                    graphql::Error::builder()
+                        .extension_code(self.code())
+                        .extensions(extensions)
+                        .message(self.to_string())
+                        .build(),
+                ])
+            }
+            DemandControlError::EstimatedSubgraphCostTooExpensive {
+                ref subgraph,
+                estimated_cost,
+                max_cost,
+            } => {
+                let mut extensions = Object::new();
+                extensions.insert("cost.subgraph", subgraph.as_str().into());
+                extensions.insert("cost.subgraph.estimated", estimated_cost.into());
+                extensions.insert("cost.subgraph.max", max_cost.into());
                 Ok(vec![
                     graphql::Error::builder()
                         .extension_code(self.code())
@@ -195,6 +311,9 @@ impl DemandControlError {
     fn code(&self) -> &'static str {
         match self {
             DemandControlError::EstimatedCostTooExpensive { .. } => "COST_ESTIMATED_TOO_EXPENSIVE",
+            DemandControlError::EstimatedSubgraphCostTooExpensive { .. } => {
+                "SUBGRAPH_COST_ESTIMATED_TOO_EXPENSIVE"
+            }
             DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
             DemandControlError::SubgraphOperationNotInitialized(_) => {
@@ -268,6 +387,63 @@ impl Context {
         Ok(estimated.zip(actual).map(|(est, act)| est - act))
     }
 
+    pub(crate) fn insert_estimated_cost_by_subgraph(
+        &self,
+        cost: CostBySubgraph,
+    ) -> Result<(), DemandControlError> {
+        self.insert(COST_BY_SUBGRAPH_ESTIMATED_KEY, cost)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_estimated_cost_by_subgraph(
+        &self,
+    ) -> Result<Option<CostBySubgraph>, DemandControlError> {
+        self.get::<&str, CostBySubgraph>(COST_BY_SUBGRAPH_ESTIMATED_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn get_actual_cost_by_subgraph(
+        &self,
+    ) -> Result<Option<CostBySubgraph>, DemandControlError> {
+        self.get::<&str, CostBySubgraph>(COST_BY_SUBGRAPH_ACTUAL_KEY)
+            .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn update_actual_cost_by_subgraph(
+        &self,
+        subgraph: &str,
+        cost: f64,
+    ) -> Result<(), DemandControlError> {
+        // combine this cost with the cost that already exists in the context
+        self.upsert(
+            COST_BY_SUBGRAPH_ACTUAL_KEY,
+            |mut existing_cost: CostBySubgraph| {
+                existing_cost.add_or_insert(subgraph, cost);
+                existing_cost
+            },
+        )
+        .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_actual_cost_by_subgraph(
+        &self,
+        cost: CostBySubgraph,
+    ) -> Result<(), DemandControlError> {
+        // combine this cost with the cost that already exists in the context
+        self.upsert(
+            COST_BY_SUBGRAPH_ACTUAL_KEY,
+            |mut existing_cost: CostBySubgraph| {
+                existing_cost += cost;
+                existing_cost
+            },
+        )
+        .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
+    }
+
     pub(crate) fn insert_cost_result(&self, result: String) -> Result<(), DemandControlError> {
         self.insert(COST_RESULT_KEY, result)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
@@ -277,6 +453,22 @@ impl Context {
     pub(crate) fn get_cost_result(&self) -> Result<Option<String>, DemandControlError> {
         self.get::<&str, String>(COST_RESULT_KEY)
             .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))
+    }
+
+    pub(crate) fn insert_cost_by_subgraph_result(
+        &self,
+        subgraph: String,
+        result: String,
+    ) -> Result<(), DemandControlError> {
+        self.upsert::<_, HashMap<String, String>>(
+            COST_BY_SUBGRAPH_RESULT_KEY,
+            |mut current_results| {
+                current_results.insert(subgraph, result);
+                current_results
+            },
+        )
+        .map_err(|e| DemandControlError::ContextSerializationError(e.to_string()))?;
+        Ok(())
     }
 
     pub(crate) fn insert_cost_strategy(&self, strategy: String) -> Result<(), DemandControlError> {
@@ -347,6 +539,9 @@ impl Plugin for DemandControl {
             demand_controlled_subgraph_schemas
                 .insert(subgraph_name.clone(), demand_controlled_subgraph_schema);
         }
+
+        let subgraph_names = init.subgraph_schemas.keys().collect();
+        init.config.strategy.validate(subgraph_names)?;
 
         Ok(DemandControl {
             strategy_factory: StrategyFactory::new(
@@ -501,7 +696,7 @@ impl Plugin for DemandControl {
                     |(subgraph_name, req): (String, Arc<Valid<ExecutableDocument>>), fut| async move {
                         let resp: subgraph::Response = fut.await?;
                         let strategy = resp.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
-                        Ok(match strategy.on_subgraph_response(req.as_ref(), &resp) {
+                        Ok(match strategy.on_subgraph_response(req.as_ref(), &resp, &subgraph_name) {
                             Ok(_) => resp,
                             Err(err) => subgraph::Response::builder()
                                 .errors(
@@ -535,6 +730,7 @@ mod test {
     use futures::StreamExt;
     use schemars::JsonSchema;
     use serde::Deserialize;
+    use tokio::task::JoinSet;
 
     use crate::Context;
     use crate::graphql;
@@ -762,5 +958,96 @@ mod test {
                 },
             }
         }
+    }
+
+    // sanity check that our actuals calculation is always accumulative and based on safe data
+    // structures (like its current implementation, using DashMap, which functions similarly to a
+    // RwLock) -- this test looks at the same subgraph updates
+    #[tokio::test]
+    async fn test_concurrent_actual_cost_updates_to_same_subgraph() {
+        let ctx = Arc::new(Context::new());
+        let num_tasks = 100;
+        let cost_per_update = 1.5;
+
+        // multiple updates to the SAME subgraph
+        let mut join_set = JoinSet::new();
+        for _ in 0..num_tasks {
+            let ctx = ctx.clone();
+            join_set.spawn(async move {
+                ctx.update_actual_cost_by_subgraph("products", cost_per_update)
+                    .expect("update should succeed");
+            });
+        }
+
+        while let Some(result) = join_set.join_next().await {
+            result.expect("painicked waiting to join tasks");
+        }
+
+        let cost_by_subgraph = ctx
+            .get_actual_cost_by_subgraph()
+            .expect("should deserialize")
+            .expect("should have value");
+
+        let products_cost = cost_by_subgraph
+            .get("products")
+            .expect("should have products");
+        let expected_cost = num_tasks as f64 * cost_per_update;
+
+        assert_eq!(
+            products_cost, expected_cost,
+            "Expected products cost {expected_cost}, got {products_cost}"
+        );
+    }
+
+    // sanity check that our actuals calculation is always accumulative and based on safe data
+    // structures (like its current implementation, using DashMap, which functions similarly to a
+    // RwLock) -- this test looks at different subgraph updates
+    #[tokio::test]
+    async fn test_concurrent_actual_cost_multiple_subgraphs() {
+        // multiple updates to DIFFERENT subgraphs
+        let ctx = Arc::new(Context::new());
+        let subgraphs = ["users", "products", "reviews", "inventory", "pricing"];
+        let updates_per_subgraph = 20;
+        let cost_per_update = 1.5;
+
+        let mut join_set = JoinSet::new();
+        for subgraph in subgraphs.iter() {
+            for _ in 0..updates_per_subgraph {
+                let ctx = ctx.clone();
+                let subgraph = subgraph.to_string();
+                join_set.spawn(async move {
+                    ctx.update_actual_cost_by_subgraph(&subgraph, cost_per_update)
+                        .expect("update should succeed");
+                });
+            }
+        }
+
+        while let Some(result) = join_set.join_next().await {
+            result.expect("task should not panic");
+        }
+
+        let cost_by_subgraph = ctx
+            .get_actual_cost_by_subgraph()
+            .expect("should deserialize")
+            .expect("should have value");
+
+        for subgraph in subgraphs.iter() {
+            let cost = cost_by_subgraph
+                .get(subgraph)
+                .expect("should have subgraph");
+            let expected = updates_per_subgraph as f64 * cost_per_update;
+
+            assert_eq!(
+                cost, expected,
+                "Expected {subgraph} cost {expected}, got {cost}"
+            );
+        }
+
+        let total = cost_by_subgraph.total();
+        let expected_total = subgraphs.len() as f64 * updates_per_subgraph as f64 * cost_per_update;
+        assert_eq!(
+            total, expected_total,
+            "Expected total cost {expected_total}, got {total}"
+        );
     }
 }

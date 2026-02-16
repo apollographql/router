@@ -44,6 +44,7 @@ use crate::merger::merge_argument::HasArguments;
 use crate::schema::blueprint::FEDERATION_OPERATION_FIELDS;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
