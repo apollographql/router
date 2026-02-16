@@ -54,7 +54,7 @@ jobs:
         if: steps.cache-skills.outputs.cache-hit != 'true'
         run: |
           echo "Installing Rust Best Practices skill using npx skills CLI"
-          npx --yes skills add apollographql/skills --skill rust-best-practices --agent github-copilot --global --yes
+          npx --yes skills add apollographql/skills#${{ steps.skills-head.outputs.sha }} --skill rust-best-practices --agent github-copilot --global --yes
           echo "Rust Best Practices skill installed successfully"
 
       - name: Copy Documentation Instructions
@@ -62,8 +62,8 @@ jobs:
         run: |
           echo "Copying documentation instructions from apollographql/skills"
           mkdir -p ~/.copilot/instructions
-          # Download the docs instructions from the skills repository
-          curl -fsSL https://raw.githubusercontent.com/apollographql/skills/main/.github/instructions/docs.instructions.md \
+          # Download the docs instructions from the skills repository using the resolved SHA
+          curl -fsSL https://raw.githubusercontent.com/apollographql/skills/${{ steps.skills-head.outputs.sha }}/.github/instructions/docs.instructions.md \
             -o ~/.copilot/instructions/docs.instructions.md
           echo "Documentation instructions copied to ~/.copilot/instructions/docs.instructions.md"
 
