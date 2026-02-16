@@ -55,5 +55,3 @@ jobs:
 
       - name: Install dev environment
         uses: jdx/mise-action@v3
-
-      - run: git status
