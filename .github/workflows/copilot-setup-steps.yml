@@ -50,21 +50,29 @@ jobs:
           restore-keys: |
             skills-
 
+      - name: Clone skills repository at specific SHA
+        if: steps.cache-skills.outputs.cache-hit != 'true'
+        run: |
+          echo "Cloning apollographql/skills at SHA ${{ steps.skills-head.outputs.sha }}"
+          git clone https://github.com/apollographql/skills.git /tmp/skills-repo
+          cd /tmp/skills-repo
+          git checkout ${{ steps.skills-head.outputs.sha }}
+          echo "Skills repository cloned and checked out to ${{ steps.skills-head.outputs.sha }}"
+
       - name: Install Rust Best Practices Skill
         if: steps.cache-skills.outputs.cache-hit != 'true'
         run: |
           echo "Installing Rust Best Practices skill using npx skills CLI"
-          npx --yes skills add apollographql/skills#${{ steps.skills-head.outputs.sha }} --skill rust-best-practices --agent github-copilot --global --yes
+          npx --yes skills add /tmp/skills-repo --skill rust-best-practices --agent github-copilot --global --yes
           echo "Rust Best Practices skill installed successfully"
 
       - name: Copy Documentation Instructions
         if: steps.cache-skills.outputs.cache-hit != 'true'
         run: |
-          echo "Copying documentation instructions from apollographql/skills"
+          echo "Copying documentation instructions from cloned skills repository"
           mkdir -p ~/.copilot/instructions
-          # Download the docs instructions from the skills repository using the resolved SHA
-          curl -fsSL https://raw.githubusercontent.com/apollographql/skills/${{ steps.skills-head.outputs.sha }}/.github/instructions/docs.instructions.md \
-            -o ~/.copilot/instructions/docs.instructions.md
+          # Copy the docs instructions from the cloned repository
+          cp /tmp/skills-repo/.github/instructions/docs.instructions.md ~/.copilot/instructions/docs.instructions.md
           echo "Documentation instructions copied to ~/.copilot/instructions/docs.instructions.md"
 
       - name: Install dev environment
