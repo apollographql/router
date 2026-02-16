@@ -37,12 +37,12 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: apollographql/skills
-          path: skills-repo
+          path: /tmp/skills
 
       - name: Install Rust Best Practices Skill
         run: |
           echo "Installing Rust Best Practices skill using npx skills CLI"
-          npx --yes skills add skills-repo --skill rust-best-practices --agent github-copilot --global --yes
+          npx --yes skills add /tmp/skills --skill rust-best-practices --agent github-copilot --global --yes
           echo "Rust Best Practices skill installed successfully"
 
       - name: Copy Documentation Instructions
@@ -50,7 +50,7 @@ jobs:
           echo "Copying documentation instructions from cloned skills repository"
           mkdir -p ~/.copilot/instructions
           # Copy the docs instructions from the cloned repository
-          cp skills-repo/.github/instructions/docs.instructions.md ~/.copilot/instructions/docs.instructions.md
+          cp /tmp/skills/.github/instructions/docs.instructions.md ~/.copilot/instructions/docs.instructions.md
           echo "Documentation instructions copied to ~/.copilot/instructions/docs.instructions.md"
 
       - name: Install dev environment
