@@ -33,18 +33,10 @@ jobs:
         with:
           node-version: "24.x"
 
-      - name: Get upstream skills repository HEAD
-        id: skills-head
-        run: |
-          SKILLS_SHA=$(git ls-remote https://github.com/apollographql/skills.git HEAD | cut -f1)
-          echo "sha=${SKILLS_SHA}" >> $GITHUB_OUTPUT
-          echo "Upstream skills repository HEAD: ${SKILLS_SHA}"
-
-      - name: Checkout skills repository at specific SHA
+      - name: Checkout skills repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: apollographql/skills
-          ref: ${{ steps.skills-head.outputs.sha }}
           path: skills-repo
 
       - name: Install Rust Best Practices Skill
