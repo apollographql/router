@@ -45,9 +45,6 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            .agents/skills/apollo-client/
-            .github/skills/apollo-client/
-            .github/instructions/docs.instructions.md
             ~/.copilot
           key: skills-${{ steps.skills-head.outputs.sha }}
           restore-keys: |
