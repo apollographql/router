@@ -115,6 +115,21 @@ expression: "&schema"
         }
       ]
     },
+    "ActualCostMode": {
+      "oneOf": [
+        {
+          "const": "by_subgraph",
+          "description": "Computes the cost of each subgraph response and sums them to get the total query cost.",
+          "type": "string"
+        },
+        {
+          "const": "by_response_shape",
+          "deprecated": true,
+          "description": "Computes the cost based on the final structure of the composed response, not including any\ninterim structures from subgraph responses that did not make it to the composed response.",
+          "type": "string"
+        }
+      ]
+    },
     "All": {
       "enum": [
         "all"
@@ -2161,6 +2176,113 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorRequestConf": {
+      "additionalProperties": false,
+      "description": "What information is passed to a connector request stage",
+      "properties": {
+        "body": {
+          "default": false,
+          "description": "Send the body",
+          "type": "boolean"
+        },
+        "condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionConnectorSelector"
+            }
+          ],
+          "description": "Condition to trigger this stage"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContextConf"
+            }
+          ],
+          "description": "Send the context"
+        },
+        "headers": {
+          "default": false,
+          "description": "Send the headers",
+          "type": "boolean"
+        },
+        "method": {
+          "default": false,
+          "description": "Send the method",
+          "type": "boolean"
+        },
+        "service_name": {
+          "default": false,
+          "description": "Send the service name",
+          "type": "boolean"
+        },
+        "uri": {
+          "default": false,
+          "description": "Send the connector URI",
+          "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorResponseConf": {
+      "additionalProperties": false,
+      "description": "What information is passed to a connector response stage",
+      "properties": {
+        "body": {
+          "default": false,
+          "description": "Send the body",
+          "type": "boolean"
+        },
+        "condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionConnectorSelector"
+            }
+          ],
+          "description": "Condition to trigger this stage"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContextConf"
+            }
+          ],
+          "description": "Send the context"
+        },
+        "headers": {
+          "default": false,
+          "description": "Send the headers",
+          "type": "boolean"
+        },
+        "service_name": {
+          "default": false,
+          "description": "Send the service name",
+          "type": "boolean"
+        },
+        "status_code": {
+          "default": false,
+          "description": "Send the http status",
+          "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ConnectorSelector": {
       "anyOf": [
         {
@@ -2522,6 +2644,38 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorStage": {
+      "additionalProperties": false,
+      "description": "The connector stage request/response configuration",
+      "properties": {
+        "request": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorRequestConf"
+            }
+          ],
+          "description": "The request configuration"
+        },
+        "response": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorResponseConf"
+            }
+          ],
+          "description": "The response configuration"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorStages": {
+      "description": "Configures the connector coprocessor stages",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/ConnectorStage"
+        }
+      },
+      "type": "object"
+    },
     "ConnectorValue": {
       "anyOf": [
         {
@@ -2687,6 +2841,14 @@ expression: "&schema"
               "type": "null"
             }
           ]
+        },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorStages"
+            }
+          ],
+          "description": "The connector stage request/response configuration"
         },
         "execution": {
           "allOf": [
@@ -9137,6 +9299,14 @@ expression: "&schema"
             "static_estimated": {
               "additionalProperties": false,
               "properties": {
+                "actual_cost_mode": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/ActualCostMode"
+                    }
+                  ],
+                  "description": "The strategy used to calculate the actual cost incurred by an operation.\n\n* `by_subgraph` (default) computes the cost of each subgraph response and sums them\n  to get the total query cost.\n* `by_response_shape` computes the cost based on the final structure of the composed\n  response, not including any interim structures from subgraph responses that did not\n  make it to the composed response."
+                },
                 "list_size": {
                   "description": "The assumed length of lists returned by the operation.",
                   "format": "uint32",
@@ -9147,6 +9317,21 @@ expression: "&schema"
                   "description": "The maximum cost of a query",
                   "format": "double",
                   "type": "number"
+                },
+                "subgraph": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/SubgraphSubgraphStrategyConfigConfiguration"
+                    }
+                  ],
+                  "default": {
+                    "all": {
+                      "list_size": null,
+                      "max": null
+                    },
+                    "subgraphs": {}
+                  },
+                  "description": "Cost control by subgraph"
                 }
               },
               "required": [
@@ -10418,6 +10603,28 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphStrategyConfig": {
+      "properties": {
+        "list_size": {
+          "description": "The assumed length of lists returned by the operation for this subgraph.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max": {
+          "description": "The maximum query cost routed to this subgraph.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "SubgraphSubgraphApqConfiguration": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
@@ -10493,6 +10700,32 @@ expression: "&schema"
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/Subgraph2"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphSubgraphStrategyConfigConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphStrategyConfig"
+            }
+          ],
+          "default": {
+            "list_size": null,
+            "max": null
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphStrategyConfig"
           },
           "default": {},
           "description": "per subgraph options",

@@ -45,6 +45,9 @@ use crate::http_ext;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEY;
 use crate::plugins::demand_control::COST_ACTUAL_KEY;
+use crate::plugins::demand_control::COST_BY_SUBGRAPH_ACTUAL_KEY;
+use crate::plugins::demand_control::COST_BY_SUBGRAPH_ESTIMATED_KEY;
+use crate::plugins::demand_control::COST_BY_SUBGRAPH_RESULT_KEY;
 use crate::plugins::demand_control::COST_ESTIMATED_KEY;
 use crate::plugins::demand_control::COST_RESULT_KEY;
 use crate::plugins::demand_control::COST_STRATEGY_KEY;
@@ -1463,6 +1466,18 @@ impl Rhai {
         global_variables.insert("APOLLO_COST_ACTUAL_KEY".into(), COST_ACTUAL_KEY.into());
         global_variables.insert("APOLLO_COST_STRATEGY_KEY".into(), COST_STRATEGY_KEY.into());
         global_variables.insert("APOLLO_COST_RESULT_KEY".into(), COST_RESULT_KEY.into());
+        global_variables.insert(
+            "APOLLO_COST_BY_SUBGRAPH_ESTIMATED_KEY".into(),
+            COST_BY_SUBGRAPH_ESTIMATED_KEY.into(),
+        );
+        global_variables.insert(
+            "APOLLO_COST_BY_SUBGRAPH_ACTUAL_KEY".into(),
+            COST_BY_SUBGRAPH_ACTUAL_KEY.into(),
+        );
+        global_variables.insert(
+            "APOLLO_COST_BY_SUBGRAPH_RESULT_KEY".into(),
+            COST_BY_SUBGRAPH_RESULT_KEY.into(),
+        );
 
         let shared_globals = Arc::new(global_variables);
 

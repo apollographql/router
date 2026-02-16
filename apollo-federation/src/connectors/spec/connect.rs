@@ -487,7 +487,6 @@ mod tests {
         let fields = schema
             .referencers()
             .get_directive(CONNECT_DIRECTIVE_NAME_IN_SPEC.as_str())
-            .unwrap()
             .object_fields
             .iter()
             .map(|f| f.get(schema.schema()).unwrap().to_string())

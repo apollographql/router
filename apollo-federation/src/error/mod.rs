@@ -145,6 +145,8 @@ pub enum CompositionError {
     },
     #[error("{error}")]
     MergeError { error: SingleFederationError },
+    #[error("{error}")]
+    MergeValidationError { error: SingleFederationError },
     #[error("{message}")]
     ContextualArgumentNotContextualInAllSubgraphs {
         message: String,
@@ -271,6 +273,7 @@ impl CompositionError {
         match self {
             Self::SubgraphError { error, .. } => error.code(),
             Self::MergeError { error, .. } => error.code(),
+            Self::MergeValidationError { error, .. } => error.code(),
             Self::ContextualArgumentNotContextualInAllSubgraphs { .. } => {
                 ErrorCode::ContextualArgumentNotContextualInAllSubgraphs
             }
@@ -462,6 +465,7 @@ impl CompositionError {
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::MergeError { .. }
+            | Self::MergeValidationError { .. }
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
             | Self::UnsupportedSpreadDirective { .. }
@@ -828,6 +832,16 @@ pub enum SingleFederationError {
     InvalidTagName { message: String },
     #[error("{message}")]
     QueryRootMissing { message: String },
+    #[error(
+        "Invalid use of @{directive_name} on {kind} \"{coordinate}\": @{directive_name} cannot be applied on interfaces, interface fields and interface objects"
+    )]
+    AuthRequirementsAppliedOnInterface {
+        directive_name: String,
+        kind: String,
+        coordinate: String,
+    },
+    #[error("{message}")]
+    MissingTransitiveAuthRequirements { message: String },
 }
 
 impl SingleFederationError {
@@ -1053,6 +1067,12 @@ impl SingleFederationError {
             SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
             SingleFederationError::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
+            SingleFederationError::AuthRequirementsAppliedOnInterface { .. } => {
+                ErrorCode::AuthRequirementsAppliedOnInterface
+            }
+            SingleFederationError::MissingTransitiveAuthRequirements { .. } => {
+                ErrorCode::MissingTransitiveAuthRequirements
+            }
         }
     }
 
@@ -2372,6 +2392,30 @@ static QUERY_ROOT_MISSING: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
+        "AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE".to_owned(),
+        "The @authenticated, @requiresScopes and @policy directive cannot be applied on interface, interface object or their fields.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.9.4",
+            replaces: &[],
+        }),
+    )
+    },
+);
+
+static MISSING_TRANSITIVE_AUTH_REQUIREMENTS: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+            "MISSING_TRANSITIVE_AUTH_REQUIREMENTS".to_owned(),
+            "Field missing transitive @authenticated, @requiresScopes and/or @policy auth requirements needed to access dependent data.".to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.9.4",
+                replaces: &[],
+            }),
+        )
+});
+
 #[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
     ErrorCodeMissing,
@@ -2474,6 +2518,8 @@ pub enum ErrorCode {
     OverrideLabelInvalid,
     ContextualArgumentNotContextualInAllSubgraphs,
     QueryRootMissing,
+    AuthRequirementsAppliedOnInterface,
+    MissingTransitiveAuthRequirements,
 }
 
 impl ErrorCode {
@@ -2597,6 +2643,10 @@ impl ErrorCode {
                 &CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS
             }
             ErrorCode::QueryRootMissing => &QUERY_ROOT_MISSING,
+            ErrorCode::AuthRequirementsAppliedOnInterface => {
+                &AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE
+            }
+            ErrorCode::MissingTransitiveAuthRequirements => &MISSING_TRANSITIVE_AUTH_REQUIREMENTS,
         }
     }
 }
