@@ -716,6 +716,10 @@ pub(crate) struct Supergraph {
     /// Default: false
     pub(crate) introspection: bool,
 
+    /// Whether query validation errors should be redacted. These errors could be abused to leak information like "field X not found on type Y", or "Field X argument Y of type Z is required".
+    /// Default: false
+    pub(crate) redact_query_validation_errors: bool,
+
     /// Enable QP generation of fragments for subgraph requests
     /// Default: true
     pub(crate) generate_query_fragments: bool,
@@ -767,6 +771,7 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
+        redact_query_validation_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -781,6 +786,7 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
+            redact_query_validation_errors: redact_query_validation_errors.unwrap_or_default(),
         }
     }
 }
@@ -800,6 +806,7 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
+        redact_query_validation_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -814,6 +821,7 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
+            redact_query_validation_errors: redact_query_validation_errors.unwrap_or_default(),
         }
     }
 }
