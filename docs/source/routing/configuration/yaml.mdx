@@ -476,23 +476,23 @@ traffic_shaping:
 
 By default, the router compresses subgraph requests by generating fragment definitions based on the shape of the subgraph operation. In many cases this significantly reduces the size of the query sent to subgraphs.
 
-You can explicitly opt out of this behavior by specifying `supergraph.generate_query_fragments`:
+Opt out of this behavior by specifying `supergraph.generate_query_fragments`:
 
 ```yaml
 supergraph:
   generate_query_fragments: false
 ```
 
-#### Variable Validation Modes
+#### Variable validation modes
 
-By default, the router validates input variables strictly, meaning that each input object value will be validated against its type definition and any unknown fields will result in a request error.
+By default, the router validates input variables strictly. It validates each input object value against its type definition, and any unknown fields result in a request error.
 
 ```yaml
 supergraph:
   strict_variable_validation: enforce
 ```
 
-If your implementation requires the use of unknown fields on a defined type, you can opt out of stricter validation by specifying `strict_variable_validation: measure`.
+If your implementation requires unknown fields on a defined type, you can opt out of stricter validation by specifying `strict_variable_validation: measure`.
 In this case, the router will not error when encountering unknown fields, but will log the field for reference.
 
 ---
