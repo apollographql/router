@@ -125,13 +125,21 @@ impl Schema {
                     }
                     #[cfg(unix)]
                     // there is no standard for unix socket URLs apparently
-                    if let Some(path) = url.strip_prefix("unix://") {
+                    // WARN: this allows for both relative paths, unix://relative/path.sock, and
+                    // absolute paths, unix:///absolute/path.sock, and we _could_ add validation to
+                    // make sure that the path is absolute, but since this is out in the wild, we
+                    // can't safely do that without potentially breaking it for someone. If you're
+                    // trying to figure out why a socket is returning a bunch of connection errors,
+                    // this might be why. In implementing coprocessor uds support, we make sure
+                    // that the paths are absolute
+                    if let Some(url_path) = url.strip_prefix("unix://") {
                         // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
                         // so a unix:// URL will not be parsed by http::Uri
                         // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
                         // It hides the socket path in a hex encoded authority that the unix socket connector will
                         // know how to decode
-                        hyperlocal::Uri::new(path, "/").into()
+                        // TODO: support optional paths, ROUTER-1589
+                        hyperlocal::Uri::new(url_path, "/").into()
                     } else {
                         Uri::from_str(url)
                             .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
