@@ -748,7 +748,6 @@ pub(crate) struct Supergraph {
     /// Determines how to handle queries which include additional fields of an input object.
     /// - `enforce` (default): rejects query
     /// - `measure`: permits query and the logs unknown fields
-    #[serde(default = "default_strict_variable_validation")]
     pub(crate) strict_variable_validation: Mode,
 }
 
