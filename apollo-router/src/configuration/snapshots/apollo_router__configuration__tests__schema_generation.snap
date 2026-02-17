@@ -2176,6 +2176,113 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorRequestConf": {
+      "additionalProperties": false,
+      "description": "What information is passed to a connector request stage",
+      "properties": {
+        "body": {
+          "default": false,
+          "description": "Send the body",
+          "type": "boolean"
+        },
+        "condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionConnectorSelector"
+            }
+          ],
+          "description": "Condition to trigger this stage"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContextConf"
+            }
+          ],
+          "description": "Send the context"
+        },
+        "headers": {
+          "default": false,
+          "description": "Send the headers",
+          "type": "boolean"
+        },
+        "method": {
+          "default": false,
+          "description": "Send the method",
+          "type": "boolean"
+        },
+        "service_name": {
+          "default": false,
+          "description": "Send the service name",
+          "type": "boolean"
+        },
+        "uri": {
+          "default": false,
+          "description": "Send the connector URI",
+          "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorResponseConf": {
+      "additionalProperties": false,
+      "description": "What information is passed to a connector response stage",
+      "properties": {
+        "body": {
+          "default": false,
+          "description": "Send the body",
+          "type": "boolean"
+        },
+        "condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionConnectorSelector"
+            }
+          ],
+          "description": "Condition to trigger this stage"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContextConf"
+            }
+          ],
+          "description": "Send the context"
+        },
+        "headers": {
+          "default": false,
+          "description": "Send the headers",
+          "type": "boolean"
+        },
+        "service_name": {
+          "default": false,
+          "description": "Send the service name",
+          "type": "boolean"
+        },
+        "status_code": {
+          "default": false,
+          "description": "Send the http status",
+          "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ConnectorSelector": {
       "anyOf": [
         {
@@ -2537,6 +2644,38 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorStage": {
+      "additionalProperties": false,
+      "description": "The connector stage request/response configuration",
+      "properties": {
+        "request": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorRequestConf"
+            }
+          ],
+          "description": "The request configuration"
+        },
+        "response": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorResponseConf"
+            }
+          ],
+          "description": "The response configuration"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorStages": {
+      "description": "Configures the connector coprocessor stages",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/ConnectorStage"
+        }
+      },
+      "type": "object"
+    },
     "ConnectorValue": {
       "anyOf": [
         {
@@ -2702,6 +2841,14 @@ expression: "&schema"
               "type": "null"
             }
           ]
+        },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorStages"
+            }
+          ],
+          "description": "The connector stage request/response configuration"
         },
         "execution": {
           "allOf": [

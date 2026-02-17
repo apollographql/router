@@ -49,6 +49,8 @@ pub(crate) enum PipelineStep {
     ExecutionResponse,
     SubgraphRequest,
     SubgraphResponse,
+    ConnectorRequest,
+    ConnectorResponse,
 }
 
 impl From<PipelineStep> for opentelemetry::Value {
@@ -360,6 +362,45 @@ where
             .await
             .map_err(BoxError::from)
             .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
+    }
+
+    /// This is the constructor (or builder) to use when constructing a Connector
+    /// `Externalizable`.
+    #[builder(visibility = "pub(crate)")]
+    fn connector_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: String,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        service_name: Option<String>,
+        uri: Option<String>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::ConnectorRequest | PipelineStep::ConnectorResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id: Some(id),
+            headers,
+            body,
+            context,
+            status_code,
+            sdl: None,
+            uri,
+            path: None,
+            method,
+            service_name,
+            has_next: None,
+            query_plan: None,
+            subgraph_request_id: None,
+        }
     }
 }
 

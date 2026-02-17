@@ -37,12 +37,13 @@ use crate::graphql;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
-use crate::register_plugin;
+use crate::plugins::traffic_shaping::Http2Config;
+use crate::register_private_plugin;
 use crate::services;
 use crate::services::external::Control;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
@@ -59,6 +60,7 @@ use crate::services::subgraph;
 #[cfg(test)]
 mod test;
 
+mod connector;
 mod execution;
 mod supergraph;
 
@@ -70,7 +72,7 @@ const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZAT
 type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClientService>;
 
 #[async_trait::async_trait]
-impl Plugin for CoprocessorPlugin<HTTPClientService> {
+impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -140,6 +142,22 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
                 "Configuration `coprocessor.subgraph.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
         }
+        if matches!(
+            init.config.connector.all.request.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.connector.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
+        if matches!(
+            init.config.connector.all.response.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.connector.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
 
         // Validate all coprocessor URLs
         validate_coprocessor_url(&init.config.url, "coprocessor.url")?;
@@ -203,14 +221,22 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         self.subgraph_service(name, service)
     }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        self.connector_request_service(&source_name, service)
+    }
 }
 
 // This macro allows us to use it in our plugin registry!
-// register_plugin takes a group name, and a plugin name.
+// register_private_plugin takes a group name, and a plugin name.
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!(
+register_private_plugin!(
     "apollo",
     "coprocessor",
     CoprocessorPlugin<HTTPClientService>
@@ -297,6 +323,19 @@ where
             self.configuration.url.clone(),
             name.to_string(),
             self.configuration.response_validation,
+        )
+    }
+
+    fn connector_request_service(
+        &self,
+        source_name: &str,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
+        self.configuration.connector.all.as_service(
+            self.http_client.clone(),
+            service,
+            self.configuration.url.clone(),
+            source_name.to_string(),
         )
     }
 }
@@ -415,6 +454,9 @@ struct Conf {
     /// The subgraph stage request/response configuration
     #[serde(default)]
     subgraph: SubgraphStages,
+    /// The connector stage request/response configuration
+    #[serde(default)]
+    connector: connector::ConnectorStages,
 }
 
 /// Configures the context
