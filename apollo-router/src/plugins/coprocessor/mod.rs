@@ -42,7 +42,6 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
-use crate::plugins::traffic_shaping::Http2Config;
 use crate::register_private_plugin;
 use crate::services;
 use crate::services::external::Control;

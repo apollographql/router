@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
-use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectorsHttpRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
@@ -39,7 +39,8 @@ use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::externalize_header_map;
-use crate::services::router::body::RouterBody;
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
 
 /// What information is passed to a connector request stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -112,15 +113,12 @@ impl ConnectorStage {
         service_name: String,
     ) -> request_service::BoxService
     where
-        C: Service<
-                http::Request<RouterBody>,
-                Response = http::Response<RouterBody>,
-                Error = BoxError,
-            > + Clone
+        C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
+            + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+        <C as tower::Service<HttpRequest>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -239,12 +237,12 @@ async fn process_connector_request_stage<C>(
     executed: &mut bool,
 ) -> Result<ControlFlow<request_service::Response, request_service::Request>, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if request_config.condition.evaluate_request(&request) != Some(true) {
         return Ok(ControlFlow::Continue(request));
@@ -281,7 +279,13 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+
+    // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
+    // we don't intend for coprocessor calls; if in the future we change it, make sure to
+    // understand what could be sent to coprocessors and how that might affect their behavior
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, Context::new())
+        .await;
     *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::ConnectorRequest, duration);
@@ -376,7 +380,7 @@ where
     }
 
     // Reconstruct the transport request
-    request.transport_request = TransportRequest::Http(HttpRequest {
+    request.transport_request = TransportRequest::Http(ConnectorsHttpRequest {
         inner: http::Request::from_parts(new_parts, new_body),
         debug,
     });
@@ -401,12 +405,12 @@ async fn process_connector_response_stage<C>(
     executed: &mut bool,
 ) -> Result<request_service::Response, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
@@ -453,7 +457,13 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+
+    // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
+    // we don't intend for coprocessor calls; if in the future we change it, make sure to
+    // understand what could be sent to coprocessors and how that might affect their behavior
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, Context::new())
+        .await;
     *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::ConnectorResponse, duration);
