@@ -10788,6 +10788,15 @@ expression: "&schema"
             "warmed_up_queries": null
           },
           "description": "Query planning options"
+        },
+        "strict_variable_validation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Mode"
+            }
+          ],
+          "default": "enforce",
+          "description": "Determines how to handle queries which include additional fields of an input object.\n- `enforce` (default): rejects query\n- `measure`: permits query and the logs unknown fields"
         }
       },
       "type": "object"
@@ -12343,7 +12352,8 @@ expression: "&schema"
           "experimental_plans_limit": null,
           "experimental_reuse_query_plans": false,
           "warmed_up_queries": null
-        }
+        },
+        "strict_variable_validation": "enforce"
       },
       "description": "Configuration for the supergraph"
     },
