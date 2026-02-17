@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use ::serde::Deserialize;
 use futures::future::BoxFuture;
-use global::get_text_map_propagator;
 use http::HeaderValue;
 use http::Request;
 use http::header::ACCEPT_ENCODING;
@@ -16,7 +15,7 @@ use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
-use opentelemetry::global;
+use opentelemetry::global::get_text_map_propagator;
 use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_STATUS_CODE;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
@@ -64,6 +63,7 @@ type MixedClient = HTTPClient;
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
+// TODO: make this configurable: ROUTER-1589
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
@@ -178,6 +178,16 @@ impl HttpClientService {
         HttpClientService::new(name, tls_client_config, client_config)
     }
 
+    pub(crate) fn from_config_for_coprocessor(
+        tls_root_store: &RootCertStore,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        // Coprocessors don't use client certificates, so use no client auth
+        let tls_client_config = generate_tls_client_config(tls_root_store.clone(), None)?;
+
+        HttpClientService::new("coprocessor".to_string(), tls_client_config, client_config)
+    }
+
     pub(crate) fn new(
         service: impl Into<String>,
         tls_config: ClientConfig,
@@ -206,19 +216,26 @@ impl HttpClientService {
                 .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                 .http2_only(http2 == Http2Config::Http2Only)
                 .build(connector);
+
+        #[cfg(unix)]
+        let unix_client = {
+            let unix_client_inner =
+                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                    .http2_only(http2 == Http2Config::Http2Only)
+                    .build(UnixConnector);
+
+            ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .service(unix_client_inner)
+        };
+
         Ok(Self {
             http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
                 .service(http_client),
             #[cfg(unix)]
-            unix_client: ServiceBuilder::new()
-                .layer(DecompressionLayer::new())
-                .service(
-                    hyper_util::client::legacy::Client::builder(
-                        hyper_util::rt::TokioExecutor::new(),
-                    )
-                    .build(UnixConnector),
-                ),
+            unix_client,
             service: Arc::new(service.into()),
         })
     }
@@ -260,6 +277,10 @@ impl tower::Service<HttpRequest> for HttpClientService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // WARN: we only check http_client, not unix_client, because we don't know which one will
+        // be used and both the http client and the unix client use hyper_util's legacy client,
+        // which is always ready (it queues internally); if that changes, we probably need to
+        // update this to wait for both to be ready
         self.http_client
             .poll_ready(cx)
             .map(|res| res.map_err(|e| Box::new(e) as BoxError))
@@ -287,6 +308,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
                 Either::Left(std::mem::replace(&mut self.http_client, clone))
             }
         };
+
         #[cfg(not(unix))]
         let client = {
             // Because we clone our inner service, we'd better swap the readied one
@@ -295,8 +317,8 @@ impl tower::Service<HttpRequest> for HttpClientService {
         };
 
         let service_name = self.service.clone();
-
         let http_req_span = Span::current();
+
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
@@ -305,8 +327,8 @@ impl tower::Service<HttpRequest> for HttpClientService {
         });
 
         let (parts, body) = http_request.into_parts();
-
         let content_encoding = parts.headers.get(&CONTENT_ENCODING);
+
         let opt_compressor = content_encoding
             .as_ref()
             .and_then(|value| value.to_str().ok())

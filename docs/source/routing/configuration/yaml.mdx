@@ -214,6 +214,12 @@ Learn more in [Request Limits](/graphos/routing/security/request-limits).
 
 By default, the router obtains the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required. The URL can use HTTP and HTTPS for network access to subgraph, or have the following shape for Unix sockets usage: `unix:///path/to/subgraph.sock`
 
+<Note>
+
+Unix socket paths should be absolute (starting with `/`). The URL format is `unix://` followed by the absolute path, resulting in three slashes: `unix:///var/run/subgraph.sock`.
+
+</Note>
+
 However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
 
 ```yaml
