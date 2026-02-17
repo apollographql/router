@@ -2515,6 +2515,7 @@ fn reformat_response_unknown_typename() {
         .test();
 }
 
+#[allow(clippy::result_large_err)]
 fn run_validation(
     schema: String,
     query: &str,
@@ -2543,7 +2544,7 @@ fn run_validation(
     query.validate_variables(&request, &schema, mode)
 }
 
-fn assert_validation(schema: &str, query: &str, variables: serde_json_bytes::Value) -> () {
+fn assert_validation(schema: &str, query: &str, variables: serde_json_bytes::Value) {
     let res = run_validation(
         with_supergraph_boilerplate(schema, "Query"),
         query,
@@ -2553,7 +2554,7 @@ fn assert_validation(schema: &str, query: &str, variables: serde_json_bytes::Val
     assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
 }
 
-fn assert_validation_error(schema: &str, query: &str, variables: serde_json_bytes::Value) -> () {
+fn assert_validation_error(schema: &str, query: &str, variables: serde_json_bytes::Value) {
     let res = run_validation(
         with_supergraph_boilerplate(schema, "Query"),
         query,

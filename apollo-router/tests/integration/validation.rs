@@ -223,10 +223,7 @@ async fn variable_validation_mode_propagates_fully(
     #[case] logs_should_contain_warning: bool,
 ) {
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!(
-        "{}",
-        strict_variable_validation.unwrap_or("missing")
-    ));
+    settings.set_snapshot_suffix(strict_variable_validation.unwrap_or("missing"));
     settings.set_sort_maps(true);
     let _guard = settings.bind_to_scope();
 
@@ -236,7 +233,7 @@ async fn variable_validation_mode_propagates_fully(
     }
 
     let mut router = IntegrationTest::builder()
-        .config(&serde_yaml::to_string(&config).unwrap())
+        .config(serde_yaml::to_string(&config).unwrap())
         .supergraph(PathBuf::from(
             "tests/fixtures/supergraph_input_variables.graphql",
         ))
