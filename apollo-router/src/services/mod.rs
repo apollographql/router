@@ -84,3 +84,83 @@ pub(crate) const MULTIPART_SUBSCRIPTION_CONTENT_TYPE: &str =
     "multipart/mixed;boundary=\"graphql\";subscriptionSpec=1.0";
 pub(crate) const MULTIPART_SUBSCRIPTION_SPEC_PARAMETER: &str = "subscriptionSpec";
 pub(crate) const MULTIPART_SUBSCRIPTION_SPEC_VALUE: &str = "1.0";
+
+pub(crate) const DEFAULT_SOCKET_PATH: &str = "/";
+pub(crate) const PATH_PREFIX: &str = "path=";
+
+/// Parse a Unix socket URL path (the part after `unix://`) and extract the socket path
+/// and HTTP path (if provided). Supports an optional `path` query parameter to specify the HTTP path.
+///
+/// Examples:
+/// - `/tmp/socket.sock` -> (`/tmp/socket.sock`, `/`)
+/// - `/tmp/socket.sock?path=/api/v1` -> (`/tmp/socket.sock`, `/api/v1`)
+///
+/// Requires:
+/// - when using query params, the param must be denoted by `?path=`
+#[cfg(unix)]
+pub(crate) fn parse_unix_socket_url(url_path: &str) -> (String, String) {
+    if let Some(query_start) = url_path.find('?') {
+        let socket_path = &url_path[..query_start];
+        let query = &url_path[query_start + 1..];
+
+        // Parse the `path` parameter from the query string
+        let http_path = query
+            .split('&')
+            .find_map(|param| param.strip_prefix(PATH_PREFIX))
+            .unwrap_or(DEFAULT_SOCKET_PATH);
+
+        (socket_path.to_string(), http_path.to_string())
+    } else {
+        (url_path.to_string(), DEFAULT_SOCKET_PATH.to_string())
+    }
+}
+
+#[cfg(unix)]
+#[cfg(test)]
+mod unix_socket_url_tests {
+    use super::parse_unix_socket_url;
+
+    #[test]
+    fn parse_socket_path_without_query() {
+        let (socket, http_path) = parse_unix_socket_url("/tmp/coprocessor.sock");
+        assert_eq!(socket, "/tmp/coprocessor.sock");
+        assert_eq!(http_path, "/");
+    }
+
+    #[test]
+    fn parse_socket_path_with_path_param() {
+        let (socket, http_path) = parse_unix_socket_url("/tmp/coprocessor.sock?path=/api/v1");
+        assert_eq!(socket, "/tmp/coprocessor.sock");
+        assert_eq!(http_path, "/api/v1");
+    }
+
+    #[test]
+    fn parse_socket_path_with_multiple_params() {
+        let (socket, http_path) =
+            parse_unix_socket_url("/tmp/coprocessor.sock?other=value&path=/api/v1&another=x");
+        assert_eq!(socket, "/tmp/coprocessor.sock");
+        assert_eq!(http_path, "/api/v1");
+    }
+
+    #[test]
+    fn parse_socket_path_with_other_params_only() {
+        let (socket, http_path) = parse_unix_socket_url("/tmp/coprocessor.sock?other=value");
+        assert_eq!(socket, "/tmp/coprocessor.sock");
+        assert_eq!(http_path, "/");
+    }
+
+    #[test]
+    fn parse_socket_path_with_empty_query() {
+        let (socket, http_path) = parse_unix_socket_url("/tmp/coprocessor.sock?");
+        assert_eq!(socket, "/tmp/coprocessor.sock");
+        assert_eq!(http_path, "/");
+    }
+
+    #[test]
+    fn parse_socket_path_with_nested_http_path() {
+        let (socket, http_path) =
+            parse_unix_socket_url("/tmp/coprocessor.sock?path=/api/v1/coprocessor/hook");
+        assert_eq!(socket, "/tmp/coprocessor.sock");
+        assert_eq!(http_path, "/api/v1/coprocessor/hook");
+    }
+}

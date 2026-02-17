@@ -5142,6 +5142,80 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_unix_socket_with_valid_path_query_accepted() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock?path=/api/v1"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Unix socket with ?path= should be accepted, got: {}",
+            result.unwrap_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unix_socket_stage_override_with_valid_path_query_accepted() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8080",
+                "router": {
+                    "request": {
+                        "url": "unix:///tmp/router.sock?path=/hook",
+                        "headers": true
+                    }
+                }
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Stage-specific Unix socket with ?path= should be accepted, got: {}",
+            result.unwrap_err()
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::unix_with_path("unix:///tmp/coprocessor.sock?path=/api/v1")]
+    #[case::unix_without_query("unix:///tmp/coprocessor.sock")]
+    #[case::unix_unknown_query_param_warns("unix:///tmp/coprocessor.sock?foo=bar")]
+    #[case::unix_empty_query_string_warns("unix:///tmp/coprocessor.sock?")]
+    #[case::http_url("http://localhost:8080/path")]
+    fn test_validate_coprocessor_url_accepted(#[case] url: &str) {
+        assert!(
+            crate::plugins::coprocessor::validate_coprocessor_url(url, "coprocessor.url").is_ok(),
+            "URL should be accepted: {url}"
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::empty_path("unix://", "must include a path")]
+    #[case::relative_path("unix://relative/path.sock", "should be absolute")]
+    #[case::invalid_http("not a valid url", "invalid URL")]
+    fn test_validate_coprocessor_url_rejected(#[case] url: &str, #[case] expected_err: &str) {
+        let result = crate::plugins::coprocessor::validate_coprocessor_url(url, "coprocessor.url");
+        assert!(result.is_err(), "URL should be rejected: {url}");
+        assert!(
+            result.unwrap_err().to_string().contains(expected_err),
+            "Error for '{url}' should contain '{expected_err}'"
+        );
+    }
+
     #[cfg(test)]
     mod connector_tests {
         use std::str::FromStr;
