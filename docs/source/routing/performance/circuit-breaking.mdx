@@ -3,36 +3,27 @@ title: Circuit breaking
 subtitle: Learn how circuit breaking improves system stability and resource efficiency
 ---
 
-Circuit breaking is a design pattern used to prevent cascading failures in distributed systems, particularly when dealing with subgraphs. It involves temporarily halting requests to a service that is failing or experiencing high latency, allowing it time to recover without being overwhelmed by additional requests.
+Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to subgraphs that are failing or experiencing high latency. This allows your services time to recover without being overwhelmed by additional requests.
 
-## Key points on circuit breaking
+## Key points for circuit breaking
 
-Purpose: Circuit breaking is used to maintain system stability by preventing a failing service from affecting the entire system. It helps in managing failures gracefully and ensures that resources are not wasted on requests that are likely to fail.
+- **Purpose**: Maintain system stability by preventing a failing service from affecting your entire system. This helps you manage failures gracefully and ensures your resources aren't wasted on requests likely to fail.
 
-Implementation: Circuit breakers can be implemented at various levels, such as at the router level for subgraphs. This involves monitoring the health of services and, upon detecting failures or timeouts, temporarily removing the service from the request chain.
+- **Implementation**: You can implement circuit breakers at various levels, such as at the router level for subgraphs. Apollo Router monitors the health of your services and, upon detecting failures or timeouts, temporarily removes the service from the request chain.
 
-Configuration: Circuit breakers can be configured to handle specific scenarios, such as setting thresholds for timeouts or errors. They can also be manually overridden to force a breaker closed or open.
+- **Configuration**: Configure circuit breakers to handle specific scenarios, such as setting thresholds for timeouts or errors. You can also manually override them to force a breaker closed or open.
 
-Use Cases: Circuit breaking is particularly useful in environments where services are highly dynamic and can experience varying loads. It is often used in conjunction with other patterns like rate limiting and load balancing to optimize resource usage.
+- **Use Cases**: Circuit breaking helps your team manage environments where services are dynamic and experience varying loads. Use it with patterns like rate limiting and load balancing to optimize your resource usage.
 
-Challenges: Implementing circuit breaking requires careful consideration of the system architecture and the specific needs of the services involved. It may involve using service meshes or custom solutions depending on the infrastructure.
+- **Challenges**: Implementing circuit breaking requires careful consideration of your system architecture and the specific needs of your services. You might use service meshes or custom solutions depending on your infrastructure.
 
-## Options
+## Circuit breaking options
 
-There are several options for implementing circuit breaking, but there is no single out-of-the-box Apollo solution today. Here’s an overview of the available approaches, their tradeoffs, and real-world usage:
+Apollo recommends implementing circuit breaking using a service mesh or proxy. Review the following approaches and their tradeoffs:
 
-### Service Meshes and Proxies
-Service meshes like Istio and proxies such as Envoy and NGINX provide robust circuit breaking at the network or application level.
-These tools can be configured to monitor health, error rates, and latency, and to halt or reroute traffic to failing subgraphs or services.
-Many organizations already use these for rate limiting and load balancing, and they're generally recommended for circuit breaking outside the Apollo Router.
-Service mesh circuit breaking is typically not GraphQL-aware, and may treat entire subgraphs atomically, lacking per-resolver or per-query granularity.
+### Use service meshes and proxies
+Service meshes like Istio and proxies such as Envoy and NGINX provide robust circuit breaking at the network or application level. Configure these tools to monitor health, error rates, and latency to halt or reroute traffic to failing subgraphs or services. Many organizations already use these for rate limiting and load balancing. Apollo recommends using these tools for circuit breaking outside the Apollo Router.
+Service mesh circuit breaking is typically not GraphQL-aware and might treat entire subgraphs atomically, lacking per-resolver or per-query granularity.
 
-### Custom Router Plugins or Builds
-Some users have implemented their own circuit breaking logic as custom plugins or by forking the Apollo Router.
-These plugins can use libraries like nodeshift/opossum or Rust crates such as failsafe to implement circuit breaker state machines, with configurable policies (e.g., consecutive failures, success rate over a window, backoff strategies).
-This approach allows for more GraphQL-specific logic, such as subgraph-level circuit breaking, and can be tailored to organizational needs, and requires engineering investment to build and maintain, and may not be supported by Apollo directly.
-
-### Application-Level (Datasource/Resolver) Circuit Breaking
-Some teams wrap their data sources or resolvers with circuit breaker logic, using libraries such as opossum (Node.js) or resilience4j (Java).
-This can be done in Apollo Server or in the subgraph services themselves, allowing for per-resolver or per-backend API circuit breaking.
-This approach is decentralized and may require coordination and duplication across services.
+### Application-level circuit breaking
+Your team can wrap data sources or resolvers with circuit breaker logic using libraries like `opossum` (Node.js) or `resilience4j` (Java). Perform this in Apollo Server or in your subgraph services to enable per-resolver or per-backend API circuit breaking. This decentralized approach might require coordination and duplication across your services.
