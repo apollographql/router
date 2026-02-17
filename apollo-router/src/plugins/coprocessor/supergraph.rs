@@ -239,8 +239,12 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
+
+    // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
+    // we don't intend for coprocessor calls; if in the future we change it, make sure to
+    // understand what could be sent to coprocessors and how that might affect their behavior
     let co_processor_result = payload
-        .call(http_client, &coprocessor_url, request.context.clone())
+        .call(http_client, &coprocessor_url, Context::new())
         .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
@@ -395,12 +399,12 @@ where
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
+
+    // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
+    // we don't intend for coprocessor calls; if in the future we change it, make sure to
+    // understand what could be sent to coprocessors and how that might affect their behavior
     let co_processor_result = payload
-        .call(
-            http_client.clone(),
-            &coprocessor_url,
-            response.context.clone(),
-        )
+        .call(http_client.clone(), &coprocessor_url, Context::new())
         .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
