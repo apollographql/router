@@ -92,6 +92,7 @@ pub(crate) struct TypeDirectiveArguments<'doc> {
     pub(crate) is_interface_object: bool,
 }
 
+#[derive(Debug)]
 pub(crate) struct ContextArgument<'doc> {
     pub(crate) name: &'doc str,
     pub(crate) type_: &'doc str,
@@ -166,6 +167,7 @@ impl<'doc> TryFrom<&'doc Value> for ContextArgument<'doc> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct FieldDirectiveArguments<'doc> {
     pub(crate) graph: Option<Name>,
     pub(crate) requires: Option<&'doc str>,

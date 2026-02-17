@@ -44,8 +44,11 @@ use crate::spec::InvalidValue;
 use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;
+use crate::spec::query::metrics::observe_query_lexical_token;
+use crate::spec::query::metrics::observe_query_recursion;
 use crate::spec::schema::ApiSchema;
 
+pub(crate) mod metrics;
 pub(crate) mod subselections;
 pub(crate) mod transform;
 pub(crate) mod traverse;
@@ -280,7 +283,11 @@ impl Query {
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
+        let token_limit = parser.tokens_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
+
+        observe_query_recursion(recursion_limit);
+        observe_query_lexical_token(token_limit);
 
         let hash = schema.schema_id.operation_hash(query, operation_name);
         ParsedDocumentInner::new(
