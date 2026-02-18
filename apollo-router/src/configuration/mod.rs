@@ -717,6 +717,11 @@ pub(crate) struct Supergraph {
     /// Default: false
     pub(crate) introspection: bool,
 
+    /// Redact query validation errors to prevent potential information disclosure about the schema structure.
+    /// When enabled, detailed validation errors are replaced with a generic "invalid query" message.
+    /// Default: false
+    pub(crate) redact_query_validation_errors: bool,
+
     /// Enable QP generation of fragments for subgraph requests
     /// Default: true
     pub(crate) generate_query_fragments: bool,
@@ -774,6 +779,7 @@ impl Supergraph {
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
         strict_variable_validation: Option<Mode>,
+        redact_query_validation_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -790,6 +796,7 @@ impl Supergraph {
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
                 .unwrap_or_else(default_strict_variable_validation),
+            redact_query_validation_errors: redact_query_validation_errors.unwrap_or_default(),
         }
     }
 }
@@ -810,6 +817,7 @@ impl Supergraph {
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
         strict_variable_validation: Option<Mode>,
+        redact_query_validation_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -826,6 +834,7 @@ impl Supergraph {
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
                 .unwrap_or_else(default_strict_variable_validation),
+            redact_query_validation_errors: redact_query_validation_errors.unwrap_or_default(),
         }
     }
 }
