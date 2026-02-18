@@ -10935,6 +10935,11 @@ expression: "&schema"
             "warmed_up_queries": null
           },
           "description": "Query planning options"
+        },
+        "redact_query_validation_errors": {
+          "default": false,
+          "description": "Redact query validation errors to prevent potential information disclosure about the schema structure.\nWhen enabled, detailed validation errors are replaced with a generic \"invalid query\" message.\nDefault: false",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -12490,7 +12495,8 @@ expression: "&schema"
           "experimental_plans_limit": null,
           "experimental_reuse_query_plans": false,
           "warmed_up_queries": null
-        }
+        },
+        "redact_query_validation_errors": false
       },
       "description": "Configuration for the supergraph"
     },
