@@ -49,6 +49,7 @@ use self::subgraph::SubgraphConfiguration;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
+use crate::configuration::mode::Mode;
 use crate::graphql;
 use crate::plugin::plugins;
 use crate::plugins::chaos;
@@ -743,6 +744,11 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
+
+    /// Determines how to handle queries which include additional fields of an input object.
+    /// - `enforce` (default): rejects query
+    /// - `measure`: permits query and the logs unknown fields
+    pub(crate) strict_variable_validation: Mode,
 }
 
 const fn default_generate_query_fragments() -> bool {
@@ -767,6 +773,7 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
+        strict_variable_validation: Option<Mode>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -781,6 +788,8 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
+            strict_variable_validation: strict_variable_validation
+                .unwrap_or_else(default_strict_variable_validation),
         }
     }
 }
@@ -800,6 +809,7 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
+        strict_variable_validation: Option<Mode>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -814,6 +824,8 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
+            strict_variable_validation: strict_variable_validation
+                .unwrap_or_else(default_strict_variable_validation),
         }
     }
 }
@@ -1504,6 +1516,10 @@ fn default_graphql_introspection() -> bool {
 
 fn default_connection_shutdown_timeout() -> Duration {
     Duration::from_secs(60)
+}
+
+fn default_strict_variable_validation() -> Mode {
+    Mode::Enforce
 }
 
 #[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]
