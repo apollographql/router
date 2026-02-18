@@ -8,7 +8,8 @@
 //!  - execution
 //!  - subgraph (multiple in parallel if multiple subgraphs are accessed)
 //!
-//! stages.
+//! stages. A separate **RouterHttp** pipeline (raw HTTP, before the router stage) runs first; use
+//! [`router_http_service`](Plugin::router_http_service) to customize it.
 //!
 //! A plugin can choose to interact with the flow of requests at any or all of these stages of
 //! processing. At each stage a [`Service`] is provided which provides an appropriate
@@ -383,6 +384,12 @@ pub trait Plugin: Send + Sync + 'static {
         service
     }
 
+    /// Service that runs at the RouterHttp pipeline layer, before the Router pipeline.
+    /// This runs at the raw HTTP layer before telemetry, traffic shaping, and other built-in features.
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define `supergraph_service` if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
@@ -457,6 +464,11 @@ pub trait PluginUnstable: Send + Sync + 'static {
         service
     }
 
+    /// Service that runs at the RouterHttp pipeline layer, before the Router pipeline.
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
@@ -516,6 +528,10 @@ where
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         Plugin::router_service(self, service)
+    }
+
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        Plugin::router_http_service(self, service)
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
@@ -585,6 +601,11 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
+    /// Service that runs at the RouterHttp pipeline layer, before the Router pipeline.
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
         service
     }
 
@@ -667,6 +688,10 @@ where
         PluginUnstable::router_service(self, service)
     }
 
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        PluginUnstable::router_http_service(self, service)
+    }
+
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         PluginUnstable::supergraph_service(self, service)
     }
@@ -714,6 +739,9 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(&self, service: router::BoxService) -> router::BoxService;
+
+    /// Service that runs at the RouterHttp pipeline layer, before the Router pipeline.
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService;
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
@@ -773,6 +801,10 @@ where
 {
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         self.router_service(service)
+    }
+
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        PluginPrivate::router_http_service(self, service)
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {

@@ -21,6 +21,7 @@ A query plan is a blueprint for dividing a single incoming operation into one or
 
 In the request path, the request lifecycle services process each request in the following order:
 
+* The **RouterHttp** pipeline runs first at the raw HTTP layer. Rhai scripts, native plugins, and built-in features (such as license enforcement) can hook in here before the request reaches the Router service. Static pages and health endpoints also pass through this layer.
 * The **Router service** receives the client request from the HTTP server and parses it into a GraphQL operation.
 * The **Supergraph service** receives a GraphQL operation and calls the router's query planner to produce the query plan that most efficiently executes the operation.
 * The **Execution service** executes a query plan by calling the necessary subgraph services to make subgraph requests
@@ -34,6 +35,9 @@ flowchart TB;
     subgraph router["Router"]
         direction LR
         httpServer("HTTP server")
+        subgraph routerHttp["RouterHttp pipeline"]
+            routerHttpPlugins[[RouterHttp plugins]];
+        end
         subgraph routerService["Router Service"]
             routerPlugins[[Router plugins]];
         end
@@ -62,7 +66,8 @@ subgraphA[Subgraph A];
 subgraphB[Subgraph B];
 
 client --"1. HTTP request"--> httpServer;
-httpServer --"2. <code>RouterRequest</code>"--> routerService;
+httpServer --"2a. Raw HTTP"--> routerHttp;
+routerHttp --"2b. <code>RouterRequest</code>"--> routerService;
 routerService --"3. <code>SupergraphRequest</code>"--> supergraphService
 supergraphService --"4. Query"--> queryPlanner;
 queryPlanner --"5. Query plan"--> supergraphService;
@@ -75,8 +80,8 @@ service1 --"8a. HTTP request"--> subgraphA;
 service2 --"8b. HTTP request"--> subgraphB;
 ```
 
-1. The router receives a client request at an HTTP server. 
-2. The HTTP server transforms the HTTP request into a `RouterRequest` containing HTTP headers and the request body as a stream of byte arrays.
+1. The router receives a client request at an HTTP server.
+2. The request passes through the **RouterHttp** pipeline at the raw HTTP layer, where plugins (Rhai, native, license enforcement) can run. The HTTP server then transforms the HTTP request into a `RouterRequest` containing HTTP headers and the request body as a stream of byte arrays.
 3. The router service receives the `RouterRequest`. It handles Automatic Persisted Queries (APQ), parses the GraphQL request from JSON, validates the query against the schema, and calls the supergraph service with the resulting `SupergraphRequest`.
 4. The supergraph service calls the query planner with the GraphQL query from the `SupergraphRequest`.
 5. The query planner returns a query plan for most efficiently executing the query.

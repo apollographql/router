@@ -128,6 +128,27 @@ impl Plugin for Rhai {
         shared_service.take_unwrap()
     }
 
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        const FUNCTION_NAME_SERVICE: &str = "router_http";
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
+        }
+        tracing::debug!("router_http function found");
+        let shared_service = Arc::new(Mutex::new(Some(service)));
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            None,
+            ServiceStep::RouterHttp(shared_service.clone()),
+            self.scope.clone(),
+        ) {
+            tracing::error!(
+                service = "RouterHttpService",
+                "service callback failed: {error}"
+            );
+        }
+        shared_service.take_unwrap()
+    }
+
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         const FUNCTION_NAME_SERVICE: &str = "supergraph_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
@@ -196,6 +217,7 @@ impl Plugin for Rhai {
 #[derive(Clone, Debug)]
 pub(crate) enum ServiceStep {
     Router(SharedMut<router::BoxService>),
+    RouterHttp(SharedMut<router::BoxService>),
     Supergraph(SharedMut<supergraph::BoxService>),
     Execution(SharedMut<execution::BoxService>),
     Subgraph(SharedMut<subgraph::BoxService>),
@@ -609,6 +631,9 @@ impl ServiceStep {
             ServiceStep::Router(service) => {
                 gen_map_router_deferred_request!(router, service, rhai_service, callback);
             }
+            ServiceStep::RouterHttp(service) => {
+                gen_map_router_deferred_request!(router, service, rhai_service, callback);
+            }
             ServiceStep::Supergraph(service) => {
                 gen_map_request!(supergraph, service, rhai_service, callback);
             }
@@ -624,6 +649,9 @@ impl ServiceStep {
     fn map_response(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
+                gen_map_router_deferred_response!(router, service, rhai_service, callback);
+            }
+            ServiceStep::RouterHttp(service) => {
                 gen_map_router_deferred_response!(router, service, rhai_service, callback);
             }
             ServiceStep::Supergraph(service) => {

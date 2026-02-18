@@ -58,6 +58,7 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterRequest;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterResponse;
+use crate::plugins::license_enforcement::LICENSE_ENFORCEMENT_PLUGIN_NAME;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
@@ -897,20 +898,31 @@ impl RouterCreator {
             configuration.batching.clone(),
         ));
 
-        // NOTE: This is the start of the router pipeline (router_service)
-        let sb = Buffer::new(
-            ServiceBuilder::new()
-                .layer(static_page.clone())
-                .service(
-                    supergraph_creator
-                        .plugins()
-                        .iter()
-                        .rev()
-                        .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-                )
-                .boxed(),
-            DEFAULT_BUFFER_SIZE,
-        );
+        let plugins = supergraph_creator.plugins();
+
+        // 1. Build Router pipeline (exclude license_enforcement - it moved to RouterHttp)
+        // Plugins are folded in rev() order so that the first plugin in add order becomes
+        // outermost (receives requests first). See router_factory.rs create_plugins() for add order.
+        let router_pipeline = plugins
+            .iter()
+            .rev()
+            .filter(|(name, _)| *name != LICENSE_ENFORCEMENT_PLUGIN_NAME)
+            .fold(router_service.boxed(), |acc, (_, plugin)| {
+                plugin.router_service(acc)
+            });
+
+        // 2. Build RouterHttp pipeline: plugins wrap (static_page + router_pipeline).
+        // Static pages go through RouterHttp (license, coprocessor, rhai) before being served.
+        // Same rev() convention: license_enforcement (early in add order) wraps last → outermost.
+        let router_http_core = static_page.layer(router_pipeline).boxed();
+        let router_http_pipeline = plugins
+            .iter()
+            .rev()
+            .fold(router_http_core, |acc, (_, plugin)| {
+                plugin.router_http_service(acc)
+            });
+
+        let sb = Buffer::new(router_http_pipeline, DEFAULT_BUFFER_SIZE);
 
         Ok(Self {
             supergraph_creator,

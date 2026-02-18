@@ -358,9 +358,15 @@ async fn test_plugin_ordering() {
             .get(TEST_PLUGIN_ORDERING_CONTEXT_KEY)
             .unwrap()
             .unwrap();
+        // RouterHttp pipeline runs first (rhai, Rust plugins), then router pipeline (coprocessor,
+        // Rust plugins) which is inside it. Coprocessor runs at RouterRequest/Response, not HTTP.
         assert_eq!(
             trace,
             [
+                "router_http Rhai map_request",
+                "router_http Rust test_ordering_1 map_request",
+                "router_http Rust test_ordering_2 map_request",
+                "router_http Rust test_ordering_3 map_request",
                 "coprocessor RouterRequest",
                 "router_service Rust test_ordering_1 map_request",
                 "router_service Rust test_ordering_2 map_request",
@@ -377,6 +383,10 @@ async fn test_plugin_ordering() {
                 "router_service Rust test_ordering_2 map_response",
                 "router_service Rust test_ordering_1 map_response",
                 "coprocessor RouterResponse",
+                "router_http Rust test_ordering_3 map_response",
+                "router_http Rust test_ordering_2 map_response",
+                "router_http Rust test_ordering_1 map_response",
+                "router_http Rhai map_response",
             ]
         );
     }
@@ -404,6 +414,26 @@ macro_rules! make_plugin {
                     Self: Sized,
                 {
                     Ok(Self)
+                }
+
+                fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+                    ServiceBuilder::new()
+                        .map_request(|request: router::Request| {
+                            test_plugin_ordering_push_trace(
+                                &request.context,
+                                format!("router_http Rust {} map_request", $str_name),
+                            );
+                            request
+                        })
+                        .map_response(|response: router::Response| {
+                            test_plugin_ordering_push_trace(
+                                &response.context,
+                                format!("router_http Rust {} map_response", $str_name),
+                            );
+                            response
+                        })
+                        .service(service)
+                        .boxed()
                 }
 
                 fn router_service(&self, service: router::BoxService) -> router::BoxService {

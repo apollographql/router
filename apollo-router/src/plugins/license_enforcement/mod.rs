@@ -4,6 +4,9 @@
 //! * TPS Rate Limiting: a certain threshold, set via License claim, for how many operations over a certain interval can be serviced
 
 use std::num::NonZeroU64;
+
+/// Plugin name used in configuration and in the router pipeline (must match `register_private_plugin!("apollo", "license_enforcement", ...)`).
+pub(crate) const LICENSE_ENFORCEMENT_PLUGIN_NAME: &str = "apollo.license_enforcement";
 use std::time::Duration;
 
 use http::StatusCode;
@@ -64,7 +67,7 @@ impl PluginPrivate for LicenseEnforcement {
         Ok(Self { tps })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
         ServiceBuilder::new()
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
@@ -96,6 +99,11 @@ impl PluginPrivate for LicenseEnforcement {
             )
             .service(service)
             .boxed()
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        // License enforcement moved to router_http_service - returns service unchanged
+        service
     }
 }
 
@@ -135,7 +143,7 @@ mod test {
             .await
             .expect("test harness");
 
-        let service = test_harness.router_service(|_req| async {
+        let service = test_harness.router_http_service(|_req| async {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             Ok(router::Response::fake_builder()
                 .data(serde_json::json!({"data": {"field": "value"}}))
@@ -191,7 +199,7 @@ mod test {
                 .build()
                 .await
                 .unwrap()
-                .router_service(|req| async {
+                .router_http_service(|req| async {
                     Ok(router::Response::fake_builder()
                         .data(serde_json::json!({"data": {"field": "value"}}))
                         .header("x-custom-header", "test-value")

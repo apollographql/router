@@ -18,12 +18,13 @@ services:
   # Note: we run both standalone redis and clustered redis because different integration tests focus on different
   # modes of redis. In the future, we should probably add redis sentinel.
 
-  # standalone redis
+  # standalone redis (persistence disabled so it works with read_only and avoids MISCONF in tests)
   redis:
     image: redis:latest
     security_opt:
       - no-new-privileges:true
     read_only: true
+    command: ["redis-server", "--save", ""]
     ports:
       - 6379:6379
 

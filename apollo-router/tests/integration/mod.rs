@@ -20,6 +20,7 @@ mod file_upload;
 mod http_server;
 mod introspection;
 mod lifecycle;
+mod router_http_ordering;
 mod metrics;
 mod mock_subgraphs;
 mod oci;

@@ -17,10 +17,17 @@
 *.iml
 .vscode
 
+# Cursor agent skills and plan docs (local/personal)
+.cursor/skills/
+.cursor/plan-docs/
+
 # Docs
 /docs/node_modules/
 /docs/.cache/
 /docs/public
+
+# Examples
+examples/router-http/coprocessor/node_modules/
 
 # Prevent accidental commits of router.yaml in the root
 /router.yaml
