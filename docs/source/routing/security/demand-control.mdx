@@ -210,25 +210,7 @@ When requesting 7 books:
 1 Query (0) + 7 book objects (7 * (1 book object (1) + 1 author object (1) + 1 publisher object (1) + 1 address object (5))) = 56 total cost
 ```
 
-## Subgraph-level demand control
-
-<MinVersionBadge version="Router v2.12.0" />
-
-Subgraph-level demand control lets you enforce per-subgraph query cost limits in Apollo Router, in addition to the
-existing global cost limit for the whole supergraph. This helps you protect specific backend services that have different
-capacity or cost profiles from being overwhelmed by expensive operations.
-
-When a subgraph‑specific cost limit is exceeded, the router:
-- Still runs the rest of the operation, including other subgraphs whose cost is within limits.
-- Skips calls to only the over‑budget subgraph, and composes the response as if that subgraph had returned null, instead
-  of rejecting the entire query.
-
-Per‑subgraph limits apply to the total work for that subgraph in a single operation. For each request, the router tracks
-the aggregate estimated cost per subgraph across the entire query plan. If the same subgraph is fetched multiple times
-(for example, through entity lookups, nested fetches, or conditional branches), those costs are summed together and the
-subgraph’s limit is enforced against that total.
-
-### Nested paths in `slicingArguments`
+#### Nested paths in `slicingArguments`
 
 <MinVersionBadge version="Router v2.12.0" />
 
@@ -253,7 +235,7 @@ type Query {
 
 For a query such as `search(input: { pagination: { first: 10 }, query: "fiction" })`, the router uses 10 as the list size. You can use deeper paths (for example, `input.level1.level2.count`).
 
-### The `sizedFields` argument
+#### The `sizedFields` argument
 
 <MinVersionBadge version="Router v2.12.0" />
 
@@ -290,6 +272,24 @@ type ResultContainer {
   page: [Book]
 }
 ```
+
+## Subgraph-level demand control
+
+<MinVersionBadge version="Router v2.12.0" />
+
+Subgraph-level demand control lets you enforce per-subgraph query cost limits in Apollo Router, in addition to the
+existing global cost limit for the whole supergraph. This helps you protect specific backend services that have different
+capacity or cost profiles from being overwhelmed by expensive operations.
+
+When a subgraph‑specific cost limit is exceeded, the router:
+- Still runs the rest of the operation, including other subgraphs whose cost is within limits.
+- Skips calls to only the over‑budget subgraph, and composes the response as if that subgraph had returned null, instead
+  of rejecting the entire query.
+
+Per‑subgraph limits apply to the total work for that subgraph in a single operation. For each request, the router tracks
+the aggregate estimated cost per subgraph across the entire query plan. If the same subgraph is fetched multiple times
+(for example, through entity lookups, nested fetches, or conditional branches), those costs are summed together and the
+subgraph’s limit is enforced against that total.
 
 ## Configuring demand control
 
