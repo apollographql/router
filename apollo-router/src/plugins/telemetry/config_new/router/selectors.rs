@@ -193,6 +193,11 @@ pub(crate) enum RouterSelector {
         /// The format of the trace ID.
         trace_id: TraceIdFormat,
     },
+    /// The context ID of the request (unique per request).
+    ContextId {
+        /// The context ID
+        context_id: bool,
+    },
 }
 
 impl Selector for RouterSelector {
@@ -263,6 +268,9 @@ impl Selector for RouterSelector {
             RouterSelector::ResponseErrors { .. } => {
                 insert_display_router_response(request);
                 None
+            }
+            RouterSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(request.context.id.clone()))
             }
             // Related to Response
             _ => None,
@@ -399,6 +407,9 @@ impl Selector for RouterSelector {
                 .ok()
                 .flatten()
                 .map(opentelemetry::Value::from),
+            RouterSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(response.context.id.clone()))
+            }
             _ => None,
         }
     }
@@ -408,6 +419,9 @@ impl Selector for RouterSelector {
             RouterSelector::Error { .. } => Some(error.to_string().into()),
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(ctx.id.clone()))
+            }
             RouterSelector::ResponseContext {
                 response_context,
                 default,
@@ -460,6 +474,7 @@ impl Selector for RouterSelector {
                         | RouterSelector::Static(_)
                         | RouterSelector::Env { .. }
                         | RouterSelector::StaticField { .. }
+                        | RouterSelector::ContextId { .. }
                 )
             }
             Stage::Response | Stage::ResponseEvent => matches!(
@@ -478,6 +493,7 @@ impl Selector for RouterSelector {
                     | RouterSelector::RouterOverhead { .. }
                     | RouterSelector::ActiveSubgraphRequests { .. }
                     | RouterSelector::OnGraphQLError { .. }
+                    | RouterSelector::ContextId { .. }
             ),
             Stage::ResponseField => false,
             Stage::Error => matches!(
@@ -491,6 +507,7 @@ impl Selector for RouterSelector {
                     | RouterSelector::StaticField { .. }
                     | RouterSelector::ResponseContext { .. }
                     | RouterSelector::Error { .. }
+                    | RouterSelector::ContextId { .. }
             ),
             Stage::Drop => matches!(
                 self,
@@ -1046,6 +1063,47 @@ mod test {
         assert_eq!(
             selector.on_response(res).unwrap().as_str(),
             r#"{"message":"Something went wrong","locations":[{"line":1,"column":1}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}"#
+        );
+    }
+
+    #[test]
+    fn router_context_id() {
+        let selector = RouterSelector::ContextId { context_id: true };
+        let context = crate::context::Context::new();
+        let expected_id = context.id.clone();
+
+        // Test on_request
+        let request_result = selector.on_request(
+            &crate::services::RouterRequest::fake_builder()
+                .context(context.clone())
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(request_result, Some(expected_id.clone().into()));
+
+        // Test on_response
+        let response_result = selector.on_response(
+            &crate::services::RouterResponse::fake_builder()
+                .context(context.clone())
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(response_result, Some(expected_id.clone().into()));
+
+        // Test on_error
+        let error_result = selector.on_error(&BoxError::from(String::from("test error")), &context);
+        assert_eq!(error_result, Some(expected_id.into()));
+
+        // Test that context_id: false returns None
+        let selector_disabled = RouterSelector::ContextId { context_id: false };
+        assert_eq!(
+            selector_disabled.on_request(
+                &crate::services::RouterRequest::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap(),
+            ),
+            None
         );
     }
 }

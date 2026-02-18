@@ -289,6 +289,11 @@ pub(crate) enum SubgraphSelector {
         /// Select data you want from the computed cache control from response caching
         response_cache_control: CacheControlSelector,
     },
+    /// The context ID of the request (unique per request).
+    ContextId {
+        /// The context ID
+        context_id: bool,
+    },
 }
 
 impl Selector for SubgraphSelector {
@@ -468,6 +473,9 @@ impl Selector for SubgraphSelector {
             }
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SubgraphSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(request.context.id.clone()))
+            }
 
             // For response
             _ => None,
@@ -742,6 +750,9 @@ impl Selector for SubgraphSelector {
                     }
                 })
             }
+            SubgraphSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(response.context.id.clone()))
+            }
             // For request
             _ => None,
         }
@@ -788,6 +799,9 @@ impl Selector for SubgraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(ctx.id.clone()))
+            }
             _ => None,
         }
     }
@@ -820,6 +834,7 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::Env { .. }
                     | SubgraphSelector::Static(_)
                     | SubgraphSelector::StaticField { .. }
+                    | SubgraphSelector::ContextId { .. }
             ),
             Stage::Response => matches!(
                 self,
@@ -838,6 +853,7 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::Cache { .. }
                     | SubgraphSelector::ResponseCache { .. }
                     | SubgraphSelector::ResponseCacheControl { .. }
+                    | SubgraphSelector::ContextId { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
@@ -850,6 +866,7 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::Static(_)
                     | SubgraphSelector::StaticField { .. }
                     | SubgraphSelector::ResponseContext { .. }
+                    | SubgraphSelector::ContextId { .. }
             ),
             Stage::Drop => matches!(
                 self,
@@ -2172,6 +2189,44 @@ mod test {
         assert_eq!(
             selector.on_request(&crate::services::SubgraphRequest::fake_builder().build(),),
             Some("default".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_context_id() {
+        let selector = SubgraphSelector::ContextId { context_id: true };
+        let context = crate::context::Context::new();
+        let expected_id = context.id.clone();
+
+        // Test on_request
+        let request_result = selector.on_request(
+            &crate::services::SubgraphRequest::fake_builder()
+                .context(context.clone())
+                .build(),
+        );
+        assert_eq!(request_result, Some(expected_id.clone().into()));
+
+        // Test on_response
+        let response_result = selector.on_response(
+            &crate::services::SubgraphResponse::fake_builder()
+                .context(context.clone())
+                .build(),
+        );
+        assert_eq!(response_result, Some(expected_id.clone().into()));
+
+        // Test on_error
+        let error_result = selector.on_error(&BoxError::from(String::from("test error")), &context);
+        assert_eq!(error_result, Some(expected_id.into()));
+
+        // Test that context_id: false returns None
+        let selector_disabled = SubgraphSelector::ContextId { context_id: false };
+        assert_eq!(
+            selector_disabled.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .context(context)
+                    .build(),
+            ),
+            None
         );
     }
 }
