@@ -146,7 +146,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) names: Vec<String>,
     pub(in crate::merger) error_reporter: ErrorReporter,
     pub(in crate::merger) merged: FederationSchema,
-    pub(in crate::merger) subgraph_names_to_join_spec_name: HashMap<String, Name>,
+    pub(in crate::merger) subgraph_names_to_join_spec_name: IndexMap<String, Name>,
     pub(in crate::merger) merged_federation_directive_names: HashSet<String>,
     pub(in crate::merger) merged_federation_directive_in_supergraph_by_directive_name:
         HashMap<Name, MergedDirectiveInfo>,
@@ -220,7 +220,7 @@ impl Merger {
             compose_directive_manager: ComposeDirectiveManager::new(),
             error_reporter,
             merged,
-            subgraph_names_to_join_spec_name: HashMap::new(),
+            subgraph_names_to_join_spec_name: Default::default(),
             merged_federation_directive_names: HashSet::new(),
             merged_federation_directive_in_supergraph_by_directive_name: HashMap::new(),
             enum_usages: HashMap::new(),
