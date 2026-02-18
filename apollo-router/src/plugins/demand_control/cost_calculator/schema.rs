@@ -64,12 +64,18 @@ impl InputDefinition {
     }
 }
 
+/// One `@listSize` directive and its pre-parsed sizedFields (for demand control cost calculation).
+/// `parsed_sized_fields` is `None` when the directive has no `sizedFields` argument.
+pub(in crate::plugins::demand_control) struct ListSizeDirectiveEntry {
+    pub(in crate::plugins::demand_control) directive: ListSizeDirective,
+    pub(in crate::plugins::demand_control) parsed_sized_fields: Option<Arc<SizedFields>>,
+}
+
 pub(in crate::plugins::demand_control) struct FieldDefinition {
     ty: ExtendedType,
     cost_directive: Option<CostDirective>,
-    list_size_directive: Option<ListSizeDirective>,
-    /// Parsed at schema load so invalid sizedFields fail startup, not first request.
-    parsed_sized_fields: Option<Arc<SizedFields>>,
+    /// All `@listSize` directives on this field, each with its parsed sizedFields (if any).
+    list_size_directive_entries: Vec<ListSizeDirectiveEntry>,
     requires_directive: Option<RequiresDirective>,
     arguments: HashMap<Name, InputDefinition>,
 }
@@ -90,46 +96,48 @@ impl FieldDefinition {
                     field_definition.name,
                 ))
             })?;
-        let mut processed_field_definition = Self {
-            ty: field_type.clone(),
-            cost_directive: None,
-            list_size_directive: None,
-            parsed_sized_fields: None,
-            requires_directive: None,
-            arguments: HashMap::new(),
-        };
-
-        processed_field_definition.cost_directive =
+        let cost_directive =
             CostSpecDefinition::cost_directive_from_field(schema, field_definition, field_type)?;
-        processed_field_definition.list_size_directive =
-            CostSpecDefinition::list_size_directive_from_field_definition(
-                schema,
-                field_definition,
-            )?;
-        if let Some(ref list_size) = processed_field_definition.list_size_directive
-            && let Some(ref field_names) = list_size.sized_fields
-        {
-            processed_field_definition.parsed_sized_fields =
-                Some(Arc::new(SizedFields::from_strings(
+        let directives = CostSpecDefinition::list_size_directives_from_field_definition(
+            schema,
+            field_definition,
+        )?;
+        let mut list_size_directive_entries = Vec::with_capacity(directives.len());
+        for directive in directives {
+            let parsed_sized_fields = match &directive.sized_fields {
+                Some(field_names) => Some(Arc::new(SizedFields::from_strings(
                     schema.schema(),
                     field_definition.ty.inner_named_type(),
                     field_names,
-                )?));
+                )?)),
+                None => None,
+            };
+            list_size_directive_entries.push(ListSizeDirectiveEntry {
+                directive,
+                parsed_sized_fields,
+            });
         }
-        processed_field_definition.requires_directive = RequiresDirective::from_field_definition(
+        let requires_directive = RequiresDirective::from_field_definition(
             field_definition,
             parent_type_name,
             schema.schema(),
         )?;
 
+        let mut arguments = HashMap::new();
         for argument in &field_definition.arguments {
-            processed_field_definition.arguments.insert(
+            arguments.insert(
                 argument.name.clone(),
                 InputDefinition::new(schema, argument)?,
             );
         }
 
-        Ok(processed_field_definition)
+        Ok(Self {
+            ty: field_type.clone(),
+            cost_directive,
+            list_size_directive_entries,
+            requires_directive,
+            arguments,
+        })
     }
 
     pub(in crate::plugins::demand_control) fn ty(&self) -> &ExtendedType {
@@ -140,16 +148,11 @@ impl FieldDefinition {
         self.cost_directive.as_ref()
     }
 
-    pub(in crate::plugins::demand_control) fn list_size_directive(
+    /// All `@listSize` directives on this field, each with its parsed sizedFields (if any).
+    pub(in crate::plugins::demand_control) fn list_size_directive_entries(
         &self,
-    ) -> Option<&ListSizeDirective> {
-        self.list_size_directive.as_ref()
-    }
-
-    pub(in crate::plugins::demand_control) fn parsed_sized_fields(
-        &self,
-    ) -> Option<&Arc<SizedFields>> {
-        self.parsed_sized_fields.as_ref()
+    ) -> &[ListSizeDirectiveEntry] {
+        &self.list_size_directive_entries
     }
 
     pub(in crate::plugins::demand_control) fn requires_directive(
