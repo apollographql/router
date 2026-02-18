@@ -232,7 +232,7 @@ subgraph’s limit is enforced against that total.
 
 <MinVersionBadge version="Router v2.12.0" />
 
-When the list size is controlled by an argument that is nested inside an input object, use a dot-separated path in `slicingArguments`. The router resolves the path against the query arguments (and variable values) to obtain the size.
+When the list size comes from an argument nested in an input object, use a dot-separated path in `slicingArguments`. The router resolves the path against the query arguments and variable values to determine the size.
 
 ```graphql
 input PaginationInput {
@@ -251,13 +251,13 @@ type Query {
 }
 ```
 
-For a query such as `search(input: { pagination: { first: 10 }, query: "fiction" })`, the router uses 10 as the list size. Paths can be deeper (for example, `input.level1.level2.count`).
+For a query such as `search(input: { pagination: { first: 10 }, query: "fiction" })`, the router uses 10 as the list size. You can use deeper paths (for example, `input.level1.level2.count`).
 
 ### The `sizedFields` argument
 
 <MinVersionBadge version="Router v2.12.0" />
 
-When a field returns an **object** that contains one or more list fields, use the `sizedFields` argument to specify which nested fields should use this directive's list size for cost. Only selections that match those paths are scaled by the size; other selections are not.
+When a field returns an object that contains one or more list fields, use the `sizedFields` argument to specify which nested fields use this directive's list size for cost. Only selections that match those paths are scaled by the size. Other selections are not.
 
 ```graphql
 type Query {
@@ -271,7 +271,7 @@ type ResultContainer {
 }
 ```
 
-For nested lists, use a path in `sizedFields` such as `"results { page }"` so the list size applies to the inner list when the query selects `deepContainer { results { page { ... } } }`:
+For nested lists, use a path in `sizedFields` such as `"results { page }"` so that the list size applies to the inner list when the query selects `deepContainer { results { page { ... } } }`:
 
 ```graphql
 type Query {
