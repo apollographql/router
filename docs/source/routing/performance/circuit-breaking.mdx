@@ -1,28 +1,30 @@
 ---
 title: Circuit Breaking
-subtitle: Learn how circuit breaking improves system stability and resource efficiency
+subtitle: Learn how circuit breaking improves system stability and how to implement it
 ---
 
 Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to subgraphs that are failing or experiencing high latency. This allows your services time to recover without being overwhelmed by additional requests.
 
-## Key points for circuit breaking
+Apollo Router monitors the health of your services. When it detects failures or timeouts, it temporarily removes the service from the request chain. You can implement circuit breakers at various levels (for example, at the router level or subgraph level).
 
-- **Purpose**: Maintain system stability by preventing a failing service from affecting your entire system. This helps you manage failures gracefully and ensures your resources aren't wasted on requests likely to fail.
+Circuit breaking helps your team manage environments where services are dynamic and experience varying loads. Use it with patterns like rate limiting and load balancing to optimize your resource usage. 
 
-- **Implementation**: You can implement circuit breakers at various levels, such as at the router level for subgraphs. Apollo Router monitors the health of your services and, upon detecting failures or timeouts, temporarily removes the service from the request chain.
+Set thresholds for timeouts or errors to trigger circuit breaking. You can manually override them to force a breaker closed or open.
 
-- **Configuration**: Configure circuit breakers to handle specific scenarios, such as setting thresholds for timeouts or errors. You can also manually override them to force a breaker closed or open.
+## Implementing circuit breaking
 
-- **Use Cases**: Circuit breaking helps your team manage environments where services are dynamic and experience varying loads. Use it with patterns like rate limiting and load balancing to optimize your resource usage.
+Implementing circuit breaking requires careful consideration of your system architecture and the specific needs of your services.
 
-- **Challenges**: Implementing circuit breaking requires careful consideration of your system architecture and the specific needs of your services. You might use service meshes or custom solutions depending on your infrastructure.
+### Use service meshes and proxies (recommended)
 
-## Circuit breaking options
+Service meshes like [Istio](https://istio.io/) and proxies such as [Envoy](https://www.envoyproxy.io/) and [NGINX](https://www.nginx.com/) provide robust circuit breaking at the network or application level. Configure these tools to monitor health, error rates, and latency to halt or reroute traffic to failing subgraphs or services. 
 
-Apollo recommends implementing circuit breaking using a service mesh or proxy. Review the following approaches and their tradeoffs:
+Apollo recommends using these tools for circuit breaking outside the Apollo Router. Many organizations already use this approach for rate limiting and load balancing. 
 
-### Use service meshes and proxies
-Service meshes like Istio and proxies such as Envoy and NGINX provide robust circuit breaking at the network or application level. Configure these tools to monitor health, error rates, and latency to halt or reroute traffic to failing subgraphs or services. Many organizations already use these for rate limiting and load balancing. Apollo recommends using these tools for circuit breaking outside the Apollo Router. Service mesh circuit breaking is typically not GraphQL-aware and might treat entire subgraphs atomically, lacking per-resolver or per-query granularity.
+Service mesh circuit breaking is typically not GraphQL-aware and might treat entire subgraphs atomically, lacking per-resolver or per-query granularity.
 
-### Application-level circuit breaking
-Your team can wrap data sources or resolvers with circuit breaker logic using libraries like `opossum` (Node.js) or `resilience4j` (Java). Perform this in Apollo Server or in your subgraph services to enable per-resolver or per-backend API circuit breaking. This decentralized approach might require coordination and duplication across your services.
+### Use circuit breakers at the application level
+
+You can wrap data sources or resolvers with circuit breaker logic using libraries like [`opossum`](https://github.com/nodeshift/opossum) (Node.js) or [`resilience4j`](https://github.com/resilience4j/resilience4j) (Java). Use this approach in your subgraph services to enable per-resolver or per-backend API circuit breaking. 
+
+This decentralized approach might require coordination and duplication across your services.
