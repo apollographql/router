@@ -257,17 +257,20 @@ For a query such as `search(input: { pagination: { first: 10 }, query: "fiction"
 
 <MinVersionBadge version="Router v2.12.0" />
 
-When a field returns an object that contains one or more list fields, use the `sizedFields` argument to specify which nested fields use this directive's list size for cost. Only selections that match those paths are scaled by the size. Other selections are not.
+When a field returns an object containing one or more list fields, use the `sizedFields` argument to specify which of those object's list fields use the list size to calculate cost. Only selections matching those paths are scaled by the size.
 
 ```graphql
 type Query {
   container(first: Int): ResultContainer
-    @listSize(slicingArguments: ["first"], sizedFields: ["page"], requireOneSlicingArgument: false)
+    @listSize(slicingArguments: ["first"], 
+      sizedFields: ["page"], 
+      requireOneSlicingArgument: false)
 }
 
 type ResultContainer {
-  page: [Book]      # uses the list size from "first"
-  metadata: String  # not in sizedFields; cost is 1
+  page: [Book]     # in sizedFields; uses list size from slicingArguments "first"
+  recent: [Book]   # not in sizedFields; uses default list size
+  metadata: String # not in sizedFields; cost is 1
 }
 ```
 
