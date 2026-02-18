@@ -42,16 +42,16 @@ jobs:
       - name: Install Rust Best Practices Skill
         run: |
           echo "Installing Rust Best Practices skill using npx skills CLI"
-          npx --yes skills add .tmp/skills --skill rust-best-practices --agent github-copilot --global --yes
+          npx --yes skills add .tmp/skills --skill rust-best-practices --agent github-copilot --scope project --method copy --yes
           echo "Rust Best Practices skill installed successfully"
 
       - name: Copy Documentation Instructions
         run: |
           echo "Copying documentation instructions from cloned skills repository"
-          mkdir -p ~/.copilot/instructions
+          mkdir -p .github/instructions
           # Copy the docs instructions from the cloned repository
-          cp .tmp/skills/.github/instructions/docs.instructions.md ~/.copilot/instructions/docs.instructions.md
-          echo "Documentation instructions copied to ~/.copilot/instructions/docs.instructions.md"
+          cp .tmp/skills/.github/instructions/docs.instructions.md .github/instructions/docs.instructions.md
+          echo "Documentation instructions copied to .github/instructions/docs.instructions.md"
 
       - name: Install dev environment
         uses: jdx/mise-action@v3
