@@ -1210,6 +1210,7 @@ impl IntegrationTest {
         );
     }
 
+    /// Sync fn using a loop to println!() each log
     #[allow(dead_code)]
     pub fn print_logs(&self) {
         for line in &self.logs {

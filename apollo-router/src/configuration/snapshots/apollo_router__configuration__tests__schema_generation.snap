@@ -2896,7 +2896,7 @@ expression: "&schema"
           "type": "string"
         },
         "url": {
-          "description": "The url you'd like to offload processing to (can be overridden per-stage)",
+          "description": "The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs",
           "type": "string"
         }
       },
@@ -10936,6 +10936,15 @@ expression: "&schema"
           },
           "description": "Query planning options"
         },
+        "strict_variable_validation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Mode"
+            }
+          ],
+          "default": "enforce",
+          "description": "Determines how to handle queries which include additional fields of an input object.\n- `enforce` (default): rejects query\n- `measure`: permits query and the logs unknown fields"
+        },
         "redact_query_validation_errors": {
           "default": false,
           "description": "Redact query validation errors to prevent potential information disclosure about the schema structure.\nWhen enabled, detailed validation errors are replaced with a generic \"invalid query\" message.\nDefault: false",
@@ -12496,6 +12505,7 @@ expression: "&schema"
           "experimental_reuse_query_plans": false,
           "warmed_up_queries": null
         },
+        "strict_variable_validation": "enforce",
         "redact_query_validation_errors": false
       },
       "description": "Configuration for the supergraph"

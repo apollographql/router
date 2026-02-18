@@ -214,6 +214,12 @@ Learn more in [Request Limits](/graphos/routing/security/request-limits).
 
 By default, the router obtains the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required. The URL can use HTTP and HTTPS for network access to subgraph, or have the following shape for Unix sockets usage: `unix:///path/to/subgraph.sock`
 
+<Note>
+
+Unix socket paths should be absolute (starting with `/`). The URL format is `unix://` followed by the absolute path, resulting in three slashes: `unix:///var/run/subgraph.sock`.
+
+</Note>
+
 However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
 
 ```yaml
@@ -504,12 +510,24 @@ traffic_shaping:
 
 By default, the router compresses subgraph requests by generating fragment definitions based on the shape of the subgraph operation. In many cases this significantly reduces the size of the query sent to subgraphs.
 
-You can explicitly opt-out of this behavior by specifying `supergraph.generate_query_fragments`:
+Opt out of this behavior by specifying `supergraph.generate_query_fragments`:
 
 ```yaml
 supergraph:
   generate_query_fragments: false
 ```
+
+#### Variable validation modes
+
+By default, the router validates input variables strictly. It validates each input object value against its type definition, and any unknown fields result in a request error.
+
+```yaml
+supergraph:
+  strict_variable_validation: enforce
+```
+
+If your implementation requires unknown fields on a defined type, you can opt out of stricter validation by specifying `strict_variable_validation: measure`.
+In this case, the router will not error when encountering unknown fields, but will log the field for reference.
 
 ---
 
