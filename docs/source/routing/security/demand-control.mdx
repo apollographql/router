@@ -228,7 +228,7 @@ the aggregate estimated cost per subgraph across the entire query plan. If the s
 (for example, through entity lookups, nested fetches, or conditional branches), those costs are summed together and the
 subgraph’s limit is enforced against that total.
 
-#### Nested paths in `slicingArguments`
+### Nested paths in `slicingArguments`
 
 <MinVersionBadge version="Router v2.12.0" />
 
@@ -253,7 +253,7 @@ type Query {
 
 For a query such as `search(input: { pagination: { first: 10 }, query: "fiction" })`, the router uses 10 as the list size. Paths can be deeper (for example, `input.level1.level2.count`).
 
-#### The `sizedFields` argument
+### The `sizedFields` argument
 
 <MinVersionBadge version="Router v2.12.0" />
 
