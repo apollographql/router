@@ -75,12 +75,13 @@ pub enum Purpose {
 
 impl Purpose {
     pub fn from_value(value: &Value) -> Result<Purpose, LinkError> {
-        value
-            .as_enum()
-            .ok_or_else(|| {
-                LinkError::BootstrapError("invalid `purpose` value, should be an enum".to_string())
-            })
-            .and_then(|value| value.parse())
+        match value {
+            Value::Enum(name) => name.as_str().parse(),
+            Value::String(s) => s.parse(),
+            _ => Err(LinkError::BootstrapError(
+                "invalid `purpose` value, should be an enum or string".to_string(),
+            )),
+        }
     }
 }
 

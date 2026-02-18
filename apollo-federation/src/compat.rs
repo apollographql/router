@@ -22,6 +22,9 @@ use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Type;
 use apollo_compiler::validation::Valid;
 
+use crate::link::link_spec_definition::LINK_DIRECTIVE_FOR_ARGUMENT_NAME;
+use crate::link::DEFAULT_LINK_NAME;
+
 /// Return true if a directive application is "semantic", meaning it's observable in introspection.
 fn is_semantic_directive_application(directive: &Directive) -> bool {
     match directive.name.as_str() {
@@ -400,6 +403,35 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
     for directive in schema.directive_definitions.values_mut() {
         let directive = directive.make_mut();
         coerce_arguments_default_values(&types, &mut directive.arguments);
+    }
+
+    let schema_definition = schema.schema_definition.make_mut();
+    // Coerce @link(for:) from string to enum; @link isn't in directive_definitions yet.
+    coerce_schema_definition_link_for_argument(&mut schema_definition.directives);
+    coerce_directive_application_values_schema(
+        &directive_definitions,
+        &types,
+        &mut schema_definition.directives,
+    );
+}
+
+/// Coerce @link(for:) string to enum on schema definition (directive not in schema yet).
+fn coerce_schema_definition_link_for_argument(directives: &mut schema::DirectiveList) {
+    for directive in directives {
+        if directive.name != DEFAULT_LINK_NAME {
+            continue;
+        }
+        let directive = directive.make_mut();
+        for arg in &mut directive.arguments {
+            if arg.name != LINK_DIRECTIVE_FOR_ARGUMENT_NAME {
+                continue;
+            }
+            let arg = arg.make_mut();
+            if let Value::String(s) = arg.value.as_ref() {
+                arg.value = Node::new(Value::Enum(Name::new_unchecked(s)));
+            }
+            break;
+        }
     }
 }
 

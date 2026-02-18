@@ -391,3 +391,39 @@ fn coerces_string_to_enum() {
         Some(Node::new(Value::Enum(Name::new_unchecked("ACTIVE"))))
     );
 }
+
+#[test]
+fn coerces_schema_definition_link_directive_for_argument() {
+    // Coerce @link(for: "SECURITY") to enum on schema definition.
+    let schema = r#"
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.0",
+                import: ["@key"])
+          @link(url: "https://specs.apollo.dev/federation/v2.0",
+                import: ["@blorg"], as: "blorg", for: "SECURITY")
+
+        type Query {
+          a: String!
+          b(id: ID!): Z
+        }
+
+        type Z @key(fields: "id") {
+          id: ID!
+          c: String!
+        }
+
+    "#;
+
+    let subgraph = build_and_validate(schema);
+    let result = subgraph
+        .validated_schema()
+        .schema()
+        .types
+        .get("Z")
+        .and_then(|ty| match ty {
+            ExtendedType::Object(t) => Some(t),
+            _ => None::<&Node<apollo_compiler::schema::ObjectType>>,
+        })
+        .expect("Z type not found");
+    assert!(result.fields.get("id").is_some());
+}
