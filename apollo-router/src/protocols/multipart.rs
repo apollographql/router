@@ -63,10 +63,14 @@ pub(crate) struct Multipart {
     /// Used to detect if a heartbeat was the last thing sent before connection closed.
     heartbeat_pending: bool,
     /// The span captured at creation time, used to record attributes on connection close.
-    span: Span,
+    creation_span: Span,
     /// The end reason determined during polling, written to the span on Drop.
     /// If `None` when dropped and `!is_terminated`, an abnormal reason is inferred.
     end_reason: Option<EndReason>,
+    /// The subgraph name for subscription streams, used in stream_end metrics.
+    subgraph_name: Option<String>,
+    /// The client name for subscription streams, used in client_disconnect and heartbeat_delivery_failed metrics.
+    client_name: Option<String>,
 }
 
 impl Multipart {
@@ -92,9 +96,23 @@ impl Multipart {
             mode,
             heartbeat_pending: false,
             // Capture the current span so we can record attributes later
-            span: Span::current(),
+            creation_span: Span::current(),
             end_reason: None,
+            subgraph_name: None,
+            client_name: None,
         }
+    }
+
+    /// Set the subgraph name for stream_end metrics attribution.
+    pub(crate) fn with_subgraph_name(mut self, name: Option<String>) -> Self {
+        self.subgraph_name = name;
+        self
+    }
+
+    /// Set the client name for client_disconnect and heartbeat_delivery_failed metrics attribution.
+    pub(crate) fn with_client_name(mut self, name: Option<String>) -> Self {
+        self.client_name = name;
+        self
     }
 
     /// Checks if the errors indicate a reload-related termination and returns the appropriate end reason
@@ -112,6 +130,27 @@ impl Multipart {
         }
         None
     }
+
+    /// Infer the end reason for a subscription that was not terminated properly.
+    fn infer_abnormal_end_reason(&self) -> EndReason {
+        match self.mode {
+            ProtocolMode::Subscription => {
+                // Stream wasn't terminated properly
+                let reason = if self.heartbeat_pending {
+                    // Heartbeat was the last thing sent - likely failed to deliver
+                    SubscriptionEndReason::HeartbeatDeliveryFailed
+                } else {
+                    // Connection closed after a message was sent
+                    SubscriptionEndReason::ClientDisconnect
+                };
+                EndReason::Subscription(reason)
+            }
+            ProtocolMode::Defer => {
+                // Defer stream wasn't terminated properly - client disconnected
+                EndReason::Defer(DeferEndReason::ClientDisconnect)
+            }
+        }
+    }
 }
 
 /// Unified end reason for both subscription and defer modes,
@@ -125,10 +164,16 @@ enum EndReason {
 /// Reasons why a subscription ended
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SubscriptionEndReason {
-    /// Server closed the connection successfully
+    /// The subgraph gracefully closed the subscription stream. This fires when
+    /// the terminating response is the "magic empty response" (no data, no errors,
+    /// no extensions) that `filter_stream` injects after the subgraph sends a
+    /// WebSocket `complete` message.
     ServerClose,
-    /// Stream source ended (e.g., subgraph closed the connection)
-    StreamEnd,
+    /// The subgraph closed the subscription stream unexpectedly (e.g. process
+    /// killed, network drop). This fires when the terminating response contains
+    /// errors (such as `WEBSOCKET_MESSAGE_ERROR` or `WEBSOCKET_CLOSE_ERROR`)
+    /// indicating the connection was lost rather than cleanly completed.
+    SubgraphError,
     /// Heartbeat could not be delivered - client likely disconnected
     HeartbeatDeliveryFailed,
     /// Client disconnected unexpectedly (after a message was sent)
@@ -143,7 +188,7 @@ impl SubscriptionEndReason {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::ServerClose => "server_close",
-            Self::StreamEnd => "stream_end",
+            Self::SubgraphError => "subgraph_error",
             Self::HeartbeatDeliveryFailed => "heartbeat_delivery_failed",
             Self::ClientDisconnect => "client_disconnect",
             Self::SchemaReload => "schema_reload",
@@ -182,32 +227,85 @@ impl Drop for Multipart {
     fn drop(&mut self) {
         // Determine the end reason: use the one recorded during polling if available,
         // otherwise infer an abnormal termination reason.
-        let end_reason = self.end_reason.take().unwrap_or_else(|| match self.mode {
-            ProtocolMode::Subscription => {
-                // Stream wasn't terminated properly - determine the reason
-                let reason = if self.heartbeat_pending {
-                    // Heartbeat was the last thing sent - likely failed to deliver
-                    SubscriptionEndReason::HeartbeatDeliveryFailed
-                } else {
-                    // Connection closed after a message was sent
-                    SubscriptionEndReason::ClientDisconnect
-                };
-                EndReason::Subscription(reason)
-            }
-            ProtocolMode::Defer => {
-                // Defer stream wasn't terminated properly - client disconnected
-                EndReason::Defer(DeferEndReason::ClientDisconnect)
-            }
-        });
+        let end_reason = self
+            .end_reason
+            .unwrap_or_else(|| self.infer_abnormal_end_reason());
 
         match end_reason {
             EndReason::Subscription(reason) => {
-                self.span
+                self.creation_span
                     .set_span_dyn_attribute(SUBSCRIPTION_END_REASON_KEY, reason.as_value());
+                self.emit_subscription_termination_metric(reason);
             }
             EndReason::Defer(reason) => {
-                self.span
+                self.creation_span
                     .set_span_dyn_attribute(DEFER_END_REASON_KEY, reason.as_value());
+            }
+        }
+    }
+}
+
+impl Multipart {
+    /// Emit a counter metric for subscription termination events that require observability.
+    fn emit_subscription_termination_metric(&self, reason: SubscriptionEndReason) {
+        match reason {
+            SubscriptionEndReason::ServerClose => {
+                let subgraph_name = self
+                    .subgraph_name
+                    .as_deref()
+                    .unwrap_or("unknown")
+                    .to_string();
+                u64_counter!(
+                    "apollo.router.operations.subscriptions.stream_end",
+                    "Subscription terminated because the subgraph gracefully closed the stream",
+                    1,
+                    subgraph.service.name = subgraph_name
+                );
+            }
+            SubscriptionEndReason::SubgraphError => {
+                let subgraph_name = self
+                    .subgraph_name
+                    .as_deref()
+                    .unwrap_or("unknown")
+                    .to_string();
+                u64_counter!(
+                    "apollo.router.operations.subscriptions.subgraph_error",
+                    "Subscription terminated unexpectedly due to a subgraph error (e.g. process killed, network drop)",
+                    1,
+                    subgraph.service.name = subgraph_name
+                );
+            }
+            SubscriptionEndReason::ClientDisconnect => {
+                let client_name = self.client_name.as_deref().unwrap_or("unknown").to_string();
+                u64_counter!(
+                    "apollo.router.operations.subscriptions.client_disconnect",
+                    "Subscription terminated because the client disconnected",
+                    1,
+                    apollo.client.name = client_name
+                );
+            }
+            SubscriptionEndReason::HeartbeatDeliveryFailed => {
+                let client_name = self.client_name.as_deref().unwrap_or("unknown").to_string();
+                u64_counter!(
+                    "apollo.router.operations.subscriptions.heartbeat_delivery_failed",
+                    "Subscription terminated because a heartbeat could not be delivered to the client",
+                    1,
+                    apollo.client.name = client_name
+                );
+            }
+            SubscriptionEndReason::SchemaReload => {
+                u64_counter!(
+                    "apollo.router.operations.subscriptions.schema_reload",
+                    "Subscription terminated because the router schema was updated",
+                    1
+                );
+            }
+            SubscriptionEndReason::ConfigReload => {
+                u64_counter!(
+                    "apollo.router.operations.subscriptions.config_reload",
+                    "Subscription terminated because the router configuration was updated",
+                    1
+                );
             }
         }
     }
@@ -261,6 +359,12 @@ impl Stream for Multipart {
                         Vec::from(&b"\r\ncontent-type: application/json\r\n\r\n"[..])
                     };
 
+                    // Track whether this is an unexpected subgraph error (e.g. WebSocket
+                    // WEBSOCKET_MESSAGE_ERROR or WEBSOCKET_CLOSE_ERROR from a killed process
+                    // or network drop). This is set inside the Subscription branch below,
+                    // before errors are consumed.
+                    let mut has_subgraph_errors = false;
+
                     match self.mode {
                         ProtocolMode::Subscription => {
                             let is_transport_error =
@@ -278,6 +382,12 @@ impl Stream for Multipart {
                                 ));
                                 return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
                             }
+
+                            // Capture before errors are moved: if the response has errors
+                            // and they're not from a router-initiated transport error
+                            // (JWT/execution), these are from the subgraph (WebSocket layer).
+                            has_subgraph_errors =
+                                !response.errors.is_empty() && !is_transport_error;
 
                             let response = if is_transport_error {
                                 SubscriptionPayload {
@@ -311,7 +421,11 @@ impl Stream for Multipart {
                         self.is_terminated = true;
                         self.end_reason = Some(match self.mode {
                             ProtocolMode::Subscription => EndReason::Subscription(
-                                maybe_end_reason.unwrap_or(SubscriptionEndReason::ServerClose),
+                                maybe_end_reason.unwrap_or(if has_subgraph_errors {
+                                    SubscriptionEndReason::SubgraphError
+                                } else {
+                                    SubscriptionEndReason::ServerClose
+                                }),
                             ),
                             ProtocolMode::Defer => EndReason::Defer(DeferEndReason::Completed),
                         });
@@ -336,7 +450,7 @@ impl Stream for Multipart {
                     self.is_terminated = true;
                     if self.mode == ProtocolMode::Subscription {
                         self.end_reason =
-                            Some(EndReason::Subscription(SubscriptionEndReason::StreamEnd));
+                            Some(EndReason::Subscription(SubscriptionEndReason::ServerClose));
                     }
 
                     Poll::Ready(Some(Ok(buf)))
@@ -347,7 +461,7 @@ impl Stream for Multipart {
                     self.is_terminated = true;
                     self.end_reason = Some(match self.mode {
                         ProtocolMode::Subscription => {
-                            EndReason::Subscription(SubscriptionEndReason::StreamEnd)
+                            EndReason::Subscription(SubscriptionEndReason::ServerClose)
                         }
                         ProtocolMode::Defer => EndReason::Defer(DeferEndReason::Completed),
                     });
@@ -373,6 +487,7 @@ mod tests {
     use tracing_subscriber::registry::LookupSpan;
 
     use super::*;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::otel;
     use crate::plugins::telemetry::otel::OtelData;
@@ -413,261 +528,334 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscription_end_reason_server_close_empty_response() {
-        // Test: Server closes connection successfully (empty response)
-        let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!("test_span");
-        let span_guard = span.enter();
+        async {
+            // Test: Server closes connection successfully (empty response)
+            // ServerClose also emits the stream_end metric since in production all
+            // server-side terminations go through filter_stream → ServerClose.
+            let (_guard, layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let span_guard = span.enter();
 
-        let responses = vec![
-            graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("data")))
-                .subscribed(true)
-                .build(),
-            // Empty response signals server-side close
-            graphql::Response::builder().build(),
-        ];
-        let gql_responses = stream::iter(responses);
-        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+            let responses = vec![
+                graphql::Response::builder()
+                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .subscribed(true)
+                    .build(),
+                // Empty response signals server-side close
+                graphql::Response::builder().build(),
+            ];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
+                .with_subgraph_name(Some("test_subgraph".to_string()));
 
-        // Consume all messages
-        while protocol.next().await.is_some() {}
+            // Consume all messages
+            while protocol.next().await.is_some() {}
 
-        drop(protocol);
-        drop(span_guard);
-        drop(span);
+            drop(protocol);
+            drop(span_guard);
+            drop(span);
 
-        let reason = layer.captured_reason.lock().unwrap().clone();
-        assert_eq!(
-            reason,
-            Some(KeyValue::new(
-                SUBSCRIPTION_END_REASON_KEY,
-                SubscriptionEndReason::ServerClose.as_value()
-            ))
-        );
+            let reason = layer.captured_reason.lock().unwrap().clone();
+            assert_eq!(
+                reason,
+                Some(KeyValue::new(
+                    SUBSCRIPTION_END_REASON_KEY,
+                    SubscriptionEndReason::ServerClose.as_value()
+                ))
+            );
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.stream_end",
+                1,
+                "subgraph.service.name" = "test_subgraph"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
     async fn test_subscription_end_reason_server_close_with_final_data() {
-        // Test: Server closes normally with final data (subscribed=false, no errors)
-        let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!("test_span");
-        let _span_guard = span.enter();
-        let responses = vec![
-            graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("data")))
-                .subscribed(true)
-                .build(),
-            graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("final")))
-                .subscribed(false) // Server close with final data
-                .build(),
-        ];
-        let gql_responses = stream::iter(responses);
-        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+        async {
+            // Test: Server closes normally with final data (subscribed=false, no errors)
+            let (_guard, layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+            let responses = vec![
+                graphql::Response::builder()
+                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .subscribed(true)
+                    .build(),
+                graphql::Response::builder()
+                    .data(serde_json_bytes::Value::String(ByteString::from("final")))
+                    .subscribed(false) // Server close with final data
+                    .build(),
+            ];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
+                .with_subgraph_name(Some("test_subgraph".to_string()));
 
-        // Consume all messages
-        while protocol.next().await.is_some() {}
+            // Consume all messages
+            while protocol.next().await.is_some() {}
 
-        drop(protocol);
-        drop(_span_guard);
-        drop(span);
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
 
-        let reason = layer.captured_reason.lock().unwrap().clone();
-        assert_eq!(
-            reason,
-            Some(KeyValue::new(
-                SUBSCRIPTION_END_REASON_KEY,
-                SubscriptionEndReason::ServerClose.as_value()
-            ))
-        );
+            let reason = layer.captured_reason.lock().unwrap().clone();
+            assert_eq!(
+                reason,
+                Some(KeyValue::new(
+                    SUBSCRIPTION_END_REASON_KEY,
+                    SubscriptionEndReason::ServerClose.as_value()
+                ))
+            );
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.stream_end",
+                1,
+                "subgraph.service.name" = "test_subgraph"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
-    async fn test_end_reason_stream_end() {
-        // Test: Stream ends via EOF (empty stream)
-        let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!("test_span");
-        let _span_guard = span.enter();
-        let responses: Vec<graphql::Response> = vec![];
-        let gql_responses = stream::iter(responses);
-        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+    async fn test_end_reason_server_close_via_eof() {
+        async {
+            // Test: Stream ends via EOF (empty stream) — the Eof sentinel fires,
+            // which sets ServerClose (same as all other server-side termination paths).
+            let (_guard, layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+            let responses: Vec<graphql::Response> = vec![];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
+                .with_subgraph_name(Some("test_subgraph".to_string()));
 
-        // Consume all messages (will get EOF)
-        while protocol.next().await.is_some() {}
+            // Consume all messages (will get EOF)
+            while protocol.next().await.is_some() {}
 
-        drop(protocol);
-        drop(_span_guard);
-        drop(span);
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
 
-        let reason = layer.captured_reason.lock().unwrap().clone();
-        assert_eq!(
-            reason,
-            Some(KeyValue::new(
-                SUBSCRIPTION_END_REASON_KEY,
-                SubscriptionEndReason::StreamEnd.as_value()
-            ))
-        );
+            let reason = layer.captured_reason.lock().unwrap().clone();
+            assert_eq!(
+                reason,
+                Some(KeyValue::new(
+                    SUBSCRIPTION_END_REASON_KEY,
+                    SubscriptionEndReason::ServerClose.as_value()
+                ))
+            );
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.stream_end",
+                1,
+                "subgraph.service.name" = "test_subgraph"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
     async fn test_end_reason_heartbeat_delivery_failed() {
-        // Test: Stream dropped while heartbeat was pending
-        let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!("test_span");
-        let _span_guard = span.enter();
-        use tokio::time::sleep;
+        async {
+            // Test: Stream dropped while heartbeat was pending
+            let (_guard, layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+            use tokio::time::sleep;
 
-        let (tx, rx) = tokio::sync::mpsc::channel::<graphql::Response>(1);
-        let gql_responses = tokio_stream::wrappers::ReceiverStream::new(rx);
-        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+            let (tx, rx) = tokio::sync::mpsc::channel::<graphql::Response>(1);
+            let gql_responses = tokio_stream::wrappers::ReceiverStream::new(rx);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
+                .with_client_name(Some("test_client".to_string()));
 
-        // Spawn a task that never sends anything, then drops the sender
-        tokio::spawn(async move {
-            sleep(std::time::Duration::from_millis(100)).await;
-            drop(tx);
-        });
+            // Spawn a task that never sends anything, then drops the sender
+            tokio::spawn(async move {
+                sleep(std::time::Duration::from_millis(100)).await;
+                drop(tx);
+            });
 
-        // Wait for a heartbeat to be sent
-        let heartbeat = "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql";
-        while let Some(resp) = protocol.next().await {
-            let res = String::from_utf8(resp.unwrap().to_vec()).unwrap();
-            if res == heartbeat || res.starts_with("\r\ncontent-type: application/json\r\n\r\n{}") {
-                // Got a heartbeat, now drop the protocol while heartbeat is pending
-                assert!(protocol.heartbeat_pending);
-                break;
+            // Wait for a heartbeat to be sent
+            let heartbeat =
+                "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{}\r\n--graphql";
+            while let Some(resp) = protocol.next().await {
+                let res = String::from_utf8(resp.unwrap().to_vec()).unwrap();
+                if res == heartbeat
+                    || res.starts_with("\r\ncontent-type: application/json\r\n\r\n{}")
+                {
+                    // Got a heartbeat, now drop the protocol while heartbeat is pending
+                    assert!(protocol.heartbeat_pending);
+                    break;
+                }
             }
+
+            // Protocol is dropped here with heartbeat_pending = true
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
+
+            let reason = layer.captured_reason.lock().unwrap().clone();
+            assert_eq!(
+                reason,
+                Some(KeyValue::new(
+                    SUBSCRIPTION_END_REASON_KEY,
+                    SubscriptionEndReason::HeartbeatDeliveryFailed.as_value()
+                ))
+            );
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.heartbeat_delivery_failed",
+                1,
+                "apollo.client.name" = "test_client"
+            );
         }
-
-        // Protocol is dropped here with heartbeat_pending = true
-        drop(protocol);
-        drop(_span_guard);
-        drop(span);
-
-        let reason = layer.captured_reason.lock().unwrap().clone();
-        assert_eq!(
-            reason,
-            Some(KeyValue::new(
-                SUBSCRIPTION_END_REASON_KEY,
-                SubscriptionEndReason::HeartbeatDeliveryFailed.as_value()
-            ))
-        );
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
     async fn test_end_reason_client_disconnect() {
-        // Test: Stream dropped after a message (not heartbeat) was sent
-        let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!("test_span");
-        let _span_guard = span.enter();
-        let responses = vec![
-            graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("data")))
-                .subscribed(true)
-                .build(),
-        ];
-        let gql_responses = stream::iter(responses);
-        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+        async {
+            // Test: Stream dropped after a message (not heartbeat) was sent
+            let (_guard, layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+            let responses = vec![
+                graphql::Response::builder()
+                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .subscribed(true)
+                    .build(),
+            ];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
+                .with_client_name(Some("test_client".to_string()));
 
-        // Get the first message
-        let resp = protocol.next().await;
-        assert!(resp.is_some());
+            // Get the first message
+            let resp = protocol.next().await;
+            assert!(resp.is_some());
 
-        // Verify heartbeat_pending is false (we got a message, not heartbeat)
-        assert!(!protocol.heartbeat_pending);
+            // Verify heartbeat_pending is false (we got a message, not heartbeat)
+            assert!(!protocol.heartbeat_pending);
 
-        // Protocol is dropped here without being terminated
-        // and heartbeat_pending = false
-        drop(protocol);
-        drop(_span_guard);
-        drop(span);
+            // Protocol is dropped here without being terminated
+            // and heartbeat_pending = false
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
 
-        let reason = layer.captured_reason.lock().unwrap().clone();
-        assert_eq!(
-            reason,
-            Some(KeyValue::new(
-                SUBSCRIPTION_END_REASON_KEY,
-                SubscriptionEndReason::ClientDisconnect.as_value()
-            ))
-        );
+            let reason = layer.captured_reason.lock().unwrap().clone();
+            assert_eq!(
+                reason,
+                Some(KeyValue::new(
+                    SUBSCRIPTION_END_REASON_KEY,
+                    SubscriptionEndReason::ClientDisconnect.as_value()
+                ))
+            );
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.client_disconnect",
+                1,
+                "apollo.client.name" = "test_client"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
     async fn test_subscription_end_reason_schema_reload() {
-        let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!("test_span");
-        let _span_guard = span.enter();
-        let responses = vec![
-            graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("data")))
-                .subscribed(true)
-                .build(),
-            graphql::Response::builder()
-                .error(
-                    graphql::Error::builder()
-                        .message("subscription has been closed due to a schema reload")
-                        .extension_code("SUBSCRIPTION_SCHEMA_RELOAD")
-                        .build(),
-                )
-                .subscribed(false)
-                .build(),
-        ];
-        let gql_responses = stream::iter(responses);
-        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+        async {
+            let (_guard, layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+            let responses = vec![
+                graphql::Response::builder()
+                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .subscribed(true)
+                    .build(),
+                graphql::Response::builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message("subscription has been closed due to a schema reload")
+                            .extension_code("SUBSCRIPTION_SCHEMA_RELOAD")
+                            .build(),
+                    )
+                    .subscribed(false)
+                    .build(),
+            ];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
 
-        // Consume all messages
-        while protocol.next().await.is_some() {}
-        drop(protocol);
-        drop(_span_guard);
-        drop(span);
+            // Consume all messages
+            while protocol.next().await.is_some() {}
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
 
-        let reason = layer.captured_reason.lock().unwrap().clone();
-        assert_eq!(
-            reason,
-            Some(KeyValue::new(
-                SUBSCRIPTION_END_REASON_KEY,
-                SubscriptionEndReason::SchemaReload.as_value()
-            ))
-        );
+            let reason = layer.captured_reason.lock().unwrap().clone();
+            assert_eq!(
+                reason,
+                Some(KeyValue::new(
+                    SUBSCRIPTION_END_REASON_KEY,
+                    SubscriptionEndReason::SchemaReload.as_value()
+                ))
+            );
+
+            assert_counter!("apollo.router.operations.subscriptions.schema_reload", 1);
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
     async fn test_subscription_end_reason_config_reload() {
-        let (_guard, layer) = setup_tracing();
-        let span = tracing::info_span!("test_span");
-        let _span_guard = span.enter();
-        let responses = vec![
-            graphql::Response::builder()
-                .data(serde_json_bytes::Value::String(ByteString::from("data")))
-                .subscribed(true)
-                .build(),
-            // Config reload error response
-            graphql::Response::builder()
-                .error(
-                    graphql::Error::builder()
-                        .message("subscription has been closed due to a configuration reload")
-                        .extension_code("SUBSCRIPTION_CONFIG_RELOAD")
-                        .build(),
-                )
-                .subscribed(false)
-                .build(),
-        ];
-        let gql_responses = stream::iter(responses);
-        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+        async {
+            let (_guard, layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+            let responses = vec![
+                graphql::Response::builder()
+                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .subscribed(true)
+                    .build(),
+                // Config reload error response
+                graphql::Response::builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message("subscription has been closed due to a configuration reload")
+                            .extension_code("SUBSCRIPTION_CONFIG_RELOAD")
+                            .build(),
+                    )
+                    .subscribed(false)
+                    .build(),
+            ];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
 
-        // Consume all messages
-        while protocol.next().await.is_some() {}
-        drop(protocol);
-        drop(_span_guard);
-        drop(span);
+            // Consume all messages
+            while protocol.next().await.is_some() {}
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
 
-        let reason = layer.captured_reason.lock().unwrap().clone();
-        assert_eq!(
-            reason,
-            Some(KeyValue::new(
-                SUBSCRIPTION_END_REASON_KEY,
-                SubscriptionEndReason::ConfigReload.as_value()
-            ))
-        );
+            let reason = layer.captured_reason.lock().unwrap().clone();
+            assert_eq!(
+                reason,
+                Some(KeyValue::new(
+                    SUBSCRIPTION_END_REASON_KEY,
+                    SubscriptionEndReason::ConfigReload.as_value()
+                ))
+            );
+
+            assert_counter!("apollo.router.operations.subscriptions.config_reload", 1);
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
@@ -993,5 +1181,164 @@ mod tests {
                 DeferEndReason::ClientDisconnect.as_value()
             ))
         );
+    }
+
+    #[tokio::test]
+    async fn test_end_reason_subgraph_error() {
+        async {
+            // Test: Subscription terminated because the subgraph WebSocket connection
+            // was lost unexpectedly (e.g. process killed). The terminating response
+            // has errors (like WEBSOCKET_MESSAGE_ERROR) and subscribed=false.
+            let (_guard, layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+
+            let responses = vec![
+                graphql::Response::builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message("cannot read message from websocket")
+                            .extension_code("WEBSOCKET_MESSAGE_ERROR")
+                            .build(),
+                    )
+                    .subscribed(false)
+                    .build(),
+            ];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
+                .with_subgraph_name(Some("flaky_subgraph".to_string()));
+
+            while protocol.next().await.is_some() {}
+
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
+
+            let reason = layer.captured_reason.lock().unwrap().clone();
+            assert_eq!(
+                reason,
+                Some(KeyValue::new(
+                    SUBSCRIPTION_END_REASON_KEY,
+                    SubscriptionEndReason::SubgraphError.as_value()
+                ))
+            );
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.subgraph_error",
+                1,
+                "subgraph.service.name" = "flaky_subgraph"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_end_reason_subgraph_error_with_close_code() {
+        async {
+            // Test: Subscription terminated because the subgraph WebSocket closed
+            // with an abnormal close code, producing a WEBSOCKET_CLOSE_ERROR.
+            let (_guard, layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+
+            let responses = vec![graphql::Response::builder()
+                .error(
+                    graphql::Error::builder()
+                        .message(
+                            "websocket connection has been closed with error code '1011' and reason 'internal error'",
+                        )
+                        .extension_code("WEBSOCKET_CLOSE_ERROR")
+                        .build(),
+                )
+                .subscribed(false)
+                .build()];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
+                .with_subgraph_name(Some("error_subgraph".to_string()));
+
+            while protocol.next().await.is_some() {}
+
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
+
+            let reason = layer.captured_reason.lock().unwrap().clone();
+            assert_eq!(
+                reason,
+                Some(KeyValue::new(
+                    SUBSCRIPTION_END_REASON_KEY,
+                    SubscriptionEndReason::SubgraphError.as_value()
+                ))
+            );
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.subgraph_error",
+                1,
+                "subgraph.service.name" = "error_subgraph"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_stream_end_metric_defaults_to_unknown_subgraph() {
+        async {
+            // Test: stream_end metric uses "unknown" when no subgraph name is set
+            let (_guard, _layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+            let responses: Vec<graphql::Response> = vec![];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+
+            while protocol.next().await.is_some() {}
+
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.stream_end",
+                1,
+                "subgraph.service.name" = "unknown"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_client_disconnect_metric_defaults_to_unknown_client() {
+        async {
+            // Test: client_disconnect metric uses "unknown" when no client name is set
+            let (_guard, _layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+            let responses = vec![
+                graphql::Response::builder()
+                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .subscribed(true)
+                    .build(),
+            ];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription);
+
+            let resp = protocol.next().await;
+            assert!(resp.is_some());
+
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.client_disconnect",
+                1,
+                "apollo.client.name" = "unknown"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

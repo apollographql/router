@@ -14,6 +14,7 @@ use tracing::instrument::Instrumented;
 
 use crate::error::Error;
 use crate::http_ext;
+use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::subscription::SubscriptionTaskParams;
 use crate::query_planner::OperationKind;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
@@ -49,6 +50,12 @@ pub(crate) fn fetch_service_handle_subscription(
 
     let service_name = service_name.clone();
     let fetch_time_offset = context.created_at.elapsed().as_nanos() as i64;
+
+    // Store the subgraph name in context so it's available for metrics at the router layer
+    let _ = context.insert(
+        SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY,
+        service_name.to_string(),
+    );
 
     // Subscriptions are not supported for connectors, so they always go to the subgraph service
     subscription_with_subgraph_service(schema, subgraph_service_factory, request).instrument(
