@@ -24,7 +24,7 @@ The exact image version to use depends on which release you wish to use. In the 
 
 <Note>
 
-If your organization uses a corporate proxy with TLS inspection, [add your proxy's root certificate to the container](proxy-certificates).
+If your organization uses a corporate proxy with TLS inspection, the recommended approach is to [add the proxy's root certificate to the container](proxy-certificates).
 
 </Note>
 
@@ -204,4 +204,4 @@ Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [<release>]
 		build_docker_image.sh -d v0.9.1
 ```
 
-The example uses the [debian:bookworm-slim image](https://hub.docker.com/_/debian/) for the final image build. Modify the script to use images that better suit your needs. When you use the `-d` flag, ensure a `heaptrack` package is available to install.
+The example uses the `debian:bookworm-slim` image for the final image build. Modify the script to use images that better suit your needs. When you use the `-d` flag, ensure a `heaptrack` package is available for installation.
