@@ -453,7 +453,7 @@ subscription:
   #highlight-end
 ```
 
-If a client attempts to execute a subscription on your router when it's already at `max_opened_subscriptions`, the router rejects the client's request with an error.
+If a client attempts to execute a subscription on Apollo Router when it's already at `max_opened_subscriptions`, the router rejects the client's request with an error.
 
 Each rejected subscription increments the `apollo.router.operations.subscriptions.rejected.limit` counter metric, which you can use to monitor how often clients hit the limit.
 
