@@ -132,6 +132,13 @@ struct JwksConf {
     #[schemars(with = "Option<Vec<String>>", default)]
     #[serde(default)]
     algorithms: Option<Vec<Algorithm>>,
+    /// Allow tokens without an `exp` claim for this JWKS.
+    ///
+    /// Expired tokens with `exp` are still rejected.
+    /// Enable only when required by your issuer and with strict issuer/audience constraints.
+    #[schemars(default)]
+    #[serde(default)]
+    allow_missing_exp: bool,
     /// List of headers to add to the JWKS request
     #[serde(default)]
     headers: Vec<Header>,
@@ -345,6 +352,18 @@ impl AuthenticationPlugin {
 
         let mut list = vec![];
         for jwks_conf in &router_conf.jwt.jwks {
+            if jwks_conf.allow_missing_exp {
+                tracing::warn!(
+                    url = %jwks_conf.url,
+                    "authentication.router.jwt.jwks.allow_missing_exp is enabled; tokens without `exp` can be accepted for this JWKS"
+                );
+                if jwks_conf.issuers.is_none() && jwks_conf.audiences.is_none() {
+                    tracing::warn!(
+                        url = %jwks_conf.url,
+                        "authentication.router.jwt.jwks.allow_missing_exp is enabled without issuer/audience constraints; tokens without `exp` can be accepted for any issuer and audience on this JWKS"
+                    );
+                }
+            }
             let url: Url = Url::from_str(jwks_conf.url.as_str())?;
             list.push(JwksConfig {
                 url,
@@ -355,6 +374,7 @@ impl AuthenticationPlugin {
                     .as_ref()
                     .map(|algs| algs.iter().cloned().collect()),
                 poll_interval: jwks_conf.poll_interval,
+                allow_missing_exp: jwks_conf.allow_missing_exp,
                 headers: jwks_conf.headers.clone(),
             });
         }
@@ -618,6 +638,9 @@ fn authenticate(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 source_of_extracted_jwt,
             );
+        }
+        if token_data.claims.get("exp").is_none() {
+            tracing::debug!("accepted JWT without `exp` claim");
         }
         // This is a metric and will not appear in the logs
         //

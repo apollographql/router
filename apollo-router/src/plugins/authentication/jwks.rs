@@ -60,6 +60,7 @@ pub(super) struct JwksConfig {
     pub(super) audiences: Option<Audiences>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
     pub(super) poll_interval: Duration,
+    pub(super) allow_missing_exp: bool,
     pub(super) headers: Vec<Header>,
 }
 
@@ -68,6 +69,7 @@ pub(super) struct JwkSetInfo {
     pub(super) jwks: JwkSet,
     pub(super) issuers: Option<Issuers>,
     pub(super) audiences: Option<Audiences>,
+    pub(super) allow_missing_exp: bool,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
 }
 
@@ -270,6 +272,7 @@ impl Iterator for Iter<'_> {
                             jwks: jwks.clone(),
                             issuers: config.issuers.clone(),
                             audiences: config.audiences.clone(),
+                            allow_missing_exp: config.allow_missing_exp,
                             algorithms: config.algorithms.clone(),
                         });
                     }
@@ -285,7 +288,12 @@ pub(super) struct JWTCriteria {
     pub(super) kid: Option<String>,
 }
 
-pub(super) type SearchResult = (Option<Issuers>, Option<Audiences>, Jwk);
+pub(super) struct SearchResult {
+    pub(super) issuers: Option<Issuers>,
+    pub(super) audiences: Option<Audiences>,
+    pub(super) jwk: Jwk,
+    pub(super) allow_missing_exp: bool,
+}
 
 /// Search the list of JWKS to find a key we can use to decode a JWT.
 ///
@@ -303,6 +311,7 @@ pub(super) fn search_jwks(
         jwks,
         issuers,
         audiences,
+        allow_missing_exp,
         algorithms,
     } in jwks_manager.iter_jwks()
     {
@@ -411,7 +420,15 @@ pub(super) fn search_jwks(
                 found_highest_score = true;
             }
 
-            candidates.push((key_score, (issuers.clone(), audiences.clone(), key)));
+            candidates.push((
+                key_score,
+                SearchResult {
+                    issuers: issuers.clone(),
+                    audiences: audiences.clone(),
+                    jwk: key,
+                    allow_missing_exp,
+                },
+            ));
         }
     }
 
@@ -419,7 +436,7 @@ pub(super) fn search_jwks(
         "jwk candidates: {:?}",
         candidates
             .iter()
-            .map(|(score, (_, _, candidate))| (
+            .map(|(score, SearchResult { jwk: candidate, .. })| (
                 score,
                 &candidate.common.key_id,
                 candidate.common.key_algorithm
@@ -567,7 +584,13 @@ pub(super) fn decode_jwt(
     criteria: JWTCriteria,
 ) -> Result<DecodedClaims, (AuthenticationError, StatusCode)> {
     let mut error = None;
-    for (issuers, audiences, jwk) in keys.into_iter() {
+    for SearchResult {
+        issuers,
+        audiences,
+        jwk,
+        allow_missing_exp,
+    } in keys.into_iter()
+    {
         let decoding_key = match DecodingKey::from_jwk(&jwk) {
             Ok(k) => k,
             Err(e) => {
@@ -606,6 +629,9 @@ pub(super) fn decode_jwt(
         // if set to true, it will reject tokens containing an `aud` claim if the validation does not specify an audience
         // we don't validate audience yet, so this is deactivated
         validation.validate_aud = false;
+        if allow_missing_exp {
+            validation.required_spec_claims.remove("exp");
+        }
 
         match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
             Ok(v) => return Ok((issuers, audiences, v)),

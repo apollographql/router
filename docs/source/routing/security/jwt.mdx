@@ -56,6 +56,7 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
              issuers: # optional list of issuers
                - https://issuer.one
                - https://issuer.two
+             allow_missing_exp: true # optional, allow tokens without exp claim
              poll_interval: <optional poll interval>
              headers: # optional list of static headers added to the HTTP request to the JWKS URL
                - name: User-Agent
@@ -121,6 +122,7 @@ The following configuration options are supported:
 - `audiences`: **optional** list of audiences accepted, that will be compared to the `aud` claim in the JWT. If none match or the `aud` claim is not present, the request will be rejected.
 - `algorithms`: **optional** list of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
 - `poll_interval`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the JWKS will be polled for changes. If not specified, the JWKS endpoint will be polled every 60 seconds.
+- `allow_missing_exp`: **optional** boolean that allows tokens without an `exp` (expiration) claim for this JWKS. Tokens that include an `exp` claim are still validated normally and rejected if expired. When enabled, it's strongly recommended to also configure non-empty `issuers` and/or `audiences` to restrict which tokens are accepted. The default value is `false`.
 - `headers`: **optional** a list of headers sent when downloading from the JWKS URL
 
 </td>
