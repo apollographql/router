@@ -2176,6 +2176,113 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorRequestConf": {
+      "additionalProperties": false,
+      "description": "What information is passed to a connector request stage",
+      "properties": {
+        "body": {
+          "default": false,
+          "description": "Send the body",
+          "type": "boolean"
+        },
+        "condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionConnectorSelector"
+            }
+          ],
+          "description": "Condition to trigger this stage"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContextConf"
+            }
+          ],
+          "description": "Send the context"
+        },
+        "headers": {
+          "default": false,
+          "description": "Send the headers",
+          "type": "boolean"
+        },
+        "method": {
+          "default": false,
+          "description": "Send the method",
+          "type": "boolean"
+        },
+        "service_name": {
+          "default": false,
+          "description": "Send the service name",
+          "type": "boolean"
+        },
+        "uri": {
+          "default": false,
+          "description": "Send the connector URI",
+          "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorResponseConf": {
+      "additionalProperties": false,
+      "description": "What information is passed to a connector response stage",
+      "properties": {
+        "body": {
+          "default": false,
+          "description": "Send the body",
+          "type": "boolean"
+        },
+        "condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionConnectorSelector"
+            }
+          ],
+          "description": "Condition to trigger this stage"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContextConf"
+            }
+          ],
+          "description": "Send the context"
+        },
+        "headers": {
+          "default": false,
+          "description": "Send the headers",
+          "type": "boolean"
+        },
+        "service_name": {
+          "default": false,
+          "description": "Send the service name",
+          "type": "boolean"
+        },
+        "status_code": {
+          "default": false,
+          "description": "Send the http status",
+          "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ConnectorSelector": {
       "anyOf": [
         {
@@ -2537,6 +2644,38 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorStage": {
+      "additionalProperties": false,
+      "description": "The connector stage request/response configuration",
+      "properties": {
+        "request": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorRequestConf"
+            }
+          ],
+          "description": "The request configuration"
+        },
+        "response": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorResponseConf"
+            }
+          ],
+          "description": "The response configuration"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorStages": {
+      "description": "Configures the connector coprocessor stages",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/ConnectorStage"
+        }
+      },
+      "type": "object"
+    },
     "ConnectorValue": {
       "anyOf": [
         {
@@ -2703,6 +2842,14 @@ expression: "&schema"
             }
           ]
         },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorStages"
+            }
+          ],
+          "description": "The connector stage request/response configuration"
+        },
         "execution": {
           "allOf": [
             {
@@ -2749,7 +2896,7 @@ expression: "&schema"
           "type": "string"
         },
         "url": {
-          "description": "The url you'd like to offload processing to (can be overridden per-stage)",
+          "description": "The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs",
           "type": "string"
         }
       },
@@ -10788,6 +10935,20 @@ expression: "&schema"
             "warmed_up_queries": null
           },
           "description": "Query planning options"
+        },
+        "redact_query_validation_errors": {
+          "default": false,
+          "description": "Redact query validation errors to prevent potential information disclosure about the schema structure.\nWhen enabled, detailed validation errors are replaced with a generic \"invalid query\" message.\nDefault: false",
+          "type": "boolean"
+        },
+        "strict_variable_validation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Mode"
+            }
+          ],
+          "default": "enforce",
+          "description": "Determines how to handle queries which include additional fields of an input object.\n- `enforce` (default): rejects query\n- `measure`: permits query and the logs unknown fields"
         }
       },
       "type": "object"
@@ -12343,7 +12504,9 @@ expression: "&schema"
           "experimental_plans_limit": null,
           "experimental_reuse_query_plans": false,
           "warmed_up_queries": null
-        }
+        },
+        "redact_query_validation_errors": false,
+        "strict_variable_validation": "enforce"
       },
       "description": "Configuration for the supergraph"
     },

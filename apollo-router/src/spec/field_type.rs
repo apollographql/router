@@ -1,3 +1,5 @@
+use std::iter::once;
+
 use apollo_compiler::Name;
 use apollo_compiler::schema;
 use serde::Deserialize;
@@ -5,6 +7,7 @@ use serde::Serialize;
 use serde::de::Error as _;
 
 use super::query::parse_hir_value;
+use crate::configuration::mode::Mode;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
@@ -123,6 +126,7 @@ fn validate_input_value(
     value: Option<&Value>,
     schema: &Schema,
     path: &JsonValuePath<'_>,
+    strict_variable_validation: Mode,
 ) -> Result<(), InvalidInputValue> {
     let fmt_path = |var_path: &JsonValuePath<'_>| match var_path {
         JsonValuePath::Variable { .. } => format!("variable `{var_path}`"),
@@ -161,12 +165,24 @@ fn validate_input_value(
                         index: i,
                         parent: path,
                     };
-                    validate_input_value(inner_type, Some(x), schema, &path)?
+                    validate_input_value(
+                        inner_type,
+                        Some(x),
+                        schema,
+                        &path,
+                        strict_variable_validation,
+                    )?
                 }
                 return Ok(());
             } else {
                 // For coercion from single value to list
-                return validate_input_value(inner_type, Some(value), schema, path);
+                return validate_input_value(
+                    inner_type,
+                    Some(value),
+                    schema,
+                    path,
+                    strict_variable_validation,
+                );
             }
         }
     };
@@ -217,17 +233,24 @@ fn validate_input_value(
                 ))
             };
 
-            let unknown = obj.keys().find_map(|k| {
-                let k = k.as_str();
-                if !def.fields.contains_key(k) {
-                    Some(k)
-                } else {
-                    None
+            let mut unknown_input_fields = obj
+                .keys()
+                .map(|k| k.as_str())
+                .filter(|&k| !def.fields.contains_key(k));
+            if let Some(unknown_input_field) = unknown_input_fields.next() {
+                match strict_variable_validation {
+                    Mode::Enforce => {
+                        return Err(unknown_field(unknown_input_field));
+                    }
+                    Mode::Measure => {
+                        let unknown_fields: Vec<&str> = once(unknown_input_field)
+                            .chain(unknown_input_fields)
+                            .collect();
+                        // NB: warning will be attached to the span via trace id, so you can figure out
+                        //  operation name from parent span
+                        tracing::warn!(variables = ?unknown_fields, "encountered unexpected variable(s)");
+                    }
                 }
-            });
-
-            if let Some(unknown) = unknown {
-                return Err(unknown_field(unknown));
             }
 
             // Validate all fields present on def
@@ -242,9 +265,21 @@ fn validate_input_value(
                             .default_value
                             .as_ref()
                             .and_then(|v| parse_hir_value(v));
-                        validate_input_value(&field.ty, default.as_ref(), schema, &path)
+                        validate_input_value(
+                            &field.ty,
+                            default.as_ref(),
+                            schema,
+                            &path,
+                            strict_variable_validation,
+                        )
                     }
-                    value => validate_input_value(&field.ty, value, schema, &path),
+                    value => validate_input_value(
+                        &field.ty,
+                        value,
+                        schema,
+                        &path,
+                        strict_variable_validation,
+                    ),
                 }
             })
         }
@@ -264,8 +299,9 @@ impl FieldType {
         value: Option<&Value>,
         schema: &Schema,
         path: &JsonValuePath<'_>,
+        strict_variable_validation: Mode,
     ) -> Result<(), InvalidInputValue> {
-        validate_input_value(&self.0, value, schema, path)
+        validate_input_value(&self.0, value, schema, path, strict_variable_validation)
     }
 
     pub(crate) fn is_non_null(&self) -> bool {
