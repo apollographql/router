@@ -136,18 +136,18 @@ impl<E: SpanExporter> Debug for NamedSpanExporter<E> {
 }
 
 impl<E: SpanExporter> SpanExporter for NamedSpanExporter<E> {
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&self, batch: Vec<SpanData>) -> impl std::future::Future<Output = ExportResult> + Send {
         let name = self.name;
         let fut = self.inner.export(batch);
-        Box::pin(async move {
+        async move {
             fut.await.map_err(|err| {
                 let modified = format!("[{} traces] {}", name, err);
                 opentelemetry::trace::TraceError::from(modified)
             })
-        })
+        }
     }
 
-    fn shutdown(&mut self) {
+    fn shutdown(&self) -> ExportResult {
         self.inner.shutdown()
     }
 
@@ -370,13 +370,15 @@ mod tests {
 
     impl SpanExporter for FailingSpanExporter {
         fn export(
-            &mut self,
+            &self,
             _batch: Vec<SpanData>,
-        ) -> BoxFuture<'static, opentelemetry_sdk::export::trace::ExportResult> {
-            Box::pin(async { Err(opentelemetry::trace::TraceError::from("connection failed")) })
+        ) -> impl std::future::Future<Output = opentelemetry_sdk::export::trace::ExportResult> + Send {
+            async { Err(opentelemetry::trace::TraceError::from("connection failed")) }
         }
 
-        fn shutdown(&mut self) {}
+        fn shutdown(&self) -> opentelemetry_sdk::export::trace::ExportResult {
+            Ok(())
+        }
 
         fn set_resource(&mut self, _resource: &opentelemetry_sdk::Resource) {}
     }
@@ -384,7 +386,7 @@ mod tests {
     #[tokio::test]
     async fn test_named_span_exporter_adds_prefix() {
         let inner = FailingSpanExporter;
-        let mut named = super::NamedSpanExporter::new(inner, "test-exporter");
+        let named = super::NamedSpanExporter::new(inner, "test-exporter");
 
         let result = named.export(vec![]).await;
 

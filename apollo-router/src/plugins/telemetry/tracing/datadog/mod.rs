@@ -255,7 +255,7 @@ impl Debug for ExporterWrapper {
 }
 
 impl SpanExporter for ExporterWrapper {
-    fn export(&mut self, mut batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&self, mut batch: Vec<SpanData>) -> impl std::future::Future<Output = ExportResult> + Send {
         // Here we do some special processing of the spans before passing them to the delegate
         // In particular we default the span.kind to the span kind, and also override the trace measure status if we need to.
         for span in &mut batch {
@@ -300,10 +300,10 @@ impl SpanExporter for ExporterWrapper {
         }
         self.delegate.export(batch)
     }
-    fn shutdown(&mut self) {
+    fn shutdown(&self) -> ExportResult {
         self.delegate.shutdown()
     }
-    fn force_flush(&mut self) -> BoxFuture<'static, ExportResult> {
+    fn force_flush(&self) -> impl std::future::Future<Output = ExportResult> + Send {
         self.delegate.force_flush()
     }
     fn set_resource(&mut self, resource: &Resource) {
