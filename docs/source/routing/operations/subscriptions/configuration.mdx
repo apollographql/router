@@ -476,5 +476,5 @@ The `apollo.subscription.end_reason` attribute can have these values:
 
 Use the `apollo.subscription.end_reason` attribute to monitor the health of your subscriptions:
 
-- Frequent `stream_end` values might indicate issues with your subgraph subscription sources closing unexpectedly.
+- Frequent `subgraph_error` values might indicate issues with your subgraph subscription sources closing unexpectedly.
 - The `server_close` value indicates healthy subscription lifecycles where the subgraph properly signals closure.

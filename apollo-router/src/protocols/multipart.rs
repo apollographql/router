@@ -67,7 +67,7 @@ pub(crate) struct Multipart {
     /// The end reason determined during polling, written to the span on Drop.
     /// If `None` when dropped and `!is_terminated`, an abnormal reason is inferred.
     end_reason: Option<EndReason>,
-    /// The subgraph name for subscription streams, used in stream_end metrics.
+    /// The subgraph name for subscription streams, used in server_close and subgraph_error metrics.
     subgraph_name: Option<String>,
     /// The client name for subscription streams, used in client_disconnect and heartbeat_delivery_failed metrics.
     client_name: Option<String>,
@@ -103,7 +103,7 @@ impl Multipart {
         }
     }
 
-    /// Set the subgraph name for stream_end metrics attribution.
+    /// Set the subgraph name for server_close and subgraph_error metrics attribution.
     pub(crate) fn with_subgraph_name(mut self, name: Option<String>) -> Self {
         self.subgraph_name = name;
         self
@@ -256,7 +256,7 @@ impl Multipart {
                     .unwrap_or("unknown")
                     .to_string();
                 u64_counter!(
-                    "apollo.router.operations.subscriptions.stream_end",
+                    "apollo.router.operations.subscriptions.server_close",
                     "Subscription terminated because the subgraph gracefully closed the stream",
                     1,
                     subgraph.service.name = subgraph_name
@@ -530,8 +530,6 @@ mod tests {
     async fn test_subscription_end_reason_server_close_empty_response() {
         async {
             // Test: Server closes connection successfully (empty response)
-            // ServerClose also emits the stream_end metric since in production all
-            // server-side terminations go through filter_stream → ServerClose.
             let (_guard, layer) = setup_tracing();
             let span = tracing::info_span!("test_span");
             let span_guard = span.enter();
@@ -565,7 +563,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.stream_end",
+                "apollo.router.operations.subscriptions.server_close",
                 1,
                 "subgraph.service.name" = "test_subgraph"
             );
@@ -612,7 +610,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.stream_end",
+                "apollo.router.operations.subscriptions.server_close",
                 1,
                 "subgraph.service.name" = "test_subgraph"
             );
@@ -651,7 +649,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.stream_end",
+                "apollo.router.operations.subscriptions.server_close",
                 1,
                 "subgraph.service.name" = "test_subgraph"
             );
@@ -1283,9 +1281,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stream_end_metric_defaults_to_unknown_subgraph() {
+    async fn test_server_close_metric_defaults_to_unknown_subgraph() {
         async {
-            // Test: stream_end metric uses "unknown" when no subgraph name is set
+            // Test: server_close metric uses "unknown" when no subgraph name is set
             let (_guard, _layer) = setup_tracing();
             let span = tracing::info_span!("test_span");
             let _span_guard = span.enter();
@@ -1300,7 +1298,7 @@ mod tests {
             drop(span);
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.stream_end",
+                "apollo.router.operations.subscriptions.server_close",
                 1,
                 "subgraph.service.name" = "unknown"
             );
