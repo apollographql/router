@@ -289,6 +289,14 @@ impl QueryAnalysisLayer {
                 .await
             {
                 Err(e) => {
+                    let e = match e {
+                        MaybeBackPressureError::PermanentError(SpecError::ValidationError(_))
+                            if self.configuration.supergraph.redact_query_validation_errors =>
+                        {
+                            MaybeBackPressureError::PermanentError(SpecError::Redacted)
+                        }
+                        other => other,
+                    };
                     if let MaybeBackPressureError::PermanentError(errors) = &e {
                         (*self.cache.lock().await).put(
                             QueryAnalysisKey {

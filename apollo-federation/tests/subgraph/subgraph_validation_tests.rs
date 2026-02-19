@@ -987,7 +987,6 @@ Did you mean "@shareable"?{}"#,
 }
 
 // PORT_NOTE: Corresponds to '@core/@link handling' tests in JS
-#[cfg(test)]
 mod link_handling_tests {
     use similar::TextDiff;
 
@@ -2339,6 +2338,68 @@ mod tag_tests {
                     "[S] Schema element T has invalid @tag directive value '{invalid}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
                 )
             )]
+        );
+    }
+}
+
+mod authentication_validations {
+    use apollo_federation::assert_errors;
+    use apollo_federation::subgraph::test_utils::build_for_errors;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case::authenticated("@authenticated", "@authenticated")]
+    #[case::requires_scopes("@requiresScopes", "@requiresScopes(scopes: [[\"scope1\"]])")]
+    #[case::policy("@policy", "@policy(policies: [[\"policy1\"]])")]
+    fn rejects_directive_applications_on_interfaces_and_interface_objects(
+        #[case] directive_name: &str,
+        #[case] directive_string: &str,
+    ) {
+        let schema_str = format!(
+            r###"
+          type Query {{
+            i: I
+            o: O
+          }}
+
+          interface I {directive_string} {{
+            x: Int {directive_string}
+          }}
+
+          type T implements I {{
+            x: Int
+          }}
+
+          type O @key(fields: "id") @interfaceObject {directive_string} {{
+            id: ID!
+            y: Int {directive_string}
+          }}
+        "###
+        );
+
+        let err = build_for_errors(&schema_str);
+        assert_errors!(
+            err,
+            [
+                (
+                    "AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE",
+                    &format!(
+                        r#"[S] Invalid use of {directive_name} on field "I.x": {directive_name} cannot be applied on interfaces, interface fields and interface objects"#
+                    ),
+                ),
+                (
+                    "AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE",
+                    &format!(
+                        r#"[S] Invalid use of {directive_name} on interface "I": {directive_name} cannot be applied on interfaces, interface fields and interface objects"#
+                    ),
+                ),
+                (
+                    "AUTH_REQUIREMENTS_APPLIED_ON_INTERFACE",
+                    &format!(
+                        r#"[S] Invalid use of {directive_name} on interface object "O": {directive_name} cannot be applied on interfaces, interface fields and interface objects"#
+                    ),
+                ),
+            ]
         );
     }
 }

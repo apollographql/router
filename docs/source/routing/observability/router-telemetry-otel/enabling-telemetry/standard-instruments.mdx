@@ -39,7 +39,7 @@ The `apollo.router.overhead` histogram provides a more direct measurement of rou
 - Response parsing and composition
 - Plugin execution, including Coprocessors and Rhai scripts
 
-The overhead calculation excludes time spent waiting for downstream HTTP services (subgraphs and connectors), giving you visibility into the router's actual processing time versus downstream latency. This metric helps identify when the router itself is a bottleneck versus when delays are caused by downstream services.
+The default unit is seconds, but this can be changed to other units using [router selectors](/router/configuration/telemetry/instrumentation/selectors#router). The overhead calculation excludes time spent waiting for downstream HTTP services (subgraphs and connectors), giving you visibility into the router's actual processing time versus downstream latency. This metric helps identify when the router itself is a bottleneck versus when delays are caused by downstream services.
 
 Default attributes:
 - `subgraph.active_requests`: A boolean indicating whether any subgraph requests were active at the time the overhead was calculated. This attribute is critical for filtering meaningful overhead measurements.
@@ -116,7 +116,7 @@ When using Redis as a cache backend, additional Redis-specific metrics are avail
 - `apollo.router.cache.redis.redelivery_count` - Number of Redis command redeliveries due to connection issues
 - `apollo.router.cache.redis.errors` - Number of Redis errors by error type and cache kind
 - `experimental.apollo.router.cache.redis.latency_avg` - Average Redis command latency in seconds
-- `experimental.apollo.router.cache.redis.network_latency_avg` - Average Redis network latency in seconds  
+- `experimental.apollo.router.cache.redis.network_latency_avg` - Average Redis network latency in seconds
 - `experimental.apollo.router.cache.redis.request_size_avg` - Average Redis request size in bytes
 - `experimental.apollo.router.cache.redis.response_size_avg` - Average Redis response size in bytes
 
@@ -232,7 +232,7 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
 
 </Note>
 
-### Subscriptions
+## Subscriptions
 
 <Tip>
 
@@ -278,3 +278,8 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
   - `server.address` - The address that the router is listening on.
   - `server.port` - The port that the router is listening on if not a unix socket.
   - `http.connection.state` - Either `active` or `terminating`.
+
+## Query parsing
+
+- `apollo.router.operations.recursion` - A histogram of the query parser recursion depth.
+- `apollo.router.operations.lexical_tokens` - A histogram of the lexical token count for queries.

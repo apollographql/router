@@ -25,44 +25,10 @@ fn authenticated_comprehensive_locations() {
         "#,
     };
 
-    let on_interface = ServiceDefinition {
-        name: "on-interface",
-        type_defs: r#"
-        type Query {
-          interface: AuthenticatedInterface!
-        }
-
-        interface AuthenticatedInterface @authenticated {
-          field: Int!
-        }
-        "#,
-    };
-
-    let on_interface_object = ServiceDefinition {
-        name: "on-interface-object",
-        type_defs: r#"
-        type AuthenticatedInterfaceObject
-          @interfaceObject
-          @key(fields: "id")
-          @authenticated
-        {
-          id: String!
-        }
-        "#,
-    };
-
     let on_scalar = ServiceDefinition {
         name: "on-scalar",
         type_defs: r#"
         scalar AuthenticatedScalar @authenticated
-
-        # This needs to exist in at least one other subgraph from where it's defined
-        # as an @interfaceObject (so arbitrarily adding it here). We don't actually
-        # apply @authenticated to this one since we want to see it propagate even
-        # when it's not applied in all locations.
-        interface AuthenticatedInterfaceObject @key(fields: "id") {
-          id: String!
-        }
         "#,
     };
 
@@ -114,8 +80,6 @@ fn authenticated_comprehensive_locations() {
 
     let result = compose_as_fed2_subgraphs(&[
         on_object,
-        on_interface,
-        on_interface_object,
         on_scalar,
         on_enum,
         on_root_field,
@@ -127,14 +91,11 @@ fn authenticated_comprehensive_locations() {
     let schema = supergraph.schema().schema();
 
     // Validate @authenticated is applied to all expected elements:
-    // ["AuthenticatedObject", "AuthenticatedInterface", "AuthenticatedInterfaceObject",
-    //  "AuthenticatedScalar", "AuthenticatedEnum", "Query.authenticatedRootField",
+    // ["AuthenticatedObject", "AuthenticatedScalar", "AuthenticatedEnum", "Query.authenticatedRootField",
     //  "ObjectWithAuthenticatedField.field", "EntityWithAuthenticatedField.field"]
 
     for coord in [
         coord!(AuthenticatedObject),
-        coord!(AuthenticatedInterface),
-        coord!(AuthenticatedInterfaceObject),
         coord!(AuthenticatedScalar),
         coord!(AuthenticatedEnum),
     ] {
@@ -318,44 +279,10 @@ fn requires_scopes_comprehensive_locations() {
         "#,
     };
 
-    let on_interface = ServiceDefinition {
-        name: "on-interface",
-        type_defs: r#"
-        type Query {
-          interface: ScopedInterface!
-        }
-
-        interface ScopedInterface @requiresScopes(scopes: ["interface"]) {
-          field: Int!
-        }
-        "#,
-    };
-
-    let on_interface_object = ServiceDefinition {
-        name: "on-interface-object",
-        type_defs: r#"
-        type ScopedInterfaceObject
-          @interfaceObject
-          @key(fields: "id")
-          @requiresScopes(scopes: ["interfaceObject"])
-        {
-          id: String!
-        }
-        "#,
-    };
-
     let on_scalar = ServiceDefinition {
         name: "on-scalar",
         type_defs: r#"
         scalar ScopedScalar @requiresScopes(scopes: ["scalar"])
-
-        # This needs to exist in at least one other subgraph from where it's defined
-        # as an @interfaceObject (so arbitrarily adding it here). We don't actually
-        # apply @requiresScopes to this one since we want to see it propagate even
-        # when it's not applied in all locations.
-        interface ScopedInterfaceObject @key(fields: "id") {
-          id: String!
-        }
         "#,
     };
 
@@ -407,8 +334,6 @@ fn requires_scopes_comprehensive_locations() {
 
     let result = compose_as_fed2_subgraphs(&[
         on_object,
-        on_interface,
-        on_interface_object,
         on_scalar,
         on_enum,
         on_root_field,
@@ -420,14 +345,11 @@ fn requires_scopes_comprehensive_locations() {
     let schema = supergraph.schema().schema();
 
     // Validate @requiresScopes is applied to all expected elements:
-    // ["ScopedObject", "ScopedInterface", "ScopedInterfaceObject",
-    //  "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
+    // ["ScopedObject", "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
     //  "ObjectWithScopedField.field", "EntityWithScopedField.field"]
 
     for coord in [
         coord!(ScopedObject),
-        coord!(ScopedInterface),
-        coord!(ScopedInterfaceObject),
         coord!(ScopedScalar),
         coord!(ScopedEnum),
     ] {
@@ -472,44 +394,10 @@ fn policy_comprehensive_locations() {
         "#,
     };
 
-    let on_interface = ServiceDefinition {
-        name: "on-interface",
-        type_defs: r#"
-        type Query {
-          interface: ScopedInterface!
-        }
-
-        interface ScopedInterface @policy(policies: ["interface"]) {
-          field: Int!
-        }
-        "#,
-    };
-
-    let on_interface_object = ServiceDefinition {
-        name: "on-interface-object",
-        type_defs: r#"
-        type ScopedInterfaceObject
-          @interfaceObject
-          @key(fields: "id")
-          @policy(policies: ["interfaceObject"])
-        {
-          id: String!
-        }
-        "#,
-    };
-
     let on_scalar = ServiceDefinition {
         name: "on-scalar",
         type_defs: r#"
         scalar ScopedScalar @policy(policies: ["scalar"])
-
-        # This needs to exist in at least one other subgraph from where it's defined
-        # as an @interfaceObject (so arbitrarily adding it here). We don't actually
-        # apply @policy to this one since we want to see it propagate even
-        # when it's not applied in all locations.
-        interface ScopedInterfaceObject @key(fields: "id") {
-          id: String!
-        }
         "#,
     };
 
@@ -561,8 +449,6 @@ fn policy_comprehensive_locations() {
 
     let result = compose_as_fed2_subgraphs(&[
         on_object,
-        on_interface,
-        on_interface_object,
         on_scalar,
         on_enum,
         on_root_field,
@@ -574,14 +460,11 @@ fn policy_comprehensive_locations() {
     let schema = supergraph.schema().schema();
 
     // Validate @policy is applied to all expected elements:
-    // ["ScopedObject", "ScopedInterface", "ScopedInterfaceObject",
-    //  "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
+    // ["ScopedObject", "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
     //  "ObjectWithScopedField.field", "EntityWithScopedField.field"]
 
     for coord in [
         coord!(ScopedObject),
-        coord!(ScopedInterface),
-        coord!(ScopedInterfaceObject),
         coord!(ScopedScalar),
         coord!(ScopedEnum),
     ] {
@@ -597,5 +480,972 @@ fn policy_comprehensive_locations() {
         let target = coord.lookup_field(schema).expect("Target exists");
         let has_policy = target.directives.iter().any(|d| d.name == "policy");
         assert!(has_policy, "No policy directive found in {}", target.node);
+    }
+}
+
+mod transitive_auth {
+    use crate::composition::ServiceDefinition;
+    use crate::composition::assert_composition_errors;
+    use crate::composition::compose_as_fed2_subgraphs;
+
+    #[test]
+    fn requires_works_with_explicit_auth() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra") @authenticated
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @authenticated
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let _supergraph = result.expect("Expected composition to succeed");
+    }
+
+    #[test]
+    fn requires_works_with_auth_on_the_type() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") @policy(policies: [["P1"]]) {
+                id: ID
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra")
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @policy(policies: [["P1"]])
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let _supergraph = result.expect("Expected composition to succeed");
+    }
+
+    #[test]
+    fn requires_works_with_valid_subset_of_auth() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra") @requiresScopes(scopes: [["S2", "S1"]])
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @requiresScopes(scopes: [["S1", "S2"], ["S3"]])
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let _supergraph = result.expect("Expected composition to succeed");
+    }
+
+    #[test]
+    fn requires_works_auth_on_nested_selection() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") @authenticated {
+                id: ID
+                extra: I @external
+                requiresExtra: String @requires(fields: "extra { i ... on I1 { i1 } ... on I2 { i2 } }")
+                  @requiresScopes(scopes: [["S1", "S2"]]) @policy(policies: [["P1"]])
+              }
+
+              interface I {
+                i: String
+              }
+
+              type I1 implements I @external {
+                i: String
+                i1: String
+              }
+
+              type I2 implements I @external {
+                i: String
+                i2: Int
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: I @authenticated
+              }
+
+              interface I {
+                i: String
+              }
+
+              type I1 implements I {
+                i: String @requiresScopes(scopes: [["S1"]])
+                i1: String @requiresScopes(scopes: [["S2"]])
+              }
+
+              type I2 implements I {
+                i: String
+                i2: Int @policy(policies: [["P1"]])
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let _supergraph = result.expect("Expected composition to succeed");
+    }
+
+    #[test]
+    fn requires_does_not_work_when_missing_auth() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra")
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @authenticated
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph1] Field "T.requiresExtra" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field "T.extra" data from @requires selection set."#,
+            )],
+        );
+    }
+
+    #[test]
+    fn requires_does_not_work_with_invalid_subset_of_auth() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra") @requiresScopes(scopes: [["S1"]])
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @requiresScopes(scopes: [["S1", "S2"]])
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph1] Field "T.requiresExtra" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field "T.extra" data from @requires selection set."#,
+            )],
+        );
+    }
+
+    #[test]
+    fn requires_does_not_work_when_missing_auth_on_a_nested_selection() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: I @external
+                requiresExtra: String @requires(fields: "extra { i ... on I1 { i1 } ... on I2 { i2 } }")
+              }
+
+              interface I {
+                i: String
+              }
+
+              type I1 implements I @external {
+                i: String
+                i1: String
+              }
+
+              type I2 implements I @external {
+                i: String
+                i2: Int
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: I
+              }
+
+              interface I {
+                i: String
+              }
+
+              type I1 implements I {
+                i: String
+                i1: String
+              }
+
+              type I2 implements I {
+                i: String
+                i2: Int @policy(policies: [["P1"]])
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph1] Field "T.requiresExtra" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field "I2.i2" data from @requires selection set."#,
+            )],
+        );
+    }
+
+    #[test]
+    #[ignore = "FED-961"]
+    fn requires_does_not_work_when_missing_explicit_auth_on_an_interface_field_selection() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: I @external
+                requiresExtra: String @requires(fields: "extra { i }")
+              }
+
+              interface I {
+                i: String
+              }
+
+              type I1 implements I @external {
+                i: String
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: I
+              }
+
+              interface I {
+                i: String
+              }
+
+              type I1 implements I {
+                i: String @requiresScopes(scopes: [["S1"]])
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph1] Field "T.requiresExtra" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field "I.i" data from @requires selection set."#,
+            )],
+        );
+    }
+
+    #[test]
+    #[ignore = "FED-961"]
+    fn requires_does_not_work_when_missing_inherited_auth_on_an_interface_field_selection() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: I @external
+                requiresExtra: String @requires(fields: "extra { i }")
+              }
+
+              interface I {
+                i: String
+              }
+
+              type I1 implements I @external {
+                i: String
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: I
+              }
+
+              interface I {
+                i: String
+              }
+
+              type I1 implements I @authenticated {
+                i: String
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph1] Field "T.requiresExtra" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field "T.extra" data from @requires selection set."#,
+            )],
+        );
+    }
+
+    #[test]
+    #[ignore = "FED-961"]
+    fn requires_does_not_work_when_missing_auth_on_type_condition_in_a_field_selection() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: I @external
+                requiresExtra: String @requires(fields: "extra { ... on I1 { i1 } ... on I2 { i2 }}")
+              }
+
+              interface I {
+                i: String
+              }
+
+              type I1 implements I @external {
+                i: String
+                i1: Int
+              }
+
+              type I2 implements I @external {
+                i: String
+                i2: String
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: I
+              }
+
+              interface I {
+                i: String
+              }
+
+              type I1 implements I @requiresScopes(scopes: [["S1"]]) {
+                i: String
+                i1: Int
+              }
+
+              type I2 implements I {
+                i: String
+                i2: String
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph1] Field "T.requiresExtra" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field "T.extra" data from @requires selection set."#,
+            )],
+        );
+    }
+
+    #[test]
+    fn verifies_access_control_on_chain_of_requires() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra")
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                secret: String @external
+                extra: String @requires(fields: "secret")
+              }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                secret: String @authenticated @inaccessible
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph2] Field "T.extra" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field "T.secret" data from @requires selection set."#,
+            )],
+        );
+    }
+
+    #[test]
+    fn works_with_chain_of_requires() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra") @authenticated
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                secret: String @external
+                extra: String @requires(fields: "secret") @authenticated
+              }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                secret: String @authenticated @inaccessible
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]);
+        let _supergraph = result.expect("Expected composition to succeed");
+    }
+
+    #[test]
+    fn requires_works_with_interface_object() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                i: I
+              }
+
+              type I @interfaceObject @key(fields: "id") {
+                id: ID!
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra") @authenticated
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              interface I @key(fields: "id") {
+                id: ID!
+                extra: String
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @authenticated
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let supergraph = result.expect("Expected composition to succeed");
+        let interface_i = supergraph
+            .schema()
+            .schema()
+            .get_interface("I")
+            .expect("interface I is defined");
+        let requires_extra_field = interface_i
+            .fields
+            .get("requiresExtra")
+            .expect("field requiresExtra exists");
+        assert!(
+            requires_extra_field
+                .directives
+                .iter()
+                .any(|d| d.name == "authenticated")
+        );
+    }
+
+    #[test]
+    fn requires_works_with_interface_object_chains() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                i: I
+              }
+
+              type I @interfaceObject @key(fields: "id") {
+                id: ID!
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra") @authenticated
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type I @interfaceObject @key(fields: "id") {
+                id: ID!
+                secret: String @external
+                extra: String @requires(fields: "secret") @authenticated
+              }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+              interface I @key(fields: "id") {
+                id: ID!
+                secret: String
+              }
+
+              type T implements I @key(fields: "id") {
+                id: ID!
+                secret: String @authenticated
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]);
+        let _ = result.expect("Expected composition to succeed");
+    }
+
+    #[test]
+    #[ignore = "FED-963"]
+    fn verifies_requires_on_interface_object_without_auth() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                i: I
+              }
+
+              type I @interfaceObject @key(fields: "id") {
+                id: ID!
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra")
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              interface I @key(fields: "id") {
+                id: ID!
+                extra: String
+              }
+
+              type T implements I @key(fields: "id") {
+                id: ID!
+                extra: String @authenticated
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph1] Field "I.requiresExtra" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field "I.extra" data from @requires selection set."#,
+            )],
+        );
+    }
+
+    #[test]
+    fn requires_works_if_field_specifies_additional_auth() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T
+              }
+
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @external
+                requiresExtra: String @requires(fields: "extra") @requiresScopes(scopes: [["S1", "S2"]])
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type T @key(fields: "id") {
+                id: ID
+                extra: String @requiresScopes(scopes: [["S1"]])
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let _ = result.expect("Expected composition to succeed");
+    }
+
+    #[test]
+    fn context_works_with_explicit_auth() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T!
+              }
+
+              type T @key(fields: "id") @context(name: "context") {
+                id: ID!
+                u: U!
+                prop: String! @authenticated
+              }
+
+              type U @key(fields: "id") {
+                id: ID!
+                field(a: String @fromContext(field: "$context { prop }")): Int! @authenticated
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type Query {
+                a: Int!
+              }
+
+              type U @key(fields: "id") {
+                id: ID!
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let _ = result.expect("Expected composition to succeed");
+    }
+
+    #[test]
+    fn context_works_with_explicit_auth_and_multiple_contexts() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                foo: Foo!
+                bar: Bar!
+              }
+
+              type Foo @key(fields: "id") @context(name: "context") {
+                id: ID!
+                u: U!
+                prop: String! @requiresScopes(scopes: [["S1"]])
+              }
+
+              type Bar @key(fields: "id") @context(name: "context") {
+                id: ID!
+                u: U!
+                prop: String! @requiresScopes(scopes: [["S2"]])
+              }
+
+              type U @key(fields: "id") {
+                id: ID!
+                field(a: String @fromContext(field: "$context { prop }")): Int! @requiresScopes(scopes: [["S1", "S2"]])
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type Query {
+                a: Int!
+              }
+
+              type U @key(fields: "id") {
+                id: ID!
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let _ = result.expect("Expected composition to succeed");
+    }
+
+    #[test]
+    fn context_works_with_explicit_auth_and_multiple_contexts_using_type_conditions() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                foo: Foo!
+                bar: Bar!
+              }
+
+              type Foo @key(fields: "id") @context(name: "context") {
+                id: ID!
+                u: U!
+                prop: String! @requiresScopes(scopes: [["S1"]])
+              }
+
+              type Bar @key(fields: "id") @context(name: "context") {
+                id: ID!
+                u: U!
+                prop2: String! @policy(policies: [["P1"]])
+              }
+
+              type U @key(fields: "id") {
+                id: ID!
+                field(
+                  a: String
+                  @fromContext(
+                    field: "$context ... on Foo { prop } ... on Bar { prop2 }"
+                  )
+                ): Int! @requiresScopes(scopes: [["S1"]]) @policy(policies: [["P1"]])
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type Query {
+                a: Int!
+              }
+
+              type U @key(fields: "id") {
+                id: ID!
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let _ = result.expect("Expected composition to succeed");
+    }
+
+    #[test]
+    fn context_does_not_work_with_missing_auth() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                t: T!
+              }
+
+              type T @key(fields: "id") @context(name: "context") {
+                id: ID!
+                u: U!
+                prop: String! @authenticated
+              }
+
+              type U @key(fields: "id") {
+                id: ID!
+                field(a: String @fromContext(field: "$context { prop }")): Int!
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type Query {
+                a: Int!
+              }
+
+              type U @key(fields: "id") {
+                id: ID!
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph1] Field "U.field" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field "T.prop" data from @fromContext selection set."#,
+            )],
+        );
+    }
+
+    #[test]
+    fn context_does_not_work_with_missing_auth_on_one_of_the_contexts() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+              type Query {
+                foo: Foo!
+                bar: Bar!
+              }
+
+              type Foo @key(fields: "id") @context(name: "context") @authenticated {
+                id: ID!
+                u: U!
+                prop: String!
+              }
+
+              type Bar @key(fields: "id") @context(name: "context") {
+                id: ID!
+                u: U!
+                prop: String!
+              }
+
+              type U @key(fields: "id") {
+                id: ID!
+                field(a: String @fromContext(field: "$context { prop }")): Int!
+              }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+              type Query {
+                a: Int!
+              }
+
+              type U @key(fields: "id") {
+                id: ID!
+              }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "MISSING_TRANSITIVE_AUTH_REQUIREMENTS",
+                r#"[Subgraph1] Field "U.field" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive data in context Subgraph1__context from @fromContext selection set."#,
+            )],
+        );
     }
 }

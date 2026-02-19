@@ -11,6 +11,7 @@ use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::validate_supergraph_for_query_planning;
 
 pub(super) struct ValidationContext {

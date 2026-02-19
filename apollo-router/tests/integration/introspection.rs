@@ -66,6 +66,41 @@ async fn variable() {
     let response = make_request(request).await;
     insta::assert_json_snapshot!(response, @r###"
     {
+      "data": {
+        "__type": {
+          "fields": [
+            {
+              "name": "me"
+            },
+            {
+              "name": "topProducts"
+            }
+          ]
+        }
+      }
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn missing_variable() {
+    let request = Request::fake_builder()
+        .query(
+            r#"
+                query($d: Boolean!) {
+                    __type(name: "Query") {
+                        fields(includeDeprecated: $d) {
+                            name
+                        }
+                    }
+                }
+            "#,
+        )
+        .build()
+        .unwrap();
+    let response = make_request(request).await;
+    insta::assert_json_snapshot!(response, @r###"
+    {
       "errors": [
         {
           "message": "missing value for non-null variable 'd'",

@@ -1,0 +1,13 @@
+---
+source: apollo-router/tests/integration/validation.rs
+expression: response_body
+---
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Subgraph errors redacted",
+      "path": []
+    }
+  ]
+}

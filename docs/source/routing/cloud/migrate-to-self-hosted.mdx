@@ -4,11 +4,17 @@ subtitle: Migrate your graph from cloud-hosted to self-hosted
 description: Migrate all Apollo GraphOS cloud graphs (Serverless and Dedicated) to self-hosted Apollo Router instances as part of Cloud Router retirement.
 ---
 
-Serverless plans end on February 1, 2026, and Dedicated plans end on March 15, 2026. After these dates, cloud routers are no longer available.
+Serverless plans end on February 1, 2026, and Dedicated plans end on March 15, 2026. Serverless cloud routers will no longer be available on February 15, 2026, and Dedicated cloud routers will no longer be available on March 15, 2026.
 
 If you are on a Serverless or Dedicated plan, migrate your graphs to self-hosted. After migrating your graphs, move your organization to a [supported plan](https://www.apollographql.com/pricing).
 
-During the migration window, your cloud router continues to receive traffic, schema updates, and configuration updates. The migration window ends on February 1, 2026 for Serverless and March 15, 2026 for Dedicated.
+During the migration window, your cloud router continues to receive traffic, schema updates, and configuration updates. The migration window ends on February 15, 2026 for Serverless and March 15, 2026 for Dedicated.
+
+<Note>
+
+If a graph variant's page does not show the migration banner or a Cloud Router page within the Observability section, that graph and all of its variants are already self-hosted and no action is required.
+
+</Note>
 
 This guide provides step-by-step instructions to migrate graphs on Serverless or Dedicated plans to self-hosted graphs on a supported plan.
 
@@ -109,7 +115,7 @@ You must migrate all of your graphs to self-hosted mode before you can move your
 
 ### What happens to your running cloud routers when you change your graph's hosting mode?
 
-Changing a graph's hosting mode doesn't affect running cloud routers. Cloud routers continue to receive traffic, emit telemetry, and receive schema and configuration updates until a [shutdown event occurs for Serverless routers](/graphos/routing/cloud/serverless#automatic-deletion-of-unused-routers) or the migration period ends on February 1, 2026 for Serverless and March 15, 2026 for Dedicated.
+Changing a graph's hosting mode doesn't affect running cloud routers. Cloud routers continue to receive traffic, emit telemetry, and receive schema and configuration updates until a [shutdown event occurs for Serverless routers](/graphos/routing/cloud/serverless#automatic-deletion-of-unused-routers) or the migration period ends on February 15, 2026, for Serverless and March 15, 2026 for Dedicated.
 
 ### How do you retrieve and update the configuration of your running cloud routers after converting to self-hosted mode?
 
