@@ -251,6 +251,14 @@ impl<'a> TestHarness<'a> {
         self
     }
 
+    /// Adds a callback-based hook similar to [`Plugin::router_http_service`]
+    pub fn router_http_hook(
+        self,
+        callback: impl Fn(router::BoxService) -> router::BoxService + Send + Sync + 'static,
+    ) -> Self {
+        self.extra_plugin(RouterHttpServicePlugin(callback))
+    }
+
     /// Adds a callback-based hook similar to [`Plugin::router_service`]
     pub fn router_hook(
         self,
@@ -434,10 +442,27 @@ pub type HttpService = tower::util::BoxService<
     std::convert::Infallible,
 >;
 
+struct RouterHttpServicePlugin<F>(F);
 struct RouterServicePlugin<F>(F);
 struct SupergraphServicePlugin<F>(F);
 struct ExecutionServicePlugin<F>(F);
 struct SubgraphServicePlugin<F>(F);
+
+#[async_trait::async_trait]
+impl<F> Plugin for RouterHttpServicePlugin<F>
+where
+    F: 'static + Send + Sync + Fn(router::BoxService) -> router::BoxService,
+{
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        (self.0)(service)
+    }
+}
 
 #[async_trait::async_trait]
 impl<F> Plugin for RouterServicePlugin<F>

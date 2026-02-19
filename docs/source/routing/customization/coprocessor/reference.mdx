@@ -97,6 +97,8 @@ Indicates which stage of the router's [request-handling lifecycle](/graphos/rout
 
 This value is one of the following:
 
+- `RouterHttpRequest`: The **RouterHttp** pipeline has just received a raw HTTP request (before the Router pipeline). This runs at the earliest possible point, analogous to Rhai's `router_http` hook.
+- `RouterHttpResponse`: The **RouterHttp** pipeline is about to send the HTTP response to the client (before the Router pipeline).
 - `RouterRequest`: The `RouterService` has just received a client request.
 - `RouterResponse`: The `RouterService` is about to send response data to a client.
 - `SupergraphRequest`: The `SupergraphService` is about to send a GraphQL request.

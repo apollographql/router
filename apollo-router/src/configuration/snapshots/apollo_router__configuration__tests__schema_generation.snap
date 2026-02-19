@@ -2871,6 +2871,14 @@ expression: "&schema"
           ],
           "description": "The router stage request/response configuration"
         },
+        "router_http": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouterHttpStage"
+            }
+          ],
+          "description": "The router_http stage request/response configuration (raw HTTP layer, before Router pipeline)"
+        },
         "subgraph": {
           "allOf": [
             {
@@ -8146,6 +8154,27 @@ expression: "&schema"
             },
             "redis": null
           }
+        }
+      },
+      "type": "object"
+    },
+    "RouterHttpStage": {
+      "properties": {
+        "request": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouterRequestConf"
+            }
+          ],
+          "description": "The request configuration"
+        },
+        "response": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouterResponseConf"
+            }
+          ],
+          "description": "The response configuration"
         }
       },
       "type": "object"

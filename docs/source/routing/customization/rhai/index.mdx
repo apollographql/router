@@ -196,7 +196,7 @@ Each service of the router has a corresponding function that a Rhai script can d
 
 Runs at the raw HTTP layer, before the main Router pipeline (and before telemetry, traffic shaping, and the Router service).
 
-Define `router_http` if your customization must run at the earliest possible point—for example, very early request checks or logic that applies to static pages and health endpoints as well as GraphQL. It uses the same `service` API as other hooks (`map_request`, `map_response`).
+Define `router_http` if your customization must run at the earliest possible point—for example, very early request checks or logic that applies to GraphQL traffic. The RouterHttp layer runs only for **GraphQL requests**; it does **not** run for the [Apollo Sandbox](/graphos/explorer/sandbox) or homepage when enabled, or for the [health check](/graphos/routing/self-hosted/health-checks) endpoint (separate route). It uses the same `service` API as other hooks (`map_request`, `map_response`).
 
 </td>
 </tr>

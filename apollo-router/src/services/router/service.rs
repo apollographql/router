@@ -30,6 +30,7 @@ use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::buffer::Buffer;
+use tower::service_fn;
 use tower_service::Service;
 use tracing::Instrument;
 
@@ -80,6 +81,7 @@ use crate::services::layers::content_negotiation;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::static_page::is_static_landing_request;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
@@ -816,6 +818,45 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
     }
 }
 
+/// Dispatches requests to either the static-only path (no RouterHttp plugins) or the full
+/// RouterHttp pipeline. Static landing requests (GET + Accept: text/html) skip the plugin stack.
+struct RouterHttpGate {
+    static_only: router::BoxService,
+    full_pipeline: router::BoxService,
+    static_page_enabled: bool,
+}
+
+impl tower::Service<router::Request> for RouterHttpGate {
+    type Response = router::Response;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, router::ServiceResult>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        let static_ready = self.static_only.poll_ready(cx);
+        let full_ready = self.full_pipeline.poll_ready(cx);
+        match (static_ready, full_ready) {
+            (std::task::Poll::Ready(Ok(())), std::task::Poll::Ready(Ok(()))) => {
+                std::task::Poll::Ready(Ok(()))
+            }
+            (std::task::Poll::Ready(Err(e)), _) | (_, std::task::Poll::Ready(Err(e))) => {
+                std::task::Poll::Ready(Err(e))
+            }
+            _ => std::task::Poll::Pending,
+        }
+    }
+
+    fn call(&mut self, req: router::Request) -> Self::Future {
+        if self.static_page_enabled && is_static_landing_request(&req) {
+            self.static_only.call(req)
+        } else {
+            self.full_pipeline.call(req)
+        }
+    }
+}
+
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
@@ -911,9 +952,14 @@ impl RouterCreator {
                 plugin.router_service(acc)
             });
 
-        // 2. Build RouterHttp pipeline: plugins wrap (static_page + router_pipeline).
-        // Static pages go through RouterHttp (license, coprocessor, rhai) before being served.
+        // 2. Build RouterHttp pipeline. Static landing requests (GET + Accept: text/html) skip
+        // the RouterHttp plugin stack and are served only by StaticPageLayer.
         // Same rev() convention: license_enforcement (early in add order) wraps last → outermost.
+        let static_page_enabled = configuration.sandbox.enabled || configuration.homepage.enabled;
+        let dummy_inner = service_fn(|_req: router::Request| async {
+            Err(BoxError::from("static-only inner unreachable"))
+        });
+        let static_only = static_page.layer(dummy_inner).boxed();
         let router_http_core = static_page.layer(router_pipeline).boxed();
         let router_http_pipeline = plugins
             .iter()
@@ -921,8 +967,13 @@ impl RouterCreator {
             .fold(router_http_core, |acc, (_, plugin)| {
                 plugin.router_http_service(acc)
             });
+        let gate = RouterHttpGate {
+            static_only,
+            full_pipeline: router_http_pipeline,
+            static_page_enabled,
+        };
 
-        let sb = Buffer::new(router_http_pipeline, DEFAULT_BUFFER_SIZE);
+        let sb = Buffer::new(gate, DEFAULT_BUFFER_SIZE);
 
         Ok(Self {
             supergraph_creator,

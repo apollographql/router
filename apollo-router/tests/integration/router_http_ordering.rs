@@ -7,21 +7,101 @@
 //! **Prerequisites:** The `router_http_service` hook must be added to the `Plugin` trait
 //! (or `PluginUnstable`/`PluginPrivate` as appropriate) for these tests to compile.
 //!
-//! Once router_http is fully integrated, extend `test_plugin_ordering` in lifecycle.rs to:
-//! 1. Add `router_http(service)` to the Rhai script (test_plugin_ordering.rhai)
-//! 2. Add `router_http: { request: { context: true }, response: { context: true } }` to coprocessor config
-//! 3. Add `router_http_service` to the test plugins in the make_plugin! macro
-//! 4. Update the expected trace to include:
-//!    - "router_http Rhai map_request" (first, before coprocessor)
-//!    - "coprocessor RouterHttpRequest"
-//!    - "router_http Rust test_ordering_1/2/3 map_request"
-//!    - ... (existing router/supergraph trace) ...
-//!    - "coprocessor RouterHttpResponse"
-//!    - "router_http Rhai map_response"
-//!    - "router_http Rust test_ordering_3/2/1 map_response" (reverse order)
+//! Full ordering with Rhai and coprocessor is asserted in `test_plugin_ordering` (lifecycle.rs).
 
+use apollo_router::services::router;
+use apollo_router::services::supergraph;
+use apollo_router::TestHarness;
+use serde_json::json;
+use tower::Service;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+
+const ROUTER_HTTP_ORDER_CONTEXT_KEY: &str = "router_http_order";
+
+/// Minimal assertion that RouterHttp runs before the Router pipeline.
 #[tokio::test(flavor = "multi_thread")]
-async fn router_http_ordering_placeholder_compiles_and_module_included() {
-    // Ensures this module is compiled and run. Full ordering is asserted in test_plugin_ordering (lifecycle.rs).
-    assert!(true, "router_http_ordering module included");
+async fn router_http_runs_before_router_pipeline() {
+    let mut service = TestHarness::builder()
+        .router_http_hook(|service| {
+            ServiceBuilder::new()
+                .map_request(|request: router::Request| {
+                    request
+                        .context
+                        .upsert(ROUTER_HTTP_ORDER_CONTEXT_KEY, |mut order: Vec<String>| {
+                            order.push("router_http".to_string());
+                            order
+                        })
+                        .unwrap();
+                    request
+                })
+                .service(service)
+                .boxed()
+        })
+        .router_hook(|service| {
+            ServiceBuilder::new()
+                .map_request(|request: router::Request| {
+                    request
+                        .context
+                        .upsert(ROUTER_HTTP_ORDER_CONTEXT_KEY, |mut order: Vec<String>| {
+                            order.push("router_service".to_string());
+                            order
+                        })
+                        .unwrap();
+                    request
+                })
+                .service(service)
+                .boxed()
+        })
+        .configuration_json(json!({}))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::canned_builder().build().unwrap();
+    let mut response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(request.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let _ = response.next_response().await.unwrap().unwrap();
+    let order: Vec<String> = response
+        .context
+        .get(ROUTER_HTTP_ORDER_CONTEXT_KEY)
+        .unwrap()
+        .unwrap_or_default();
+
+    assert_eq!(
+        order,
+        ["router_http", "router_service"],
+        "RouterHttp must run before Router pipeline"
+    );
+}
+
+/// Plugin that only implements router_service (not router_http_service) must not break the pipeline.
+#[tokio::test(flavor = "multi_thread")]
+async fn default_no_op_router_http_service_does_not_break_pipeline() {
+    let mut service = TestHarness::builder()
+        .router_hook(|service| service)
+        .configuration_json(json!({}))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::canned_builder().build().unwrap();
+    let mut response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(request.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let chunk = response.next_response().await.unwrap();
+    assert!(chunk.is_ok(), "request must succeed when plugin omits router_http_service");
 }

@@ -21,7 +21,7 @@ In these cases, you can create custom plugins for the router.
 
 ## Planning a plugin
 
-When designing a new plugin, you first want to determine which of the router's **services** the plugin should hook into to achieve its use case. The **RouterHttp** pipeline runs at the raw HTTP layer before the main Router pipeline; use the `router_http_service` hook for logic that must run at the earliest possible point (for example, before telemetry or for all requests including static pages and health endpoints).
+When designing a new plugin, you first want to determine which of the router's **services** the plugin should hook into to achieve its use case. The **RouterHttp** pipeline runs at the raw HTTP layer before the main Router pipeline; use the `router_http_service` hook for logic that must run at the earliest possible point (for example, before telemetry). RouterHttp runs only for **GraphQL requests**; it does **not** run for the static landing page ([Apollo Sandbox](/graphos/explorer/sandbox) or homepage when enabled) or for the [health check](/graphos/routing/self-hosted/health-checks) (separate route).
 
 For descriptions of these services, see [Router request lifecycle](/graphos/routing/request-lifecycle).
 
