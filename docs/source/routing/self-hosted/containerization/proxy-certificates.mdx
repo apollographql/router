@@ -76,35 +76,34 @@ When deploying with Kubernetes, use a ConfigMap or Secret to provide the certifi
 2. Configure your deployment to use an init container that installs the certificate.
 
     ```yaml title="values.yaml"
-    router:
-      extraVolumes:
-        - name: proxy-ca-cert
-          configMap:
-            name: proxy-ca-cert
-        - name: ca-certs
-          emptyDir: {}
+    extraVolumes:
+      - name: proxy-ca-cert
+        configMap:
+          name: proxy-ca-cert
+      - name: ca-certs
+        emptyDir: {}
 
-      extraVolumeMounts:
-        - name: ca-certs
-          mountPath: /etc/ssl/certs
+    extraVolumeMounts:
+      - name: ca-certs
+        mountPath: /etc/ssl/certs
 
-      initContainers:
-        - name: install-proxy-cert
-          image: ghcr.io/apollographql/router:<router-image-version>
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              cp -r /etc/ssl/certs/* /ca-certs/
-              cp /proxy-cert/proxy-ca.crt /usr/local/share/ca-certificates/
-              update-ca-certificates
-              cp -r /etc/ssl/certs/* /ca-certs/
-          securityContext:
-            runAsUser: 0
-          volumeMounts:
-            - name: proxy-ca-cert
-              mountPath: /proxy-cert
-            - name: ca-certs
-              mountPath: /ca-certs
+    initContainers:
+      - name: install-proxy-cert
+        image: ghcr.io/apollographql/router:<router-image-version>
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            cp -r /etc/ssl/certs/* /ca-certs/
+            cp /proxy-cert/proxy-ca.crt /usr/local/share/ca-certificates/
+            update-ca-certificates
+            cp -r /etc/ssl/certs/* /ca-certs/
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+          - name: proxy-ca-cert
+            mountPath: /proxy-cert
+          - name: ca-certs
+            mountPath: /ca-certs
     ```
 
 ### Building a custom image for Kubernetes
@@ -112,10 +111,9 @@ When deploying with Kubernetes, use a ConfigMap or Secret to provide the certifi
 Build a custom Docker image with the certificate as described in [Building a custom image](#building-a-custom-image) and reference it in your Helm values.
 
 ```yaml title="values.yaml"
-router:
-  image:
-    repository: your-registry/router-with-proxy-cert
-    tag: <your-tag>
+image:
+  repository: your-registry/router-with-proxy-cert
+  tag: <your-tag>
 ```
 
 ## Adding certificates for cloud deployments
