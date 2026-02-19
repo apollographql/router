@@ -7,8 +7,8 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceId;
 use opentelemetry_sdk::trace::ShouldSample;
 
-use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
-use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
+use super::propagator::DatadogTraceState;
+use super::propagator::SamplingPriority;
 
 /// The Datadog Agent Sampler
 ///
@@ -117,8 +117,8 @@ mod tests {
     use opentelemetry_sdk::trace::ShouldSample;
 
     use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
-    use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
-    use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
+    use crate::plugins::telemetry::tracing::datadog::propagator::DatadogTraceState;
+    use crate::plugins::telemetry::tracing::datadog::propagator::SamplingPriority;
 
     #[derive(Debug, Clone, Builder)]
     struct StubSampler {
