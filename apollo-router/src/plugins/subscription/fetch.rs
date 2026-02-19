@@ -246,22 +246,21 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
 
-    use crate::query_planner::OperationKind;
     use apollo_federation::query_plan::serializable_document::SerializableDocument;
     use serde_json_bytes::Value;
     use tokio::sync::mpsc;
 
+    use super::subscription_with_subgraph_service;
     use crate::Context;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::subscription::SubscriptionConfig;
+    use crate::query_planner::OperationKind;
     use crate::query_planner::fetch::Variables;
     use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
     use crate::query_planner::subscription::SubscriptionNode;
     use crate::services::SubgraphServiceFactory;
     use crate::services::fetch::SubscriptionRequest;
-
-    use super::subscription_with_subgraph_service;
 
     #[tokio::test]
     async fn test_subscription_limit_reached_emits_metric() {
