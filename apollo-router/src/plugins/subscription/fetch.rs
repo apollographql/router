@@ -98,6 +98,11 @@ fn subscription_with_subgraph_service(
         .and_then(|s| s.max_opened_subscriptions)
         && OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= max_opened_subscriptions
     {
+        u64_counter!(
+            "apollo.router.operations.subscriptions.rejected.limit",
+            "Number of subscription requests rejected because the maximum opened subscriptions limit was reached",
+            1
+        );
         return Box::pin(async {
             Ok((
                 Value::default(),
@@ -233,4 +238,99 @@ fn subscription_with_subgraph_service(
         };
         Ok((Value::default(), response))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+
+    use crate::query_planner::OperationKind;
+    use apollo_federation::query_plan::serializable_document::SerializableDocument;
+    use serde_json_bytes::Value;
+    use tokio::sync::mpsc;
+
+    use crate::Context;
+    use crate::json_ext::Path;
+    use crate::metrics::FutureMetricsExt;
+    use crate::plugins::subscription::SubscriptionConfig;
+    use crate::query_planner::fetch::Variables;
+    use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
+    use crate::query_planner::subscription::SubscriptionNode;
+    use crate::services::SubgraphServiceFactory;
+    use crate::services::fetch::SubscriptionRequest;
+
+    use super::subscription_with_subgraph_service;
+
+    #[tokio::test]
+    async fn test_subscription_limit_reached_emits_metric() {
+        async {
+            let original_count = OPENED_SUBSCRIPTIONS.swap(1, Ordering::Relaxed);
+
+            let subscription_config = SubscriptionConfig {
+                max_opened_subscriptions: Some(1),
+                ..Default::default()
+            };
+
+            let subscription_node = SubscriptionNode {
+                service_name: Arc::from("subgraph-a"),
+                variable_usages: Vec::new(),
+                operation: SerializableDocument::from_string("subscription { onEvent { id } }"),
+                operation_name: None,
+                operation_kind: OperationKind::Subscription,
+                input_rewrites: None,
+                output_rewrites: None,
+            };
+
+            let (sender, _receiver) = mpsc::channel(1);
+            let supergraph_request = Arc::new(
+                http::Request::builder()
+                    .body(crate::graphql::Request::builder().build())
+                    .unwrap(),
+            );
+
+            let schema = Arc::new(
+                crate::spec::Schema::parse(
+                    include_str!("../../testdata/minimal_supergraph.graphql"),
+                    &Default::default(),
+                )
+                .expect("could not parse schema"),
+            );
+
+            let factory = Arc::new(SubgraphServiceFactory {
+                services: Arc::new(HashMap::new()),
+            });
+
+            let request = SubscriptionRequest::builder()
+                .context(Context::new())
+                .subscription_node(subscription_node)
+                .supergraph_request(supergraph_request)
+                .variables(Variables::default())
+                .current_dir(Path(Vec::new()))
+                .sender(sender)
+                .subscription_config(subscription_config)
+                .build();
+
+            let (data, errors) = subscription_with_subgraph_service(schema, factory, request)
+                .await
+                .expect("call should not fail");
+
+            assert_eq!(data, Value::default());
+            assert_eq!(errors.len(), 1);
+            assert_eq!(
+                errors[0].message,
+                "can't open new subscription, limit reached"
+            );
+            assert_eq!(
+                errors[0].extensions.get("code").and_then(|v| v.as_str()),
+                Some("SUBSCRIPTION_MAX_LIMIT")
+            );
+            assert_counter!("apollo.router.operations.subscriptions.rejected.limit", 1);
+
+            OPENED_SUBSCRIPTIONS.store(original_count, Ordering::Relaxed);
+        }
+        .with_metrics()
+        .await;
+    }
 }

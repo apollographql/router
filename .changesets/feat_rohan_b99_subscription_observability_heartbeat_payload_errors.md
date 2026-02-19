@@ -20,4 +20,8 @@ The following counters are emitted when a subscription terminates:
 - **`apollo.router.operations.subscriptions.schema_reload`**: The subscription was terminated because the router schema was updated.
 - **`apollo.router.operations.subscriptions.config_reload`**: The subscription was terminated because the router configuration was updated.
 
+The following counter is emitted when a subscription request is rejected:
+
+- **`apollo.router.operations.subscriptions.rejected.limit`**: A new subscription request was rejected because the router has reached its `max_opened_subscriptions` limit.
+
 By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8858
