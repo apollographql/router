@@ -277,6 +277,8 @@ items:
         children:
           - label: "Google Cloud Run"
             href: "./self-hosted/containerization/gcp"
+      - label: "Proxy Certificates"
+        href: "./self-hosted/containerization/proxy-certificates"
       - label: "Managed Hosting"
         children:
           - label: "Railway"
