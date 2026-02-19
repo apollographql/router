@@ -45,15 +45,25 @@ Only the final squashed commit needs to compile and pass tests.
 
 Update all OpenTelemetry crates:
 ```toml
+# Main dependencies
 opentelemetry = "0.31"
 opentelemetry_sdk = "0.31"
+opentelemetry-aws = "0.19"
+opentelemetry-http = "0.31"
+opentelemetry-jaeger-propagator = "0.31"
 opentelemetry-otlp = "0.31"
-opentelemetry-zipkin = "0.31"  # Part of opentelemetry-rust repo
 opentelemetry-semantic-conventions = "0.31"
-opentelemetry-datadog = "0.19"  # External crate (latest as of 2026-02)
+opentelemetry-zipkin = "0.31"
+opentelemetry-prometheus = "0.31"
+
+# Dev dependencies
+opentelemetry-stdout = "0.31"
+opentelemetry-proto = "0.31"
+opentelemetry-datadog = "0.19"
+tracing-opentelemetry = "0.32"
 ```
 
-**Verified:** Versions confirmed from [crates.io](https://crates.io/crates/opentelemetry) and [opentelemetry-datadog](https://crates.io/crates/opentelemetry-datadog).
+**Verified:** Versions confirmed from [docs.rs](https://docs.rs) - all core OTel crates at 0.31, datadog/aws at 0.19, tracing-opentelemetry at 0.32 (compatible with OTel 0.31).
 
 **Commit:** `deps: upgrade OpenTelemetry dependencies to 0.31`
 
