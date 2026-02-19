@@ -112,6 +112,7 @@ mod tests {
         let span_data = SpanData {
             span_context,
             parent_span_id: SpanId::from_u64(1),
+            parent_span_is_remote: false,
             span_kind: SpanKind::Client,
             name: Default::default(),
             start_time: SystemTime::now(),

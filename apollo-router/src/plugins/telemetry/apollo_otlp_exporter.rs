@@ -187,6 +187,7 @@ impl ApolloOtlpExporter {
                 TraceState::default(),
             ),
             parent_span_id: span.parent_span_id,
+            parent_span_is_remote: false,
             span_kind: span.span_kind.clone(),
             name: span.name.clone(),
             start_time: span.start_time,
