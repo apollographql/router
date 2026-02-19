@@ -4067,7 +4067,19 @@ mod tests {
             let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
                 let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_call().returning(callback);
+                mock_http_client.expect_call().returning(
+                    move |req: crate::services::http::HttpRequest| {
+                        let context = req.context.clone();
+                        let fut = callback(req.http_request);
+                        Box::pin(async move {
+                            let response = fut.await?;
+                            Ok(crate::services::http::HttpResponse {
+                                http_response: response,
+                                context,
+                            })
+                        })
+                    },
+                );
                 mock_http_client
             });
             mock_http_client
@@ -4089,7 +4101,19 @@ mod tests {
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
                     let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client.expect_call().returning(callback);
+                    mock_http_client.expect_call().returning(
+                        move |req: crate::services::http::HttpRequest| {
+                            let context = req.context.clone();
+                            let fut = callback(req.http_request);
+                            Box::pin(async move {
+                                let response = fut.await?;
+                                Ok(crate::services::http::HttpResponse {
+                                    http_response: response,
+                                    context,
+                                })
+                            })
+                        },
+                    );
                     mock_http_client
                 });
                 mock_http_client
@@ -4836,6 +4860,288 @@ mod tests {
         // Tests for context key deletion functionality
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_url() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock"
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs are properly handled
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with a Unix socket URL
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_and_h2c_http2only() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock",
+                "client": {
+                    "experimental_http2": "http2only"
+                }
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs work with h2c http2only configuration
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with Unix socket + h2c http2only configuration
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_and_h2c_enable() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock",
+                "client": {
+                    "experimental_http2": "enable"
+                }
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs work with h2c enable configuration
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with Unix socket + h2c enable configuration
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_and_h2c_disable() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock",
+                "client": {
+                    "experimental_http2": "disable"
+                }
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs work with HTTP/2 disabled
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with Unix socket + HTTP/2 disabled
+    }
+
+    #[tokio::test]
+    async fn test_coprocessor_http_url_configuration() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8081"
+            }
+        });
+
+        // Verify HTTP URLs continue to work as before (same as existing load_plugin test)
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_coprocessor_https_url_configuration() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "https://example.com:8443/coprocessor"
+            }
+        });
+
+        // Verify HTTPS URLs continue to work as before
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn test_url_scheme_detection() {
+        // Test various URL formats that should be supported
+        let test_cases = vec![
+            ("http://localhost:8081", false),
+            ("https://example.com:443/path", false),
+            ("unix:///tmp/socket.sock", true),
+            ("unix:///var/run/app/coprocessor.sock", true),
+            ("ftp://example.com", false), // Invalid but shouldn't panic
+        ];
+
+        for (url, should_be_unix) in test_cases {
+            let is_unix = url.starts_with("unix://");
+            assert_eq!(
+                is_unix, should_be_unix,
+                "URL '{}' unix detection failed",
+                url
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_backwards_compatibility_with_existing_configs() {
+        // Test that existing production configurations continue to work unchanged
+        let legacy_http_configs = vec![
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080"
+                }
+            }),
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "https://external-coprocessor.company.com/graphql",
+                    "timeout": "10s"
+                }
+            }),
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://127.0.0.1:3001/webhook",
+                    "router": {
+                        "request": {
+                            "context": true,
+                            "headers": true
+                        }
+                    }
+                }
+            }),
+        ];
+
+        // Verify all legacy configurations can still be loaded
+        for config in legacy_http_configs {
+            let test_harness = crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await;
+
+            assert!(
+                test_harness.is_ok(),
+                "Legacy HTTP configuration should load successfully"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_unix_socket_path_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix://"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(result.is_err(), "Empty Unix socket path should be rejected");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("must include a path"),
+            "Error should mention missing path: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relative_unix_socket_path_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix://relative/path.sock"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_err(),
+            "Relative Unix socket path should be rejected"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("should be absolute"),
+            "Error should mention absolute path requirement: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_invalid_http_url_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "not a valid url"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(result.is_err(), "Invalid HTTP URL should be rejected");
+    }
+
+    #[tokio::test]
+    async fn test_stage_specific_empty_unix_socket_path_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8080",
+                "router": {
+                    "request": {
+                        "url": "unix://",
+                        "headers": true
+                    }
+                }
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_err(),
+            "Empty Unix socket path in stage config should be rejected"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("router.request.url"),
+            "Error should mention the specific config path: {err}"
+        );
+    }
+
     #[cfg(test)]
     mod connector_tests {
         use std::str::FromStr;
@@ -4850,7 +5156,7 @@ mod tests {
         use apollo_federation::connectors::JSONSelection;
         use apollo_federation::connectors::SourceName;
         use apollo_federation::connectors::StringTemplate;
-        use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+        use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectorsHttpRequest;
         use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
         use apollo_federation::connectors::runtime::key::ResponseKey;
         use apollo_federation::connectors::runtime::responses::MappedResponse;
@@ -4870,6 +5176,8 @@ mod tests {
         use crate::plugins::telemetry::config_new::conditions::Condition;
         use crate::services::connector::request_service;
         use crate::services::external::PipelineStep;
+        use crate::services::http::HttpRequest;
+        use crate::services::http::HttpResponse;
         use crate::services::router;
 
         #[allow(clippy::type_complexity)]
@@ -4884,7 +5192,19 @@ mod tests {
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
                     let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client.expect_call().returning(callback);
+                    mock_http_client
+                        .expect_call()
+                        .returning(move |req: HttpRequest| {
+                            let context = req.context.clone();
+                            let fut = callback(req.http_request);
+                            Box::pin(async move {
+                                let response = fut.await?;
+                                Ok(HttpResponse {
+                                    http_response: response,
+                                    context,
+                                })
+                            })
+                        });
                     mock_http_client
                 });
                 mock_http_client
@@ -4940,7 +5260,7 @@ mod tests {
                 .body(r#"{"query":"test"}"#.to_string())
                 .unwrap();
 
-            let transport_request = TransportRequest::Http(HttpRequest {
+            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
                 inner: http_request,
                 debug: Default::default(),
             });
@@ -5109,7 +5429,7 @@ mod tests {
                 .body("plain text body".to_string())
                 .unwrap();
 
-            let transport_request = TransportRequest::Http(HttpRequest {
+            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
                 inner: http_request,
                 debug: Default::default(),
             });

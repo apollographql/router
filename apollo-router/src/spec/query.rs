@@ -24,6 +24,7 @@ use self::subselections::SubSelectionValue;
 use super::Fragment;
 use super::QueryHash;
 use crate::Configuration;
+use crate::configuration::mode::Mode;
 use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -43,8 +44,11 @@ use crate::spec::InvalidValue;
 use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;
+use crate::spec::query::metrics::observe_query_lexical_token;
+use crate::spec::query::metrics::observe_query_recursion;
 use crate::spec::schema::ApiSchema;
 
+pub(crate) mod metrics;
 pub(crate) mod subselections;
 pub(crate) mod transform;
 pub(crate) mod traverse;
@@ -279,7 +283,11 @@ impl Query {
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
+        let token_limit = parser.tokens_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
+
+        observe_query_recursion(recursion_limit);
+        observe_query_lexical_token(token_limit);
 
         let hash = schema.schema_id.operation_hash(query, operation_name);
         ParsedDocumentInner::new(
@@ -1035,6 +1043,7 @@ impl Query {
         &self,
         request: &Request,
         schema: &Schema,
+        strict_variable_validation: Mode,
     ) -> Result<(), Response> {
         if LevelFilter::current() >= LevelFilter::DEBUG {
             let known_variables = self
@@ -1078,7 +1087,7 @@ impl Query {
                     let path = super::JsonValuePath::Variable {
                         name: name.as_str(),
                     };
-                    ty.validate_input_value(value, schema, &path)
+                    ty.validate_input_value(value, schema, &path, strict_variable_validation)
                         .err()
                         .map(|message| {
                             FetchError::ValidationInvalidTypeVariable {
