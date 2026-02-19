@@ -208,21 +208,23 @@ impl Config {
             .with_timeout(batch_config.max_export_timeout)
             .build();
 
-        let resource = Resource::new([
-            KeyValue::new("apollo.router.id", router_id()),
-            KeyValue::new("apollo.graph.ref", reference.to_string()),
-            KeyValue::new("apollo.schema.id", schema_id.to_string()),
-            KeyValue::new(
-                "apollo.user.agent",
-                format!(
-                    "{}@{}",
-                    std::env!("CARGO_PKG_NAME"),
-                    std::env!("CARGO_PKG_VERSION")
+        let resource = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new("apollo.router.id", router_id()),
+                KeyValue::new("apollo.graph.ref", reference.to_string()),
+                KeyValue::new("apollo.schema.id", schema_id.to_string()),
+                KeyValue::new(
+                    "apollo.user.agent",
+                    format!(
+                        "{}@{}",
+                        std::env!("CARGO_PKG_NAME"),
+                        std::env!("CARGO_PKG_VERSION")
+                    ),
                 ),
-            ),
-            KeyValue::new("apollo.client.host", hostname()?),
-            KeyValue::new("apollo.client.uname", get_uname()?),
-        ]);
+                KeyValue::new("apollo.client.host", hostname()?),
+                KeyValue::new("apollo.client.uname", get_uname()?),
+            ])
+            .build();
 
         builder
             .with_reader(MeterProviderType::Apollo, default_reader)

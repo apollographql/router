@@ -91,21 +91,23 @@ impl ApolloOtlpExporter {
             .build_span_exporter()?,
         };
 
-        otlp_exporter.set_resource(&Resource::new([
-            KeyValue::new("apollo.router.id", router_id()),
-            KeyValue::new("apollo.graph.ref", apollo_graph_ref.to_string()),
-            KeyValue::new("apollo.schema.id", schema_id.to_string()),
-            KeyValue::new(
-                "apollo.user.agent",
-                format!(
-                    "{}@{}",
-                    std::env!("CARGO_PKG_NAME"),
-                    std::env!("CARGO_PKG_VERSION")
+        otlp_exporter.set_resource(&Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new("apollo.router.id", router_id()),
+                KeyValue::new("apollo.graph.ref", apollo_graph_ref.to_string()),
+                KeyValue::new("apollo.schema.id", schema_id.to_string()),
+                KeyValue::new(
+                    "apollo.user.agent",
+                    format!(
+                        "{}@{}",
+                        std::env!("CARGO_PKG_NAME"),
+                        std::env!("CARGO_PKG_VERSION")
+                    ),
                 ),
-            ),
-            KeyValue::new("apollo.client.host", hostname()?),
-            KeyValue::new("apollo.client.uname", get_uname()?),
-        ]));
+                KeyValue::new("apollo.client.host", hostname()?),
+                KeyValue::new("apollo.client.uname", get_uname()?),
+            ])
+            .build());
 
         Ok(Self {
             endpoint: endpoint.clone(),
