@@ -646,7 +646,7 @@ mod test {
                     callback_observe_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 i.observe(count + 1, &[])
             })
-            .init();
+            .build();
 
         let mut result = ResourceMetrics {
             resource: Default::default(),
@@ -698,7 +698,7 @@ mod test {
                     callback_observe_counter1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 i.observe(count + 1, &[])
             })
-            .init();
+            .build();
 
         let mut result = ResourceMetrics {
             resource: Default::default(),
@@ -721,7 +721,7 @@ mod test {
                     callback_observe_counter2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 i.observe(count + 1, &[])
             })
-            .init();
+            .build();
 
         // Fetching metrics will call the observer ONLY on the remaining gauge
         reader
@@ -788,7 +788,7 @@ mod test {
         let counter = meter_provider
             .versioned_meter("test", None::<String>, None::<String>, None)
             .u64_counter("test.counter")
-            .init();
+            .build();
         counter.add(1, &[]);
         let mut resource_metrics = ResourceMetrics {
             resource: Default::default(),
@@ -841,7 +841,7 @@ mod test {
                 .meter_provider
                 .versioned_meter("test", None::<String>, None::<String>, None)
                 .u64_counter("test.counter")
-                .init();
+                .build();
             counter.add(1, &[]);
         }
     }

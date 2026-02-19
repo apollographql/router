@@ -238,7 +238,7 @@ impl LruSizeInstrument {
                     gauge.observe(value.load(std::sync::atomic::Ordering::Relaxed), &[]);
                 }
             })
-            .init();
+            .build();
 
         Self {
             value,

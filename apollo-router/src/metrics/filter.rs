@@ -267,43 +267,43 @@ mod test {
         // Matches allow
         filtered
             .u64_counter("apollo.router.operations")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.operations.test")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.graphos.cloud.test")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.query_planning.test")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.lifecycle.api_schema")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.operations.connectors")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_observable_gauge("apollo.router.schema.connectors")
             .with_callback(move |observer| observer.observe(1, &[]))
-            .init();
+            .build();
 
         // Mismatches allow
         filtered
             .u64_counter("apollo.router.unknown.test")
-            .init()
+            .build()
             .add(1, &[]);
 
         // Matches deny
         filtered
             .u64_counter("apollo.router.operations.error")
-            .init()
+            .build()
             .add(1, &[]);
 
         meter_provider.force_flush().unwrap();
@@ -376,7 +376,7 @@ mod test {
             .u64_counter("apollo.router.operations")
             .with_description("desc")
             .with_unit("ms")
-            .init()
+            .build()
             .add(1, &[]);
         meter_provider.force_flush().unwrap();
 
@@ -426,28 +426,28 @@ mod test {
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.config")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.config.test")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.entities")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.entities.test")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.operations.connectors")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_observable_gauge("apollo.router.schema.connectors")
             .with_callback(move |observer| observer.observe(1, &[]))
-            .init();
+            .build();
         meter_provider.force_flush().unwrap();
 
         let metrics: Vec<_> = exporter
@@ -493,11 +493,11 @@ mod test {
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.operations.error")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.operations.mismatch")
-            .init()
+            .build()
             .add(1, &[]);
         meter_provider.force_flush().unwrap();
 

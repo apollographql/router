@@ -206,7 +206,7 @@ impl RedisMetricsCollector {
                     &[KeyValue::new("kind", caller)],
                 );
             })
-            .init()
+            .build()
     }
 
     /// Generic method to create a weighted average gauge
@@ -237,7 +237,7 @@ impl RedisMetricsCollector {
 
                 gauge.observe(average, &[KeyValue::new("kind", caller)]);
             })
-            .init()
+            .build()
     }
 
     fn create_client_count_gauge() -> ObservableGauge<u64> {
@@ -249,7 +249,7 @@ impl RedisMetricsCollector {
             .with_callback(move |gauge| {
                 gauge.observe(ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed), &[]);
             })
-            .init()
+            .build()
     }
 
     /// Spawn the metrics collection task
