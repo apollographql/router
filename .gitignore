@@ -27,7 +27,7 @@
 /docs/public
 
 # Examples
-examples/router-http/coprocessor/node_modules/
+examples/**/node_modules/
 
 # Prevent accidental commits of router.yaml in the root
 /router.yaml
