@@ -125,13 +125,33 @@ mod unix_socket_url_tests {
 
     #[rstest]
     #[case::without_query("/tmp/coprocessor.sock", "/tmp/coprocessor.sock", "/")]
-    #[case::with_path_param("/tmp/coprocessor.sock?path=/api/v1", "/tmp/coprocessor.sock", "/api/v1")]
-    #[case::with_multiple_params("/tmp/coprocessor.sock?other=value&path=/api/v1&another=x", "/tmp/coprocessor.sock", "/api/v1")]
-    #[case::with_other_params_only("/tmp/coprocessor.sock?other=value", "/tmp/coprocessor.sock", "/")]
+    #[case::with_path_param(
+        "/tmp/coprocessor.sock?path=/api/v1",
+        "/tmp/coprocessor.sock",
+        "/api/v1"
+    )]
+    #[case::with_multiple_params(
+        "/tmp/coprocessor.sock?other=value&path=/api/v1&another=x",
+        "/tmp/coprocessor.sock",
+        "/api/v1"
+    )]
+    #[case::with_other_params_only(
+        "/tmp/coprocessor.sock?other=value",
+        "/tmp/coprocessor.sock",
+        "/"
+    )]
     #[case::with_empty_query("/tmp/coprocessor.sock?", "/tmp/coprocessor.sock", "/")]
-    #[case::with_nested_http_path("/tmp/coprocessor.sock?path=/api/v1/coprocessor/hook", "/tmp/coprocessor.sock", "/api/v1/coprocessor/hook")]
+    #[case::with_nested_http_path(
+        "/tmp/coprocessor.sock?path=/api/v1/coprocessor/hook",
+        "/tmp/coprocessor.sock",
+        "/api/v1/coprocessor/hook"
+    )]
     #[case::with_empty_path_param("/tmp/coprocessor.sock?path", "/tmp/coprocessor.sock", "/")]
-    #[case::without_leading_slash("/tmp/coprocessor.sock?path=no_leading_slash", "/tmp/coprocessor.sock", "no_leading_slash")]
+    #[case::without_leading_slash(
+        "/tmp/coprocessor.sock?path=no_leading_slash",
+        "/tmp/coprocessor.sock",
+        "no_leading_slash"
+    )]
     fn parse_socket_url(
         #[case] input: &str,
         #[case] expected_socket: &str,
