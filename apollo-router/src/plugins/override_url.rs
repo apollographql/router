@@ -61,7 +61,7 @@ impl Plugin for OverrideSubgraphUrl {
                         // supports an optional `path` query parameter for downstream HTTP paths. That looks like this:
                         // unix:///tmp/socket.sock?path=/api/v1
                         let (socket_path, http_path) = parse_unix_socket_url(url_path);
-                        Ok((k, hyperlocal::Uri::new(&socket_path, &http_path).into()))
+                        Ok((k, hyperlocal::Uri::new(socket_path, http_path).into()))
                     } else {
                         Uri::from_str(&url).map(|url| (k, url))
                     }

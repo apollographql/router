@@ -142,7 +142,7 @@ impl Schema {
                         //
                         // supports an optional `path` query parameter for HTTP path, eg: unix:///tmp/socket.sock?path=/api/v1
                         let (socket_path, http_path) = parse_unix_socket_url(url_path);
-                        hyperlocal::Uri::new(&socket_path, &http_path).into()
+                        hyperlocal::Uri::new(socket_path, http_path).into()
                     } else {
                         Uri::from_str(url)
                             .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?

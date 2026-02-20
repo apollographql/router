@@ -301,7 +301,7 @@ where
         #[cfg(unix)]
         let converted_uri: http::Uri = if let Some(path) = uri.strip_prefix("unix://") {
             let (socket_path, http_path) = parse_unix_socket_url(path);
-            hyperlocal::Uri::new(&socket_path, &http_path).into()
+            hyperlocal::Uri::new(socket_path, http_path).into()
         } else {
             uri.parse()?
         };
