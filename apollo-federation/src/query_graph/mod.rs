@@ -359,8 +359,8 @@ impl QueryGraphEdgeTransition {
         }
     }
 
-    // NOTE: This function is intented to be used when comparing edges from a
-    // FederationedQueryGraph against edges from an API schema query graph. `other` should be from
+    // NOTE: This function is intended to be used when comparing edges from a
+    // federated query graph against edges from an API schema query graph. `other` should be from
     // an API schema graph.
     pub(crate) fn matches_supergraph_transition(
         &self,
