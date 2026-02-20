@@ -85,6 +85,7 @@ mod tests {
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugins::coprocessor::RouterHttpRequestConf;
+    use crate::plugins::coprocessor::RouterHttpResponseConf;
     use crate::plugins::coprocessor::RouterHttpStage;
     use crate::plugins::coprocessor::RouterRequestConf;
     use crate::plugins::coprocessor::RouterResponseConf;
@@ -3188,6 +3189,17 @@ mod tests {
         }
     }
 
+    // Helper for router HTTP response validation tests (response stage enabled, request stage disabled)
+    fn create_router_http_stage_for_response_validation_test() -> RouterHttpStage {
+        RouterHttpStage {
+            request: Default::default(),
+            response: RouterHttpResponseConf {
+                body: true,
+                ..Default::default()
+            },
+        }
+    }
+
     fn create_router_stage_for_request_validation_test() -> RouterStage {
         RouterStage {
             request: RouterRequestConf {
@@ -3303,7 +3315,6 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid response for RouterHttpResponse
-    #[allow(dead_code)]
     fn create_mock_http_client_router_http_response_valid_response() -> MockInternalHttpClientService {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -4682,6 +4693,34 @@ mod tests {
             }
 
             assert_coprocessor_operations_metrics(&[(PipelineStep::RouterHttpRequest, 3, Some(true))]);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn router_http_response_metric_incremented_when_condition_true() {
+        async {
+            for _ in 0..3 {
+                let router_http_stage = create_router_http_stage_for_response_validation_test();
+                let mock_http_client = create_mock_http_client_router_http_response_valid_response();
+                let mock_router_service = create_mock_router_service();
+
+                let service_stack = router_http_stage
+                    .as_service(
+                        mock_http_client,
+                        mock_router_service.boxed(),
+                        "http://test".to_string(),
+                        Arc::new("".to_string()),
+                        false,
+                    )
+                    .boxed();
+
+                let request = router::Request::fake_builder().build().unwrap();
+                let _ = service_stack.oneshot(request).await.unwrap();
+            }
+
+            assert_coprocessor_operations_metrics(&[(PipelineStep::RouterHttpResponse, 3, Some(true))]);
         }
         .with_metrics()
         .await;
