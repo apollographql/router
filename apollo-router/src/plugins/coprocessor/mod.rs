@@ -77,22 +77,28 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();
 
+        // Router HTTP is a new feature: reject deprecated context: true (fail boot, do not warn).
         if matches!(
             init.config.router_http.request.context,
             ContextConf::Deprecated(true)
         ) {
-            tracing::warn!(
-                "Configuration `coprocessor.router_http.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            return Err(
+                "Configuration `coprocessor.router_http.request.context: true` is not supported. \
+                 Use the object form (e.g. context: { all: true }). See https://go.apollo.dev/o/coprocessor-context"
+                    .into(),
             );
         }
         if matches!(
             init.config.router_http.response.context,
             ContextConf::Deprecated(true)
         ) {
-            tracing::warn!(
-                "Configuration `coprocessor.router_http.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            return Err(
+                "Configuration `coprocessor.router_http.response.context: true` is not supported. \
+                 Use the object form (e.g. context: { all: true }). See https://go.apollo.dev/o/coprocessor-context"
+                    .into(),
             );
         }
+
         if matches!(
             init.config.router.request.context,
             ContextConf::Deprecated(true)
@@ -601,7 +607,10 @@ pub(crate) fn update_context_from_coprocessor(
 
     for (mut key, value) in context_returned.try_into_iter()? {
         // Handle deprecated key names - convert back to actual key names
-        if let ContextConf::NewContextConf(NewContextConf::Deprecated) = context_config {
+        if matches!(
+            context_config,
+            ContextConf::NewContextConf(NewContextConf::Deprecated) | ContextConf::Deprecated(true)
+        ) {
             key = context_key_from_deprecated(key);
         }
 
@@ -647,13 +656,55 @@ fn record_coprocessor_operation(stage: PipelineStep, succeeded: bool) {
     );
 }
 
+/// Router HTTP stage request config (same shape as RouterRequestConf; deprecated context rejected at boot).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct RouterHttpRequestConf {
+    /// Condition to trigger this stage
+    pub(super) condition: Option<Condition<RouterSelector>>,
+    /// Send the headers
+    pub(super) headers: bool,
+    /// Send the context
+    pub(super) context: ContextConf,
+    /// Send the body
+    pub(super) body: bool,
+    /// Send the SDL
+    pub(super) sdl: bool,
+    /// Send the path
+    pub(super) path: bool,
+    /// Send the method
+    pub(super) method: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
+}
+
+/// Router HTTP stage response config (same shape as RouterResponseConf; deprecated context rejected at boot).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct RouterHttpResponseConf {
+    /// Condition to trigger this stage
+    pub(super) condition: Condition<RouterSelector>,
+    /// Send the headers
+    pub(super) headers: bool,
+    /// Send the context
+    pub(super) context: ContextConf,
+    /// Send the body
+    pub(super) body: bool,
+    /// Send the SDL
+    pub(super) sdl: bool,
+    /// Send the HTTP status
+    pub(super) status_code: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub(super) struct RouterHttpStage {
     /// The request configuration
-    pub(super) request: RouterRequestConf,
+    pub(super) request: RouterHttpRequestConf,
     /// The response configuration
-    pub(super) response: RouterResponseConf,
+    pub(super) response: RouterHttpResponseConf,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -675,15 +726,12 @@ impl RouterHttpStage {
         response_validation: bool,
     ) -> router::BoxService
     where
-        C: Service<
-                http::Request<RouterBody>,
-                Response = http::Response<RouterBody>,
-                Error = BoxError,
-            > + Clone
+        C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
+            + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+        <C as tower::Service<HttpRequest>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -1029,17 +1077,17 @@ async fn process_router_http_request_stage<C>(
     coprocessor_url: String,
     sdl: Arc<String>,
     mut request: router::Request,
-    mut request_config: RouterRequestConf,
+    mut request_config: RouterHttpRequestConf,
     response_validation: bool,
     executed: &mut bool,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     let should_be_executed = request_config
         .condition
@@ -1078,7 +1126,9 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, Context::new())
+        .await;
     *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::RouterHttpRequest, duration);
@@ -1125,9 +1175,11 @@ where
         }
         if let Some(context) = co_processor_output.context {
             for (mut key, value) in context.try_into_iter()? {
-                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                    &request_config.context
-                {
+                if matches!(
+                    &request_config.context,
+                    ContextConf::NewContextConf(NewContextConf::Deprecated)
+                        | ContextConf::Deprecated(true)
+                ) {
                     key = context_key_from_deprecated(key);
                 }
                 res.context.upsert_json_value(key, move |_current| value);
@@ -1144,8 +1196,11 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
+            if matches!(
+                &request_config.context,
+                ContextConf::NewContextConf(NewContextConf::Deprecated)
+                    | ContextConf::Deprecated(true)
+            ) {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -1165,17 +1220,17 @@ async fn process_router_http_response_stage<C>(
     coprocessor_url: String,
     sdl: Arc<String>,
     mut response: router::Response,
-    response_config: RouterResponseConf,
+    response_config: RouterHttpResponseConf,
     _response_validation: bool,
     executed: &mut bool,
 ) -> Result<router::Response, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
@@ -1220,7 +1275,9 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    let co_processor_result = payload
+        .call(http_client.clone(), &coprocessor_url, Context::new())
+        .await;
     *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::RouterHttpResponse, duration);
@@ -1240,7 +1297,11 @@ where
         *response.response.status_mut() = control.get_http_status()?
     }
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+        update_context_from_coprocessor(
+            &response.context,
+            context,
+            &response_config.context,
+        )?;
     }
     if let Some(headers) = co_processor_output.headers {
         *response.response.headers_mut() = internalize_header_map(headers)?;
@@ -1278,7 +1339,11 @@ where
                     .build();
 
                 let co_processor_output = payload
-                    .call(generator_client, &generator_coprocessor_url)
+                    .call(
+                        generator_client,
+                        &generator_coprocessor_url,
+                        Context::new(),
+                    )
                     .await?;
                 validate_coprocessor_output(&co_processor_output, PipelineStep::RouterHttpResponse)?;
 

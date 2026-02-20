@@ -367,7 +367,8 @@ async fn test_plugin_ordering() {
             .get(TEST_PLUGIN_ORDERING_CONTEXT_KEY)
             .unwrap()
             .unwrap();
-        // RouterHttp pipeline runs first; plugin fold order puts coprocessor RouterHttp after Rhai
+        // Execution order: RouterHttp (top-level) first, then Router pipeline. Plugin fold order
+        // puts coprocessor RouterHttp after Rhai. See request-lifecycle docs for full path.
         // and before test_ordering plugins. Then router pipeline (coprocessor Router, etc.).
         assert_eq!(
             trace,

@@ -941,9 +941,10 @@ impl RouterCreator {
 
         let plugins = supergraph_creator.plugins();
 
-        // 1. Build Router pipeline (exclude license_enforcement - it moved to RouterHttp)
-        // Plugins are folded in rev() order so that the first plugin in add order becomes
-        // outermost (receives requests first). See router_factory.rs create_plugins() for add order.
+        // 1. Build Router pipeline (exclude license_enforcement — it runs in RouterHttp only).
+        // Plugins are folded in rev() order so the first plugin in add order becomes outermost
+        // (receives requests first). Add order: router_factory.rs create_plugins(). Full request
+        // path: https://www.apollographql.com/docs/graphos/routing/request-lifecycle.
         let router_pipeline = plugins
             .iter()
             .rev()
@@ -952,9 +953,9 @@ impl RouterCreator {
                 plugin.router_service(acc)
             });
 
-        // 2. Build RouterHttp pipeline. Static landing requests (GET + Accept: text/html) skip
-        // the RouterHttp plugin stack and are served only by StaticPageLayer.
-        // Same rev() convention: license_enforcement (early in add order) wraps last → outermost.
+        // 2. Build RouterHttp pipeline (top-level hook; runs before Router pipeline). Static
+        // landing requests (GET + Accept: text/html) skip the RouterHttp plugin stack. Same rev()
+        // convention: first in add order wraps last → outermost.
         let static_page_enabled = configuration.sandbox.enabled || configuration.homepage.enabled;
         let dummy_inner = service_fn(|_req: router::Request| async {
             Err(BoxError::from("static-only inner unreachable"))

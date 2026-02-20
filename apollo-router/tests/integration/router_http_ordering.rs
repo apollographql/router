@@ -1,8 +1,8 @@
 //! RouterHttp pipeline ordering tests.
 //!
-//! These tests verify that RouterHttp runs before the Router pipeline and that
-//! the plugin order (license_enforcement → rhai → coprocessor → router_service)
-//! is correct.
+//! These tests verify that the **RouterHttp** pipeline runs first (top-level hook), then the
+//! **Router** pipeline. Plugin add order is the same for both; see `router_factory::create_plugins`
+//! and [request lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
 //!
 //! **Prerequisites:** The `router_http_service` hook must be added to the `Plugin` trait
 //! (or `PluginUnstable`/`PluginPrivate` as appropriate) for these tests to compile.

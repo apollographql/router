@@ -84,6 +84,7 @@ mod tests {
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::coprocessor::RouterHttpRequestConf;
     use crate::plugins::coprocessor::RouterHttpStage;
     use crate::plugins::coprocessor::RouterRequestConf;
     use crate::plugins::coprocessor::RouterResponseConf;
@@ -3179,7 +3180,7 @@ mod tests {
     // Helper functions for router request validation tests
     fn create_router_http_stage_for_request_validation_test() -> RouterHttpStage {
         RouterHttpStage {
-            request: RouterRequestConf {
+            request: RouterHttpRequestConf {
                 body: true,
                 ..Default::default()
             },
@@ -5222,6 +5223,68 @@ mod tests {
         assert!(
             err.contains("router.request.url"),
             "Error should mention the specific config path: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_router_http_request_context_true_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8080",
+                "router_http": {
+                    "request": {
+                        "context": true,
+                        "body": true
+                    }
+                }
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_err(),
+            "router_http.request.context: true should be rejected at boot"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("router_http.request.context") && err.contains("not supported"),
+            "Error should mention router_http.request.context and that it is not supported: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_router_http_response_context_true_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8080",
+                "router_http": {
+                    "response": {
+                        "context": true,
+                        "body": true
+                    }
+                }
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_err(),
+            "router_http.response.context: true should be rejected at boot"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("router_http.response.context") && err.contains("not supported"),
+            "Error should mention router_http.response.context and that it is not supported: {err}"
         );
     }
 
