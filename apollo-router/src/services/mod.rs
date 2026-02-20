@@ -86,7 +86,7 @@ pub(crate) const MULTIPART_SUBSCRIPTION_SPEC_PARAMETER: &str = "subscriptionSpec
 pub(crate) const MULTIPART_SUBSCRIPTION_SPEC_VALUE: &str = "1.0";
 
 pub(crate) const DEFAULT_SOCKET_PATH: &str = "/";
-pub(crate) const PATH_PREFIX: &str = "path=";
+pub(crate) const PATH_QUERY_PARAM: &str = "path=";
 
 /// Parse a Unix socket URL path (the part after `unix://`) and extract the socket path
 /// and HTTP path (if provided). Supports an optional `path` query parameter to specify the HTTP path.
@@ -106,7 +106,7 @@ pub(crate) fn parse_unix_socket_url(url_path: &str) -> (String, String) {
         // Parse the `path` parameter from the query string
         let http_path = query
             .split('&')
-            .find_map(|param| param.strip_prefix(PATH_PREFIX))
+            .find_map(|param| param.strip_prefix(PATH_QUERY_PARAM))
             .unwrap_or(DEFAULT_SOCKET_PATH);
 
         (socket_path.to_string(), http_path.to_string())
