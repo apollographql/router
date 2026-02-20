@@ -220,7 +220,7 @@ Unix socket paths should be absolute (starting with `/`). The URL format is `uni
 
 </Note>
 
-Because `.sock` isn't required as a file extension, the router can't tell if a path has been appended to the base URL. You can specify a custom HTTP path using the `path` query parameter:
+Because `.sock` is not required as a file extension, the router cannot determine if a path is appended to the base URL. Specify a custom HTTP path using the `path` query parameter:
 
 ```yaml
 override_subgraph_url:
