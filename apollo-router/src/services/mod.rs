@@ -119,49 +119,26 @@ pub(crate) fn parse_unix_socket_url(url_path: &str) -> (String, String) {
 #[cfg(unix)]
 #[cfg(test)]
 mod unix_socket_url_tests {
+    use rstest::rstest;
+
     use super::parse_unix_socket_url;
 
-    #[test]
-    fn parse_socket_path_without_query() {
-        let (socket, http_path) = parse_unix_socket_url("/tmp/coprocessor.sock");
-        assert_eq!(socket, "/tmp/coprocessor.sock");
-        assert_eq!(http_path, "/");
-    }
-
-    #[test]
-    fn parse_socket_path_with_path_param() {
-        let (socket, http_path) = parse_unix_socket_url("/tmp/coprocessor.sock?path=/api/v1");
-        assert_eq!(socket, "/tmp/coprocessor.sock");
-        assert_eq!(http_path, "/api/v1");
-    }
-
-    #[test]
-    fn parse_socket_path_with_multiple_params() {
-        let (socket, http_path) =
-            parse_unix_socket_url("/tmp/coprocessor.sock?other=value&path=/api/v1&another=x");
-        assert_eq!(socket, "/tmp/coprocessor.sock");
-        assert_eq!(http_path, "/api/v1");
-    }
-
-    #[test]
-    fn parse_socket_path_with_other_params_only() {
-        let (socket, http_path) = parse_unix_socket_url("/tmp/coprocessor.sock?other=value");
-        assert_eq!(socket, "/tmp/coprocessor.sock");
-        assert_eq!(http_path, "/");
-    }
-
-    #[test]
-    fn parse_socket_path_with_empty_query() {
-        let (socket, http_path) = parse_unix_socket_url("/tmp/coprocessor.sock?");
-        assert_eq!(socket, "/tmp/coprocessor.sock");
-        assert_eq!(http_path, "/");
-    }
-
-    #[test]
-    fn parse_socket_path_with_nested_http_path() {
-        let (socket, http_path) =
-            parse_unix_socket_url("/tmp/coprocessor.sock?path=/api/v1/coprocessor/hook");
-        assert_eq!(socket, "/tmp/coprocessor.sock");
-        assert_eq!(http_path, "/api/v1/coprocessor/hook");
+    #[rstest]
+    #[case::without_query("/tmp/coprocessor.sock", "/tmp/coprocessor.sock", "/")]
+    #[case::with_path_param("/tmp/coprocessor.sock?path=/api/v1", "/tmp/coprocessor.sock", "/api/v1")]
+    #[case::with_multiple_params("/tmp/coprocessor.sock?other=value&path=/api/v1&another=x", "/tmp/coprocessor.sock", "/api/v1")]
+    #[case::with_other_params_only("/tmp/coprocessor.sock?other=value", "/tmp/coprocessor.sock", "/")]
+    #[case::with_empty_query("/tmp/coprocessor.sock?", "/tmp/coprocessor.sock", "/")]
+    #[case::with_nested_http_path("/tmp/coprocessor.sock?path=/api/v1/coprocessor/hook", "/tmp/coprocessor.sock", "/api/v1/coprocessor/hook")]
+    #[case::with_empty_path_param("/tmp/coprocessor.sock?path", "/tmp/coprocessor.sock", "/")]
+    #[case::without_leading_slash("/tmp/coprocessor.sock?path=no_leading_slash", "/tmp/coprocessor.sock", "no_leading_slash")]
+    fn parse_socket_url(
+        #[case] input: &str,
+        #[case] expected_socket: &str,
+        #[case] expected_http_path: &str,
+    ) {
+        let (socket, http_path) = parse_unix_socket_url(input);
+        assert_eq!(socket, expected_socket);
+        assert_eq!(http_path, expected_http_path);
     }
 }
