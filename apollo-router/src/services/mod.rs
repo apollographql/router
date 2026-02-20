@@ -85,6 +85,7 @@ pub(crate) const MULTIPART_SUBSCRIPTION_CONTENT_TYPE: &str =
 pub(crate) const MULTIPART_SUBSCRIPTION_SPEC_PARAMETER: &str = "subscriptionSpec";
 pub(crate) const MULTIPART_SUBSCRIPTION_SPEC_VALUE: &str = "1.0";
 
+#[cfg(unix)]
 pub(crate) const DEFAULT_SOCKET_PATH: &str = "/";
 pub(crate) const PATH_QUERY_PARAM: &str = "path=";
 
