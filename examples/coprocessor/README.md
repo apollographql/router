@@ -1,12 +1,11 @@
 # External co-processing
 
-Demonstrates router request/response externalization can be performed via yaml configuration.
+Demonstrates router request/response externalization via YAML configuration.
 
-Possible operations include externalizing:
-- Headers
-- Body
-- Context
-- SDL (schema)
+The example config enables:
+
+- **router_http** (raw HTTP layer, before the Router pipeline): request path, method, and headers; response headers and status code.
+- **router** (RouterService stage): request/response headers, context, body, and SDL (schema).
 
 ## Usage
 
