@@ -107,27 +107,6 @@ impl Plugin for Rhai {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        const FUNCTION_NAME_SERVICE: &str = "router_service";
-        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
-            return service;
-        }
-        tracing::debug!("router_service function found");
-        let shared_service = Arc::new(Mutex::new(Some(service)));
-        if let Err(error) = self.run_rhai_service(
-            FUNCTION_NAME_SERVICE,
-            None,
-            ServiceStep::Router(shared_service.clone()),
-            self.scope.clone(),
-        ) {
-            tracing::error!(
-                service = "RouterService",
-                "service callback failed: {error}"
-            );
-        }
-        shared_service.take_unwrap()
-    }
-
     fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
         const FUNCTION_NAME_SERVICE: &str = "router_http";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
@@ -143,6 +122,27 @@ impl Plugin for Rhai {
         ) {
             tracing::error!(
                 service = "RouterHttpService",
+                "service callback failed: {error}"
+            );
+        }
+        shared_service.take_unwrap()
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        const FUNCTION_NAME_SERVICE: &str = "router_service";
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
+        }
+        tracing::debug!("router_service function found");
+        let shared_service = Arc::new(Mutex::new(Some(service)));
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            None,
+            ServiceStep::Router(shared_service.clone()),
+            self.scope.clone(),
+        ) {
+            tracing::error!(
+                service = "RouterService",
                 "service callback failed: {error}"
             );
         }
@@ -216,8 +216,8 @@ impl Plugin for Rhai {
 
 #[derive(Clone, Debug)]
 pub(crate) enum ServiceStep {
-    Router(SharedMut<router::BoxService>),
     RouterHttp(SharedMut<router::BoxService>),
+    Router(SharedMut<router::BoxService>),
     Supergraph(SharedMut<supergraph::BoxService>),
     Execution(SharedMut<execution::BoxService>),
     Subgraph(SharedMut<subgraph::BoxService>),
@@ -628,10 +628,10 @@ macro_rules! gen_map_deferred_response {
 impl ServiceStep {
     fn map_request(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
-            ServiceStep::Router(service) => {
+            ServiceStep::RouterHttp(service) => {
                 gen_map_router_deferred_request!(router, service, rhai_service, callback);
             }
-            ServiceStep::RouterHttp(service) => {
+            ServiceStep::Router(service) => {
                 gen_map_router_deferred_request!(router, service, rhai_service, callback);
             }
             ServiceStep::Supergraph(service) => {
@@ -648,10 +648,10 @@ impl ServiceStep {
 
     fn map_response(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
-            ServiceStep::Router(service) => {
+            ServiceStep::RouterHttp(service) => {
                 gen_map_router_deferred_response!(router, service, rhai_service, callback);
             }
-            ServiceStep::RouterHttp(service) => {
+            ServiceStep::Router(service) => {
                 gen_map_router_deferred_response!(router, service, rhai_service, callback);
             }
             ServiceStep::Supergraph(service) => {

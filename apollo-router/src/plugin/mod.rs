@@ -2,12 +2,11 @@
 //!
 //! Provides a customization mechanism for the router.
 //!
-//! Request execution order: the **RouterHttp** pipeline runs first (raw HTTP layer), then the
-//! **Router** pipeline, then execution and subgraph stages. Only GraphQL requests go through
+//! Request execution order (earliest to latest) is the list below. Only GraphQL requests go through
 //! RouterHttp; static landing and health check are separate routes.
 //!
-//! Stages at which a plugin can hook in (earliest to latest):
-//!  1. **RouterHttp** — [`router_http_service`](Plugin::router_http_service) (top-level hook)
+//! Stages at which a plugin can hook in:
+//!  1. **RouterHttp** — [`router_http_service`](Plugin::router_http_service) (raw HTTP, top-level hook)
 //!  2. **Router** — [`router_service`](Plugin::router_service)
 //!  3. **Supergraph** — [`supergraph_service`](Plugin::supergraph_service)
 //!  4. **Execution** — [`execution_service`](Plugin::execution_service)
@@ -377,6 +376,15 @@ pub trait Plugin: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// Top-level hook: runs at the **RouterHttp** pipeline (raw HTTP layer), before the Router
+    /// pipeline. This is the earliest point at which plugins run for GraphQL requests. Use it for
+    /// logic that must run before telemetry, traffic shaping, and other built-in features. Only
+    /// GraphQL requests pass through; static landing and health check do not. See [request
+    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
     /// This function is EXPERIMENTAL and its signature is subject to change.
     ///
     /// This service runs at the **Router** pipeline: after the [RouterHttp](Self::router_http_service)
@@ -386,15 +394,6 @@ pub trait Plugin: Send + Sync + 'static {
     /// possible point (raw HTTP), use [router_http_service](Self::router_http_service) instead.
     /// See [request lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        service
-    }
-
-    /// Top-level hook: runs at the **RouterHttp** pipeline (raw HTTP layer), before the Router
-    /// pipeline. This is the earliest point at which plugins run for GraphQL requests. Use it for
-    /// logic that must run before telemetry, traffic shaping, and other built-in features. Only
-    /// GraphQL requests pass through; static landing and health check do not. See [request
-    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
-    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
         service
     }
 
@@ -462,19 +461,19 @@ pub trait PluginUnstable: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// Top-level hook: RouterHttp pipeline (raw HTTP), before the Router pipeline. See
+    /// [Plugin::router_http_service] and [request
+    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
     /// This function is EXPERIMENTAL and its signature is subject to change.
     ///
     /// Router pipeline hook: runs after [router_http_service](PluginUnstable::router_http_service)
     /// and before supergraph/execution/subgraph. See [Plugin::router_service] and [request
     /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        service
-    }
-
-    /// Top-level hook: RouterHttp pipeline (raw HTTP), before the Router pipeline. See
-    /// [Plugin::router_http_service] and [request
-    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
-    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
         service
     }
 
@@ -535,12 +534,12 @@ where
         Plugin::new(init).await
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        Plugin::router_service(self, service)
-    }
-
     fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
         Plugin::router_http_service(self, service)
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        Plugin::router_service(self, service)
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
@@ -603,17 +602,17 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// Top-level hook: RouterHttp pipeline (raw HTTP), before the Router pipeline. See [request
+    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
     /// This function is EXPERIMENTAL and its signature is subject to change.
     ///
     /// Router pipeline hook: runs after router_http and before supergraph/execution/subgraph. See
     /// [request lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        service
-    }
-
-    /// Top-level hook: RouterHttp pipeline (raw HTTP), before the Router pipeline. See [request
-    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
-    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
         service
     }
 
@@ -692,12 +691,12 @@ where
         PluginUnstable::new(init).await
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        PluginUnstable::router_service(self, service)
-    }
-
     fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
         PluginUnstable::router_http_service(self, service)
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        PluginUnstable::router_service(self, service)
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
@@ -742,13 +741,13 @@ fn get_type_of<T>(_: &T) -> &'static str {
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub(crate) trait DynPlugin: Send + Sync + 'static {
-    /// Router pipeline hook (after RouterHttp, before supergraph/execution/subgraph). See [request
-    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
-    fn router_service(&self, service: router::BoxService) -> router::BoxService;
-
     /// Top-level hook: RouterHttp pipeline (raw HTTP), before the Router pipeline. See [request
     /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
     fn router_http_service(&self, service: router::BoxService) -> router::BoxService;
+
+    /// Router pipeline hook (after RouterHttp, before supergraph/execution/subgraph). See [request
+    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
+    fn router_service(&self, service: router::BoxService) -> router::BoxService;
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
@@ -806,12 +805,12 @@ where
     T: PluginPrivate,
     for<'de> <T as PluginPrivate>::Config: Deserialize<'de>,
 {
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        self.router_service(service)
-    }
-
     fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
         PluginPrivate::router_http_service(self, service)
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        self.router_service(service)
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
