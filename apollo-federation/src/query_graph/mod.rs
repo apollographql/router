@@ -368,7 +368,7 @@ impl QueryGraphEdgeTransition {
             "Supergraphs shouldn't have a transition that doesn't collect elements; got {}",
             other,
         );
-        Ok(match self {
+        let digest = match self {
             QueryGraphEdgeTransition::FieldCollection {
                 field_definition_position,
                 ..
@@ -396,17 +396,18 @@ impl QueryGraphEdgeTransition {
                 to_type_position.type_name() == other_to_type_position.type_name()
             }
             QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. } => {
-                let QueryGraphEdgeTransition::InterfaceObjectFakeDownCast {
-                    to_type_name: other_to_type_name,
+                let QueryGraphEdgeTransition::Downcast {
+                    to_type_position: other_to_type_position,
                     ..
                 } = other
                 else {
                     return Ok(false);
                 };
-                to_type_name == other_to_type_name
+                to_type_name == other_to_type_position.type_name()
             }
             _ => false,
-        })
+        };
+        Ok(digest)
     }
 }
 
