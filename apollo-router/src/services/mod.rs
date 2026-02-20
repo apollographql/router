@@ -99,7 +99,7 @@ pub(crate) const PATH_QUERY_PARAM: &str = "path=";
 /// Requires:
 /// - when using query params, the param must be denoted by `?path=`
 #[cfg(unix)]
-pub(crate) fn parse_unix_socket_url(url_path: &str) -> (String, String) {
+pub(crate) fn parse_unix_socket_url(url_path: &str) -> (&str, &str) {
     if let Some(query_start) = url_path.find('?') {
         let socket_path = &url_path[..query_start];
         let query = &url_path[query_start + 1..];
@@ -110,9 +110,9 @@ pub(crate) fn parse_unix_socket_url(url_path: &str) -> (String, String) {
             .find_map(|param| param.strip_prefix(PATH_QUERY_PARAM))
             .unwrap_or(DEFAULT_SOCKET_PATH);
 
-        (socket_path.to_string(), http_path.to_string())
+        (socket_path, http_path)
     } else {
-        (url_path.to_string(), DEFAULT_SOCKET_PATH.to_string())
+        (url_path, DEFAULT_SOCKET_PATH)
     }
 }
 
