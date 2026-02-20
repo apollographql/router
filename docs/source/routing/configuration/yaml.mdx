@@ -227,7 +227,7 @@ override_subgraph_url:
   my_subgraph: "unix:///tmp/subgraph.sock?path=/graphql/v1"
 ```
 
-This also works for subgraph URLs defined directly in the supergraph schema (via the `url` argument of the `@join__graph` directive).
+This configuration also applies to subgraph URLs defined in your supergraph schema (using the `url` argument of the `@join__graph` directive).
 
 However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
 
