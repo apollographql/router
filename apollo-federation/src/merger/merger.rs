@@ -451,6 +451,8 @@ impl Merger {
         let input_object_types = self.get_merged_input_object_type_names();
 
         // Merge implements relationships for object and interface types
+        // We do this first because being able to know if a type is a subtype of another one
+        // (which relies on those 2 things) is used when merging fields.
         trace!("Merging implements relationships");
         for object_type in &object_types {
             self.merge_implements(object_type)?;
@@ -465,25 +467,28 @@ impl Merger {
             self.merge_type(union_type)?;
         }
 
-        // Merge schema definition (root types)
+        // We merge the roots first as it only depend on the type existing, not being fully merged, and when
+        // we merge types next, we actually rely on this having been called to detect "root types"
+        // (in order to skip the _entities and _service fields on that particular type, and to avoid
+        // calling root type a "value type" when hinting).
         trace!("Merging schema definition");
         self.merge_schema_definition()?;
 
         // Merge non-union and non-enum types
-        trace!("Merging object types");
-        for type_def in &object_types {
-            self.merge_type(type_def)?;
-        }
-        trace!("Merging interface types");
-        for type_def in &interface_types {
-            self.merge_type(type_def)?;
-        }
         trace!("Merging scalar types");
         for type_def in &scalar_types {
             self.merge_type(type_def)?;
         }
         trace!("Merging input object types");
         for type_def in &input_object_types {
+            self.merge_type(type_def)?;
+        }
+        trace!("Merging interface types");
+        for type_def in &interface_types {
+            self.merge_type(type_def)?;
+        }
+        trace!("Merging object types");
+        for type_def in &object_types {
             self.merge_type(type_def)?;
         }
 
@@ -1790,49 +1795,22 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // For each merged object types, we check if we're missing a field from one of the implemented interface.
         // If we do, then we look if one of the subgraph provides that field as a (non-external) interface object
         // type, and if that's the case, we add the field to the object.
-        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+        for subgraph in self.subgraphs.iter() {
             for itf_obj_field in subgraph.interface_object_fields() {
+                // we skip @external fields as they are provided by other subgraphs
+                if subgraph
+                    .metadata()
+                    .external_metadata()
+                    .is_external(&FieldDefinitionPosition::Object(itf_obj_field.clone()))
+                {
+                    continue;
+                }
+
                 let ast_node_to_add =
                     (*itf_obj_field.get(subgraph.schema().schema())?.node).clone();
                 let itf = InterfaceTypeDefinitionPosition {
                     type_name: itf_obj_field.type_name.clone(),
                 };
-                let itf_field_pos = itf.field(itf_obj_field.field_name.clone());
-
-                // If the interface in the supergraph is missing this field, merge it in.
-                if itf_field_pos.try_get(self.merged.schema()).is_none() {
-                    let subgraph_enum_name = self.join_spec_name(idx)?;
-                    let mut missing_itf_node = ast_node_to_add.clone();
-                    // This node from the subgraph may have subgraph-only directives, so we filter
-                    // out any directive which isn't defined in the supergraph
-                    missing_itf_node.directives.retain(|d| {
-                        self.merged
-                            .schema()
-                            .directive_definitions
-                            .contains_key(&d.name)
-                    });
-                    missing_itf_node.directives.push(
-                        JoinFieldBuilder::new()
-                            .arg(
-                                &JOIN_GRAPH_ARGUMENT_NAME,
-                                Value::Enum(subgraph_enum_name.clone()),
-                            )
-                            .build(),
-                    );
-                    fields_to_insert.insert(itf_field_pos.into(), missing_itf_node);
-                } else {
-                    // If the field already exists on the interface, we still need to add a @join__field
-                    // directive for this subgraph since the @interfaceObject provides this field.
-                    let subgraph_enum_name = self.join_spec_name(idx)?;
-                    let directive = JoinFieldBuilder::new()
-                        .arg(
-                            &JOIN_GRAPH_ARGUMENT_NAME,
-                            Value::Enum(subgraph_enum_name.clone()),
-                        )
-                        .build();
-
-                    itf_field_pos.insert_directive(&mut self.merged, Node::new(directive))?;
-                }
 
                 // If an implementer of that interface is missing the field, merge it in.
                 for implementer in itf.implementers(&self.merged)? {
@@ -1855,6 +1833,14 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         missing_obj_node
                             .directives
                             .push(JoinFieldBuilder::new().build());
+                        missing_obj_node.arguments.iter_mut().for_each(|arg| {
+                            arg.make_mut().directives.retain(|d| {
+                                self.merged
+                                    .schema()
+                                    .directive_definitions
+                                    .contains_key(&d.name)
+                            });
+                        });
                         fields_to_insert.insert(
                             ObjectFieldDefinitionPosition {
                                 type_name: implementer.type_name().clone(),

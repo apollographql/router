@@ -130,31 +130,11 @@ impl Merger {
 
         trace!("Gathering fields to add for type {}", obj_or_itf);
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
-            // Check interfaces in the subgraph's schema first
-            let Ok(interfaces) = obj_or_itf.implemented_interfaces(subgraph.schema()) else {
-                // If the type doesn't exist in this subgraph, check if any of the interfaces
-                // it implements in the merged schema are interface objects in this subgraph
-                if let Ok(merged_interfaces) = obj_or_itf.implemented_interfaces(&self.merged) {
-                    for itf in merged_interfaces {
-                        if subgraph
-                            .schema()
-                            .get_type(itf.name.clone())
-                            .as_ref()
-                            .is_ok_and(|ty| subgraph.is_interface_object_type(ty))
-                        {
-                            // This marks the subgraph as having a relevant @interfaceObject,
-                            // even though we do not actively add that type's fields.
-                            extra_sources.insert(idx, None);
-                            break; // Only need to mark once per subgraph
-                        }
-                    }
-                }
-                continue;
-            };
-            for itf in interfaces {
+            // check if subgraph contains @interfaceObjects for any of the target implemented interfaces
+            for interface in obj_or_itf.implemented_interfaces(&self.merged)? {
                 if subgraph
                     .schema()
-                    .get_type(itf.name.clone())
+                    .get_type(interface.name.clone())
                     .as_ref()
                     .is_ok_and(|ty| subgraph.is_interface_object_type(ty))
                 {
@@ -164,17 +144,20 @@ impl Merger {
                 }
             }
 
-            for field in obj_or_itf.fields(subgraph.schema().schema())? {
-                let field_node = field.get(subgraph.schema().schema())?;
-                field_types.insert(field.clone(), field_node.ty.clone());
-                fields_to_add.entry(idx).or_default().insert(field);
-            }
-
-            if subgraph
+            // we look up the actual type in the subgraph schema as it can be different than the one in the supergraph
+            // (i.e. @interfaceObject in subgraph but an interface in supergraph)
+            if let Some(type_position) = subgraph
                 .schema()
                 .try_get_type(obj_or_itf.type_name().clone())
-                .is_some()
             {
+                let object_or_interface_in_subgraph: ObjectOrInterfaceTypeDefinitionPosition =
+                    type_position.try_into()?;
+                for field in object_or_interface_in_subgraph.fields(subgraph.schema().schema())? {
+                    let field_node = field.get(subgraph.schema().schema())?;
+                    field_types.insert(field.clone(), field_node.ty.clone());
+                    fields_to_add.entry(idx).or_default().insert(field);
+                }
+
                 // Our needsJoinField logic adds @join__field if any subgraphs define
                 // the parent type containing the field but not the field itself. In
                 // those cases, for each field we add, we need to add undefined entries
@@ -188,20 +171,23 @@ impl Merger {
 
         trace!("Adding fields to supergraph schema for type {}", obj_or_itf);
         for (idx, field_set) in fields_to_add {
-            for field in field_set {
-                let is_merged_field = !self.subgraphs[idx].schema().is_root_type(field.type_name())
-                    || !FEDERATION_OPERATION_FIELDS.contains(field.field_name());
+            for subgraph_field in field_set {
+                let is_merged_field = !self.subgraphs[idx]
+                    .schema()
+                    .is_root_type(subgraph_field.type_name())
+                    || !FEDERATION_OPERATION_FIELDS.contains(subgraph_field.field_name());
                 if !is_merged_field {
                     continue;
                 }
-                if !added.contains_key(&field)
-                    && let Some(ty) = field_types.get(&field)
+                let supergraph_field = obj_or_itf.field(subgraph_field.field_name().clone());
+                if !added.contains_key(&supergraph_field)
+                    && let Some(ty) = field_types.get(&subgraph_field)
                 {
-                    field.insert(
+                    supergraph_field.insert(
                         &mut self.merged,
                         Component::new(FieldDefinition {
                             description: None,
-                            name: field.field_name().clone(),
+                            name: supergraph_field.field_name().clone(),
                             arguments: vec![],
                             ty: ty.clone(),
                             directives: Default::default(),
@@ -209,9 +195,9 @@ impl Merger {
                     )?;
                 }
                 added
-                    .entry(field.clone())
+                    .entry(supergraph_field.clone())
                     .or_insert_with(|| extra_sources.clone())
-                    .insert(idx, Some(field));
+                    .insert(idx, Some(subgraph_field));
             }
         }
 
