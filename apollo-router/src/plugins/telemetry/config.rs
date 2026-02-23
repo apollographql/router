@@ -7,7 +7,7 @@ use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry_sdk::metrics::aggregation::Aggregation;
+use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::trace::SpanLimits;
@@ -195,7 +195,7 @@ impl MetricView {
             }
             if let Some(ref keys) = allowed_attribute_keys {
                 stream =
-                    stream.with_allowed_attribute_keys(keys.iter().cloned().map(Key::new).collect());
+                    stream.with_allowed_attribute_keys(keys.iter().cloned().map(Key::new));
             }
             stream.build().ok()
         }

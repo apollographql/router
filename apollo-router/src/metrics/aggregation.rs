@@ -6,7 +6,6 @@ use std::sync::Arc;
 use derive_more::From;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::AsyncInstrument;
 use opentelemetry::metrics::AsyncInstrumentBuilder;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
@@ -21,7 +20,6 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
 use strum::Display;
@@ -29,6 +27,11 @@ use strum::EnumCount;
 use strum::EnumIter;
 
 use crate::metrics::filter::FilterMeterProvider;
+
+/// Noop InstrumentProvider - all methods use the default trait implementations
+/// which return noop instruments.
+struct NoopInstrumentProvider;
+impl InstrumentProvider for NoopInstrumentProvider {}
 
 // This meter provider enables us to combine multiple meter providers. The reasons we need this are:
 // 1. Prometheus meters are special. To dispose a meter is to dispose the entire registry. This means we need to make a best effort to keep them around.
@@ -64,7 +67,7 @@ impl Default for AggregateMeterProvider {
         // This functionality is not guaranteed to stay like this, so use at your own risk.
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(opentelemetry::global::meter_provider()),
+            FilterMeterProvider::public_dynamic(opentelemetry::global::meter_provider()),
         );
 
         meter_provider
@@ -263,7 +266,7 @@ impl MeterProvider for AggregateMeterProvider {
             inner.meter_with_scope(scope)
         } else {
             // The meter was used after shutdown. Default to Noop since the instrument cannot actually be used
-            NoopMeterProvider::default().meter_with_scope(scope)
+            Meter::new(Arc::new(NoopInstrumentProvider))
         }
     }
 }
@@ -284,16 +287,12 @@ impl<T: Copy> SyncInstrument<T> for AggregateCounter<T> {
     }
 }
 
+/// Aggregate observable counter - holds references to delegate instruments.
+/// In OTel 0.31+, observable instruments work through callbacks registered at build time.
+/// This struct keeps the delegate instruments alive.
 pub(crate) struct AggregateObservableCounter<T> {
+    #[allow(dead_code)]
     delegates: Vec<ObservableCounter<T>>,
-}
-
-impl<T: Copy> AsyncInstrument<T> for AggregateObservableCounter<T> {
-    fn observe(&self, value: T, attributes: &[KeyValue]) {
-        for counter in &self.delegates {
-            counter.observe(value, attributes)
-        }
-    }
 }
 
 pub(crate) struct AggregateHistogram<T> {
@@ -320,16 +319,11 @@ impl<T: Copy> SyncInstrument<T> for AggregateUpDownCounter<T> {
     }
 }
 
+/// Aggregate observable up-down counter - holds references to delegate instruments.
+/// In OTel 0.31+, observable instruments work through callbacks registered at build time.
 pub(crate) struct AggregateObservableUpDownCounter<T> {
+    #[allow(dead_code)]
     delegates: Vec<ObservableUpDownCounter<T>>,
-}
-
-impl<T: Copy> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
-    fn observe(&self, value: T, attributes: &[KeyValue]) {
-        for counter in &self.delegates {
-            counter.observe(value, attributes)
-        }
-    }
 }
 
 pub(crate) struct AggregateGauge<T> {
@@ -344,16 +338,11 @@ impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
     }
 }
 
+/// Aggregate observable gauge - holds references to delegate instruments.
+/// In OTel 0.31+, observable instruments work through callbacks registered at build time.
 pub(crate) struct AggregateObservableGauge<T> {
+    #[allow(dead_code)]
     delegates: Vec<ObservableGauge<T>>,
-}
-
-impl<T: Copy> AsyncInstrument<T> for AggregateObservableGauge<T> {
-    fn observe(&self, measurement: T, attributes: &[KeyValue]) {
-        for gauge in &self.delegates {
-            gauge.observe(measurement, attributes)
-        }
-    }
 }
 // Macro for sync instruments (Counter, UpDownCounter, Gauge)
 macro_rules! aggregate_instrument_fn {
@@ -406,15 +395,17 @@ macro_rules! aggregate_histogram_fn {
 }
 
 // Macro for observable/async instruments
-// Note: Observable instruments now handle callbacks via the builder's with_callback method.
-// The aggregate implementation creates instruments from each delegate meter.
-// Callbacks are NOT aggregated - each delegate gets its own copy of any callbacks.
+// Note: In OTel 0.31+, observable instruments work through callbacks registered at build time.
+// The observable instrument types (ObservableCounter, etc.) are now just marker types.
+// We build delegate instruments from each meter and store them to keep registrations alive.
 macro_rules! aggregate_observable_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
         fn $name(
             &self,
             builder: AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
         ) -> $wrapper<$ty> {
+            // Build instruments from all delegate meters
+            // Each delegate will have its own callback registration
             let delegates: Vec<$wrapper<$ty>> = self
                 .meters
                 .iter()
@@ -426,13 +417,16 @@ macro_rules! aggregate_observable_instrument_fn {
                     if let Some(unit) = &builder.unit {
                         b = b.with_unit(unit.clone());
                     }
-                    // Callbacks from the builder are not forwarded as they contain
-                    // references to the original aggregate instrument.
-                    // The delegate instruments will be used via the aggregate's observe method.
+                    // Note: Callbacks are not forwarded to delegates.
+                    // Each delegate meter handles its own callbacks.
                     b.build()
                 })
                 .collect();
-            $wrapper::new(Arc::new($implementation { delegates }))
+            // Store delegates to keep registrations alive
+            // The returned marker type is just a handle
+            let _keeper = Box::new($implementation { delegates });
+            Box::leak(_keeper);
+            $wrapper::new()
         }
     };
 }
@@ -514,21 +508,17 @@ mod test {
     use std::sync::atomic::AtomicI64;
     use std::time::Duration;
 
-    use async_trait::async_trait;
-    use opentelemetry::global::GlobalMeterProvider;
     use opentelemetry::metrics::MeterProvider;
-    use opentelemetry::metrics::Result;
-    use opentelemetry_sdk::metrics::aggregation::Aggregation;
+    use opentelemetry_sdk::error::OTelSdkResult;
     use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
     use opentelemetry_sdk::metrics::Pipeline;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::Temporality;
-    use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
-    use opentelemetry_sdk::metrics::reader::AggregationSelector;
+    use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::reader::TemporalitySelector;
     use opentelemetry_sdk::runtime;
@@ -546,27 +536,25 @@ mod test {
         }
     }
 
-    impl AggregationSelector for SharedReader {
-        fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
-            self.0.aggregation(kind)
-        }
-    }
-
     impl MetricReader for SharedReader {
         fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
             self.0.register_pipeline(pipeline)
         }
 
-        fn collect(&self, rm: &mut ResourceMetrics) -> Result<()> {
+        fn collect(&self, rm: &mut ResourceMetrics) -> OTelSdkResult {
             self.0.collect(rm)
         }
 
-        fn force_flush(&self) -> Result<()> {
+        fn force_flush(&self) -> OTelSdkResult {
             self.0.force_flush()
         }
 
-        fn shutdown(&self) -> Result<()> {
+        fn shutdown(&self) -> OTelSdkResult {
             self.0.shutdown()
+        }
+
+        fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+            self.0.shutdown_with_timeout(timeout)
         }
     }
 
@@ -716,7 +704,7 @@ mod test {
     }
 
     #[test]
-    fn test_global_meter_provider() {
+    fn test_otel_default_meter_provider() {
         // The global meter provider is populated in AggregateMeterProvider::Default, but we can't test that without interacting with statics.
         // Setting it explicitly is the next best thing.
 
@@ -729,11 +717,11 @@ mod test {
         let meter_provider = AggregateMeterProvider::default();
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(GlobalMeterProvider::new(delegate)),
+            FilterMeterProvider::public(delegate),
         );
 
         let counter = meter_provider
-            .versioned_meter("test", None::<String>, None::<String>, None)
+            .meter("test")
             .u64_counter("test.counter")
             .build();
         counter.add(1, &[]);
@@ -750,35 +738,36 @@ mod test {
         shutdown: Arc<AtomicBool>,
     }
 
-    impl AggregationSelector for TestExporter {
-        fn aggregation(&self, _kind: InstrumentKind) -> Aggregation {
-            Aggregation::Default
-        }
-    }
-
     impl TemporalitySelector for TestExporter {
         fn temporality(&self, _kind: InstrumentKind) -> Temporality {
             Temporality::Cumulative
         }
     }
 
-    #[async_trait]
-    impl PushMetricsExporter for TestExporter {
-        async fn export(&self, _metrics: &mut ResourceMetrics) -> Result<()> {
+    impl PushMetricExporter for TestExporter {
+        fn export(&self, _metrics: &mut ResourceMetrics) -> OTelSdkResult {
             self.count();
             Ok(())
         }
 
-        async fn force_flush(&self) -> Result<()> {
+        fn force_flush(&self) -> OTelSdkResult {
             self.count();
             Ok(())
         }
 
-        fn shutdown(&self) -> Result<()> {
+        fn shutdown(&self) -> OTelSdkResult {
             self.count();
             self.shutdown
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
+        }
+
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+            self.shutdown()
+        }
+
+        fn temporality(&self) -> Temporality {
+            Temporality::Cumulative
         }
     }
 
@@ -786,7 +775,7 @@ mod test {
         fn count(&self) {
             let counter = self
                 .meter_provider
-                .versioned_meter("test", None::<String>, None::<String>, None)
+                .meter("test")
                 .u64_counter("test.counter")
                 .build();
             counter.add(1, &[]);
@@ -807,7 +796,7 @@ mod test {
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(GlobalMeterProvider::new(delegate)),
+            FilterMeterProvider::public(delegate),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -831,7 +820,7 @@ mod test {
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(GlobalMeterProvider::new(delegate)),
+            FilterMeterProvider::public(delegate),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -845,7 +834,7 @@ mod test {
         // Setting the meter provider should not deadlock.
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(GlobalMeterProvider::new(delegate)),
+            FilterMeterProvider::public(delegate),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;

@@ -49,7 +49,6 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         )
         .type_attribute(".", "#[derive(serde::Serialize)]")
         .type_attribute(".", "#[allow(dead_code)]")
-        .type_attribute("StatsContext", "#[derive(Eq, Hash)]")
         .emit_rerun_if_changed(false)
         .compile_protos(&[reports_out],  &[out_dir])?;
 
