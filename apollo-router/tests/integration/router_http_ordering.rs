@@ -9,9 +9,9 @@
 //!
 //! Full ordering with Rhai and coprocessor is asserted in `test_plugin_ordering` (lifecycle.rs).
 
+use apollo_router::TestHarness;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
-use apollo_router::TestHarness;
 use serde_json::json;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -103,5 +103,8 @@ async fn default_no_op_router_http_service_does_not_break_pipeline() {
         .unwrap();
 
     let chunk = response.next_response().await.unwrap();
-    assert!(chunk.is_ok(), "request must succeed when plugin omits router_http_service");
+    assert!(
+        chunk.is_ok(),
+        "request must succeed when plugin omits router_http_service"
+    );
 }

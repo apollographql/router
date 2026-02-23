@@ -12,16 +12,16 @@ use apollo_router::services::supergraph;
 use async_trait::async_trait;
 use axum::handler::HandlerWithoutStateExt;
 use futures::FutureExt;
+use http::HeaderValue;
+use http::Method;
+use http::Request as HttpRequest;
+use http::header::ACCEPT;
+use http::header::HeaderName;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::process::Command;
-use http::header::ACCEPT;
-use http::header::HeaderName;
-use http::HeaderValue;
-use http::Method;
-use http::Request as HttpRequest;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -418,10 +418,10 @@ async fn test_router_http_request_response_modification() {
                     request
                 })
                 .map_response(|mut response: router::Response| {
-                    response
-                        .response
-                        .headers_mut()
-                        .insert(HeaderName::from_static(RESPONSE_HEADER), HeaderValue::from_static("ok"));
+                    response.response.headers_mut().insert(
+                        HeaderName::from_static(RESPONSE_HEADER),
+                        HeaderValue::from_static("ok"),
+                    );
                     response
                 })
                 .service(service)
@@ -530,7 +530,9 @@ async fn test_coprocessor_router_http_request_response_modification() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let coprocessor_url = format!("http://{}", listener.local_addr().unwrap());
     let server = axum::serve(listener, coprocessor.into_make_service());
-    let server = server.with_graceful_shutdown(async { let _ = rx.await; });
+    let server = server.with_graceful_shutdown(async {
+        let _ = rx.await;
+    });
     tokio::spawn(async move {
         if let Err(e) = server.await {
             eprintln!("coprocessor server error: {e}");
@@ -568,7 +570,10 @@ async fn test_coprocessor_router_http_request_response_modification() {
         .ok()
         .flatten()
         .unwrap_or(false);
-    assert!(ran, "coprocessor RouterHttpRequest must have run and set context");
+    assert!(
+        ran,
+        "coprocessor RouterHttpRequest must have run and set context"
+    );
 
     let value = response
         .response

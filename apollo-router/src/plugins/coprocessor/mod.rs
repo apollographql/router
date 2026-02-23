@@ -1297,11 +1297,7 @@ where
         *response.response.status_mut() = control.get_http_status()?
     }
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &response.context,
-            context,
-            &response_config.context,
-        )?;
+        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
     }
     if let Some(headers) = co_processor_output.headers {
         *response.response.headers_mut() = internalize_header_map(headers)?;
@@ -1339,13 +1335,12 @@ where
                     .build();
 
                 let co_processor_output = payload
-                    .call(
-                        generator_client,
-                        &generator_coprocessor_url,
-                        Context::new(),
-                    )
+                    .call(generator_client, &generator_coprocessor_url, Context::new())
                     .await?;
-                validate_coprocessor_output(&co_processor_output, PipelineStep::RouterHttpResponse)?;
+                validate_coprocessor_output(
+                    &co_processor_output,
+                    PipelineStep::RouterHttpResponse,
+                )?;
 
                 let final_bytes: Bytes = match co_processor_output.body {
                     Some(bytes) => bytes.into(),
