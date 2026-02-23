@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::MetricsExporterBuilder;
+use opentelemetry_otlp::MetricExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::PeriodicReader;
@@ -25,7 +25,7 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
+use crate::plugins::telemetry::error_handler::NamedMetricExporter;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
 use crate::plugins::telemetry::otlp::Protocol;
@@ -116,7 +116,7 @@ impl Config {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter = match otlp_protocol {
-            Protocol::Grpc => MetricsExporterBuilder::Tonic(
+            Protocol::Grpc => MetricExporterBuilder::Tonic(
                 opentelemetry_otlp::new_exporter()
                     .tonic()
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
@@ -140,7 +140,7 @@ impl Config {
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
-                MetricsExporterBuilder::Http(otlp_exporter)
+                MetricExporterBuilder::Http(otlp_exporter)
             }
         }
         .build_metrics_exporter(
@@ -153,9 +153,9 @@ impl Config {
                     .build(),
             ),
         )?;
-        // MetricsExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
+        // MetricExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
         let realtime_exporter = match otlp_protocol {
-            Protocol::Grpc => MetricsExporterBuilder::Tonic(
+            Protocol::Grpc => MetricExporterBuilder::Tonic(
                 opentelemetry_otlp::new_exporter()
                     .tonic()
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
@@ -177,7 +177,7 @@ impl Config {
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
-                MetricsExporterBuilder::Http(otlp_exporter)
+                MetricExporterBuilder::Http(otlp_exporter)
             }
         }
         .build_metrics_exporter(
@@ -195,8 +195,8 @@ impl Config {
                     .build(),
             ),
         )?;
-        let named_exporter = NamedMetricsExporter::new(exporter, "apollo");
-        let named_realtime_exporter = NamedMetricsExporter::new(realtime_exporter, "apollo");
+        let named_exporter = NamedMetricExporter::new(exporter, "apollo");
+        let named_realtime_exporter = NamedMetricExporter::new(realtime_exporter, "apollo");
 
         let default_reader = PeriodicReader::builder(named_exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))

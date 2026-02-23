@@ -184,7 +184,7 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = [
     "reqwest-client",
     "trace",
 ] }
-opentelemetry-semantic-conventions = "0.31"
+opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
 opentelemetry-zipkin = { version = "0.31", default-features = false, features = [
     "reqwest-client",
     "reqwest-rustls",

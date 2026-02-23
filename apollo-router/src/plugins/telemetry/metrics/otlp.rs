@@ -1,11 +1,11 @@
-use opentelemetry_otlp::MetricsExporterBuilder;
+use opentelemetry_otlp::MetricExporterBuilder;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::runtime;
 use tower::BoxError;
 
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
+use crate::plugins::telemetry::error_handler::NamedMetricExporter;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
@@ -21,7 +21,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
     }
 
     fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
-        let exporter_builder: MetricsExporterBuilder = self.exporter(TelemetryDataKind::Metrics)?;
+        let exporter_builder: MetricExporterBuilder = self.exporter(TelemetryDataKind::Metrics)?;
         let exporter = exporter_builder.build_metrics_exporter(
             (&self.temporality).into(),
             Box::new(
@@ -31,7 +31,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
             ),
         )?;
 
-        let named_exporter = NamedMetricsExporter::new(exporter, "otlp");
+        let named_exporter = NamedMetricExporter::new(exporter, "otlp");
         builder.with_reader(
             MeterProviderType::Public,
             PeriodicReader::builder(named_exporter, runtime::Tokio)

@@ -19,9 +19,9 @@ use opentelemetry::Value;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanKind;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::ExportResult;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::trace::SpanData;
+use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 pub(crate) use propagator::DatadogPropagator;
@@ -255,7 +255,7 @@ impl Debug for ExporterWrapper {
 }
 
 impl SpanExporter for ExporterWrapper {
-    fn export(&self, mut batch: Vec<SpanData>) -> impl std::future::Future<Output = ExportResult> + Send {
+    fn export(&self, mut batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> + Send {
         // Here we do some special processing of the spans before passing them to the delegate
         // In particular we default the span.kind to the span kind, and also override the trace measure status if we need to.
         for span in &mut batch {
@@ -300,10 +300,10 @@ impl SpanExporter for ExporterWrapper {
         }
         self.delegate.export(batch)
     }
-    fn shutdown(&self) -> ExportResult {
+    fn shutdown(&mut self) -> OTelSdkResult {
         self.delegate.shutdown()
     }
-    fn force_flush(&self) -> impl std::future::Future<Output = ExportResult> + Send {
+    fn force_flush(&mut self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
     fn set_resource(&mut self, resource: &Resource) {

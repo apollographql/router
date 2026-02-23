@@ -23,7 +23,7 @@
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry_sdk::trace::SpanProcessor;
-use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use tower::BoxError;
 
 use crate::plugins::telemetry::CustomTraceIdPropagator;
@@ -37,7 +37,7 @@ use crate::plugins::telemetry::config_new::spans::Spans;
 pub(crate) struct TracingBuilder<'a> {
     common: &'a TracingCommon,
     spans: &'a Spans,
-    builder: opentelemetry_sdk::trace::Builder,
+    builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 }
 
 impl<'a> TracingBuilder<'a> {
@@ -70,7 +70,7 @@ impl<'a> TracingBuilder<'a> {
         self.builder = builder.with_span_processor(span_processor);
     }
 
-    pub(crate) fn build(self) -> TracerProvider {
+    pub(crate) fn build(self) -> SdkTracerProvider {
         self.builder.build()
     }
 }

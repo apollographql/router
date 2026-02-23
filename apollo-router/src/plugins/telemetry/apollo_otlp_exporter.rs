@@ -2,7 +2,7 @@ use derivative::Derivative;
 use futures::TryFutureExt;
 use futures::future;
 use futures::future::BoxFuture;
-use opentelemetry::InstrumentationLibrary;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Event;
 use opentelemetry::trace::SpanContext;
@@ -12,9 +12,9 @@ use opentelemetry::trace::TraceState;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::ExportResult;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::trace::SpanData;
+use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::trace::SpanEvents;
 use opentelemetry_sdk::trace::SpanLinks;
 use sys_info::hostname;
@@ -49,7 +49,7 @@ pub(crate) struct ApolloOtlpExporter {
     batch_config: BatchProcessorConfig,
     endpoint: Url,
     apollo_key: String,
-    intrumentation_library: InstrumentationLibrary,
+    instrumentation_scope: InstrumentationScope,
     #[derivative(Debug = "ignore")]
     otlp_exporter: opentelemetry_otlp::SpanExporter,
     errors_configuration: ErrorsConfiguration,
@@ -113,7 +113,7 @@ impl ApolloOtlpExporter {
             endpoint: endpoint.clone(),
             batch_config: batch_config.clone(),
             apollo_key: apollo_key.to_string(),
-            intrumentation_library: InstrumentationLibrary::builder(GLOBAL_TRACER_NAME)
+            instrumentation_scope: InstrumentationScope::builder(GLOBAL_TRACER_NAME)
                 .with_version(format!(
                     "{}@{}",
                     std::env!("CARGO_PKG_NAME"),
@@ -200,7 +200,7 @@ impl ApolloOtlpExporter {
             events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status: span.status,
-            instrumentation_lib: self.intrumentation_library.clone(),
+            instrumentation_scope: self.instrumentation_scope.clone(),
             dropped_attributes_count: span.droppped_attribute_count,
         }
     }
@@ -253,12 +253,12 @@ impl ApolloOtlpExporter {
             events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status,
-            instrumentation_lib: self.intrumentation_library.clone(),
+            instrumentation_scope: self.instrumentation_scope.clone(),
             dropped_attributes_count: span.droppped_attribute_count,
         }
     }
 
-    pub(crate) fn export(&mut self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    pub(crate) fn export(&mut self, spans: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         let fut = self.otlp_exporter.export(spans);
         Box::pin(fut.and_then(|_| {
             // re-use the metric we already have in apollo_exporter but attach the protocol
