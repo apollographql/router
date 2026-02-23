@@ -1,29 +1,25 @@
-use std::any::Any;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::mem;
 use std::sync::Arc;
 
 use derive_more::From;
-use itertools::Itertools;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::AsyncInstrument;
-use opentelemetry::metrics::Callback;
-use opentelemetry::metrics::CallbackRegistration;
+use opentelemetry::metrics::AsyncInstrumentBuilder;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
+use opentelemetry::metrics::HistogramBuilder;
+use opentelemetry::metrics::InstrumentBuilder;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
-use opentelemetry::metrics::Observer;
-use opentelemetry::metrics::SyncCounter;
-use opentelemetry::metrics::SyncGauge;
-use opentelemetry::metrics::SyncHistogram;
-use opentelemetry::metrics::SyncUpDownCounter;
+use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
@@ -221,23 +217,14 @@ impl Inner {
         self.registered_instruments.clear()
     }
     pub(crate) fn meter(&mut self, name: impl Into<Cow<'static, str>>) -> Meter {
-        self.versioned_meter(
-            name,
-            None::<Cow<'static, str>>,
-            None::<Cow<'static, str>>,
-            None,
-        )
+        let scope = InstrumentationScope::builder(name).build();
+        self.meter_with_scope(scope)
     }
-    pub(crate) fn versioned_meter(
-        &mut self,
-        name: impl Into<Cow<'static, str>>,
-        version: Option<impl Into<Cow<'static, str>>>,
-        schema_url: Option<impl Into<Cow<'static, str>>>,
-        attributes: Option<Vec<KeyValue>>,
-    ) -> Meter {
-        let name = name.into();
-        let version = version.map(|v| v.into());
-        let schema_url = schema_url.map(|v| v.into());
+    pub(crate) fn meter_with_scope(&mut self, scope: InstrumentationScope) -> Meter {
+        let name: Cow<'static, str> = Cow::Owned(scope.name().to_string());
+        let version: Option<Cow<'static, str>> = scope.version().map(|v| Cow::Owned(v.to_string()));
+        let schema_url: Option<Cow<'static, str>> =
+            scope.schema_url().map(|v| Cow::Owned(v.to_string()));
         let mut meters = Vec::with_capacity(self.providers.len());
 
         for (provider, existing_meters) in &mut self.providers {
@@ -248,14 +235,7 @@ impl Inner {
                         version: version.clone(),
                         schema_url: schema_url.clone(),
                     })
-                    .or_insert_with(|| {
-                        provider.versioned_meter(
-                            name.clone(),
-                            version.clone(),
-                            schema_url.clone(),
-                            attributes.clone(),
-                        )
-                    })
+                    .or_insert_with(|| provider.meter_with_scope(scope.clone()))
                     .clone(),
             );
         }
@@ -277,19 +257,13 @@ impl Inner {
 }
 
 impl MeterProvider for AggregateMeterProvider {
-    fn versioned_meter(
-        &self,
-        name: impl Into<Cow<'static, str>>,
-        version: Option<impl Into<Cow<'static, str>>>,
-        schema_url: Option<impl Into<Cow<'static, str>>>,
-        attributes: Option<Vec<KeyValue>>,
-    ) -> Meter {
+    fn meter_with_scope(&self, scope: InstrumentationScope) -> Meter {
         let mut inner = self.inner.lock();
         if let Some(inner) = inner.as_mut() {
-            inner.versioned_meter(name, version, schema_url, attributes)
+            inner.meter_with_scope(scope)
         } else {
             // The meter was used after shutdown. Default to Noop since the instrument cannot actually be used
-            NoopMeterProvider::default().versioned_meter(name, version, schema_url, attributes)
+            NoopMeterProvider::default().meter_with_scope(scope)
         }
     }
 }
@@ -302,8 +276,8 @@ pub(crate) struct AggregateCounter<T> {
     delegates: Vec<Counter<T>>,
 }
 
-impl<T: Copy> SyncCounter<T> for AggregateCounter<T> {
-    fn add(&self, value: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateCounter<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
             counter.add(value, attributes)
         }
@@ -311,18 +285,14 @@ impl<T: Copy> SyncCounter<T> for AggregateCounter<T> {
 }
 
 pub(crate) struct AggregateObservableCounter<T> {
-    delegates: Vec<(ObservableCounter<T>, Option<DroppingUnregister>)>,
+    delegates: Vec<ObservableCounter<T>>,
 }
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableCounter<T> {
     fn observe(&self, value: T, attributes: &[KeyValue]) {
-        for (counter, _) in &self.delegates {
+        for counter in &self.delegates {
             counter.observe(value, attributes)
         }
-    }
-
-    fn as_any(&self) -> Arc<dyn Any> {
-        unreachable!()
     }
 }
 
@@ -330,8 +300,8 @@ pub(crate) struct AggregateHistogram<T> {
     delegates: Vec<Histogram<T>>,
 }
 
-impl<T: Copy> SyncHistogram<T> for AggregateHistogram<T> {
-    fn record(&self, value: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateHistogram<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for histogram in &self.delegates {
             histogram.record(value, attributes)
         }
@@ -342,8 +312,8 @@ pub(crate) struct AggregateUpDownCounter<T> {
     delegates: Vec<UpDownCounter<T>>,
 }
 
-impl<T: Copy> SyncUpDownCounter<T> for AggregateUpDownCounter<T> {
-    fn add(&self, value: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateUpDownCounter<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
             counter.add(value, attributes)
         }
@@ -351,18 +321,14 @@ impl<T: Copy> SyncUpDownCounter<T> for AggregateUpDownCounter<T> {
 }
 
 pub(crate) struct AggregateObservableUpDownCounter<T> {
-    delegates: Vec<(ObservableUpDownCounter<T>, Option<DroppingUnregister>)>,
+    delegates: Vec<ObservableUpDownCounter<T>>,
 }
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
     fn observe(&self, value: T, attributes: &[KeyValue]) {
-        for (counter, _) in &self.delegates {
+        for counter in &self.delegates {
             counter.observe(value, attributes)
         }
-    }
-
-    fn as_any(&self) -> Arc<dyn Any> {
-        unreachable!()
     }
 }
 
@@ -370,8 +336,8 @@ pub(crate) struct AggregateGauge<T> {
     delegates: Vec<Gauge<T>>,
 }
 
-impl<T: Copy> SyncGauge<T> for AggregateGauge<T> {
-    fn record(&self, value: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for gauge in &self.delegates {
             gauge.record(value, attributes)
         }
@@ -379,106 +345,96 @@ impl<T: Copy> SyncGauge<T> for AggregateGauge<T> {
 }
 
 pub(crate) struct AggregateObservableGauge<T> {
-    delegates: Vec<(ObservableGauge<T>, Option<DroppingUnregister>)>,
+    delegates: Vec<ObservableGauge<T>>,
 }
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableGauge<T> {
     fn observe(&self, measurement: T, attributes: &[KeyValue]) {
-        for (gauge, _) in &self.delegates {
+        for gauge in &self.delegates {
             gauge.observe(measurement, attributes)
         }
     }
-
-    fn as_any(&self) -> Arc<dyn Any> {
-        unreachable!()
-    }
 }
-// Observable instruments don't need to have a ton of optimisation because they are only read on demand.
+// Macro for sync instruments (Counter, UpDownCounter, Gauge)
+macro_rules! aggregate_instrument_fn {
+    ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
+        fn $name(&self, builder: InstrumentBuilder<'_, $wrapper<$ty>>) -> $wrapper<$ty> {
+            let delegates: Vec<$wrapper<$ty>> = self
+                .meters
+                .iter()
+                .map(|meter| {
+                    let mut b = meter.$name(builder.name.clone());
+                    if let Some(description) = &builder.description {
+                        b = b.with_description(description.clone());
+                    }
+                    if let Some(unit) = &builder.unit {
+                        b = b.with_unit(unit.clone());
+                    }
+                    b.build()
+                })
+                .collect();
+            $wrapper::new(Arc::new($implementation { delegates }))
+        }
+    };
+}
+
+// Macro for histogram instruments
+macro_rules! aggregate_histogram_fn {
+    ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
+        fn $name(&self, builder: HistogramBuilder<'_, $wrapper<$ty>>) -> $wrapper<$ty> {
+            let delegates: Vec<$wrapper<$ty>> = self
+                .meters
+                .iter()
+                .map(|meter| {
+                    let mut b = meter.$name(builder.name.clone());
+                    if let Some(description) = &builder.description {
+                        b = b.with_description(description.clone());
+                    }
+                    if let Some(unit) = &builder.unit {
+                        b = b.with_unit(unit.clone());
+                    }
+                    // Copy boundaries if set
+                    if let Some(boundaries) = &builder.boundaries {
+                        b = b.with_boundaries(boundaries.clone());
+                    }
+                    b.build()
+                })
+                .collect();
+            $wrapper::new(Arc::new($implementation { delegates }))
+        }
+    };
+}
+
+// Macro for observable/async instruments
+// Note: Observable instruments now handle callbacks via the builder's with_callback method.
+// The aggregate implementation creates instruments from each delegate meter.
+// Callbacks are NOT aggregated - each delegate gets its own copy of any callbacks.
 macro_rules! aggregate_observable_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
         fn $name(
             &self,
-            name: Cow<'static, str>,
-            description: Option<Cow<'static, str>>,
-            unit: Option<Cow<'static, str>>,
-            callback: Vec<Callback<$ty>>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
-            let callback: Vec<Arc<Callback<$ty>>> =
-                callback.into_iter().map(|c| Arc::new(c)).collect_vec();
-            let delegates = self
+            builder: AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
+        ) -> $wrapper<$ty> {
+            let delegates: Vec<$wrapper<$ty>> = self
                 .meters
                 .iter()
                 .map(|meter| {
-                    let mut builder = meter.$name(name.clone());
-                    if let Some(description) = &description {
-                        builder = builder.with_description(description.clone());
-                    }
-                    if let Some(unit) = &unit {
-                        builder = builder.with_unit(unit.clone());
-                    }
-                    // We must not set callback in the builder as it will leak memory.
-                    // Instead we use callback registration on the meter provider as it allows unregistration
-                    // Also we need to filter out no-op instruments as passing these to the meter provider as these will fail with a cryptic message about different implementations.
-                    // Confusingly the implementation of as_any() on an instrument will return 'other stuff'. In particular no-ops return Arc<()>. This is why we need to check for this.
-                    let delegate: $wrapper<$ty> = builder.try_init()?;
-                    let registration = if delegate.clone().as_any().downcast_ref::<()>().is_some() {
-                        // This is a no-op instrument, so we don't need to register a callback.
-                        None
-                    } else {
-                        let delegate = delegate.clone();
-                        let callback = callback.clone();
-                        Some(
-                            meter.register_callback(&[delegate.clone().as_any()], move |_| {
-                                for callback in &callback {
-                                    callback(&delegate);
-                                }
-                            })?,
-                        )
-                    };
-                    let result: opentelemetry::metrics::Result<_> =
-                        Ok((delegate, registration.map(DroppingUnregister)));
-                    result
-                })
-                .try_collect()?;
-            Ok($wrapper::new(Arc::new($implementation { delegates })))
-        }
-    };
-}
-
-struct DroppingUnregister(Box<dyn CallbackRegistration>);
-
-macro_rules! aggregate_instrument_fn {
-    ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
-        fn $name(
-            &self,
-            name: Cow<'static, str>,
-            description: Option<Cow<'static, str>>,
-            unit: Option<Cow<'static, str>>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
-            let delegates = self
-                .meters
-                .iter()
-                .map(|p| {
-                    let mut b = p.$name(name.clone());
-                    if let Some(description) = &description {
+                    let mut b = meter.$name(builder.name.clone());
+                    if let Some(description) = &builder.description {
                         b = b.with_description(description.clone());
                     }
-                    if let Some(unit) = &unit {
+                    if let Some(unit) = &builder.unit {
                         b = b.with_unit(unit.clone());
                     }
-                    b.try_init()
+                    // Callbacks from the builder are not forwarded as they contain
+                    // references to the original aggregate instrument.
+                    // The delegate instruments will be used via the aggregate's observe method.
+                    b.build()
                 })
-                .try_collect()?;
-            Ok($wrapper::new(Arc::new($implementation { delegates })))
+                .collect();
+            $wrapper::new(Arc::new($implementation { delegates }))
         }
     };
-}
-impl Drop for DroppingUnregister {
-    fn drop(&mut self) {
-        if let Err(e) = self.0.unregister() {
-            ::tracing::error!(error = %e, "failed to unregister callback")
-        }
-    }
 }
 
 impl InstrumentProvider for AggregateInstrumentProvider {
@@ -498,8 +454,8 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         AggregateObservableCounter
     );
 
-    aggregate_instrument_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
-    aggregate_instrument_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
+    aggregate_histogram_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
+    aggregate_histogram_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
 
     aggregate_instrument_fn!(
         i64_up_down_counter,
@@ -548,15 +504,6 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         ObservableGauge,
         AggregateObservableGauge
     );
-
-    fn register_callback(
-        &self,
-        _instruments: &[Arc<dyn Any>],
-        _callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry::metrics::Result<Box<dyn CallbackRegistration>> {
-        // We may implement this in future, but for now we don't need it and it's a pain to implement because we need to unwrap the aggregate instruments and pass them to the meter provider that owns them.
-        unimplemented!("register_callback is not supported on AggregateInstrumentProvider");
-    }
 }
 
 #[cfg(test)]
