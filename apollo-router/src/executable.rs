@@ -452,7 +452,10 @@ impl Executable {
         if apollo_telemetry_initialized {
             // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
             tokio::task::spawn_blocking(move || {
-                opentelemetry::global::shutdown_tracer_provider();
+                // Setting a new default provider causes the old one to be dropped and shut down
+                let _ = opentelemetry::global::set_tracer_provider(
+                    opentelemetry_sdk::trace::SdkTracerProvider::default(),
+                );
                 meter_provider_internal().shutdown();
             })
             .await?;
