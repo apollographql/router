@@ -256,8 +256,33 @@ telemetry:
         attributes: {}
           # ...      
       http_client:
-        attributes: {}
-          # ...      
+        attributes:
+          # Custom attributes from request headers
+          "acme.request_content_type":
+            request_header: "content-type"
+          # Custom attributes from response headers
+          "acme.response_content_type":
+            response_header: "content-type"
+            default: "unknown"
+```
+
+### `http_client` span attributes
+
+The `http_client` span is created for each HTTP request to a subgraph or REST service. It executes after any [Rhai scripts](/router/customizations/rhai) that modify subgraph requests, so its selectors can observe headers added by scripts.
+
+Extract custom attributes from request and response headers using the `request_header` and `response_header` [selectors](/router/configuration/telemetry/instrumentation/selectors).
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      http_client:
+        attributes:
+          http.request.header.x-custom:
+            request_header: "x-custom"
+          http.response.header.x-custom:
+            response_header: "x-custom"
+            default: "none"
 ```
 
 ## Spans configuration reference
