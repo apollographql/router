@@ -361,6 +361,10 @@ impl RedisCacheStorage {
                         .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint)
                         .inspect_err(|err| record_redis_error(err, caller, "startup"));
                 }
+
+                // if `required_to_start`, then we only want to try connecting once - if we fail, we just return an error now.
+                // if `!required_to_start`, then we should continue trying to connect in the background if the first connection fails.
+                client_config.fail_fast = required_to_start;
             })
             .with_connection_config(|config| {
                 // NOTE: the default internal_command_timeout is 10s, so this line is just to make
