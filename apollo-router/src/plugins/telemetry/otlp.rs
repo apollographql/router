@@ -5,6 +5,8 @@ use http::Uri;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::WithHttpConfig;
+use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::reader::TemporalitySelector;
 use schemars::JsonSchema;
@@ -173,8 +175,7 @@ impl Config {
                     None
                 };
 
-                let mut exporter = opentelemetry_otlp::new_exporter()
-                    .tonic()
+                let mut exporter = TonicExporterBuilder::default()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
@@ -189,9 +190,8 @@ impl Config {
             Protocol::Http => {
                 let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
                 let headers = self.http.headers.clone();
-                let mut exporter: HttpExporterBuilder = opentelemetry_otlp::new_exporter()
-                    .http()
-                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                let mut exporter = HttpExporterBuilder::default()
+                    .with_protocol(opentelemetry_otlp::Protocol::HttpBinary)
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_headers(headers);
                 if let Some(endpoint) = endpoint_opt {

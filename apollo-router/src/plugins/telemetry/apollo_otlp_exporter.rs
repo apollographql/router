@@ -11,6 +11,7 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
@@ -71,24 +72,20 @@ impl ApolloOtlpExporter {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
         let mut otlp_exporter = match protocol {
-            Protocol::Grpc => SpanExporterBuilder::from(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                    .with_timeout(batch_config.max_export_timeout)
-                    .with_endpoint(endpoint.to_string())
-                    .with_metadata(metadata)
-                    .with_compression(opentelemetry_otlp::Compression::Gzip),
-            )
-            .build_span_exporter()?,
+            Protocol::Grpc => SpanExporterBuilder::new()
+                .with_tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                .with_timeout(batch_config.max_export_timeout)
+                .with_endpoint(endpoint.to_string())
+                .with_metadata(metadata)
+                .with_compression(opentelemetry_otlp::Compression::Gzip)
+                .build()?,
             // So far only using HTTP path for testing - the Studio backend only accepts GRPC today.
-            Protocol::Http => SpanExporterBuilder::from(
-                opentelemetry_otlp::new_exporter()
-                    .http()
-                    .with_timeout(batch_config.max_export_timeout)
-                    .with_endpoint(endpoint.to_string()),
-            )
-            .build_span_exporter()?,
+            Protocol::Http => SpanExporterBuilder::new()
+                .with_http()
+                .with_timeout(batch_config.max_export_timeout)
+                .with_endpoint(endpoint.to_string())
+                .build()?,
         };
 
         otlp_exporter.set_resource(&Resource::builder_empty()
