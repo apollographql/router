@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use opentelemetry::Context;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::trace::SpanData;
-use opentelemetry_sdk::trace::TraceResult;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::BatchConfig;
+use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
@@ -57,12 +57,12 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
         }
     }
 
-    fn force_flush(&self) -> TraceResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
 
-    fn shutdown(&self) -> TraceResult<()> {
-        self.delegate.shutdown()
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.delegate.shutdown_with_timeout(timeout)
     }
 
     fn set_resource(&mut self, resource: &Resource) {
