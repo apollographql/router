@@ -79,7 +79,7 @@ static FMT_LAYER_HANDLE: OnceCell<
 
 pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     let hot_tracer = ReloadTracer::new(
-        opentelemetry_sdk::trace::TracerProvider::default()
+        opentelemetry_sdk::trace::SdkTracerProvider::default()
             .tracer_builder("noop")
             .build(),
     );

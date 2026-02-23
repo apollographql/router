@@ -46,7 +46,7 @@ use crate::plugins::telemetry::reload::otel::reload_fmt;
 /// then atomically applies them during the activation phase via [`Activation::commit()`].
 pub(crate) struct Activation {
     /// The new tracer provider. None means leave the existing one
-    new_trace_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
+    new_trace_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
 
     /// The new tracer propagator. None means leave the existing one
     new_trace_propagator: Option<TextMapCompositePropagator>,
@@ -135,7 +135,7 @@ impl Activation {
 
     pub(crate) fn with_tracer_provider(
         &mut self,
-        tracer_provider: opentelemetry_sdk::trace::TracerProvider,
+        tracer_provider: opentelemetry_sdk::trace::SdkTracerProvider,
     ) {
         self.new_trace_provider = Some(tracer_provider);
         #[cfg(test)]

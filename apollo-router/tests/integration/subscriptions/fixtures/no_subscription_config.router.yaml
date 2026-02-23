@@ -1,0 +1,30 @@
+supergraph:
+  listen: 127.0.0.1:4000
+  path: /
+  introspection: true
+homepage:
+  enabled: false
+sandbox:
+  enabled: true
+override_subgraph_url:
+  products: http://localhost:{{PRODUCTS_PORT}}
+  accounts: http://localhost:{{ACCOUNTS_PORT}}
+include_subgraph_errors:
+  all: true
+# NO subscription configuration - this will trigger the error when a subscription is attempted
+headers:
+  all:
+    request:
+      - propagate:
+          named: custom_id
+subscription:
+  enabled: true
+  mode:
+
+    passthrough:
+      subgraphs:
+        reviews:
+          protocol: graphql_ws
+        accounts:
+          protocol: graphql_ws
+

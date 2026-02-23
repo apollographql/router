@@ -45,7 +45,7 @@ impl<'a> TracingBuilder<'a> {
         Self {
             common: &config.exporters.tracing.common,
             spans: &config.instrumentation.spans,
-            builder: opentelemetry_sdk::trace::TracerProvider::builder()
+            builder: opentelemetry_sdk::trace::SdkTracerProvider::builder()
                 .with_config((&config.exporters.tracing.common).into()),
         }
     }
