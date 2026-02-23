@@ -571,7 +571,7 @@ mod test {
     use opentelemetry::global::GlobalMeterProvider;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry::metrics::Result;
-    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::aggregation::Aggregation;
     use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;

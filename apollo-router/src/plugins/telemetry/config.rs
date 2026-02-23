@@ -7,7 +7,7 @@ use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::aggregation::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::trace::SpanLimits;

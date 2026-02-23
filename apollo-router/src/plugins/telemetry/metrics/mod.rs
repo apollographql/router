@@ -1,4 +1,4 @@
-use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::aggregation::Aggregation;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::reader::AggregationSelector;
 pub(crate) mod allocation;

@@ -171,7 +171,7 @@ pub(crate) mod test_utils {
     use opentelemetry::KeyValue;
     use opentelemetry::StringValue;
     use opentelemetry::Value;
-    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::aggregation::Aggregation;
     use opentelemetry_sdk::metrics::AttributeSet;
     use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
