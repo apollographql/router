@@ -6,7 +6,7 @@
 use std::task::Context;
 use std::task::Poll;
 
-use opentelemetry_sdk::metrics::aggregation::Aggregation;
+use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
 use tower::Layer;

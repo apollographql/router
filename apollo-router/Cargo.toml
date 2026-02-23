@@ -165,6 +165,8 @@ opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
 opentelemetry_sdk = { version = "0.31", default-features = false, features = [
     "rt-tokio",
     "trace",
+    "metrics",
+    "spec_unstable_metrics_views",
 ] }
 opentelemetry-aws = "0.19"
 opentelemetry-datadog = { version = "0.19", features = ["reqwest-client"] }

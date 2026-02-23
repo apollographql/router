@@ -4,6 +4,10 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use opentelemetry_prometheus::ResourceSelector;
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::InstrumentKind;
+use opentelemetry_sdk::metrics::Stream;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -15,7 +19,6 @@ use tower_service::Service;
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::services::router;
@@ -78,18 +81,29 @@ impl MetricsConfigurator for Config {
         let registry = Registry::new();
 
         let exporter = opentelemetry_prometheus::exporter()
-            .with_aggregation_selector(
-                CustomAggregationSelector::builder()
-                    .boundaries(builder.metrics_common().buckets.clone())
-                    .record_min_max(true)
-                    .build(),
-            )
             .with_resource_selector(self.resource_selector)
             .with_registry(registry.clone())
             .build()?;
 
         builder.with_reader(MeterProviderType::Public, exporter);
         builder.with_prometheus_registry(registry);
+
+        // Register view for histogram bucket boundaries
+        let boundaries = builder.metrics_common().buckets.clone();
+        builder.with_view(MeterProviderType::Public, move |instrument: &Instrument| {
+            if instrument.kind() == InstrumentKind::Histogram {
+                Stream::builder()
+                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries: boundaries.clone(),
+                        record_min_max: true,
+                    })
+                    .build()
+                    .ok()
+            } else {
+                None
+            }
+        });
+
         Ok(())
     }
 }

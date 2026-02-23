@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::MetricExporterBuilder;
+use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_otlp::WithHttpConfig;
 use opentelemetry_otlp::WithTonicConfig;
@@ -29,7 +29,6 @@ use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::error_handler::NamedMetricExporter;
-use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
@@ -118,7 +117,7 @@ impl Config {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter = match otlp_protocol {
-            Protocol::Grpc => MetricExporterBuilder::new()
+            Protocol::Grpc => MetricExporter::builder()
                 .with_tonic()
                 .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
@@ -135,7 +134,7 @@ impl Config {
                     &TelemetryDataKind::Metrics,
                     &Protocol::Http,
                 )?;
-                let mut builder = MetricExporterBuilder::new()
+                let mut builder = MetricExporter::builder()
                     .with_http()
                     .with_timeout(batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta);
@@ -145,9 +144,9 @@ impl Config {
                 builder.build()?
             }
         };
-        // MetricExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
+        // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
         let realtime_exporter = match otlp_protocol {
-            Protocol::Grpc => MetricExporterBuilder::new()
+            Protocol::Grpc => MetricExporter::builder()
                 .with_tonic()
                 .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
@@ -162,7 +161,7 @@ impl Config {
                     &TelemetryDataKind::Metrics,
                     &Protocol::Http,
                 )?;
-                let mut builder = MetricExporterBuilder::new()
+                let mut builder = MetricExporter::builder()
                     .with_http()
                     .with_timeout(batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta);
