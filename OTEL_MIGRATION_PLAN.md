@@ -10,6 +10,24 @@ The migration involves:
 - API changes throughout the telemetry subsystem
 - Architectural changes to handle new lifetime requirements
 
+## Current Status
+
+### Completed Commits (on branch `bryn/otel-0.31-migration`)
+- ✅ `43ee7fb56` - fix: update Resource to use builder API (Phase 5)
+- ✅ `9edc2679d` - fix: replace Key::string()/array() with KeyValue::new() (Phase 6)
+- ✅ `53a13ebbf` - fix: update instrument builders .init() to .build() (Phase 7)
+- ✅ `c4a7a65cb` - fix: add parent_span_is_remote field to SpanData (Phase 8)
+- ✅ `26f48c544` - fix: partial OTel 0.31 SDK API migration (Phase 1 partial)
+
+### Uncommitted Work (to be reset and redone in smaller commits)
+The following changes were made but not committed. We will reset and redo them as separate commits:
+
+1. **Tonic 0.14.5 upgrade** - Required because opentelemetry-otlp 0.31 depends on tonic 0.14
+2. **SpanExporter trait changes** - New method signatures in 0.31
+3. **SpanProcessor trait changes** - New method signatures in 0.31
+4. **Observable instrument API changes** - Major refactor needed in aggregation.rs
+5. **Config API changes** - Builder methods removed, direct field access required
+
 ## Commit Strategy
 
 **Important:** Individual commits may not compile. These are **logical review units** that will be **squashed on merge**. The PR description will note this.
@@ -302,22 +320,96 @@ Create an `ExporterInner` struct containing all mutable state and wrap in `Arc<M
 
 ---
 
+## Phase 10A: Tonic Version Upgrade
+
+**MUST BE DONE FIRST** - opentelemetry-otlp 0.31 depends on tonic 0.14.5
+
+**Files:** `apollo-router/Cargo.toml`
+
+**Changes:**
+```toml
+# Update version
+tonic = { version = "0.14.5", features = [...] }
+tonic-build = "0.14.5"
+
+# Feature names changed in tonic 0.14:
+# OLD                    NEW
+# "tls"            →     "tls-ring"
+# "tls-roots"      →     "tls-native-roots"
+```
+
+**Commit:** `deps: upgrade tonic to 0.14.5 for opentelemetry-otlp compatibility`
+
+---
+
+## Phase 10B: SpanExporter Trait Changes
+
+**Search:**
+- `grep -r "impl.*SpanExporter" --include="*.rs"`
+
+**Files:**
+- `apollo-router/src/plugins/telemetry/tracing/apollo_telemetry.rs`
+- `apollo-router/src/plugins/telemetry/apollo_otlp_exporter.rs`
+- `apollo-router/src/plugins/telemetry/error_handler.rs` (already updated)
+
+**Trait signature changes in 0.31:**
+```rust
+// OLD
+#[async_trait]
+impl SpanExporter for Exporter {
+    fn export(&self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult>
+    fn shutdown(&self) -> ExportResult
+    fn set_resource(&self, resource: &Resource)
+}
+
+// NEW (no #[async_trait] needed)
+impl SpanExporter for Exporter {
+    fn export(&self, batch: Vec<SpanData>) -> impl Future<Output = OTelSdkResult> + Send
+    fn shutdown(&mut self) -> OTelSdkResult          // &mut self!
+    fn force_flush(&mut self) -> OTelSdkResult       // NEW, has default impl
+    fn set_resource(&mut self, resource: &Resource)  // &mut self!
+}
+```
+
+**Key changes:**
+1. Remove `#[async_trait]` attribute
+2. Change `export` return type to `impl Future<Output = OTelSdkResult> + Send`
+3. Change `shutdown(&self)` → `shutdown(&mut self)`
+4. Add `force_flush(&mut self)` method
+5. Change `set_resource(&self)` → `set_resource(&mut self)`
+6. Update any call sites that call these methods on immutable references
+
+**apollo_otlp_exporter.rs specific:**
+- `pub(crate) fn shutdown(&self)` → `pub(crate) fn shutdown(&mut self)`
+- Update call site in `shutdown_impl` to use `&mut self.otlp_exporter`
+
+**Commit:** `fix: update SpanExporter implementations for OTel 0.31 API`
+
+---
+
 ## Phase 11: SpanProcessor Trait Changes
 
 **Search:**
 - `grep -r "impl.*SpanProcessor" --include="*.rs"` - Find all SpanProcessor implementations
 - `grep -r "fn shutdown\|fn force_flush" --include="*.rs"` - Find existing methods
 
-**Files:** `tracing/datadog/span_processor.rs` and any SpanProcessor impl
+**Files:**
+- `tracing/datadog/span_processor.rs`
+- `tracing/mod.rs` (ApolloFilterSpanProcessor)
 
-Add new required method:
+**Trait signature changes in 0.31:**
 ```rust
-fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
-    self.shutdown()
-}
+// OLD
+fn force_flush(&self) -> TraceResult<()>
+fn shutdown(&self) -> TraceResult<()>
+
+// NEW
+fn force_flush(&self) -> OTelSdkResult
+fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult  // replaces shutdown()
+// shutdown() now has default impl that calls shutdown_with_timeout
 ```
 
-**Commit:** `fix: add shutdown_with_timeout to SpanProcessor impls`
+**Commit:** `fix: update SpanProcessor implementations for OTel 0.31 API`
 
 ---
 
@@ -438,33 +530,156 @@ Update to new `opentelemetry-zipkin` API.
 
 ---
 
-## Phase 18: Observable Gauge Lifecycle Management
+## Phase 18: Observable Instrument API Changes
 
 **Search:**
-- `grep -r "ObservableGauge\|observable_gauge" --include="*.rs"`
-- `grep -r "with_callback" --include="*.rs"`
-- `grep -r "AggregateMeterProvider" --include="*.rs"`
+- `grep -r "ObservableGauge\|ObservableCounter\|ObservableUpDownCounter" --include="*.rs"`
+- `grep -r "AsyncInstrument" --include="*.rs"`
 
-**Problem:** Observable gauges register callbacks that persist globally. When dropped, callbacks remain registered causing memory leaks and stale data.
+**Files:** `apollo-router/src/metrics/aggregation.rs`
 
-**Solution:** Handle internally in `AggregateMeterProvider`:
-1. Intercept observable gauge creation
-2. Create regular gauge + store callback in registry
-3. Return wrapper that unregisters on drop
-4. Background task invokes callbacks every N seconds
+**CRITICAL API CHANGES in OTel 0.31:**
 
-**Files:** `metrics/aggregation.rs`
+1. **`ObservableCounter::new()` takes 0 arguments** - creates a noop, cannot pass custom impl
+2. **`with_inner()` is `pub(crate)` only** - cannot create custom observable wrappers
+3. **`observe()` method removed from observable types** - only exists on the observer passed to callbacks
+4. **No way to create custom `ObservableCounter<T>`** from outside the crate
 
-**Answers:**
-1. **Update interval:** Hardcode to 10 seconds. This aligns with existing patterns (e.g., Redis metrics collector uses 5-second intervals). Configuration adds complexity without clear benefit.
-2. **Background task spawning:** Spawn lazily on first gauge registration. This avoids creating unnecessary resources when no observable gauges are used.
+**Solution for aggregation.rs:**
 
-**Current observable gauge usage patterns (from codebase):**
-- `cache/storage.rs`: Cache size and estimated storage gauges using `Arc<AtomicI64>`
-- `cache/metrics.rs`: Redis metrics gauges (queue length, latency, etc.)
-- Uses `with_callback()` capturing atomic values
+Since we cannot wrap observable instruments, we use a different approach:
 
-**Commit:** `fix: observable gauge lifecycle management in AggregateMeterProvider`
+1. **Remove** `AggregateObservableCounter`, `AggregateObservableUpDownCounter`, `AggregateObservableGauge` structs
+2. **Remove** their `AsyncInstrument` trait implementations (observe() doesn't exist anymore)
+3. **Add** `keep_alive: Mutex<Vec<Box<dyn Any + Send + Sync>>>` to `AggregateInstrumentProvider`
+4. **Update macro** to create observables on ALL delegate meters, return first, store rest in keep_alive
+
+```rust
+// Add to imports
+use std::any::Any;
+
+// Update struct
+pub(crate) struct AggregateInstrumentProvider {
+    meters: Vec<Meter>,
+    keep_alive: parking_lot::Mutex<Vec<Box<dyn Any + Send + Sync>>>,
+}
+
+// Macro now takes 3 args instead of 4 (no $implementation)
+macro_rules! aggregate_observable_instrument_fn {
+    ($name:ident, $ty:ty, $wrapper:ident) => {
+        fn $name(&self, builder: AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>) -> $wrapper<$ty> {
+            // ... build with callbacks on all meters
+            let mut result: Option<$wrapper<$ty>> = None;
+            for meter in &self.meters {
+                let observable = new_builder.build();
+                if result.is_none() {
+                    result = Some(observable);
+                } else {
+                    self.keep_alive.lock().push(Box::new(observable));
+                }
+            }
+            result.unwrap_or_else(|| $wrapper::new())
+        }
+    };
+}
+```
+
+**Update macro invocations:**
+```rust
+// OLD (4 args)
+aggregate_observable_instrument_fn!(f64_observable_counter, f64, ObservableCounter, AggregateObservableCounter);
+
+// NEW (3 args)
+aggregate_observable_instrument_fn!(f64_observable_counter, f64, ObservableCounter);
+```
+
+**Commit:** `fix: update observable instrument API for OTel 0.31`
+
+---
+
+## Phase 19: Trace Config API Changes
+
+**Search:**
+- `grep -r "opentelemetry_sdk::trace::Config" --include="*.rs"`
+- `grep -r "with_sampler\|with_max_events\|with_max_attributes\|with_resource" --include="*.rs"`
+
+**Files:** `apollo-router/src/plugins/telemetry/config.rs`
+
+**API Changes in OTel 0.31:**
+
+The `Config` struct no longer has builder methods. Fields are public and set directly:
+
+```rust
+// OLD API
+let mut common = Config::default();
+common = common.with_sampler(sampler);
+common = common.with_max_events_per_span(config.max_events_per_span);
+common = common.with_max_attributes_per_span(config.max_attributes_per_span);
+common = common.with_max_links_per_span(config.max_links_per_span);
+common = common.with_max_attributes_per_event(config.max_attributes_per_event);
+common = common.with_max_attributes_per_link(config.max_attributes_per_link);
+common = common.with_resource(config.to_resource());
+
+// NEW API
+let mut common = Config::default();
+common.sampler = Box::new(sampler);
+common.span_limits.max_events_per_span = config.max_events_per_span;
+common.span_limits.max_attributes_per_span = config.max_attributes_per_span;
+common.span_limits.max_links_per_span = config.max_links_per_span;
+common.span_limits.max_attributes_per_event = config.max_attributes_per_event;
+common.span_limits.max_attributes_per_link = config.max_attributes_per_link;
+common.resource = std::borrow::Cow::Owned(config.to_resource());
+```
+
+**Also fix in same file:**
+```rust
+// Remove unnecessary .collect() - iterator already implements IntoIterator
+// OLD
+stream.with_allowed_attribute_keys(keys.iter().cloned().map(Key::new).collect());
+// NEW
+stream.with_allowed_attribute_keys(keys.iter().cloned().map(Key::new));
+```
+
+**Commit:** `fix: update trace Config API for OTel 0.31`
+
+---
+
+## Phase 20: Fix Remaining SpanData Constructions
+
+**Search:**
+- `grep -r "SpanData {" --include="*.rs"`
+
+**Files:** `apollo-router/src/plugins/telemetry/apollo_otlp_exporter.rs`
+
+There's one more SpanData construction in `prepare_subgraph_span` that needs `parent_span_is_remote: false`.
+
+**Commit:** `fix: add missing parent_span_is_remote to SpanData in apollo_otlp_exporter`
+
+---
+
+## Phase 21: Update Test Code
+
+**Files:**
+- `apollo-router/src/metrics/aggregation.rs` (test module)
+- `apollo-router/src/plugins/telemetry/tracing/datadog/span_processor.rs` (test module)
+
+**Test code changes needed:**
+
+1. **SpanProcessor mocks** - Update trait method signatures:
+```rust
+// OLD
+fn force_flush(&self) -> TraceResult<()> { Ok(()) }
+fn shutdown(&self) -> TraceResult<()> { Ok(()) }
+
+// NEW
+fn force_flush(&self) -> OTelSdkResult { Ok(()) }
+fn shutdown(&mut self) -> OTelSdkResult { Ok(()) }
+```
+
+2. **PushMetricExporter mocks** - Check if trait changed
+3. **Remove references to deleted AggregateObservable* types**
+
+**Commit:** `fix: update test code for OTel 0.31 API changes`
 
 ---
 
@@ -480,3 +695,30 @@ Integration testing:
 - Verify metrics reach Prometheus/OTLP endpoints
 - Verify Datadog integration works
 - Verify Zipkin integration works
+
+---
+
+## Summary of Remaining Commits (After Reset)
+
+These commits should be made IN ORDER after resetting uncommitted changes:
+
+1. **`deps: upgrade tonic to 0.14.5`** (Phase 10A)
+   - Cargo.toml only
+
+2. **`fix: update SpanProcessor for OTel 0.31`** (Phase 11)
+   - tracing/mod.rs, tracing/datadog/span_processor.rs
+
+3. **`fix: update SpanExporter for OTel 0.31`** (Phase 10B)
+   - tracing/apollo_telemetry.rs, apollo_otlp_exporter.rs
+
+4. **`fix: update observable instrument API for OTel 0.31`** (Phase 18)
+   - metrics/aggregation.rs
+
+5. **`fix: update trace Config API for OTel 0.31`** (Phase 19)
+   - plugins/telemetry/config.rs
+
+6. **`fix: add missing parent_span_is_remote`** (Phase 20)
+   - apollo_otlp_exporter.rs
+
+7. **`fix: update test code for OTel 0.31`** (Phase 21)
+   - Various test modules
