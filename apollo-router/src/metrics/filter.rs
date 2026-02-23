@@ -249,7 +249,7 @@ mod test {
         let exporter = InMemoryMetricsExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");
@@ -357,7 +357,7 @@ mod test {
         let exporter = InMemoryMetricsExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");
@@ -386,7 +386,7 @@ mod test {
         let exporter = InMemoryMetricsExporter::default();
         let meter_provider = FilterMeterProvider::public(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");
@@ -453,7 +453,7 @@ mod test {
         let exporter = InMemoryMetricsExporter::default();
         let meter_provider = FilterMeterProvider::apollo_realtime(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");

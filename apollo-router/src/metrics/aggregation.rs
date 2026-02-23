@@ -521,7 +521,6 @@ mod test {
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry_sdk::runtime;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
@@ -848,15 +847,11 @@ mod test {
         meter_provider: &AggregateMeterProvider,
         shutdown: &Arc<AtomicBool>,
     ) -> PeriodicReader {
-        PeriodicReader::builder(
-            TestExporter {
-                meter_provider: meter_provider.clone(),
-                shutdown: shutdown.clone(),
-            },
-            runtime::Tokio,
-        )
+        PeriodicReader::builder(TestExporter {
+            meter_provider: meter_provider.clone(),
+            shutdown: shutdown.clone(),
+        })
         .with_interval(Duration::from_millis(10))
-        .with_timeout(Duration::from_millis(10))
         .build()
     }
 }

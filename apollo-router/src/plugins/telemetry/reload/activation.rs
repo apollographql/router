@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use opentelemetry::InstrumentationScope;
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
@@ -191,10 +192,10 @@ impl Activation {
             && let Some(tracer_provider) = self.new_trace_provider.take()
         {
             // Build a new tracer from the provider and hot-swap it into the tracing subscriber
-            let tracer = tracer_provider
-                .tracer_builder(GLOBAL_TRACER_NAME)
+            let scope = InstrumentationScope::builder(GLOBAL_TRACER_NAME)
                 .with_version(env!("CARGO_PKG_VERSION"))
                 .build();
+            let tracer = tracer_provider.tracer_with_scope(scope);
             hot_tracer.reload(tracer);
 
             // Install the new provider globally and safely drop the old one in a blocking task

@@ -30,12 +30,13 @@ use std::io::IsTerminal;
 use anyhow::anyhow;
 use once_cell::sync::OnceCell;
 use opentelemetry::Context;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::TracerProvider;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
-use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
@@ -80,8 +81,7 @@ static FMT_LAYER_HANDLE: OnceCell<
 pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     let hot_tracer = ReloadTracer::new(
         opentelemetry_sdk::trace::SdkTracerProvider::default()
-            .tracer_builder("noop")
-            .build(),
+            .tracer_with_scope(InstrumentationScope::builder("noop").build()),
     );
     let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
 

@@ -42,11 +42,13 @@ pub(crate) struct TracingBuilder<'a> {
 
 impl<'a> TracingBuilder<'a> {
     pub(crate) fn new(config: &'a Conf) -> Self {
+        let common = &config.exporters.tracing.common;
         Self {
-            common: &config.exporters.tracing.common,
+            common,
             spans: &config.instrumentation.spans,
-            builder: opentelemetry_sdk::trace::SdkTracerProvider::builder()
-                .with_config((&config.exporters.tracing.common).into()),
+            builder: common.configure_tracer_provider_builder(
+                opentelemetry_sdk::trace::SdkTracerProvider::builder(),
+            ),
         }
     }
 

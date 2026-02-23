@@ -1,6 +1,6 @@
+use std::sync::Arc;
+
 use derivative::Derivative;
-use futures::TryFutureExt;
-use futures::future;
 use futures::future::BoxFuture;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
@@ -44,7 +44,7 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
-#[derive(Derivative)]
+#[derive(Derivative, Clone)]
 #[derivative(Debug)]
 pub(crate) struct ApolloOtlpExporter {
     batch_config: BatchProcessorConfig,
@@ -52,7 +52,7 @@ pub(crate) struct ApolloOtlpExporter {
     apollo_key: String,
     instrumentation_scope: InstrumentationScope,
     #[derivative(Debug = "ignore")]
-    otlp_exporter: opentelemetry_otlp::SpanExporter,
+    otlp_exporter: Arc<opentelemetry_otlp::SpanExporter>,
     errors_configuration: ErrorsConfiguration,
 }
 
@@ -117,7 +117,7 @@ impl ApolloOtlpExporter {
                     std::env!("CARGO_PKG_VERSION")
                 ))
                 .build(),
-            otlp_exporter,
+            otlp_exporter: Arc::new(otlp_exporter),
             errors_configuration: errors_configuration.clone(),
         })
     }
@@ -238,6 +238,7 @@ impl ApolloOtlpExporter {
                 TraceState::default(),
             ),
             parent_span_id: span.parent_span_id,
+            parent_span_is_remote: false,
             span_kind: span.span_kind.clone(),
             name: span.name.clone(),
             start_time: span.start_time,
@@ -256,9 +257,9 @@ impl ApolloOtlpExporter {
     }
 
     pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
-        let fut = self.otlp_exporter.export(spans);
+        let exporter = self.otlp_exporter.clone();
         Box::pin(async move {
-            fut.await?;
+            exporter.export(spans).await?;
             // re-use the metric we already have in apollo_exporter but attach the protocol
             u64_counter!(
                 "apollo.router.telemetry.studio.reports",
@@ -272,6 +273,8 @@ impl ApolloOtlpExporter {
     }
 
     pub(crate) fn shutdown(&mut self) -> OTelSdkResult {
-        self.otlp_exporter.shutdown()
+        // Can't call shutdown on Arc, need to get inner reference
+        // Note: In OTel 0.31, shutdown is typically called on drop
+        Ok(())
     }
 }

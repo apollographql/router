@@ -6,13 +6,10 @@ use std::time::Duration;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_otlp::WithHttpConfig;
 use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::runtime;
-use prometheus::exponential_buckets;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
@@ -174,14 +171,12 @@ impl Config {
         let named_exporter = NamedMetricExporter::new(exporter, "apollo");
         let named_realtime_exporter = NamedMetricExporter::new(realtime_exporter, "apollo");
 
-        let default_reader = PeriodicReader::builder(named_exporter, runtime::Tokio)
+        let default_reader = PeriodicReader::builder(named_exporter)
             .with_interval(Duration::from_secs(60))
-            .with_timeout(batch_config.max_export_timeout)
             .build();
 
-        let realtime_reader = PeriodicReader::builder(named_realtime_exporter, runtime::Tokio)
+        let realtime_reader = PeriodicReader::builder(named_realtime_exporter)
             .with_interval(batch_config.scheduled_delay)
-            .with_timeout(batch_config.max_export_timeout)
             .build();
 
         let resource = Resource::builder_empty()

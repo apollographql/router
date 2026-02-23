@@ -287,7 +287,7 @@ impl LightSpanData {
             None => value
                 .attributes
                 .into_iter()
-                .map(|KeyValue { key, value }| (key, value))
+                .map(|KeyValue { key, value, .. }| (key, value))
                 .collect(),
             Some(attr_names) => value
                 .attributes

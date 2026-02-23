@@ -250,7 +250,9 @@ pub(crate) fn to_list(resource: Resource) -> Vec<(String, serde_json::Value)> {
                                 .map(|s| serde_json::Value::String(s.to_string()))
                                 .collect(),
                         ),
+                        _ => serde_json::Value::Null, // Handle future Array variants
                     },
+                    _ => serde_json::Value::Null, // Handle future Value variants
                 },
             )
         })

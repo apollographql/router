@@ -656,6 +656,7 @@ impl From<opentelemetry::Array> for AttributeArray {
             opentelemetry::Array::String(v) => {
                 AttributeArray::String(v.into_iter().map(|v| v.into()).collect())
             }
+            _ => AttributeArray::String(vec![]), // Handle future variants
         }
     }
 }
@@ -697,32 +698,32 @@ impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
     }
 }
 
-impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
-    fn from(config: &TracingCommon) -> Self {
-        let mut common = opentelemetry_sdk::trace::Config::default();
-
-        let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
-        if config.parent_based_sampler {
+impl TracingCommon {
+    /// Configures a TracerProviderBuilder with sampler, span limits, and resource settings.
+    pub(crate) fn configure_tracer_provider_builder(
+        &self,
+        builder: opentelemetry_sdk::trace::TracerProviderBuilder,
+    ) -> opentelemetry_sdk::trace::TracerProviderBuilder {
+        let mut sampler: opentelemetry_sdk::trace::Sampler = self.sampler.clone().into();
+        if self.parent_based_sampler {
             sampler = parent_based(sampler);
         }
-        if config.preview_datadog_agent_sampling.unwrap_or_default() {
-            common = common.with_sampler(DatadogAgentSampling::new(
-                sampler,
-                config.parent_based_sampler,
-            ));
+
+        let builder = builder
+            .with_span_limits(SpanLimits {
+                max_events_per_span: self.max_events_per_span,
+                max_attributes_per_span: self.max_attributes_per_span,
+                max_links_per_span: self.max_links_per_span,
+                max_attributes_per_event: self.max_attributes_per_event,
+                max_attributes_per_link: self.max_attributes_per_link,
+            })
+            .with_resource(self.to_resource());
+
+        if self.preview_datadog_agent_sampling.unwrap_or_default() {
+            builder.with_sampler(DatadogAgentSampling::new(sampler, self.parent_based_sampler))
         } else {
-            common = common.with_sampler(sampler);
+            builder.with_sampler(sampler)
         }
-
-        common = common.with_max_events_per_span(config.max_events_per_span);
-        common = common.with_max_attributes_per_span(config.max_attributes_per_span);
-        common = common.with_max_links_per_span(config.max_links_per_span);
-        common = common.with_max_attributes_per_event(config.max_attributes_per_event);
-        common = common.with_max_attributes_per_link(config.max_attributes_per_link);
-
-        // Take the default first, then config, then env resources, then env variable. Last entry wins
-        common = common.with_resource(config.to_resource());
-        common
     }
 }
 

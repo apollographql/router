@@ -256,13 +256,13 @@ impl EventDynAttribute for ::tracing::Span {
                                     Some(event_attributes) => {
                                         // No need to use the upsert function here as they're going into a Map
                                         event_attributes.extend(
-                                            attributes.map(|KeyValue { key, value }| (key, value)),
+                                            attributes.map(|KeyValue { key, value, .. }| (key, value)),
                                         );
                                     }
                                     None => {
                                         otel_data.event_attributes = Some(
                                             attributes
-                                                .map(|KeyValue { key, value }| (key, value))
+                                                .map(|KeyValue { key, value, .. }| (key, value))
                                                 .collect(),
                                         );
                                     }

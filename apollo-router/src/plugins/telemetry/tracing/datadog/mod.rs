@@ -11,7 +11,6 @@ use std::time::Duration;
 pub(crate) use agent_sampling::DatadogAgentSampling;
 use ahash::HashMap;
 use ahash::HashMapExt;
-use futures::future::BoxFuture;
 use http::Uri;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -33,6 +32,7 @@ use tower::BoxError;
 
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::GenericWith;
+use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::consts::BUILT_IN_SPAN_NAMES;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_ORIGINAL_NAME;
@@ -128,7 +128,7 @@ impl TracingConfigurator for Config {
 
     fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
-        let common: opentelemetry_sdk::trace::Config = builder.tracing_common().into();
+        let resource = builder.tracing_common().to_resource();
 
         // Precompute representation otel Keys for the mappings so that we don't do heap allocation for each span
         let resource_mappings = self.enable_span_mapping.then(|| {
@@ -163,6 +163,7 @@ impl TracingConfigurator for Config {
                         && let Some(KeyValue {
                             key: _,
                             value: Value::String(v),
+                            ..
                         }) = span.attributes.iter().find(|kv| kv.key == *mapping)
                     {
                         return v.as_str();
@@ -188,20 +189,19 @@ impl TracingConfigurator for Config {
                 &span.name
             })
             .with(
-                &common.resource.get(SERVICE_NAME.into()),
+                &resource.get(&Key::new(SERVICE_NAME)),
                 |builder, service_name| {
                     // Datadog exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
                     builder.with_service_name(service_name.as_str())
                 },
             )
-            .with(&common.resource.get(ENV_KEY), |builder, env| {
+            .with(&resource.get(&ENV_KEY), |builder, env| {
                 builder.with_env(env.as_str())
             })
             .with_version(
-                common
-                    .resource
-                    .get(SERVICE_VERSION.into())
+                resource
+                    .get(&Key::new(SERVICE_VERSION))
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
@@ -212,7 +212,6 @@ impl TracingConfigurator for Config {
                     .pool_idle_timeout(Duration::from_millis(1))
                     .build()?,
             )
-            .with_trace_config(common)
             .build_exporter()?;
 
         // Use the default span metrics and override with the ones from the config

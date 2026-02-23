@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::env;
+use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::EnvResourceDetector;
@@ -74,20 +75,21 @@ pub trait ConfigResource {
             .with_detectors(&detectors)
             .build();
 
-        // Default service name
-        if resource
-            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into())
-            .is_none()
-        {
+        // Default service name if not already set
+        let service_name_key = Key::new(opentelemetry_semantic_conventions::resource::SERVICE_NAME);
+        if resource.get(&service_name_key).is_none() {
             let executable_name = executable_name();
-            resource.merge(&Resource::builder_empty()
+            let default_service_name = executable_name
+                .map(|name| format!("{UNKNOWN_SERVICE}:{name}"))
+                .unwrap_or_else(|| UNKNOWN_SERVICE.to_string());
+            // Rebuild with the default service name added
+            Resource::builder_empty()
                 .with_attributes([KeyValue::new(
                     opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                    executable_name
-                        .map(|executable_name| format!("{UNKNOWN_SERVICE}:{executable_name}"))
-                        .unwrap_or_else(|| UNKNOWN_SERVICE.to_string()),
+                    default_service_name,
                 )])
-                .build())
+                .with_detectors(&detectors)
+                .build()
         } else {
             resource
         }
