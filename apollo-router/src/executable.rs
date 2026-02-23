@@ -282,6 +282,29 @@ impl Opt {
     fn err_require_opt(env_var: &str) -> anyhow::Error {
         anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
     }
+
+    fn validate_otel_env() -> Result<(), anyhow::Error> {
+        let forbidden = [
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        ];
+
+        let present: Vec<&str> = forbidden
+            .iter()
+            .copied()
+            .filter(|var| std::env::var_os(var).is_some())
+            .collect();
+
+        if !present.is_empty() {
+            return Err(anyhow!(
+                "The following OTEL environment variables are not supported by Apollo Router and must not be set: {}",
+                present.join(", ")
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 /// This is the main router entrypoint.
@@ -470,6 +493,10 @@ impl Executable {
         let current_directory = std::env::current_dir()?;
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
+
+         // ROUTER-1609
+         // New rule that will prevent Router from starting if OTEL environment variables are set.
+        Opt::validate_otel_env()?;
 
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
@@ -731,14 +758,6 @@ impl Executable {
         {
             tracing::warn!(
                 "Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists."
-            );
-        }
-
-        // Warn users that OTEL_EXPORTER_OTLP_ENDPOINT takes precedence over default configurations
-        // and may override trace export to Apollo Studio
-        if std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
-            tracing::warn!(
-                "The OTEL_EXPORTER_OTLP_ENDPOINT environment variable is set. This takes precedence over default configurations and may override trace export to Apollo Studio."
             );
         }
 
