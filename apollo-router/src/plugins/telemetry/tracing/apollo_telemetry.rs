@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
 
-use async_trait::async_trait;
 use base64::Engine as _;
 use base64::prelude::BASE64_STANDARD;
 use derivative::Derivative;
@@ -1185,18 +1184,21 @@ fn extract_http_data(span: &LightSpanData) -> (Http, Option<CacheControl>) {
     )
 }
 
-#[async_trait]
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
-    fn export(&self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+    fn export(&self, batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> + Send {
         self.inner.lock().export_impl(batch)
     }
 
-    fn shutdown(&self) -> OTelSdkResult {
+    fn shutdown(&mut self) -> OTelSdkResult {
         self.inner.lock().shutdown_impl()
     }
 
-    fn set_resource(&self, _resource: &Resource) {
+    fn force_flush(&mut self) -> OTelSdkResult {
+        Ok(())
+    }
+
+    fn set_resource(&mut self, _resource: &Resource) {
         // This is intentionally a NOOP. The reason for this is that we do not allow users to set the resource attributes
         // for telemetry that is sent to Apollo. To do so would expose potential private information that the user did not intend for us.
     }
@@ -1316,7 +1318,7 @@ impl ExporterInner {
 
     fn shutdown_impl(&mut self) -> OTelSdkResult {
         // Currently only handled in the OTLP case.
-        if let Some(exporter) = &self.otlp_exporter {
+        if let Some(exporter) = &mut self.otlp_exporter {
             exporter.shutdown()
         } else {
             Ok(())
