@@ -30,7 +30,6 @@ use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::error_handler::NamedMetricExporter;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
-use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
