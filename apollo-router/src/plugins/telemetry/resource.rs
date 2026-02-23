@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 use std::env;
-use std::time::Duration;
-
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::EnvResourceDetector;
@@ -15,7 +13,7 @@ const OTEL_SERVICE_NAME: &str = "OTEL_SERVICE_NAME";
 /// Users can always override them via config.
 struct StaticResourceDetector;
 impl ResourceDetector for StaticResourceDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         let mut config_resources = vec![];
         config_resources.push(KeyValue::new(
             opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
@@ -38,7 +36,7 @@ impl ResourceDetector for StaticResourceDetector {
 struct EnvServiceNameDetector;
 // Used instead of SdkProvidedResourceDetector
 impl ResourceDetector for EnvServiceNameDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         match env::var(OTEL_SERVICE_NAME) {
             Ok(service_name) if !service_name.is_empty() => Resource::builder_empty()
                 .with_attributes([KeyValue::new(
@@ -110,7 +108,7 @@ struct ConfigResourceDetector {
 }
 
 impl ResourceDetector for ConfigResourceDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         let mut config_resources = vec![];
 
         // For config resources last entry wins
