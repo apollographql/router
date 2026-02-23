@@ -19,6 +19,7 @@ use http::header::CACHE_CONTROL;
 use itertools::Itertools;
 use lru::LruCache;
 use opentelemetry::Key;
+use parking_lot::Mutex;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
 use opentelemetry::trace::SpanId;
@@ -26,10 +27,10 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceId;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
-use opentelemetry_sdk::trace::TraceError;
 use prost::Message;
 use rand::Rng;
 use serde::de::DeserializeOwned;
@@ -346,9 +347,14 @@ impl LightSpanData {
 ///
 /// [`SpanExporter`]: super::SpanExporter
 /// [`Reporter`]: crate::plugins::telemetry::Reporter
+#[derive(Debug)]
+pub(crate) struct Exporter {
+    inner: Mutex<ExporterInner>,
+}
+
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub(crate) struct Exporter {
+struct ExporterInner {
     spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
     /// An externally updateable gauge for "apollo.router.exporter.span.lru.size".
     span_lru_size_instrument: LruSizeInstrument,
@@ -426,58 +432,62 @@ impl Exporter {
             LruSizeInstrument::new("apollo.router.exporter.span.lru.size");
 
         Ok(Self {
-            spans_by_parent_id: LruCache::new(buffer_size),
-            span_lru_size_instrument,
-            report_exporter: if otlp_tracing_ratio < 1f64 {
-                Some(Arc::new(ApolloExporter::new(
-                    endpoint,
-                    &batch_processor_config.into(),
-                    apollo_key,
-                    apollo_graph_ref,
-                    schema_id,
-                    router_id,
-                    metrics_reference_mode,
-                )?))
-            } else {
-                None
-            },
-            otlp_exporter: if otlp_tracing_ratio > 0f64 {
-                Some(ApolloOtlpExporter::new(
-                    otlp_endpoint,
-                    otlp_tracing_protocol,
-                    batch_processor_config,
-                    apollo_key,
-                    apollo_graph_ref,
-                    schema_id,
-                    errors_configuration,
-                )?)
-            } else {
-                None
-            },
-            otlp_tracing_ratio,
-            field_execution_weight: match field_execution_sampler {
-                SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
-                SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
-                SamplerOption::TraceIdRatioBased(ratio) => 1.0 / ratio,
-            },
-            errors_configuration: errors_configuration.clone(),
-            use_legacy_request_span: use_legacy_request_span.unwrap_or_default(),
-            include_span_names: REPORTS_INCLUDE_SPANS.into(),
-            include_attr_names: if otlp_tracing_ratio > 0f64 {
-                Some(HashSet::from_iter(
-                    [&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat(),
-                ))
-            } else {
-                Some(HashSet::from(REPORTS_INCLUDE_ATTRS))
-            },
-            include_attr_event_names: if otlp_tracing_ratio > 0f64 {
-                Some(HashSet::from(OTLP_EXT_INCLUDE_EVENT_ATTRS))
-            } else {
-                None
-            },
+            inner: Mutex::new(ExporterInner {
+                spans_by_parent_id: LruCache::new(buffer_size),
+                span_lru_size_instrument,
+                report_exporter: if otlp_tracing_ratio < 1f64 {
+                    Some(Arc::new(ApolloExporter::new(
+                        endpoint,
+                        &batch_processor_config.into(),
+                        apollo_key,
+                        apollo_graph_ref,
+                        schema_id,
+                        router_id,
+                        metrics_reference_mode,
+                    )?))
+                } else {
+                    None
+                },
+                otlp_exporter: if otlp_tracing_ratio > 0f64 {
+                    Some(ApolloOtlpExporter::new(
+                        otlp_endpoint,
+                        otlp_tracing_protocol,
+                        batch_processor_config,
+                        apollo_key,
+                        apollo_graph_ref,
+                        schema_id,
+                        errors_configuration,
+                    )?)
+                } else {
+                    None
+                },
+                otlp_tracing_ratio,
+                field_execution_weight: match field_execution_sampler {
+                    SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
+                    SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
+                    SamplerOption::TraceIdRatioBased(ratio) => 1.0 / ratio,
+                },
+                errors_configuration: errors_configuration.clone(),
+                use_legacy_request_span: use_legacy_request_span.unwrap_or_default(),
+                include_span_names: REPORTS_INCLUDE_SPANS.into(),
+                include_attr_names: if otlp_tracing_ratio > 0f64 {
+                    Some(HashSet::from_iter(
+                        [&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat(),
+                    ))
+                } else {
+                    Some(HashSet::from(REPORTS_INCLUDE_ATTRS))
+                },
+                include_attr_event_names: if otlp_tracing_ratio > 0f64 {
+                    Some(HashSet::from(OTLP_EXT_INCLUDE_EVENT_ATTRS))
+                } else {
+                    None
+                },
+            }),
         })
     }
+}
 
+impl ExporterInner {
     fn extract_root_traces(
         &mut self,
         span: &LightSpanData,
@@ -1178,7 +1188,22 @@ fn extract_http_data(span: &LightSpanData) -> (Http, Option<CacheControl>) {
 #[async_trait]
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+        self.inner.lock().export_impl(batch)
+    }
+
+    fn shutdown(&self) -> OTelSdkResult {
+        self.inner.lock().shutdown_impl()
+    }
+
+    fn set_resource(&self, _resource: &Resource) {
+        // This is intentionally a NOOP. The reason for this is that we do not allow users to set the resource attributes
+        // for telemetry that is sent to Apollo. To do so would expose potential private information that the user did not intend for us.
+    }
+}
+
+impl ExporterInner {
+    fn export_impl(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
@@ -1266,7 +1291,7 @@ impl SpanExporter for Exporter {
 
         if send_otlp && !otlp_trace_spans.is_empty() {
             self.otlp_exporter
-                .as_mut()
+                .as_ref()
                 .expect("expected an otel exporter")
                 .export(otlp_trace_spans.into_iter().flatten().collect())
         } else if send_reports && !traces.is_empty() {
@@ -1281,24 +1306,21 @@ impl SpanExporter for Exporter {
                 exporter
                     .submit_report(report)
                     .await
-                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
+                    .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))
             }
             .boxed()
         } else {
-            async { ExportResult::Ok(()) }.boxed()
+            async { Ok(()) }.boxed()
         }
     }
 
-    fn shutdown(&mut self) {
+    fn shutdown_impl(&mut self) -> OTelSdkResult {
         // Currently only handled in the OTLP case.
-        if let Some(exporter) = &mut self.otlp_exporter {
+        if let Some(exporter) = &self.otlp_exporter {
             exporter.shutdown()
-        };
-    }
-
-    fn set_resource(&mut self, _resource: &Resource) {
-        // This is intentionally a NOOP. The reason for this is that we do not allow users to set the resource attributes
-        // for telemetry that is sent to Apollo. To do so would expose potential private information that the user did not intend for us.
+        } else {
+            Ok(())
+        }
     }
 }
 

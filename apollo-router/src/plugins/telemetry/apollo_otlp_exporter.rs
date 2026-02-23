@@ -255,9 +255,10 @@ impl ApolloOtlpExporter {
         }
     }
 
-    pub(crate) fn export(&mut self, spans: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+    pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         let fut = self.otlp_exporter.export(spans);
-        Box::pin(fut.and_then(|_| {
+        Box::pin(async move {
+            fut.await?;
             // re-use the metric we already have in apollo_exporter but attach the protocol
             u64_counter!(
                 "apollo.router.telemetry.studio.reports",
@@ -266,11 +267,11 @@ impl ApolloOtlpExporter {
                 report.type = ROUTER_REPORT_TYPE_TRACES,
                 report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
             );
-            future::ready(Ok(()))
-        }))
+            Ok(())
+        })
     }
 
-    pub(crate) fn shutdown(&mut self) {
+    pub(crate) fn shutdown(&self) -> OTelSdkResult {
         self.otlp_exporter.shutdown()
     }
 }
