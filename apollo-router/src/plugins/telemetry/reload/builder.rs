@@ -103,7 +103,7 @@ impl<'a> Builder<'a> {
             crate::plugins::telemetry::metrics::allocation::register_memory_allocation_views(
                 &mut builder,
             );
-            builder.configure_views(MeterProviderType::Public)?;
+            builder.configure_views(MeterProviderType::Public);
 
             let (prometheus_registry, meter_providers, _) = builder.build();
             self.activation

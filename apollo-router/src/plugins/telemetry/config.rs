@@ -7,12 +7,9 @@ use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry::metrics::MetricsError;
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
-use opentelemetry_sdk::metrics::View;
-use opentelemetry_sdk::metrics::new_view;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -161,36 +158,47 @@ pub(crate) struct MetricView {
     pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
 }
 
-impl TryInto<Box<dyn View>> for MetricView {
-    type Error = MetricsError;
-
-    fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
-        let aggregation = self.aggregation.map(|aggregation| match aggregation {
+impl MetricView {
+    /// Converts this MetricView into a view function for OTel SDK 0.31+
+    pub(crate) fn into_view_fn(
+        self,
+    ) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
+        let name_pattern = self.name;
+        let rename = self.rename;
+        let description = self.description;
+        let unit = self.unit;
+        let aggregation = self.aggregation.map(|agg| match agg {
             MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
                 boundaries: buckets,
                 record_min_max: true,
             },
             MetricAggregation::Drop => Aggregation::Drop,
         });
-        let instrument = Instrument::new().name(self.name);
-        let mut mask = Stream::new();
-        if let Some(new_name) = self.rename {
-            mask = mask.name(new_name);
-        }
-        if let Some(desc) = self.description {
-            mask = mask.description(desc);
-        }
-        if let Some(unit) = self.unit {
-            mask = mask.unit(unit);
-        }
-        if let Some(aggregation) = aggregation {
-            mask = mask.aggregation(aggregation);
-        }
-        if let Some(allowed_attribute_keys) = self.allowed_attribute_keys {
-            mask = mask.allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
-        }
+        let allowed_attribute_keys = self.allowed_attribute_keys;
 
-        new_view(instrument, mask)
+        move |instrument: &Instrument| {
+            if instrument.name() != name_pattern {
+                return None;
+            }
+            let mut stream = Stream::builder();
+            if let Some(ref new_name) = rename {
+                stream = stream.with_name(new_name.clone());
+            }
+            if let Some(ref desc) = description {
+                stream = stream.with_description(desc.clone());
+            }
+            if let Some(ref u) = unit {
+                stream = stream.with_unit(u.clone());
+            }
+            if let Some(ref agg) = aggregation {
+                stream = stream.with_aggregation(agg.clone());
+            }
+            if let Some(ref keys) = allowed_attribute_keys {
+                stream =
+                    stream.with_allowed_attribute_keys(keys.iter().cloned().map(Key::new).collect());
+            }
+            stream.build().ok()
+        }
     }
 }
 
