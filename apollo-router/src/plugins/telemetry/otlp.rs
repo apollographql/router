@@ -7,7 +7,7 @@ use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_otlp::WithHttpConfig;
 use opentelemetry_otlp::WithTonicConfig;
-use opentelemetry_sdk::metrics::data::Temporality as SdkTemporality;
+use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;

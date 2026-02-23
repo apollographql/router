@@ -4,7 +4,7 @@ use std::time::Duration;
 use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
-use opentelemetry_sdk::metrics::data::Temporality;
+use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
@@ -118,7 +118,7 @@ mod tests {
     use opentelemetry_sdk::error::OTelSdkError;
     use opentelemetry_sdk::error::OTelSdkResult;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::data::Temporality;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::trace::SpanData;
     use opentelemetry_sdk::trace::SpanExporter;

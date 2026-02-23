@@ -8,7 +8,7 @@ use opentelemetry_otlp::MetricExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_otlp::WithHttpConfig;
 use opentelemetry_otlp::WithTonicConfig;
-use opentelemetry_sdk::metrics::data::Temporality;
+use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::runtime;
