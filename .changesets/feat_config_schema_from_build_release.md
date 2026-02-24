@@ -4,4 +4,4 @@ The router configuration schema JSON is again included in GitHub releases, but g
 
 The schema is now produced in the **amd_linux_build** job using the binary already built by `cargo xtask dist` in that job. The output is written to a versioned file (e.g. `router-config-schema-v2.12.0.json`) so each release has a clearly versioned schema. The file is persisted to the workspace and included in the GitHub release alongside the other artifacts. Nightly builds also produce the versioned schema in the amd_linux artifacts with no extra build.
 
-By [@shanemyrick](https://github.com/shanemyrick) in https://github.com/apollographql/router/pull/0
+By [@shanemyrick](https://github.com/shanemyrick) in https://github.com/apollographql/router/pull/8909
