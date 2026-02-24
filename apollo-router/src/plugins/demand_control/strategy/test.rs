@@ -54,6 +54,7 @@ impl StrategyImpl for Test {
         &self,
         _request: &ExecutableDocument,
         response: &Response,
+        _subgraph_name: &str,
     ) -> Result<(), DemandControlError> {
         match self {
             Test {

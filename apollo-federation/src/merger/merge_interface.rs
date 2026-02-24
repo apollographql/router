@@ -4,6 +4,7 @@ use tracing::trace;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::merger::merge::Merger;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;

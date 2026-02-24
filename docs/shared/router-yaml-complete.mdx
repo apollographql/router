@@ -199,6 +199,7 @@ demand_control:
     static_estimated:
       list_size: 0
       max: 0.0
+      actual_cost_mode: by_subgraph
 experimental_chaos:
   force_reload: null
 experimental_type_conditioned_fetching: false
@@ -330,6 +331,7 @@ supergraph:
   introspection: false
   listen: example_listen
   path: /
+  redact_query_validation_errors: false
   query_planning:
     cache:
       in_memory:
@@ -356,6 +358,7 @@ supergraph:
     experimental_plans_limit: null
     experimental_reuse_query_plans: false
     warmed_up_queries: null
+  strict_variable_validation: enforce
 telemetry:
   apollo:
     batch_processor:

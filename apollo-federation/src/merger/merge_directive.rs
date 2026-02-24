@@ -4,6 +4,7 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
@@ -18,6 +19,7 @@ use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
@@ -115,10 +117,6 @@ impl Merger {
             .merged_federation_directive_in_supergraph_by_directive_name
             .get(name);
 
-        // In JS, there are several methods for checking if directive applications are the same, and the static
-        // argument transforms are only applied for repeatable directives. In this version, we rely on the `Eq`
-        // and `Hash` implementations of `Directive` to deduplicate applications, and the argument transforms
-        // are applied up front so they are available in all locations.
         let directive_counts: IndexMap<Directive, usize> = sources
             .iter()
             .flat_map(|(idx, source)| {
@@ -132,11 +130,6 @@ impl Merger {
                     .into_iter()
                     .map(|d| (**d).clone())
                     .collect_vec();
-                for application in &mut applications {
-                    // When we deduplicate directives below, we want to treat applications which
-                    // explicitly pass the default the same as applications which omit it.
-                    self.fill_argument_defaults(application, &definition);
-                }
                 if let Some(transform) =
                     &directive_in_supergraph.and_then(|d| d.static_argument_transform.as_ref())
                 {
@@ -147,7 +140,19 @@ impl Merger {
                 applications
             })
             .fold(Default::default(), |mut acc, directive| {
-                *acc.entry(directive).or_insert(0) += 1;
+                // Note that when comparing arguments, we include default values. This means that we
+                // consider it the same thing (as far as merging application goes) to rely on a default
+                // value or to pass that very exact value explicitly.
+                let args = self.directive_arguments_with_defaults(&directive, &definition);
+                if let Some((_, count)) = acc.iter_mut().find(|(existing, _)| {
+                    let existing_args =
+                        self.directive_arguments_with_defaults(existing, &definition);
+                    existing_args == args
+                }) {
+                    *count += 1;
+                } else {
+                    acc.insert(directive, 1);
+                }
                 acc
             });
 
@@ -177,7 +182,6 @@ impl Merger {
                     .keys()
                     .filter_map(|d| {
                         d.specified_argument_by_name(&arg_def.name)
-                            .or(arg_def.default_value.as_ref())
                             .map(|v| v.as_ref())
                     })
                     .cloned()
@@ -252,23 +256,23 @@ impl Merger {
         Ok(())
     }
 
-    fn fill_argument_defaults(&self, directive: &mut Directive, definition: &DirectiveDefinition) {
-        let existing_arg_names = directive
+    fn directive_arguments_with_defaults<'dir>(
+        &self,
+        directive: &'dir Directive,
+        definition: &'dir DirectiveDefinition,
+    ) -> IndexMap<Name, Option<&'dir Node<Value>>> {
+        definition
             .arguments
             .iter()
-            .map(|arg| arg.name.clone())
-            .collect::<IndexSet<_>>();
-        for arg_def in &definition.arguments {
-            if !existing_arg_names.contains(&arg_def.name)
-                && let Some(default_value) = &arg_def.default_value
-            {
-                let arg = Argument {
-                    name: arg_def.name.clone(),
-                    value: default_value.clone(),
-                };
-                directive.arguments.push(Node::new(arg));
-            }
-        }
+            .map(|arg_def| {
+                (
+                    arg_def.name.clone(),
+                    directive
+                        .specified_argument_by_name(&arg_def.name)
+                        .or(arg_def.default_value.as_ref()),
+                )
+            })
+            .collect()
     }
 
     fn transform_arguments(

@@ -37,6 +37,7 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::limits;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::QueryPlannerService;
@@ -125,6 +126,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     enable_authorization_directives: bool,
     config_mode_hash: Arc<ConfigModeHash>,
     cooperative_cancellation: CooperativeCancellation,
+    config_limits: limits::Config,
 }
 
 fn init_query_plan_from_redis(
@@ -187,6 +189,7 @@ where
             enable_authorization_directives,
             cooperative_cancellation,
             config_mode_hash,
+            config_limits: configuration.limits.clone(),
         })
     }
 
@@ -372,6 +375,7 @@ where
                         metadata: caching_key.metadata.clone(),
                         plan_options: caching_key.plan_options.clone(),
                         compute_job_type: ComputeJobType::QueryPlanningWarmup,
+                        variables: Default::default(),
                     };
                     let res = match service.ready().await {
                         Ok(service) => service.call(request).await,
@@ -544,11 +548,13 @@ where
                 init_query_plan_from_redis(&self.subgraph_schemas, v)
             })
             .await;
+
         if entry.is_first() {
             let query_planner::CachingRequest {
                 query,
                 operation_name,
                 context,
+                variables,
             } = request;
 
             let request = QueryPlannerRequest::builder()
@@ -558,6 +564,7 @@ where
                 .metadata(caching_key.metadata)
                 .plan_options(caching_key.plan_options)
                 .compute_job_type(ComputeJobType::QueryPlanning)
+                .variables(variables)
                 .build();
 
             let planning_task = async move {
@@ -818,6 +825,14 @@ where
                         context.extensions().with_lock(|lock| {
                             lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                         });
+
+                        crate::spec::operation_limits::check_measured(
+                            &plan.query_metrics,
+                            &self.config_limits,
+                            &caching_key.query,
+                            caching_key.operation.as_deref(),
+                        )
+                        .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e.into())))?;
                     }
 
                     Ok(QueryPlannerResponse::builder().content(content).build())
@@ -1161,7 +1176,8 @@ mod tests {
                     .call(query_planner::CachingRequest::new(
                         "query Me { me { username } }".to_string(),
                         Some("".into()),
-                        context.clone()
+                        context.clone(),
+                        Default::default()
                     ))
                     .await
                     .is_err()
@@ -1185,7 +1201,8 @@ mod tests {
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { name { first } } }".to_string(),
                     Some("".into()),
-                    context.clone()
+                    context.clone(),
+                    Default::default()
                 ))
                 .await
                 .is_err()
@@ -1248,6 +1265,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
+                Default::default(),
             ))
             .await;
 
@@ -1323,6 +1341,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1439,6 +1458,7 @@ mod tests {
                     "query Me { me { name { first } } }".to_string(),
                     Some("".into()),
                     context.clone(),
+                    Default::default(),
                 ))
                 .await
         });
@@ -1522,6 +1542,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
+                Default::default(),
             ))
             .await;
 
@@ -1598,6 +1619,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1674,6 +1696,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1751,6 +1774,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1831,6 +1855,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1910,6 +1935,7 @@ mod tests {
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 context.clone(),
+                Default::default(),
             ))
             .with_memory_tracking("planning_task")
             .await;
@@ -1992,6 +2018,7 @@ mod tests {
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
                     context.clone(),
+                    Default::default(),
                 ))
                 .await
                 .unwrap();
@@ -2075,6 +2102,7 @@ mod tests {
                     .to_string(),
                     Some("".into()),
                     context.clone(),
+                    Default::default()
                 ))
                 .await
                 .is_ok()
@@ -2093,6 +2121,7 @@ mod tests {
                     .to_string(),
                     Some("".into()),
                     context.clone(),
+                    Default::default()
                 ))
                 .await
                 .is_ok()
@@ -2159,6 +2188,7 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
+                Default::default(),
             ))
             .await
             .unwrap();
@@ -2173,6 +2203,7 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
+                Default::default(),
             ))
             .await
             .unwrap();
@@ -2233,6 +2264,7 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
+                Default::default(),
             ))
             .await;
 
@@ -2246,6 +2278,7 @@ mod tests {
                 .to_string(),
                 None,
                 context.clone(),
+                Default::default(),
             ))
             .await;
 
@@ -2301,7 +2334,7 @@ mod tests {
             context
                 .extensions()
                 .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
-            query_planner::CachingRequest::new(query_str, None, context)
+            query_planner::CachingRequest::new(query_str, None, context, Default::default())
         };
 
         // send query to caching planner. it should save this query plan in its cache

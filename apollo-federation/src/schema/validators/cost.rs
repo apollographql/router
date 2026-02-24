@@ -11,13 +11,9 @@ pub(crate) fn validate_cost_directives(
     let Some(cost_directive_name) = CostSpecDefinition::cost_directive_name(schema)? else {
         return Ok(());
     };
-    let Ok(cost_directive_referencers) = schema
+    let cost_directive_referencers = schema
         .referencers()
-        .get_directive(cost_directive_name.as_str())
-    else {
-        // This just returns an Err if the directive is not found, which is fine in this case.
-        return Ok(());
-    };
+        .get_directive(cost_directive_name.as_str());
     for interface_field in &cost_directive_referencers.interface_fields {
         errors
             .errors

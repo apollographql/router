@@ -71,7 +71,6 @@ fn jwt_error_to_reason(jwt_err: &JWTError) -> &'static str {
         ErrorKind::Base64(_) => "BASE64_ERROR",
         ErrorKind::Json(_) => "JSON_ERROR",
         ErrorKind::Utf8(_) => "UTF8_ERROR",
-        ErrorKind::Crypto(_) => "CRYPTO_ERROR",
         // ErrorKind is non-exhaustive
         _ => "UNKNOWN_ERROR",
     }

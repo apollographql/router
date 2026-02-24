@@ -214,6 +214,12 @@ Learn more in [Request Limits](/graphos/routing/security/request-limits).
 
 By default, the router obtains the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required. The URL can use HTTP and HTTPS for network access to subgraph, or have the following shape for Unix sockets usage: `unix:///path/to/subgraph.sock`
 
+<Note>
+
+Unix socket paths should be absolute (starting with `/`). The URL format is `unix://` followed by the absolute path, resulting in three slashes: `unix:///var/run/subgraph.sock`.
+
+</Note>
+
 However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
 
 ```yaml
@@ -232,7 +238,7 @@ If you need to override the subgraph URL at runtime on a per-request basis, you 
 
 You can enhance your graph's security with GraphOS Router by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. Once configured, the router checks incoming requests against the PQL.
 
-Learn more in [Safelisting with persisted queries](/router/configuration/persisted-queries).
+Learn more about [safelisting with persisted queries](/graphos/platform/security/persisted-queries).
 
 ---
 
@@ -433,6 +439,34 @@ limits:
   introspection_max_depth: false
 ```
 
+#### Redacting query validation errors
+
+Query validation errors might reveal information about your schema structure, such as field names, types, and required arguments. Although this is not typically a significant security concern (especially with persisted queries), you can redact these error details in production environments.
+
+Apollo Router returns detailed validation error messages by default. To redact validation errors and return a generic error message, set the `supergraph.redact_query_validation_errors` flag:
+
+```yaml title="router.yaml"
+supergraph:
+  redact_query_validation_errors: true
+```
+
+When you enable this setting, Apollo Router replaces query validation errors with a single generic error:
+
+```json
+{
+  "message": "invalid query",
+  "extensions": {
+    "code": "UNKNOWN_ERROR"
+  }
+}
+```
+
+<Note>
+
+Enabling this option will make debugging more difficult, as clients won't receive specific information about what's wrong with their queries. Consider enabling it only in production environments where schema details should remain private.
+
+</Note>
+
 #### Early cancel
 
 Up until [Apollo Router Core v1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1), when the client closed the connection without waiting for the response, the entire request was cancelled and did not go through the entire pipeline. Since this causes issues with request monitoring, the router introduced a new behavior in 1.43.1. Now, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.
@@ -476,12 +510,24 @@ traffic_shaping:
 
 By default, the router compresses subgraph requests by generating fragment definitions based on the shape of the subgraph operation. In many cases this significantly reduces the size of the query sent to subgraphs.
 
-You can explicitly opt-out of this behavior by specifying `supergraph.generate_query_fragments`:
+Opt out of this behavior by specifying `supergraph.generate_query_fragments`:
 
 ```yaml
 supergraph:
   generate_query_fragments: false
 ```
+
+#### Variable validation modes
+
+By default, the router validates input variables strictly. It validates each input object value against its type definition, and any unknown fields result in a request error.
+
+```yaml
+supergraph:
+  strict_variable_validation: enforce
+```
+
+If your implementation requires unknown fields on a defined type, you can opt out of stricter validation by specifying `strict_variable_validation: measure`.
+In this case, the router will not error when encountering unknown fields, but will log the field for reference.
 
 ---
 
@@ -840,6 +886,13 @@ headers:
 ```
 
 Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.
+
+### Escaping special characters
+
+To include a literal `$` character, double it as `$$`. The router converts each `$$` to a single `$`:
+
+- Config value: `prefix$$suffix`
+- Result: `prefix$suffix`
 
 ## Related topics
 

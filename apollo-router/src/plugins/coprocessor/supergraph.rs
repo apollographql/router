@@ -78,15 +78,12 @@ impl SupergraphStage {
         response_validation: bool,
     ) -> supergraph::BoxService
     where
-        C: Service<
-                http::Request<RouterBody>,
-                Response = http::Response<RouterBody>,
-                Error = BoxError,
-            > + Clone
+        C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
+            + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+        <C as tower::Service<HttpRequest>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -201,12 +198,12 @@ async fn process_supergraph_request_stage<C>(
     executed: &mut bool,
 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if request_config.condition.evaluate_request(&request) != Some(true) {
         return Ok(ControlFlow::Continue(request));
@@ -219,8 +216,7 @@ where
 
     let headers_to_send = request_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
 
     let body_to_send = request_config
         .body
@@ -243,7 +239,13 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+
+    // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
+    // we don't intend for coprocessor calls; if in the future we change it, make sure to
+    // understand what could be sent to coprocessors and how that might affect their behavior
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, Context::new())
+        .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
     let duration = start.elapsed();
@@ -348,12 +350,12 @@ async fn process_supergraph_response_stage<C>(
     executed: &mut bool,
 ) -> Result<supergraph::Response, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
@@ -375,8 +377,7 @@ where
     // Encode headers, body, status, context, sdl to create a payload
     let headers_to_send = response_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
     let body_to_send = response_config
         .body
         .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));
@@ -398,7 +399,13 @@ where
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+
+    // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
+    // we don't intend for coprocessor calls; if in the future we change it, make sure to
+    // understand what could be sent to coprocessors and how that might affect their behavior
+    let co_processor_result = payload
+        .call(http_client.clone(), &coprocessor_url, Context::new())
+        .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
     let duration = start.elapsed();
@@ -477,7 +484,11 @@ where
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
                 let co_processor_result = payload
-                    .call(generator_client, &generator_coprocessor_url)
+                    .call(
+                        generator_client,
+                        &generator_coprocessor_url,
+                        generator_map_context.clone(),
+                    )
                     .await;
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
@@ -574,7 +585,19 @@ mod tests {
 
             mock_http_client.expect_clone().returning(move || {
                 let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_call().returning(callback);
+                mock_http_client.expect_call().returning(
+                    move |req: crate::services::http::HttpRequest| {
+                        let context = req.context.clone();
+                        let fut = callback(req.http_request);
+                        Box::pin(async move {
+                            let response = fut.await?;
+                            Ok(crate::services::http::HttpResponse {
+                                http_response: response,
+                                context,
+                            })
+                        })
+                    },
+                );
                 mock_http_client
             });
             mock_http_client
@@ -596,7 +619,19 @@ mod tests {
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
                     let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client.expect_call().returning(callback);
+                    mock_http_client.expect_call().returning(
+                        move |req: crate::services::http::HttpRequest| {
+                            let context = req.context.clone();
+                            let fut = callback(req.http_request);
+                            Box::pin(async move {
+                                let response = fut.await?;
+                                Ok(crate::services::http::HttpResponse {
+                                    http_response: response,
+                                    context,
+                                })
+                            })
+                        },
+                    );
                     mock_http_client
                 });
                 mock_http_client
