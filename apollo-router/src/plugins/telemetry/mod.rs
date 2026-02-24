@@ -3213,7 +3213,7 @@ mod tests {
         let mut injected = Injected(HashMap::new());
         let _ctx = opentelemetry::Context::new()
             .with_remote_span_context(SpanContext::new(
-                TraceId::from_u128(0x04f9e396465c4840bc2bf493b8b1a7fc),
+                TraceId::from(0x04f9e396465c4840bc2bf493b8b1a7fc),
                 SpanId::INVALID,
                 TraceFlags::default(),
                 false,

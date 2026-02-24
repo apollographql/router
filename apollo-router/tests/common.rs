@@ -29,16 +29,12 @@ use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TracerProvider as OtherTracerProvider;
-use opentelemetry_otlp::HttpExporterBuilder;
-use opentelemetry_otlp::Protocol;
-use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::testing::trace::NoopSpanExporter;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use parking_lot::Mutex;
@@ -375,26 +371,22 @@ pub enum Telemetry {
 
 impl Telemetry {
     fn tracer_provider(&self, service_name: &str) -> SdkTracerProvider {
-        let config = Config::default().with_resource(Resource::new(vec![KeyValue::new(
-            SERVICE_NAME,
-            service_name.to_string(),
-        )]));
+        let resource = Resource::builder_empty()
+            .with_attributes([KeyValue::new(SERVICE_NAME, service_name.to_string())])
+            .build();
 
         match self {
             Telemetry::Otlp {
                 endpoint: Some(endpoint),
             } => SdkTracerProvider::builder()
-                .with_config(config)
+                .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        SpanExporterBuilder::Http(
-                            HttpExporterBuilder::default()
-                                .with_endpoint(endpoint)
-                                .with_protocol(Protocol::HttpBinary),
-                        )
-                        .build_span_exporter()
-                        .expect("otlp pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
+                        opentelemetry_otlp::SpanExporter::builder()
+                            .with_http()
+                            .with_endpoint(endpoint)
+                            .build()
+                            .expect("otlp pipeline failed"),
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -405,14 +397,13 @@ impl Telemetry {
                 )
                 .build(),
             Telemetry::Datadog => SdkTracerProvider::builder()
-                .with_config(config)
+                .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
                         opentelemetry_datadog::new_pipeline()
                             .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -423,14 +414,12 @@ impl Telemetry {
                 )
                 .build(),
             Telemetry::Zipkin => SdkTracerProvider::builder()
-                .with_config(config)
+                .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        opentelemetry_zipkin::new_pipeline()
-                            .with_service_name(service_name)
-                            .init_exporter()
+                        opentelemetry_zipkin::ZipkinExporter::builder()
+                            .build()
                             .expect("zipkin pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -441,7 +430,7 @@ impl Telemetry {
                 )
                 .build(),
             Telemetry::None | Telemetry::Otlp { endpoint: None } => SdkTracerProvider::builder()
-                .with_config(config)
+                .with_resource(resource)
                 .with_simple_exporter(NoopSpanExporter::default())
                 .build(),
         }
@@ -1562,16 +1551,12 @@ impl IntegrationTest {
     pub(crate) fn force_flush(&self) {
         let tracer_provider_client = self._tracer_provider_client.clone();
         let tracer_provider_subgraph = self._tracer_provider_subgraph.clone();
-        for r in tracer_provider_subgraph.force_flush() {
-            if let Err(e) = r {
-                eprintln!("failed to flush subgraph tracer: {e}");
-            }
+        if let Err(e) = tracer_provider_subgraph.force_flush() {
+            eprintln!("failed to flush subgraph tracer: {e}");
         }
 
-        for r in tracer_provider_client.force_flush() {
-            if let Err(e) = r {
-                eprintln!("failed to flush client tracer: {e}");
-            }
+        if let Err(e) = tracer_provider_client.force_flush() {
+            eprintln!("failed to flush client tracer: {e}");
         }
     }
 

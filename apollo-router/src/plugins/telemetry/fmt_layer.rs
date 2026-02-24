@@ -263,6 +263,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
+    use opentelemetry_sdk::Resource;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -553,7 +554,7 @@ connector:
             display_resource: false,
             ..Default::default()
         };
-        let format = Json::new(Default::default(), json_format);
+        let format = Json::new(Resource::builder_empty().build(), json_format);
         let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
@@ -574,7 +575,7 @@ connector:
             ansi_escape_codes: false,
             ..Default::default()
         };
-        let format = Text::new(Default::default(), text_format);
+        let format = Text::new(Resource::builder_empty().build(), text_format);
         let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
@@ -592,7 +593,7 @@ connector:
             ansi_escape_codes: false,
             ..Default::default()
         };
-        let format = Text::new(Default::default(), text_format);
+        let format = Text::new(Resource::builder_empty().build(), text_format);
         let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
@@ -641,7 +642,7 @@ connector:
             display_resource: false,
             ..Default::default()
         };
-        let format = Json::new(Default::default(), text_format);
+        let format = Json::new(Resource::builder_empty().build(), text_format);
         let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
@@ -690,7 +691,7 @@ connector:
             display_resource: false,
             ..Default::default()
         };
-        let format = Json::new(Default::default(), text_format);
+        let format = Json::new(Resource::builder_empty().build(), text_format);
         let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
@@ -937,7 +938,7 @@ connector:
             display_resource: false,
             ..Default::default()
         };
-        let format = Json::new(Default::default(), text_format);
+        let format = Json::new(Resource::builder_empty().build(), text_format);
         let fmt_layer = FmtLayer::new(
             RateLimitFormatter::new(format, &RateLimit::default()),
             buff.clone(),
@@ -1043,7 +1044,7 @@ subgraph:
             ansi_escape_codes: false,
             ..Default::default()
         };
-        let format = Text::new(Default::default(), text_format);
+        let format = Text::new(Resource::builder_empty().build(), text_format);
         let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();

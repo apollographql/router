@@ -107,15 +107,15 @@ mod tests {
         let mock_processor = MockSpanProcessor::new();
         let processor = DatadogSpanProcessor::new(mock_processor.clone());
         let span_context = SpanContext::new(
-            TraceId::from_u128(1),
-            SpanId::from_u64(1),
+            TraceId::from(1),
+            SpanId::from(1),
             TraceFlags::default(),
             false,
             Default::default(),
         );
         let span_data = SpanData {
             span_context,
-            parent_span_id: SpanId::from_u64(1),
+            parent_span_id: SpanId::from(1),
             parent_span_is_remote: false,
             span_kind: SpanKind::Client,
             name: Default::default(),
@@ -125,7 +125,7 @@ mod tests {
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: Default::default(),
-            instrumentation_lib: Default::default(),
+            instrumentation_scope: Default::default(),
             dropped_attributes_count: 0,
         };
 

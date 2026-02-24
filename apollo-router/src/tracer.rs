@@ -115,17 +115,15 @@ mod test {
 
     #[tokio::test]
     async fn it_returns_valid_trace_id() {
+        use opentelemetry::InstrumentationScope;
+
         let _guard = TRACING_LOCK.lock();
         // Create a tracing layer with the configured tracer
 
         let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-            .with_simple_exporter(
-                opentelemetry_stdout::SpanExporter::builder()
-                    .with_writer(std::io::stdout())
-                    .build(),
-            )
+            .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
-        let tracer = provider.tracer_builder("noop").build();
+        let tracer = provider.tracer_with_scope(InstrumentationScope::builder("noop").build());
 
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
@@ -148,7 +146,9 @@ mod test {
         let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
-        let tracer = provider.tracer_builder("noop").build();
+        let tracer = provider.tracer_with_scope(
+            opentelemetry::InstrumentationScope::builder("noop").build(),
+        );
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`

@@ -1837,8 +1837,8 @@ mod test {
     #[test]
     fn test_extract_limits() {
         let mut span = LightSpanData {
-            trace_id: TraceId::from_u128(0),
-            span_id: SpanId::from_u64(1),
+            trace_id: TraceId::from(0),
+            span_id: SpanId::from(1),
             parent_span_id: SpanId::INVALID,
             span_kind: SpanKind::Client,
             name: Default::default(),
@@ -1881,8 +1881,8 @@ mod test {
     #[test]
     fn test_extract_cache_control() {
         let mut span = LightSpanData {
-            trace_id: TraceId::from_u128(0),
-            span_id: SpanId::from_u64(1),
+            trace_id: TraceId::from(0),
+            span_id: SpanId::from(1),
             parent_span_id: SpanId::INVALID,
             span_kind: SpanKind::Client,
             name: Default::default(),

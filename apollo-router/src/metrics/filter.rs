@@ -237,16 +237,15 @@ impl OtelMeterProvider for FilterMeterProvider {
 #[cfg(test)]
 mod test {
     use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
-    use opentelemetry_sdk::runtime;
-    use opentelemetry_sdk::testing::metrics::InMemoryMetricsExporter;
 
     use crate::metrics::filter::FilterMeterProvider;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_private_metrics() {
-        let exporter = InMemoryMetricsExporter::default();
+        let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
@@ -301,60 +300,60 @@ mod test {
             .get_finished_metrics()
             .unwrap()
             .into_iter()
-            .flat_map(|m| m.scope_metrics.into_iter())
-            .flat_map(|m| m.metrics)
+            .flat_map(|m| m.scope_metrics())
+            .flat_map(|m| m.metrics())
             .collect();
 
         // Matches allow
         assert!(
             metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.operations.test")
+                .any(|m| m.name() == "apollo.router.operations.test")
         );
 
-        assert!(metrics.iter().any(|m| m.name == "apollo.router.operations"));
+        assert!(metrics.iter().any(|m| m.name() == "apollo.router.operations"));
 
         assert!(
             metrics
                 .iter()
-                .any(|m| m.name == "apollo.graphos.cloud.test")
-        );
-
-        assert!(
-            metrics
-                .iter()
-                .any(|m| m.name == "apollo.router.lifecycle.api_schema")
+                .any(|m| m.name() == "apollo.graphos.cloud.test")
         );
 
         assert!(
             metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.operations.connectors")
+                .any(|m| m.name() == "apollo.router.lifecycle.api_schema")
+        );
+
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name() == "apollo.router.operations.connectors")
         );
         assert!(
             metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.schema.connectors")
+                .any(|m| m.name() == "apollo.router.schema.connectors")
         );
 
         // Mismatches allow
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.unknown.test")
+                .any(|m| m.name() == "apollo.router.unknown.test")
         );
 
         // Matches deny
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.operations.error")
+                .any(|m| m.name() == "apollo.router.operations.error")
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_description_and_unit() {
-        let exporter = InMemoryMetricsExporter::default();
+        let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
@@ -373,17 +372,17 @@ mod test {
             .get_finished_metrics()
             .unwrap()
             .into_iter()
-            .flat_map(|m| m.scope_metrics.into_iter())
-            .flat_map(|m| m.metrics)
+            .flat_map(|m| m.scope_metrics())
+            .flat_map(|m| m.metrics())
             .collect();
-        assert!(metrics.iter().any(|m| m.name == "apollo.router.operations"
-            && m.description == "desc"
-            && m.unit == "ms"));
+        assert!(metrics.iter().any(|m| m.name() == "apollo.router.operations"
+            && m.description() == "desc"
+            && m.unit() == "ms"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_public_metrics() {
-        let exporter = InMemoryMetricsExporter::default();
+        let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::public(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
@@ -420,37 +419,37 @@ mod test {
             .get_finished_metrics()
             .unwrap()
             .into_iter()
-            .flat_map(|m| m.scope_metrics.into_iter())
-            .flat_map(|m| m.metrics)
+            .flat_map(|m| m.scope_metrics())
+            .flat_map(|m| m.metrics())
             .collect();
 
-        assert!(!metrics.iter().any(|m| m.name == "apollo.router.config"));
+        assert!(!metrics.iter().any(|m| m.name() == "apollo.router.config"));
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.config.test")
+                .any(|m| m.name() == "apollo.router.config.test")
         );
-        assert!(!metrics.iter().any(|m| m.name == "apollo.router.entities"));
+        assert!(!metrics.iter().any(|m| m.name() == "apollo.router.entities"));
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.entities.test")
-        );
-        assert!(
-            !metrics
-                .iter()
-                .any(|m| m.name == "apollo.router.operations.connectors")
+                .any(|m| m.name() == "apollo.router.entities.test")
         );
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.schema.connectors")
+                .any(|m| m.name() == "apollo.router.operations.connectors")
+        );
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name() == "apollo.router.schema.connectors")
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_private_realtime_metrics() {
-        let exporter = InMemoryMetricsExporter::default();
+        let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo_realtime(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
@@ -471,21 +470,21 @@ mod test {
             .get_finished_metrics()
             .unwrap()
             .into_iter()
-            .flat_map(|m| m.scope_metrics.into_iter())
-            .flat_map(|m| m.metrics)
+            .flat_map(|m| m.scope_metrics())
+            .flat_map(|m| m.metrics())
             .collect();
         // Matches
         assert!(
             metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.operations.error")
+                .any(|m| m.name() == "apollo.router.operations.error")
         );
 
         // Mismatches
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.operations.mismatch")
+                .any(|m| m.name() == "apollo.router.operations.mismatch")
         );
     }
 }

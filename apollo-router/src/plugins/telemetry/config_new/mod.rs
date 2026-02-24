@@ -312,7 +312,7 @@ mod test {
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
                 TraceId::from(42),
-                SpanId::from_u64(42),
+                SpanId::from(42),
                 TraceFlags::default(),
                 false,
                 TraceState::default(),
@@ -323,7 +323,7 @@ mod test {
             let span = span!(tracing::Level::INFO, "test");
             let _guard = span.enter();
             let trace_id = trace_id();
-            assert_eq!(trace_id, Some(TraceId::from_u128(42)));
+            assert_eq!(trace_id, Some(TraceId::from(42)));
         });
     }
 
@@ -333,8 +333,8 @@ mod test {
         let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
+                TraceId::from(42),
+                SpanId::from(42),
                 TraceFlags::default(),
                 false,
                 TraceState::default(),
@@ -345,7 +345,7 @@ mod test {
             let span = span!(tracing::Level::INFO, "test");
             let _guard = span.enter();
             let trace_id = trace_id();
-            assert_eq!(trace_id, Some(TraceId::from_u128(42)));
+            assert_eq!(trace_id, Some(TraceId::from(42)));
         });
     }
 

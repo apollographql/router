@@ -186,11 +186,7 @@ mod tests {
     }
 
     fn empty_resource_metrics() -> ResourceMetrics {
-        use opentelemetry_sdk::Resource;
-        ResourceMetrics {
-            resource: Resource::builder_empty().build(),
-            scope_metrics: vec![],
-        }
+        ResourceMetrics::default()
     }
 
     #[tokio::test]
