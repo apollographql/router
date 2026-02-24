@@ -1,6 +1,6 @@
-### fix: ensure attributes under `telemetry.instrumentation.spans.http_client` are added to http_request span instead of subgraph_request ([PR #8798](https://github.com/apollographql/router/pull/8798))
+### Place `http_client` span attributes on the `http_request` span ([PR #8798](https://github.com/apollographql/router/pull/8798))
 
-Adds response attributes to the `http_request` span instead of `subgraph_request`.
+Attributes configured under `telemetry.instrumentation.spans.http_client` are now added to the `http_request` span instead of `subgraph_request`.
 
 Given this config:
 
@@ -16,6 +16,6 @@ telemetry:
             response_header: "content-type"
 ```
 
-Both attributes will now be placed on the `http_request` span.
+Both attributes are now placed on the `http_request` span.
 
 By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8798

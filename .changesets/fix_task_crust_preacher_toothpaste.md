@@ -1,9 +1,9 @@
-### Fix Router's validation of `ObjectValue` variables ([PR #8821](https://github.com/apollographql/router/pull/8821) and [PR #8884](https://github.com/apollographql/router/pull/8884))
+### Validate `ObjectValue` variable fields against input type definitions ([PR #8821](https://github.com/apollographql/router/pull/8821) and [PR #8884](https://github.com/apollographql/router/pull/8884))
 
-This change addresses an issue in Router whereby invalid additional fields of an input object were able to pass variable validation because the fields of the object were not being properly checked.
+The router now validates individual fields of input object variables against their type definitions. Previously, variable validation checked that the variable itself was present but didn't validate the fields within the object.
 
 Example:
-```
+```graphql
 ## schema ##
 input MessageInput {
     content: String
@@ -24,7 +24,7 @@ query($msg: MessageInput) {
 }
 
 ## input variables ##
-{"msg":  
+{"msg":
     {
     "content": "Hello",
     "author": "Me",
@@ -32,10 +32,10 @@ query($msg: MessageInput) {
     }
 }
 ```
-This request would pass validation because the variable `msg` from the query was present in the input, however, the fields of `msg` from the input were not being validated against the `MessageInput` type.
+This request previously passed validation because the variable `msg` was present in the input, but the fields of `msg` weren't validated against the `MessageInput` type.
 
 > [!WARNING]
-> If you need to opt out, you must set the `supergraph.strict_variable_validation` config option to `measure` instead.
+> To opt out of this behavior, set the `supergraph.strict_variable_validation` config option to `measure`.
 
 Enabled:
 ```yaml

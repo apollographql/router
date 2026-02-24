@@ -1,10 +1,10 @@
-### Bug: Connectors content-type header duplication ([PR #8867](https://github.com/apollographql/router/pull/8867))
+### Prevent duplicate `content-type` headers in connectors ([PR #8867](https://github.com/apollographql/router/pull/8867))
 
-When using connectors and overriding the content-type header, the default value was still set. Setting the content-type header will now properly override the value.
+When you override the `content-type` header in a connector `@source` directive, the router no longer appends the default value. The custom header value now properly replaces the default.
 
 For example:
 
-```
+```graphql
 @source(
     name: "datasetInsightsAPI"
     http: {
@@ -15,15 +15,15 @@ For example:
 )
 ```
 
-Would result in:
+Previously resulted in:
 
-```
+```http
 content-type: application/json, application/vnd.iaas.v1+json
 ```
 
-After this change, it will instead result in:
+Now correctly results in:
 
-```
+```http
 content-type: application/vnd.iaas.v1+json
 ```
 
