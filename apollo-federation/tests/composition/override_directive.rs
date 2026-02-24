@@ -828,7 +828,7 @@ mod interface_object {
             &result,
             &[(
                 "OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE",
-                r#"Invalid @override on field "A.a" of subgraph "Subgraph2": source subgraph "Subgraph1" does not have field "A.a" but abstracts it through @interfaceObject and overriding abstracted fields is not supported."#,
+                r#"Invalid @override on field "A.a" of subgraph "Subgraph2": source subgraph "Subgraph1" does not have field "A.a" but abstracts it in type "I" and overriding abstracted fields is not supported."#,
             )],
         );
     }

@@ -361,8 +361,17 @@ impl Merger {
         source_idx: usize,
     ) -> Result<Vec<ObjectFieldDefinitionPosition>, FederationError> {
         let mut interface_object_fields = Vec::new();
+        let parent_name_in_supergraph = dest_field.type_name();
         let subgraph = &self.subgraphs[source_idx];
+        if matches!(dest_field, ObjectOrInterfaceFieldDefinitionPosition::Interface(_))
+            || subgraph.schema().try_get_type(parent_name_in_supergraph.clone()).is_some()
+        {
+            return Ok(interface_object_fields);
+        }
+
         for itf in dest_field.parent().implemented_interfaces(&self.merged)? {
+            // Note that since the type is an interface in the supergraph, we can assume that
+            // if it is an object type in the subgraph, then it is an @interfaceObject.
             let itf_as_obj = ObjectTypeDefinitionPosition {
                 type_name: itf.name.clone(),
             };
@@ -769,7 +778,6 @@ impl Merger {
 pub(crate) struct FieldMergeContextProperties {
     pub used_overridden: bool,
     pub unused_overridden: bool,
-    #[allow(dead_code)]
     pub override_with_unknown_target: bool,
     pub override_label: Option<String>,
 }
