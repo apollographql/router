@@ -19,6 +19,7 @@ use super::TypeDefinitionPosition;
 use super::field_set::collect_target_fields_from_field_set;
 use super::position::DirectiveDefinitionPosition;
 use super::position::FieldDefinitionPosition;
+use super::position::HasAppliedDirectives;
 use super::position::HasDescription;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;

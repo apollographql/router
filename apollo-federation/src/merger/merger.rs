@@ -65,6 +65,7 @@ use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::HasDescription;
 use crate::schema::position::HasMutableDirectives;
 use crate::schema::position::HasType;
@@ -79,6 +80,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
+use crate::schema::validators::access_control::validate_transitive_access_control_requirements_in_the_supergraph;
 use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
@@ -144,7 +146,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) names: Vec<String>,
     pub(in crate::merger) error_reporter: ErrorReporter,
     pub(in crate::merger) merged: FederationSchema,
-    pub(in crate::merger) subgraph_names_to_join_spec_name: HashMap<String, Name>,
+    pub(in crate::merger) subgraph_names_to_join_spec_name: IndexMap<String, Name>,
     pub(in crate::merger) merged_federation_directive_names: HashSet<String>,
     pub(in crate::merger) merged_federation_directive_in_supergraph_by_directive_name:
         HashMap<Name, MergedDirectiveInfo>,
@@ -158,6 +160,7 @@ pub(crate) struct Merger {
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
     pub(in crate::merger) latest_federation_version_used: Version,
     pub(in crate::merger) applied_directives_to_merge: AppliedDirectivesToMerge,
+    pub(in crate::merger) access_control_directives_in_supergraph: Vec<(Name, Name)>,
 }
 
 #[allow(dead_code)]
@@ -217,7 +220,7 @@ impl Merger {
             compose_directive_manager: ComposeDirectiveManager::new(),
             error_reporter,
             merged,
-            subgraph_names_to_join_spec_name: HashMap::new(),
+            subgraph_names_to_join_spec_name: Default::default(),
             merged_federation_directive_names: HashSet::new(),
             merged_federation_directive_in_supergraph_by_directive_name: HashMap::new(),
             enum_usages: HashMap::new(),
@@ -230,6 +233,7 @@ impl Merger {
             join_spec_definition: join_spec,
             latest_federation_version_used,
             applied_directives_to_merge: Vec::new(),
+            access_control_directives_in_supergraph: Vec::new(),
         };
 
         // Now call prepare_supergraph as a member function
@@ -519,6 +523,15 @@ impl Merger {
             })
         } else {
             validate_merged_schema(&self.merged, &self.subgraphs, &mut errors)?;
+            if !self.access_control_directives_in_supergraph.is_empty() {
+                validate_transitive_access_control_requirements_in_the_supergraph(
+                    self.join_spec_definition,
+                    &self.subgraph_names_to_join_spec_name,
+                    &self.merged,
+                    &self.subgraphs,
+                    &mut errors,
+                )?;
+            }
             if !errors.is_empty() {
                 return Ok(MergeResult {
                     supergraph: None,

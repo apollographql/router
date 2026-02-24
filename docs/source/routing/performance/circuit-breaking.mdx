@@ -1,0 +1,30 @@
+---
+title: Circuit Breaking
+subtitle: Improve system stability by implementing circuit breaking
+---
+
+Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to subgraphs that fail or experience high latency. This gives your services time to recover without being overwhelmed by additional requests.
+
+Apollo Router monitors the health of your services. When it detects failures or timeouts, it temporarily removes the service from the request chain. You can implement circuit breakers at various levels (for example, at the router level or subgraph level).
+
+Circuit breaking helps your team manage environments where services are dynamic and experience varying loads. Use it with patterns like rate limiting and load balancing to optimize resource usage.
+
+Set thresholds for timeouts or errors to trigger circuit breaking. Manually override them to force a breaker closed or open.
+
+## Implementing circuit breaking
+
+To implement circuit breaking, evaluate your system architecture and the specific requirements of your services.
+
+### Use service meshes and proxies (recommended)
+
+Service meshes like [Istio](https://istio.io/) and proxies such as [Envoy](https://www.envoyproxy.io/) and [NGINX](https://www.nginx.com/) provide robust circuit breaking at the network or application level. Configure these tools to monitor health, error rates, and latency to halt or reroute traffic to failing subgraphs or services.
+
+Apollo recommends using these tools for circuit breaking outside the Apollo Router. Many organizations already use this approach for rate limiting and load balancing.
+
+Service mesh circuit breaking is typically not GraphQL-aware and might treat entire subgraphs atomically, lacking per-resolver or per-query granularity.
+
+### Use circuit breakers at the application level
+
+Wrap data sources or resolvers with circuit breaker logic using libraries like [`opossum`](https://github.com/nodeshift/opossum) (Node.js) or [`resilience4j`](https://github.com/resilience4j/resilience4j) (Java). Use this approach in your subgraph services to enable per-resolver or per-backend API circuit breaking.
+
+This decentralized approach can require coordination and duplication across your services.
