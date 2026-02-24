@@ -504,19 +504,26 @@ pub(crate) mod test_utils {
             expected: &[KeyValue],
             actual: impl Iterator<Item = &'a KeyValue>,
         ) -> bool {
-            let actual_vec: Vec<_> = actual.collect();
+            let mut actual_vec: Vec<_> = actual.collect();
             // If lengths are different, we can short circuit. This also accounts for a bug where
             // an empty attributes list would always be considered "equal" due to zip capping at
             // the shortest iter's length
             if expected.len() != actual_vec.len() {
                 return false;
             }
-            // This works because the attributes are always sorted
-            expected.iter().zip(actual_vec.iter()).all(|(exp, act)| {
-                exp.key == act.key
-                    && (exp.value == act.value
-                        || exp.value == Value::String(StringValue::from("<any>")))
-            })
+            // Sort both sides by key for comparison (attributes may not be in same order)
+            let mut expected_sorted: Vec<_> = expected.iter().collect();
+            expected_sorted.sort_by(|a, b| a.key.cmp(&b.key));
+            actual_vec.sort_by(|a, b| a.key.cmp(&b.key));
+
+            expected_sorted
+                .iter()
+                .zip(actual_vec.iter())
+                .all(|(exp, act)| {
+                    exp.key == act.key
+                        && (exp.value == act.value
+                            || exp.value == Value::String(StringValue::from("<any>")))
+                })
         }
     }
 
