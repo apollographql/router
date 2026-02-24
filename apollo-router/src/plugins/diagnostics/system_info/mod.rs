@@ -63,52 +63,56 @@ use sysinfo::System;
 
 use crate::plugins::diagnostics::DiagnosticsResult;
 
-/// Complete system diagnostic information
-struct SystemDiagnostics {
-    basic_system: BasicSystemInfo,
-    rust: RustInfo,
+/// Active resource and load info (memory, CPU, system load). Use [`collect_resources()`].
+struct ResourceAndLoadInfo {
     memory: MemoryInfo,
     jemalloc: JemallocInfo,
     cpu: CpuInfo,
     system_load: SystemLoadInfo,
-    environment: EnvironmentInfo,
 }
 
-impl SystemDiagnostics {
-    /// Collect all system diagnostic information
-    async fn new() -> Self {
-        // Create a single System instance for all system info collection
+impl ResourceAndLoadInfo {
+    async fn collect() -> Self {
         let mut system = System::new_all();
-
         Self {
-            basic_system: BasicSystemInfo::new().await,
-            rust: RustInfo::new(),
             memory: MemoryInfo::new(&system).await,
             jemalloc: JemallocInfo::new(),
             cpu: CpuInfo::new(&system).await,
             system_load: SystemLoadInfo::new(&mut system).await,
+        }
+    }
+}
+
+impl fmt::Display for ResourceAndLoadInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}{}{}", self.memory, self.jemalloc, self.cpu, self.system_load)
+    }
+}
+
+/// Static system info (OS, arch, router/rust version, build, env vars). Use [`collect_static_system_info()`].
+struct StaticSystemInfo {
+    basic_system: BasicSystemInfo,
+    rust: RustInfo,
+    environment: EnvironmentInfo,
+}
+
+impl StaticSystemInfo {
+    async fn collect() -> Self {
+        Self {
+            basic_system: BasicSystemInfo::new().await,
+            rust: RustInfo::new(),
             environment: EnvironmentInfo::new(),
         }
     }
 }
 
-impl fmt::Display for SystemDiagnostics {
+impl fmt::Display for StaticSystemInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}{}{}{}{}{}{}",
-            self.basic_system,
-            self.rust,
-            self.memory,
-            self.jemalloc,
-            self.cpu,
-            self.system_load,
-            self.environment
-        )
+        write!(f, "{}{}{}", self.basic_system, self.rust, self.environment)
     }
 }
 
-/// Basic system information
+/// Basic system information (OS, architecture, container).
 struct BasicSystemInfo {
     operating_system: &'static str,
     architecture: &'static str,
@@ -182,13 +186,14 @@ impl fmt::Display for BasicSystemInfo {
     }
 }
 
-/// Rust and build information
+/// Rust and build information.
 struct RustInfo {
     router_version: &'static str,
     rust_version: &'static str,
     build: BuildInfo,
 }
 
+#[allow(dead_code)]
 impl RustInfo {
     /// Collect Rust and Cargo information
     fn new() -> Self {
@@ -209,7 +214,7 @@ impl fmt::Display for RustInfo {
     }
 }
 
-/// Build and debug information
+#[allow(dead_code)]
 struct BuildInfo {
     build_type: &'static str,
     build_profile: Option<String>,
@@ -915,43 +920,20 @@ impl fmt::Display for SystemLoadInfo {
     }
 }
 
-/// Environment variables information
+/// Environment variables (Router-relevant allowlist).
 struct EnvironmentInfo {
-    relevant_vars: Vec<(String, String)>,
+    /// (var_name, Some(display_value) for safe vars, None for secret-bearing vars shown as "(set)")
+    relevant_vars: Vec<(String, Option<String>)>,
 }
 
 impl EnvironmentInfo {
-    /// Collect relevant environment variables
+    /// Collect relevant environment variables using the shared allowlist.
     ///
-    /// SECURITY: Limited environment variable exposure
-    /// Only expose specifically allowlisted environment variables that are safe for diagnostics.
-    /// Never expose variables that might contain secrets, tokens, passwords, or API keys.
+    /// SECURITY: Only vars from crate::info allowlist; safe vars get truncated values,
+    /// others get name-only / "(set)".
     fn new() -> Self {
-        // SECURITY: Explicit allowlist of safe environment variables
-        // Only Apollo-specific configuration variables are included
-        // DO NOT add variables that might contain secrets (API keys, passwords, etc.)
-        let relevant_vars = ["APOLLO_GRAPH_REF"];
-        let mut collected_vars = Vec::new();
-
-        for var in &relevant_vars {
-            if let Ok(value) = std::env::var(var) {
-                // SECURITY: Truncate long values to prevent log injection or excessive output
-                let display_value = if value.len() > 200 {
-                    format!(
-                        "{}... (truncated, {} chars total)",
-                        &value[..200],
-                        value.len()
-                    )
-                } else {
-                    value
-                };
-                collected_vars.push((var.to_string(), display_value));
-            }
-        }
-
-        Self {
-            relevant_vars: collected_vars,
-        }
+        let relevant_vars = crate::info::relevant_env_vars_for_diagnostics();
+        Self { relevant_vars }
     }
 }
 
@@ -963,8 +945,11 @@ impl fmt::Display for EnvironmentInfo {
         if self.relevant_vars.is_empty() {
             writeln!(f, "No relevant Apollo environment variables set")?;
         } else {
-            for (var, value) in &self.relevant_vars {
-                writeln!(f, "{}: {}", var, value)?;
+            for (var, value_opt) in &self.relevant_vars {
+                match value_opt {
+                    Some(value) => writeln!(f, "{}: {}", var, value)?,
+                    None => writeln!(f, "{}: (set)", var)?,
+                }
             }
         }
 
@@ -972,15 +957,27 @@ impl fmt::Display for EnvironmentInfo {
     }
 }
 
-/// Collect system information
+/// Collect static system information (OS, arch, container, router/rust version, build, env vars).
 ///
-/// SECURITY WARNING: This function collects extensive system information that may be sensitive:
-/// - Memory layout, CPU details, container environment
-/// - Environment variables, filesystem paths, system architecture
-/// - Should only be used in development/debugging environments with proper access controls
+/// Use for static deployment info. For memory/CPU/load use [`collect_resources()`].
+pub(crate) async fn collect_static_system_info() -> DiagnosticsResult<String> {
+    let info = StaticSystemInfo::collect().await;
+    Ok(info.to_string())
+}
+
+/// Collect active resource and load information (memory, jemalloc, CPU, system load).
+///
+/// Use for the Resources tab and report.txt. For static deployment info use [`collect_static_system_info()`].
+pub(crate) async fn collect_resources() -> DiagnosticsResult<String> {
+    let info = ResourceAndLoadInfo::collect().await;
+    Ok(info.to_string())
+}
+
+/// Collect resource and load information (alias for [`collect_resources()`]).
+///
+/// Kept for backward compatibility. Prefer [`collect_resources()`] or [`collect_static_system_info()`].
 pub(crate) async fn collect() -> DiagnosticsResult<String> {
-    let diagnostics = SystemDiagnostics::new().await;
-    Ok(diagnostics.to_string())
+    collect_resources().await
 }
 
 /// CGroup version enumeration

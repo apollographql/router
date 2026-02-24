@@ -6,13 +6,10 @@ async fn test_system_info_collection() {
     assert!(result.is_ok());
 
     let info = result.unwrap();
-    assert!(info.contains("SYSTEM INFORMATION"));
-    assert!(info.contains("Operating System:"));
-    assert!(info.contains("Architecture:"));
-    assert!(info.contains("Router Version:"));
-
-    // Test new normalized values are included
-    assert!(info.contains("(") && info.contains(")")); // Should have normalized values in parentheses
+    // collect() returns only resources/load (memory, jemalloc, CPU, system load); static info is in RouterSystemInfo
+    assert!(info.contains("MEMORY INFORMATION"));
+    assert!(info.contains("CPU INFORMATION"));
+    assert!(info.contains("SYSTEM LOAD"));
 }
 
 #[tokio::test]
@@ -30,13 +27,13 @@ async fn test_system_info_cpu_count() {
 }
 
 #[tokio::test]
-async fn test_system_info_environment_variables() {
+async fn test_system_info_resources_only_no_env_section() {
     let result = system_info::collect().await;
     assert!(result.is_ok());
 
     let info = result.unwrap();
-    // Should contain environment variables section
-    assert!(info.contains("RELEVANT ENVIRONMENT VARIABLES"));
+    // Environment variables are only in System info tab (RouterSystemInfo), not in resources output
+    assert!(!info.contains("RELEVANT ENVIRONMENT VARIABLES"));
 }
 
 #[tokio::test]
@@ -53,15 +50,14 @@ async fn test_system_info_memory_details() {
 }
 
 #[tokio::test]
-async fn test_system_info_container_detection() {
+async fn test_system_info_resources_only_no_basic_system() {
     let result = system_info::collect().await;
     assert!(result.is_ok());
 
     let info = result.unwrap();
-    // Should contain container environment information
-    assert!(info.contains("Container Environment:"));
-    // Should have some form of detection result
-    assert!(info.contains("detected") || info.contains("Not detected"));
+    // Basic system/container info is only in System info tab (RouterSystemInfo), not in resources output
+    assert!(!info.contains("Container Environment:"));
+    assert!(!info.contains("Operating System:"));
 }
 
 #[tokio::test]

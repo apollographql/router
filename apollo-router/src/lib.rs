@@ -61,6 +61,7 @@ mod context;
 mod error;
 mod executable;
 mod files;
+mod info;
 pub mod graphql;
 mod http_ext;
 mod http_server_factory;

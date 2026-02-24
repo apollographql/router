@@ -22,6 +22,10 @@ use regex::Regex;
 use url::ParseError;
 use url::Url;
 
+use crate::info::RouterSystemInfo;
+use crate::info::StartupOptions;
+use crate::info::set_relevant_env_var_names;
+use crate::info::set_router_system_info;
 use crate::LicenseSource;
 use crate::configuration::Discussed;
 use crate::configuration::expansion::Expansion;
@@ -55,20 +59,22 @@ const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const INITIAL_OCI_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Subcommands
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, PartialEq)]
 enum Commands {
+    /// Print router version, OS, config paths, startup options, and set env var names (for support tickets).
+    Info,
     /// Configuration subcommands.
     Config(ConfigSubcommandArgs),
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, PartialEq)]
 struct ConfigSubcommandArgs {
     /// Subcommands
     #[clap(subcommand)]
     command: ConfigSubcommand,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, PartialEq)]
 enum ConfigSubcommand {
     /// Print the json configuration schema.
     Schema,
@@ -284,6 +290,57 @@ impl Opt {
     }
 }
 
+/// Build RouterSystemInfo from Opt and optional config/schema details (for boot or CLI).
+fn build_router_system_info_from_opt(
+    opt: &Opt,
+    config_path: Option<String>,
+    config_hash: Option<String>,
+    supergraph_source: Option<String>,
+    supergraph_hash: Option<String>,
+) -> RouterSystemInfo {
+    let startup_options = StartupOptions {
+        log_level: Some(opt.log_level.clone()),
+        hot_reload: opt.hot_reload,
+        dev: opt.dev,
+        listen_address: opt
+            .listen_address
+            .as_ref()
+            .map(|a| a.to_string()),
+        config_path: opt
+            .config_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string()),
+        supergraph_path: opt
+            .supergraph_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string()),
+        supergraph_urls: opt.supergraph_urls.as_ref().map(|urls| {
+            urls.iter()
+                .map(|u| u.as_str().to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        }),
+        apollo_key_set: opt.apollo_key.is_some(),
+        apollo_graph_ref_set: opt.apollo_graph_ref.is_some(),
+        apollo_router_license_set: opt.apollo_router_license.is_some(),
+        apollo_router_license_path_set: opt.apollo_router_license_path.is_some(),
+        graph_artifact_reference_set: opt.graph_artifact_reference.is_some(),
+        anonymous_telemetry_disabled: opt.anonymous_telemetry_disabled,
+    };
+    RouterSystemInfo {
+        version: std::env!("CARGO_PKG_VERSION").to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        target_family: std::env::consts::FAMILY.to_string(),
+        config_path,
+        config_hash,
+        supergraph_source,
+        supergraph_hash,
+        startup_options,
+        set_env_var_names: set_relevant_env_var_names(),
+    }
+}
+
 /// This is the main router entrypoint.
 ///
 /// Starts a Tokio runtime and runs a Router in it based on command-line options.
@@ -375,6 +432,12 @@ impl Executable {
             return Ok(());
         }
 
+        if opt.command.as_ref() == Some(&Commands::Info) {
+            let info = build_router_system_info_from_opt(&opt, None, None, None, None);
+            println!("{}", info.format_for_cli());
+            return Ok(());
+        }
+
         *crate::services::APOLLO_KEY.lock() = opt.apollo_key.clone();
         *crate::services::APOLLO_GRAPH_REF.lock() = opt.apollo_graph_ref.clone();
         *APOLLO_ROUTER_LISTEN_ADDRESS.lock() = opt.listen_address;
@@ -446,6 +509,7 @@ impl Executable {
                 Discussed::new().print_preview();
                 Ok(())
             }
+            Some(Commands::Info) => unreachable!("router info command is handled before init_telemetry"),
             None => Self::inner_start(shutdown, schema, config, license, opt).await,
         };
 
@@ -672,6 +736,34 @@ impl Executable {
                 ));
             }
         };
+
+        // Build and store router system info for diagnostics; log compact boot line
+        let config_path_str = match &configuration {
+            ConfigurationSource::File { path, .. } => Some(path.to_string_lossy().to_string()),
+            _ => None,
+        };
+        let supergraph_source_str = match &schema_source {
+            SchemaSource::File { path, .. } => Some(path.to_string_lossy().to_string()),
+            SchemaSource::URLs { urls } => Some(format!(
+                "urls({})",
+                urls.iter()
+                    .map(|u| u.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )),
+            SchemaSource::Registry(_) => Some("uplink".to_string()),
+            SchemaSource::OCI(_) => Some("oci".to_string()),
+            SchemaSource::Static { .. } | SchemaSource::Stream(_) => Some("static/stream".to_string()),
+        };
+        let router_info = build_router_system_info_from_opt(
+            &opt,
+            config_path_str,
+            None,
+            supergraph_source_str,
+            None,
+        );
+        set_router_system_info(router_info.clone());
+        tracing::info!("{}", router_info.format_for_boot_log());
 
         // Order of precedence for licenses:
         // 1. explicit path from cli
