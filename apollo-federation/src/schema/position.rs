@@ -651,7 +651,6 @@ pub(crate) trait HasAppliedDirectives {
     type AppliedDirective: AsRef<Directive>;
 
     fn filter_directives<'dir, T: AsRef<Directive>>(
-        &self,
         directives: impl IntoIterator<Item = &'dir T>,
         name: &Name,
     ) -> Vec<&'dir T> {
@@ -677,7 +676,7 @@ impl HasAppliedDirectives for SchemaDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         let schema_def = self.get(&schema.schema);
-        self.filter_directives(schema_def.directives.iter(), directive_name)
+        Self::filter_directives(schema_def.directives.iter(), directive_name)
     }
 }
 
@@ -797,7 +796,7 @@ impl HasAppliedDirectives for ScalarTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|scalar| self.filter_directives(scalar.directives.iter(), directive_name))
+            .map(|scalar| Self::filter_directives(scalar.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -811,7 +810,7 @@ impl HasAppliedDirectives for ObjectTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|object| self.filter_directives(object.directives.iter(), directive_name))
+            .map(|object| Self::filter_directives(object.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -825,7 +824,7 @@ impl HasAppliedDirectives for ObjectFieldDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|field| self.filter_directives(field.directives.iter(), directive_name))
+            .map(|field| Self::filter_directives(field.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -839,7 +838,7 @@ impl HasAppliedDirectives for ObjectFieldArgumentDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .map(|input| Self::filter_directives(input.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -853,7 +852,7 @@ impl HasAppliedDirectives for InterfaceTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|intf| self.filter_directives(intf.directives.iter(), directive_name))
+            .map(|intf| Self::filter_directives(intf.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -867,7 +866,7 @@ impl HasAppliedDirectives for InterfaceFieldDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|field| self.filter_directives(field.directives.iter(), directive_name))
+            .map(|field| Self::filter_directives(field.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -880,7 +879,7 @@ impl HasAppliedDirectives for InterfaceFieldArgumentDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .map(|input| Self::filter_directives(input.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -893,7 +892,7 @@ impl HasAppliedDirectives for UnionTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|union| self.filter_directives(union.directives.iter(), directive_name))
+            .map(|union| Self::filter_directives(union.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -906,7 +905,7 @@ impl HasAppliedDirectives for EnumTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|enum_type| self.filter_directives(enum_type.directives.iter(), directive_name))
+            .map(|enum_type| Self::filter_directives(enum_type.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -919,7 +918,7 @@ impl HasAppliedDirectives for EnumValueDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|value| self.filter_directives(value.directives.iter(), directive_name))
+            .map(|value| Self::filter_directives(value.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -932,7 +931,7 @@ impl HasAppliedDirectives for InputObjectTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .map(|input| Self::filter_directives(input.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -945,7 +944,7 @@ impl HasAppliedDirectives for InputObjectFieldDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|field| self.filter_directives(field.directives.iter(), directive_name))
+            .map(|field| Self::filter_directives(field.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -958,7 +957,7 @@ impl HasAppliedDirectives for DirectiveArgumentDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .map(|input| Self::filter_directives(input.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
