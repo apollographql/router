@@ -778,6 +778,10 @@ mod interface_object {
             &[(
                 "OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE",
                 r#"@override is not yet supported on fields of @interfaceObject types: cannot be used on field "I.a" on subgraph "Subgraph1"."#,
+            ),
+            (
+                "INVALID_FIELD_SHARING",
+                r#"Non-shareable field "A.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1 (through @interfaceObject field "I.a")" and "Subgraph2" and defined as non-shareable in all of them"#
             )],
         );
     }
@@ -829,6 +833,10 @@ mod interface_object {
             &[(
                 "OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE",
                 r#"Invalid @override on field "A.a" of subgraph "Subgraph2": source subgraph "Subgraph1" does not have field "A.a" but abstracts it in type "I" and overriding abstracted fields is not supported."#,
+            ),
+            (
+                "INVALID_FIELD_SHARING",
+                r#"Non-shareable field "A.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1 (through @interfaceObject field "I.a")" and "Subgraph2" and defined as non-shareable in all of them"#,
             )],
         );
     }

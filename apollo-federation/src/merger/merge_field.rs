@@ -648,9 +648,9 @@ impl Merger {
         Ok(arg_sources)
     }
 
-    pub(crate) fn validate_field_sharing<T>(
+    pub(crate) fn validate_field_sharing(
         &mut self,
-        sources: &Sources<T>,
+        sources: &Sources<ObjectOrInterfaceFieldDefinitionPosition>,
         dest: &ObjectOrInterfaceFieldDefinitionPosition,
         merge_context: &FieldMergeContext,
     ) -> Result<(), FederationError> {
@@ -682,33 +682,28 @@ impl Merger {
             };
 
         // Iterate over sources and categorize fields
-        for (idx, unit) in sources.iter() {
-            if unit.is_some() {
-                if !merge_context.is_used_overridden(*idx)
-                    && !merge_context.is_unused_overridden(*idx)
-                {
-                    let subgraph = self.names[*idx].clone();
-                    categorize_field(*idx, subgraph, dest);
-                }
-            } else {
-                // Skip interface object fields if this subgraph is involved in overrides
-                // (either as the source or target of an override)
-                if !merge_context.is_used_overridden(*idx)
-                    && !merge_context.is_unused_overridden(*idx)
-                {
+        for (idx, source) in sources.iter() {
+            match source {
+                None => {
                     let itf_object_fields =
                         self.fields_in_source_if_abstracted_by_interface_object(dest, *idx)?;
+                    // In theory, a type can implement multiple interfaces and all of them could be a @interfaceObject in
+                    // the source and provide the field. If so, we want to consider each as a different source of the
+                    // field.
                     for field in itf_object_fields {
-                        // Also skip if the interface object field itself has @override
-                        let has_override = self.fields_with_override.object_fields.contains(&field);
-
-                        if !has_override {
-                            let subgraph_str = format!(
-                                "{} (through @interfaceObject field \"{}.{}\")",
-                                self.names[*idx], field.type_name, field.field_name
-                            );
-                            categorize_field(*idx, subgraph_str, &field.into());
-                        }
+                        let subgraph_str = format!(
+                            "{} (through @interfaceObject field \"{}.{}\")",
+                            self.names[*idx], field.type_name, field.field_name
+                        );
+                        categorize_field(*idx, subgraph_str, &field.into());
+                    }
+                },
+                Some(source) => {
+                    if !merge_context.is_used_overridden(*idx)
+                        && !merge_context.is_unused_overridden(*idx)
+                    {
+                        let subgraph = self.names[*idx].clone();
+                        categorize_field(*idx, subgraph, source);
                     }
                 }
             }
@@ -789,7 +784,6 @@ pub(crate) struct FieldMergeContext {
 }
 
 impl FieldMergeContext {
-    #[allow(dead_code)]
     pub(crate) fn new<I: IntoIterator<Item = usize>>(indices: I) -> Self {
         let mut props = HashMap::new();
         for i in indices {
@@ -798,7 +792,6 @@ impl FieldMergeContext {
         FieldMergeContext { props }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn is_used_overridden(&self, idx: usize) -> bool {
         self.props
             .get(&idx)
@@ -806,7 +799,6 @@ impl FieldMergeContext {
             .unwrap_or(false)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn is_unused_overridden(&self, idx: usize) -> bool {
         self.props
             .get(&idx)
@@ -814,42 +806,36 @@ impl FieldMergeContext {
             .unwrap_or(false)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_used_overridden(&mut self, idx: usize) {
         if let Some(p) = self.props.get_mut(&idx) {
             p.used_overridden = true;
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_unused_overridden(&mut self, idx: usize) {
         if let Some(p) = self.props.get_mut(&idx) {
             p.unused_overridden = true;
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_override_with_unknown_target(&mut self, idx: usize) {
         if let Some(p) = self.props.get_mut(&idx) {
             p.override_with_unknown_target = true;
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_override_label(&mut self, idx: usize, label: String) {
         if let Some(p) = self.props.get_mut(&idx) {
             p.override_label = Some(label);
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn override_label(&self, idx: usize) -> Option<&str> {
         self.props
             .get(&idx)
             .and_then(|p| p.override_label.as_deref())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn has_override_with_unknown_target(&self, idx: usize) -> bool {
         self.props
             .get(&idx)
@@ -857,7 +843,6 @@ impl FieldMergeContext {
             .unwrap_or(false)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn some<F>(&self, mut predicate: F) -> bool
     where
         F: FnMut(&FieldMergeContextProperties, usize) -> bool,

@@ -1709,6 +1709,10 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // If we do, then we look if one of the subgraph provides that field as a (non-external) interface object
         // type, and if that's the case, we add the field to the object.
         for subgraph in self.subgraphs.iter() {
+            // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
+            // have a specific validation that return a user-friendly error in such incorrect cases, see
+            // `post_merge_validations`). We must first check that there is some subgraph that implement
+            // that field as an "interface object", since in that case the field will genuinely be provided
             for itf_obj_field in subgraph.interface_object_fields() {
                 // we skip @external fields as they are provided by other subgraphs
                 if subgraph
@@ -1725,27 +1729,22 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     type_name: itf_obj_field.type_name.clone(),
                 };
 
-                // If an implementer of that interface is missing the field, merge it in.
+                // Note it's possible that interface is abstracted away (as an interface object) in multiple
+                // subgraphs, so we don't bother with the field definition in those subgraphs, but rather
+                // just copy the merged definition from the interface.
                 for implementer in itf.implementers(&self.merged)? {
                     if implementer
                         .field(itf_obj_field.field_name.clone())
                         .try_get(self.merged.schema())
                         .is_none()
                     {
-                        // We add a special @join__field for those added field with no `graph` target. This
-                        // clarifies to the later extraction process that this particular field doesn't come
-                        // from any particular subgraph.
                         let mut missing_obj_node = ast_node_to_add.clone();
-                        // Similarly to above, we filter out subgraph-only directives
                         missing_obj_node.directives.retain(|d| {
                             self.merged
                                 .schema()
                                 .directive_definitions
                                 .contains_key(&d.name)
                         });
-                        missing_obj_node
-                            .directives
-                            .push(JoinFieldBuilder::new().build());
                         missing_obj_node.arguments.iter_mut().for_each(|arg| {
                             arg.make_mut().directives.retain(|d| {
                                 self.merged
@@ -1754,6 +1753,15 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                     .contains_key(&d.name)
                             });
                         });
+
+                        // We add a special @join__field for those added field with no `graph` target. This
+                        // clarifies to the later extraction process that this particular field doesn't come
+                        // from any particular subgraph (it comes indirectly from an @interfaceObject type,
+                        // but it's very much indirect so ...).
+                        missing_obj_node
+                            .directives
+                            .push(JoinFieldBuilder::new().build());
+
                         fields_to_insert.insert(
                             ObjectFieldDefinitionPosition {
                                 type_name: implementer.type_name().clone(),
@@ -1770,6 +1778,21 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         for (dest, ast_node) in fields_to_insert {
             trace!("Filling in missing interface object field {dest} with {ast_node}",);
             dest.insert(&mut self.merged, Component::new(ast_node))?;
+            // If we had to add a field here, it means that, for this particular implementation, the
+            // field is only provided through the @interfaceObject. But because the field wasn't
+            // merged, it also means we haven't validated field sharing for that field, and we could
+            // have field sharing concerns if the field is provided by multiple @interfaceObject.
+            // So we validate field sharing now (it's convenient to wait until now as now that
+            // the field is part of the supergraph, we can just call `validate_field_sharing` with
+            // all sources `undefined` and it wil still find and check the `@interfaceObject`).
+            let sources: Sources<ObjectOrInterfaceFieldDefinitionPosition> = self.names.iter()
+                .enumerate()
+                // We don't usually want undefined sources in our Sources maps,
+                // but both validate_field_sharing and FieldMergeContext need the
+                // undefined sources to be registered in order to do their work.
+                .map(|(index, _)| (index, None))
+                .collect();
+            self.validate_field_sharing(&sources, &dest, &FieldMergeContext::new(sources.keys().copied()))?;
         }
 
         Ok(())
