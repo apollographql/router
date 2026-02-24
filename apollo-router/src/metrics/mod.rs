@@ -713,7 +713,9 @@ pub(crate) mod test_utils {
                     Array::I64(v) => v.into(),
                     Array::F64(v) => v.into(),
                     Array::String(v) => v.iter().map(|v| v.to_string()).collect::<Vec<_>>().into(),
+                    _ => serde_json::Value::Null,
                 },
+                _ => serde_json::Value::Null,
             }
         }
     }
