@@ -17,6 +17,10 @@
 *.iml
 .vscode
 
+# Cursor
+.cursor/plan-docs/
+.cursor/skills/
+
 # Docs
 /docs/node_modules/
 /docs/.cache/
