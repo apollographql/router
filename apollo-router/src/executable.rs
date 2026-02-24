@@ -54,6 +54,12 @@ pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(fal
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const INITIAL_OCI_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
+const FORBIDDEN_OTEL_VARS: [&str; 3] = [
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+];
+
 /// Subcommands
 #[derive(Subcommand, Debug)]
 enum Commands {
@@ -283,27 +289,22 @@ impl Opt {
         anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
     }
 
-    fn validate_otel_env() -> Result<(), anyhow::Error> {
-        let forbidden = [
-            "OTEL_EXPORTER_OTLP_ENDPOINT",
-            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-            "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-        ];
+    fn validate_otel_envs_not_present() -> Result<(), anyhow::Error> {
+        
+        let present: Vec<&'static str> = FORBIDDEN_OTEL_VARS
+        .into_iter()
+        .filter(|k| std::env::var_os(k).is_some())
+        .collect();
 
-        let present: Vec<&str> = forbidden
-            .iter()
-            .copied()
-            .filter(|var| std::env::var_os(var).is_some())
-            .collect();
-
-        if !present.is_empty() {
-            return Err(anyhow!(
-                "The following OTEL environment variables are not supported by Apollo Router and must not be set: {}",
-                present.join(", ")
-            ));
+        if present.is_empty() {
+            return Ok(());
         }
 
-        Ok(())
+        // Do not print values (could include auth headers in some setups).
+        Err(anyhow!(
+            "Router startup blocked: the following OTEL environment variables must not be set: {}",
+            present.join(", ")
+        ))
     }
 }
 
@@ -496,7 +497,7 @@ impl Executable {
 
          // ROUTER-1609
          // New rule that will prevent Router from starting if OTEL environment variables are set.
-        Opt::validate_otel_env()?;
+        Opt::validate_otel_envs_not_present()?;
 
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
@@ -1044,6 +1045,59 @@ mod tests {
                     || error_msg.contains("--graph-artifact-reference"),
                 "Error should mention the conflicting options"
             );
+            
         }
+
+        use super::super::*;
+
+        fn clear_vars() {
+            for k in FORBIDDEN_OTEL_VARS {
+                unsafe { std::env::remove_var(k); }
+            }
+        }
+
+        #[test]
+        fn passes_when_none_set() {
+            clear_vars();
+            assert!(Opt::validate_otel_envs_not_present().is_ok());
+        }
+
+        #[test]
+        fn fails_when_one_set() {
+            clear_vars();
+            unsafe {std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "http://example:4317"); }
+            let err = Opt::validate_otel_envs_not_present().unwrap_err().to_string();
+            assert!(err.contains("OTEL_EXPORTER_OTLP_ENDPOINT"));
+        }
+
+        #[test]
+        fn fails_and_lists_all_that_are_set() {
+            clear_vars();
+            unsafe { std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "x"); }
+            unsafe { std::env::set_var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "y"); }
+            unsafe { std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "z"); }
+
+            let err = Opt::validate_otel_envs_not_present().unwrap_err().to_string();
+            for k in FORBIDDEN_OTEL_VARS {
+                assert!(err.contains(k), "expected error to list {k}, got: {err}");
+            }
+        }
+
+        use std::process::Command;
+
+        #[test]
+        fn blocks_startup_when_forbidden_env_present() {
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_router"));
+            cmd.args(["--dev", "--supergraph", "tests/fixtures/starstuff.graphql"]);
+            cmd.env("OTEL_EXPORTER_OTLP_ENDPOINT", "http://example:4317");
+
+            let out = cmd.output().expect("run router");
+            assert!(!out.status.success());
+
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(stderr.contains("Router startup blocked"));
+            assert!(stderr.contains("OTEL_EXPORTER_OTLP_ENDPOINT"));
+        }
+
     }
 }
