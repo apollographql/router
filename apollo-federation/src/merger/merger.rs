@@ -87,7 +87,8 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::MultiIndexMap;
 use crate::utils::first_max_by_key;
-use crate::utils::human_readable::{human_readable_subgraph_names, human_readable_types};
+use crate::utils::human_readable::human_readable_subgraph_names;
+use crate::utils::human_readable::human_readable_types;
 use crate::utils::iter_into_single_item;
 
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
@@ -1124,17 +1125,21 @@ impl Merger {
                                 is_interface_object: false,
                                 interface_object_abstracting_fields,
                                 override_directive: None,
-                            }
+                            },
                         );
                     }
-                },
+                }
                 Some(source) => {
                     let subgraph = &self.subgraphs[*idx];
-                    let is_interface_field = subgraph.schema()
-                        .schema().get_interface(source.type_name()).is_some();
-                    let candidate_intf_object_in_subgraph = TypeDefinitionPosition::Object(
-                        ObjectTypeDefinitionPosition { type_name: dest.type_name().clone() }
-                    );
+                    let is_interface_field = subgraph
+                        .schema()
+                        .schema()
+                        .get_interface(source.type_name())
+                        .is_some();
+                    let candidate_intf_object_in_subgraph =
+                        TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+                            type_name: dest.type_name().clone(),
+                        });
                     let is_interface_object =
                         subgraph.is_interface_object_type(&candidate_intf_object_in_subgraph);
                     let override_directive = self.get_override_directive(*idx, source)?;
@@ -1150,7 +1155,7 @@ impl Merger {
                             is_interface_object,
                             interface_object_abstracting_fields: Vec::new(),
                             override_directive,
-                        }
+                        },
                     );
                 }
             }
@@ -1240,7 +1245,10 @@ impl Merger {
                 let source_mapped = subgraph_map.get(&source_subgraph_name).unwrap();
                 if !source_mapped.interface_object_abstracting_fields.is_empty() {
                     let abstracting_types = human_readable_types(
-                        source_mapped.interface_object_abstracting_fields.iter().map(|f| f.type_name.clone())
+                        source_mapped
+                            .interface_object_abstracting_fields
+                            .iter()
+                            .map(|f| f.type_name.clone()),
                     );
                     self.error_reporter.add_error(CompositionError::OverrideCollisionWithAnotherDirective {
                         message: format!(
@@ -1358,7 +1366,7 @@ impl Merger {
                     }
                 }
             }
-            }
+        }
 
         Ok(result)
     }
@@ -1785,14 +1793,20 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             // So we validate field sharing now (it's convenient to wait until now as now that
             // the field is part of the supergraph, we can just call `validate_field_sharing` with
             // all sources `undefined` and it wil still find and check the `@interfaceObject`).
-            let sources: Sources<ObjectOrInterfaceFieldDefinitionPosition> = self.names.iter()
+            let sources: Sources<ObjectOrInterfaceFieldDefinitionPosition> = self
+                .names
+                .iter()
                 .enumerate()
                 // We don't usually want undefined sources in our Sources maps,
                 // but both validate_field_sharing and FieldMergeContext need the
                 // undefined sources to be registered in order to do their work.
                 .map(|(index, _)| (index, None))
                 .collect();
-            self.validate_field_sharing(&sources, &dest, &FieldMergeContext::new(sources.keys().copied()))?;
+            self.validate_field_sharing(
+                &sources,
+                &dest,
+                &FieldMergeContext::new(sources.keys().copied()),
+            )?;
         }
 
         Ok(())

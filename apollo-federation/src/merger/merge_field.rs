@@ -363,8 +363,13 @@ impl Merger {
         let mut interface_object_fields = Vec::new();
         let parent_name_in_supergraph = dest_field.type_name();
         let subgraph = &self.subgraphs[source_idx];
-        if matches!(dest_field, ObjectOrInterfaceFieldDefinitionPosition::Interface(_))
-            || subgraph.schema().try_get_type(parent_name_in_supergraph.clone()).is_some()
+        if matches!(
+            dest_field,
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(_)
+        ) || subgraph
+            .schema()
+            .try_get_type(parent_name_in_supergraph.clone())
+            .is_some()
         {
             return Ok(interface_object_fields);
         }
@@ -697,7 +702,7 @@ impl Merger {
                         );
                         categorize_field(*idx, subgraph_str, &field.into());
                     }
-                },
+                }
                 Some(source) => {
                     if !merge_context.is_used_overridden(*idx)
                         && !merge_context.is_unused_overridden(*idx)
