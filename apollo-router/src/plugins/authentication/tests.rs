@@ -1930,8 +1930,8 @@ mod expiry_validation {
     use crate::services::router;
 
     fn authenticate_request(
-        allow_missing_exp: bool,
         token_claims: serde_json::Value,
+        allow_missing_exp: bool,
     ) -> ControlFlow<router::Response, router::Request> {
         let signing_key = SigningKey::random(&mut OsRng);
         let manager = if allow_missing_exp {
@@ -1950,7 +1950,7 @@ mod expiry_validation {
             "sub": "test"
         });
 
-        match authenticate_request(false, token_claims) {
+        match authenticate_request(token_claims, false) {
             ControlFlow::Break(response) => {
                 assert_eq!(response.response.status(), StatusCode::UNAUTHORIZED);
             }
@@ -1966,7 +1966,7 @@ mod expiry_validation {
             "sub": "test"
         });
 
-        match authenticate_request(true, token_claims) {
+        match authenticate_request(token_claims, true) {
             ControlFlow::Continue(_) => {}
             ControlFlow::Break(response) => {
                 panic!(
@@ -1983,7 +1983,7 @@ mod expiry_validation {
             "exp": 1
         });
 
-        match authenticate_request(true, token_claims) {
+        match authenticate_request(token_claims, true) {
             ControlFlow::Break(response) => {
                 assert_eq!(response.response.status(), StatusCode::UNAUTHORIZED);
             }
@@ -2002,7 +2002,7 @@ mod expiry_validation {
             "exp": get_current_timestamp() + 3600
         });
 
-        match authenticate_request(true, token_claims) {
+        match authenticate_request(token_claims, true) {
             ControlFlow::Continue(_) => {}
             ControlFlow::Break(response) => {
                 panic!(
@@ -2013,10 +2013,10 @@ mod expiry_validation {
     }
 
     fn authenticate_request_with_constraints(
-        allow_missing_exp: bool,
         token_claims: serde_json::Value,
         issuers: Option<Issuers>,
         audiences: Option<Audiences>,
+        allow_missing_exp: bool,
     ) -> ControlFlow<router::Response, router::Request> {
         let signing_key = SigningKey::random(&mut OsRng);
         let manager = make_manager_with_allow_missing_exp(
@@ -2037,7 +2037,7 @@ mod expiry_validation {
             "iss": "https://wrong.example.com"
         });
 
-        match authenticate_request_with_constraints(true, token_claims, Some(issuers), None) {
+        match authenticate_request_with_constraints(token_claims, Some(issuers), None, true) {
             ControlFlow::Break(response) => {
                 assert_eq!(
                     response.response.status(),
@@ -2058,7 +2058,7 @@ mod expiry_validation {
             "aud": "wrong-audience"
         });
 
-        match authenticate_request_with_constraints(true, token_claims, None, Some(audiences)) {
+        match authenticate_request_with_constraints(token_claims, None, Some(audiences), true) {
             ControlFlow::Break(response) => {
                 assert_eq!(response.response.status(), StatusCode::UNAUTHORIZED);
             }
