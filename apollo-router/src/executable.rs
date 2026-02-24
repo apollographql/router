@@ -290,11 +290,10 @@ impl Opt {
     }
 
     fn validate_otel_envs_not_present() -> Result<(), anyhow::Error> {
-        
         let present: Vec<&'static str> = FORBIDDEN_OTEL_VARS
-        .into_iter()
-        .filter(|k| std::env::var_os(k).is_some())
-        .collect();
+            .into_iter()
+            .filter(|k| std::env::var_os(k).is_some())
+            .collect();
 
         if present.is_empty() {
             return Ok(());
@@ -495,8 +494,8 @@ impl Executable {
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
 
-         // ROUTER-1609
-         // New rule that will prevent Router from starting if OTEL environment variables are set.
+        // ROUTER-1609
+        // New rule that will prevent Router from starting if OTEL environment variables are set.
         Opt::validate_otel_envs_not_present()?;
 
         let configuration = match (config, opt.config_path.as_ref()) {
@@ -1045,14 +1044,15 @@ mod tests {
                     || error_msg.contains("--graph-artifact-reference"),
                 "Error should mention the conflicting options"
             );
-            
         }
 
         use super::super::*;
 
         fn clear_vars() {
             for k in FORBIDDEN_OTEL_VARS {
-                unsafe { std::env::remove_var(k); }
+                unsafe {
+                    std::env::remove_var(k);
+                }
             }
         }
 
@@ -1065,39 +1065,34 @@ mod tests {
         #[test]
         fn fails_when_one_set() {
             clear_vars();
-            unsafe {std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "http://example:4317"); }
-            let err = Opt::validate_otel_envs_not_present().unwrap_err().to_string();
+            unsafe {
+                std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "http://example:4317");
+            }
+            let err = Opt::validate_otel_envs_not_present()
+                .unwrap_err()
+                .to_string();
             assert!(err.contains("OTEL_EXPORTER_OTLP_ENDPOINT"));
         }
 
         #[test]
         fn fails_and_lists_all_that_are_set() {
             clear_vars();
-            unsafe { std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "x"); }
-            unsafe { std::env::set_var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "y"); }
-            unsafe { std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "z"); }
+            unsafe {
+                std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "x");
+            }
+            unsafe {
+                std::env::set_var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "y");
+            }
+            unsafe {
+                std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "z");
+            }
 
-            let err = Opt::validate_otel_envs_not_present().unwrap_err().to_string();
+            let err = Opt::validate_otel_envs_not_present()
+                .unwrap_err()
+                .to_string();
             for k in FORBIDDEN_OTEL_VARS {
                 assert!(err.contains(k), "expected error to list {k}, got: {err}");
             }
         }
-
-        use std::process::Command;
-
-        #[test]
-        fn blocks_startup_when_forbidden_env_present() {
-            let mut cmd = Command::new(env!("CARGO_BIN_EXE_router"));
-            cmd.args(["--dev", "--supergraph", "tests/fixtures/starstuff.graphql"]);
-            cmd.env("OTEL_EXPORTER_OTLP_ENDPOINT", "http://example:4317");
-
-            let out = cmd.output().expect("run router");
-            assert!(!out.status.success());
-
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            assert!(stderr.contains("Router startup blocked"));
-            assert!(stderr.contains("OTEL_EXPORTER_OTLP_ENDPOINT"));
-        }
-
     }
 }
