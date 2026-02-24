@@ -89,13 +89,23 @@ pub(crate) struct StartupOptions {
     pub(crate) anonymous_telemetry_disabled: bool,
 }
 
-/// Static router system info: version, OS, arch, options, config/supergraph path+hash, env names.
+/// Static router system info: version, OS, arch, build, options, config/supergraph path+hash, env names.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RouterSystemInfo {
     pub(crate) version: String,
     pub(crate) os: String,
     pub(crate) arch: String,
     pub(crate) target_family: String,
+    /// Build type (e.g. "Release (optimized)" or "Debug (with debug assertions)").
+    pub(crate) build_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rust_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) build_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) target_triple: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) optimization_level: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) config_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -134,6 +144,29 @@ impl RouterSystemInfo {
         out.push_str(" (");
         out.push_str(&self.target_family);
         out.push_str(")\n");
+        out.push_str("Build type: ");
+        out.push_str(&self.build_type);
+        out.push_str("\n");
+        if let Some(ref rv) = self.rust_version {
+            out.push_str("Rust version: ");
+            out.push_str(rv);
+            out.push_str("\n");
+        }
+        if let Some(ref p) = self.build_profile {
+            out.push_str("Build profile: ");
+            out.push_str(p);
+            out.push_str("\n");
+        }
+        if let Some(ref t) = self.target_triple {
+            out.push_str("Target triple: ");
+            out.push_str(t);
+            out.push_str("\n");
+        }
+        if let Some(ref o) = self.optimization_level {
+            out.push_str("Optimization level: ");
+            out.push_str(o);
+            out.push_str("\n");
+        }
         out.push_str("Startup options:\n");
         if let Some(ref l) = self.startup_options.log_level {
             out.push_str(&format!("  --log {}\n", l));

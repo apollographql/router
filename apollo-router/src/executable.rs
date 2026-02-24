@@ -327,11 +327,21 @@ fn build_router_system_info_from_opt(
         graph_artifact_reference_set: opt.graph_artifact_reference.is_some(),
         anonymous_telemetry_disabled: opt.anonymous_telemetry_disabled,
     };
+    let build_type = if cfg!(debug_assertions) {
+        "Debug (with debug assertions)".to_string()
+    } else {
+        "Release (optimized)".to_string()
+    };
     RouterSystemInfo {
         version: std::env!("CARGO_PKG_VERSION").to_string(),
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         target_family: std::env::consts::FAMILY.to_string(),
+        build_type,
+        rust_version: std::env::var("CARGO_PKG_RUST_VERSION").ok(),
+        build_profile: std::env::var("CARGO_BUILD_PROFILE").ok(),
+        target_triple: std::env::var("CARGO_CFG_TARGET_TRIPLE").ok(),
+        optimization_level: std::env::var("CARGO_CFG_OPT_LEVEL").ok(),
         config_path,
         config_hash,
         supergraph_source,

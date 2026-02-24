@@ -9,13 +9,9 @@
 //!   - Target family (unix, windows, etc.)
 //!   - Container environment detection (Docker, Podman, Kubernetes, generic containers)
 //!
-//! - **Rust & Build Information**
+//! - **Rust & Version Information** (static build info is in [`crate::info::RouterSystemInfo`])
 //!   - Router version
 //!   - Rust version
-//!   - Build type (Debug/Release)
-//!   - Build profile
-//!   - Target triple
-//!   - Optimization level
 //!
 //! - **Memory Information**
 //!   - Total memory
@@ -186,21 +182,18 @@ impl fmt::Display for BasicSystemInfo {
     }
 }
 
-/// Rust and build information.
+/// Rust and router version information (build info lives in crate::info::RouterSystemInfo).
 struct RustInfo {
     router_version: &'static str,
     rust_version: &'static str,
-    build: BuildInfo,
 }
 
-#[allow(dead_code)]
 impl RustInfo {
-    /// Collect Rust and Cargo information
+    /// Collect Rust and Cargo version information
     fn new() -> Self {
         Self {
             router_version: env!("CARGO_PKG_VERSION"),
             rust_version: env!("CARGO_PKG_RUST_VERSION"),
-            build: BuildInfo::new(),
         }
     }
 }
@@ -209,62 +202,7 @@ impl fmt::Display for RustInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Router Version: {}", self.router_version)?;
         writeln!(f, "Rust Version: {}", self.rust_version)?;
-        writeln!(f, "{}", self.build)?;
         writeln!(f)
-    }
-}
-
-#[allow(dead_code)]
-struct BuildInfo {
-    build_type: &'static str,
-    build_profile: Option<String>,
-    target_triple: Option<String>,
-    optimization_level: Option<String>,
-}
-
-impl BuildInfo {
-    /// Collect build and debug symbol information
-    fn new() -> Self {
-        // Check if running in debug vs release mode
-        let build_type = if cfg!(debug_assertions) {
-            "Debug (with debug assertions)"
-        } else {
-            "Release (optimized)"
-        };
-
-        // Build profile information
-        let build_profile = std::env::var("CARGO_BUILD_PROFILE").ok();
-
-        // Target information
-        let target_triple = std::env::var("CARGO_CFG_TARGET_TRIPLE").ok();
-        let optimization_level = std::env::var("CARGO_CFG_OPT_LEVEL").ok();
-
-        Self {
-            build_type,
-            build_profile,
-            target_triple,
-            optimization_level,
-        }
-    }
-}
-
-impl fmt::Display for BuildInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f)?;
-        writeln!(f, "BUILD INFORMATION")?;
-        writeln!(f, "-----------------")?;
-        writeln!(f, "Build Type: {}", self.build_type)?;
-
-        if let Some(ref profile) = self.build_profile {
-            writeln!(f, "Build Profile: {}", profile)?;
-        }
-        if let Some(ref target) = self.target_triple {
-            writeln!(f, "Target Triple: {}", target)?;
-        }
-        if let Some(ref opt_level) = self.optimization_level {
-            writeln!(f, "Optimization Level: {}", opt_level)?;
-        }
-        Ok(())
     }
 }
 
