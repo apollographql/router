@@ -101,6 +101,11 @@ pub struct OciConfig {
 
     /// The duration between polling
     pub poll_interval: Duration,
+
+    /// Whether to use SSL (HTTPS) when connecting to the OCI registry.
+    /// Determined once at config creation from the registry hostname and
+    /// the `APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS` environment variable.
+    pub use_ssl: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -319,39 +324,49 @@ fn unsecure_hosts() -> Vec<String> {
     }
 }
 
-/// Extract the hostname from a registry string like "host", "host:port", or
-/// an IPv6 address like "[::1]:port", using `url::Url` for robust parsing.
+/// Extract the hostname from a registry string like "host", "host:port",
+/// "http://host:port", or an IPv6 address like "[::1]:port".
+/// If a scheme is already present, it is parsed directly; otherwise a dummy
+/// scheme is prepended so `url::Url` can parse it.
 /// IPv6 addresses are returned without brackets (e.g. "::1" not "[::1]").
 fn extract_host(registry: &str) -> Option<String> {
-    Url::parse(&format!("dummy://{registry}"))
-        .ok()
-        .and_then(|url| {
-            url.host().map(|h| match h {
-                url::Host::Ipv6(addr) => addr.to_string(),
-                other => other.to_string(),
-            })
-        })
+    let url = if registry.contains("://") {
+        Url::parse(registry).ok()?
+    } else {
+        Url::parse(&format!("dummy://{registry}")).ok()?
+    };
+    url.host().map(|h| match h {
+        url::Host::Ipv6(addr) => addr.to_string(),
+        other => other.to_string(),
+    })
 }
 
 /// Check whether `registry` matches any entry in `hosts`, comparing only the
 /// hostname portion (stripping any port).
 fn is_unsecure_host(registry: &str, hosts: &[String]) -> bool {
-    extract_host(registry)
-        .map_or(false, |host| hosts.iter().any(|h| h == &host))
+    extract_host(registry).is_some_and(|host| hosts.iter().any(|h| h == &host))
 }
 
-/// Determine whether to use HTTP or HTTPS for the OCI registry.
+/// Determine whether SSL should be used for the given OCI reference.
 ///
-/// Uses the `APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS` environment variable, which
-/// contains a comma-separated list of hostnames that should use HTTP instead of
-/// HTTPS. When the variable is unset, the defaults are "localhost", "127.0.0.1",
-/// and "dockerhost". Setting it to an empty string disables all HTTP overrides.
-async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
-    let hosts = unsecure_hosts();
-    if is_unsecure_host(registry, &hosts) {
-        ClientProtocol::Http
-    } else {
-        ClientProtocol::Https
+/// Consults the `APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS` environment variable,
+/// which contains a comma-separated list of hostnames that should use HTTP
+/// instead of HTTPS. When the variable is unset, the defaults are "localhost",
+/// "127.0.0.1", and "dockerhost". Setting it to an empty string disables all
+/// HTTP overrides.
+pub(crate) fn should_use_ssl(reference: &str) -> bool {
+    reference
+        .parse::<Reference>()
+        .map_or(true, |r| !is_unsecure_host(r.registry(), &unsecure_hosts()))
+}
+
+impl OciConfig {
+    fn client_protocol(&self) -> ClientProtocol {
+        if self.use_ssl {
+            ClientProtocol::Https
+        } else {
+            ClientProtocol::Http
+        }
     }
 }
 
@@ -359,7 +374,7 @@ async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
 pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<String, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
-    let protocol = infer_oci_protocol(reference.resolve_registry()).await;
+    let protocol = oci_config.client_protocol();
 
     let client = Client::new(ClientConfig {
         protocol,
@@ -404,7 +419,7 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
 pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
-    let protocol = infer_oci_protocol(reference.registry()).await;
+    let protocol = oci_config.client_protocol();
 
     tracing::debug!(
         "prepared to fetch schema from oci over {:?}, auth anonymous? {:?}",
@@ -608,6 +623,7 @@ mod tests {
             reference: reference.clone(),
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
+            use_ssl: false,
         }
     }
 
@@ -900,74 +916,39 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_localhost() {
-        let result = infer_oci_protocol("localhost").await;
-        assert_eq!(result, ClientProtocol::Http);
+    #[test]
+    fn test_should_use_ssl_localhost() {
+        assert!(!should_use_ssl("localhost:5000/test-graph:latest"));
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_localhost_with_port() {
-        let result = infer_oci_protocol("localhost:5000").await;
-        assert_eq!(result, ClientProtocol::Http);
+    #[test]
+    fn test_should_use_ssl_127_0_0_1() {
+        assert!(!should_use_ssl("127.0.0.1:5000/test-graph:latest"));
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_127_0_0_1() {
-        let result = infer_oci_protocol("127.0.0.1").await;
-        assert_eq!(result, ClientProtocol::Http);
+    #[test]
+    fn test_should_use_ssl_dockerhost() {
+        assert!(!should_use_ssl("dockerhost:5000/test-graph:latest"));
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_127_0_0_1_with_port() {
-        let result = infer_oci_protocol("127.0.0.1:5000").await;
-        assert_eq!(result, ClientProtocol::Http);
+    #[test]
+    fn test_should_use_ssl_external_registry() {
+        assert!(should_use_ssl("registry.apollographql.com/my-graph:latest"));
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_docker_io() {
-        let result = infer_oci_protocol("docker.io").await;
-        assert_eq!(result, ClientProtocol::Https);
+    #[test]
+    fn test_should_use_ssl_docker_io() {
+        assert!(should_use_ssl("docker.io/library/alpine:latest"));
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_docker_io_with_port() {
-        let result = infer_oci_protocol("docker.io:443").await;
-        assert_eq!(result, ClientProtocol::Https);
+    #[test]
+    fn test_should_use_ssl_invalid_reference_defaults_true() {
+        assert!(should_use_ssl(""));
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_apollo_registry() {
-        let result = infer_oci_protocol("registry.apollographql.com").await;
-        assert_eq!(result, ClientProtocol::Https);
-    }
-
-    #[tokio::test]
-    async fn test_infer_oci_protocol_apollo_registry_with_port() {
-        let result = infer_oci_protocol("registry.apollographql.com:443").await;
-        assert_eq!(result, ClientProtocol::Https);
-    }
-
-    #[tokio::test]
-    async fn test_infer_oci_protocol_custom_registry() {
-        let result = infer_oci_protocol("localhost.example.com").await;
-        assert_eq!(result, ClientProtocol::Https);
-    }
-
-    #[tokio::test]
-    async fn test_infer_oci_protocol_port_only() {
-        // This case will never pass the initial reference validation, but is
-        // included here as a second layer of security.
-        let result = infer_oci_protocol(":8080").await;
-        assert_eq!(result, ClientProtocol::Https);
-    }
-
-    #[tokio::test]
-    async fn test_infer_oci_protocol_empty_string() {
-        // This case will never pass the initial reference validation, but is
-        // included here as a second layer of security.
-        let result = infer_oci_protocol("").await;
-        assert_eq!(result, ClientProtocol::Https);
+    #[test]
+    fn test_should_use_ssl_no_substring_match() {
+        assert!(should_use_ssl("localhost.example.com/my-graph:latest"));
     }
 
     #[test]
@@ -1084,6 +1065,47 @@ mod tests {
             extract_host("registry.example.com:443"),
             Some("registry.example.com".to_string())
         );
+    }
+
+    #[test]
+    fn test_extract_host_with_http_scheme() {
+        assert_eq!(
+            extract_host("http://localhost:5000"),
+            Some("localhost".to_string())
+        );
+        assert_eq!(
+            extract_host("http://127.0.0.1:5000"),
+            Some("127.0.0.1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_host_with_https_scheme() {
+        assert_eq!(
+            extract_host("https://registry.example.com"),
+            Some("registry.example.com".to_string())
+        );
+        assert_eq!(
+            extract_host("https://registry.example.com:443"),
+            Some("registry.example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_host_with_scheme_and_path() {
+        assert_eq!(
+            extract_host("https://registry.example.com/v2/repo"),
+            Some("registry.example.com".to_string())
+        );
+        assert_eq!(
+            extract_host("http://localhost:5000/v2/my-graph/manifests/latest"),
+            Some("localhost".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_host_with_scheme_ipv6() {
+        assert_eq!(extract_host("http://[::1]:5000"), Some("::1".to_string()));
     }
 
     #[test]
@@ -1405,6 +1427,7 @@ mod tests {
             reference: image_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
+            use_ssl: false,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -1440,6 +1463,7 @@ mod tests {
             reference: image_reference.to_string(),
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
+            use_ssl: false,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -1465,6 +1489,7 @@ mod tests {
             reference: digest_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
+            use_ssl: true,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -1552,6 +1577,7 @@ mod tests {
             reference: digest_ref,
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
+            use_ssl: false,
         };
 
         let result = create_oci_schema_stream(oci_config_digest);
@@ -1782,6 +1808,7 @@ mod tests {
             reference: image_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
+            use_ssl: false,
         };
 
         let start_time = tokio::time::Instant::now();
