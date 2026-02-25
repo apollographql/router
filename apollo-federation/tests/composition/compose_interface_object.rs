@@ -594,3 +594,49 @@ fn interface_with_non_resolvable_key_does_not_require_all_implementations() {
         "Expected composition to succeed - non-resolvable interface key should not require all implementations"
     );
 }
+
+#[test]
+fn interface_object_chains_are_not_supported() {
+    let s1 = ServiceDefinition {
+        name: "S1",
+        type_defs: r#"
+            type Query {
+              i: I1
+            }
+
+            interface I1 @key(fields: "id") {
+              id: ID!
+              data: String!
+            }
+
+            interface I2 implements I1 @key(fields: "id") {
+              id: ID!
+              data: String!
+              data2: String!
+            }
+
+            type T implements I1 & I2 @key(fields: "id") {
+              id: ID!
+              data: String!
+              data2: String!
+            }
+        "#,
+    };
+    let s2 = ServiceDefinition {
+        name: "S2",
+        type_defs: r#"
+            type I1 @interfaceObject @key(fields: "id") {
+              id: ID!
+              data3: Int
+            }
+        "#,
+    };
+    let result = compose_as_fed2_subgraphs(&[s1, s2]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INTERFACE_OBJECT_USAGE_ERROR",
+            r#"Interfaces implementing @interfaceObject are not supported: @interfaceObject "I1" is implemented by an interface "I2"."#,
+        )],
+    );
+}

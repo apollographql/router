@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Debug;
 use std::fmt::Display;
 
 use apollo_compiler::Name;
@@ -76,7 +77,7 @@ impl Merger {
         dest: &T,
     ) -> Result<IndexSet<Name>, FederationError>
     where
-        T: HasArguments + std::fmt::Debug + Display,
+        T: HasArguments + Debug + Display,
         <T as HasArguments>::ArgumentPosition: Display,
     {
         let mut arg_types: IndexMap<Name, Node<Type>> = Default::default();
@@ -259,7 +260,8 @@ impl Merger {
             + HasDefaultValue
             + HasDescription
             + HasType
-            + Into<DirectiveTargetPosition>,
+            + Into<DirectiveTargetPosition>
+            + Debug,
     {
         trace!("Merging argument \"{dest}\"");
         self.merge_description(sources, dest)?;
