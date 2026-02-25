@@ -814,8 +814,8 @@ impl CacheService {
                 .await;
         }
 
-        if !is_entity {
-            self.call_service_for_root_fields_operation(
+        if is_entity {
+            self.call_service_for_entities_query(
                 request,
                 storage,
                 is_known_private,
@@ -824,7 +824,7 @@ impl CacheService {
             )
             .await
         } else {
-            self.call_service_for_entities_query(
+            self.call_service_for_root_fields_operation(
                 request,
                 storage,
                 is_known_private,
