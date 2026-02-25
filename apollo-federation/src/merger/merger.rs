@@ -1731,69 +1731,83 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // If we do, then we look if one of the subgraph provides that field as a (non-external) interface object
         // type, and if that's the case, we add the field to the object.
         for (index, subgraph) in self.subgraphs.iter().enumerate() {
-            // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
-            // have a specific validation that return a user-friendly error in such incorrect cases, see
-            // `post_merge_validations`). We must first check that there is some subgraph that implement
-            // that field as an "interface object", since in that case the field will genuinely be provided
-            for itf_obj_field in subgraph.interface_object_fields() {
-                // we skip @external fields as they are provided by other subgraphs
-                if subgraph
-                    .metadata()
-                    .external_metadata()
-                    .is_external(&FieldDefinitionPosition::Object(itf_obj_field.clone()))
-                {
-                    continue;
-                }
-
-                let ast_node_to_add =
-                    (*itf_obj_field.get(subgraph.schema().schema())?.node).clone();
+            for itf_object in subgraph.interface_objects() {
                 let itf = InterfaceTypeDefinitionPosition {
-                    type_name: itf_obj_field.type_name.clone(),
+                    type_name: itf_object.type_name.clone(),
                 };
-
                 // Note it's possible that interface is abstracted away (as an interface object) in multiple
                 // subgraphs, so we don't bother with the field definition in those subgraphs, but rather
                 // just copy the merged definition from the interface.
                 for implementer in itf.implementers(&self.merged)? {
-                    if implementer
-                        .field(itf_obj_field.field_name.clone())
-                        .try_get(self.merged.schema())
-                        .is_none()
-                    {
-                        let mut missing_obj_node = ast_node_to_add.clone();
-                        missing_obj_node.directives.retain(|d| {
-                            self.merged
-                                .schema()
-                                .directive_definitions
-                                .contains_key(&d.name)
-                            // filter access control directives for now as they will be merged later one
-                            && !access_control_directive_names.contains(&d.name)
+                    if matches!(
+                        implementer,
+                        ObjectOrInterfaceTypeDefinitionPosition::Interface(_)
+                    ) {
+                        // @interfaceObject cannot be implemented by other interfaces
+                        self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {
+                            message: format!(
+                                "Interfaces implementing @interfaceObject are not supported: @interfaceObject \"{itf}\" is implemented by an interface \"{implementer}\".",
+                            ),
                         });
-                        missing_obj_node.arguments.iter_mut().for_each(|arg| {
-                            arg.make_mut().directives.retain(|d| {
+                        continue;
+                    }
+
+                    // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
+                    // have a specific validation that return a user-friendly error in such incorrect cases, see
+                    // `post_merge_validations`). We must first check that there is some subgraph that implement
+                    // that field as an "interface object", since in that case the field will genuinely be provided
+                    for itf_obj_field in itf_object.fields(subgraph.schema().schema())? {
+                        // we skip @external fields as they are provided by other subgraphs
+                        if subgraph
+                            .metadata()
+                            .external_metadata()
+                            .is_external(&FieldDefinitionPosition::Object(itf_obj_field.clone()))
+                        {
+                            continue;
+                        }
+
+                        let ast_node_to_add =
+                            (*itf_obj_field.get(subgraph.schema().schema())?.node).clone();
+                        if implementer
+                            .field(itf_obj_field.field_name.clone())
+                            .try_get(self.merged.schema())
+                            .is_none()
+                        {
+                            let mut missing_obj_node = ast_node_to_add.clone();
+                            missing_obj_node.directives.retain(|d| {
                                 self.merged
                                     .schema()
                                     .directive_definitions
                                     .contains_key(&d.name)
+                                    // filter access control directives for now as they will be merged later one
+                                    && !access_control_directive_names.contains(&d.name)
                             });
-                        });
+                            missing_obj_node.arguments.iter_mut().for_each(|arg| {
+                                arg.make_mut().directives.retain(|d| {
+                                    self.merged
+                                        .schema()
+                                        .directive_definitions
+                                        .contains_key(&d.name)
+                                });
+                            });
 
-                        // We add a special @join__field for those added field with no `graph` target. This
-                        // clarifies to the later extraction process that this particular field doesn't come
-                        // from any particular subgraph (it comes indirectly from an @interfaceObject type,
-                        // but it's very much indirect so ...).
-                        missing_obj_node
-                            .directives
-                            .push(JoinFieldBuilder::new().build());
-                        let merged_field = ObjectFieldDefinitionPosition {
-                            type_name: implementer.type_name().clone(),
-                            field_name: itf_obj_field.field_name.clone(),
-                        };
-                        access_control_sources
-                            .entry(merged_field.clone())
-                            .or_default()
-                            .insert(index, Some(itf_obj_field.clone().into()));
-                        fields_to_insert.insert(merged_field, missing_obj_node);
+                            // We add a special @join__field for those added field with no `graph` target. This
+                            // clarifies to the later extraction process that this particular field doesn't come
+                            // from any particular subgraph (it comes indirectly from an @interfaceObject type,
+                            // but it's very much indirect so ...).
+                            missing_obj_node
+                                .directives
+                                .push(JoinFieldBuilder::new().build());
+                            let merged_field = ObjectFieldDefinitionPosition {
+                                type_name: implementer.type_name().clone(),
+                                field_name: itf_obj_field.field_name.clone(),
+                            };
+                            access_control_sources
+                                .entry(merged_field.clone())
+                                .or_default()
+                                .insert(index, Some(itf_obj_field.clone().into()));
+                            fields_to_insert.insert(merged_field, missing_obj_node);
+                        }
                     }
                 }
             }
