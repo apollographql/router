@@ -755,11 +755,7 @@ impl CacheService {
         // will break any request batches which this request is part of.
         // This check is what enables Batching and response caching to work together, so be very careful
         // before making any changes to it.
-        if request
-            .context
-            .extensions()
-            .with_lock(|lock| lock.contains_key::<BatchQuery>())
-        {
+        if request.is_part_of_batch() {
             return self.service.call(request).await;
         }
         // Don't use cache at all if no-store is set in cache-control header

@@ -23,6 +23,7 @@ use tokio_stream::Stream;
 use tower::BoxError;
 
 use crate::Context;
+use crate::batching::BatchQuery;
 use crate::error::Error;
 use crate::graphql;
 use crate::http_ext::TryIntoHeaderName;
@@ -138,6 +139,12 @@ impl Request {
             connection_closed_signal,
             None,
         )
+    }
+
+    pub(crate) fn is_part_of_batch(&self) -> bool {
+        self.context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
     }
 }
 
