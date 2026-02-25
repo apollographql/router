@@ -940,7 +940,7 @@ impl CacheService {
                     CacheSubgraph(cache_hit),
                 );
 
-                // extract debug information
+                // stash a few pieces of the request to use for debugging later
                 let mut root_operation_fields: Vec<String> = Vec::new();
                 let mut debug_subgraph_request = None;
                 if self.debug {
@@ -969,63 +969,7 @@ impl CacheService {
                     cache_control.clone(),
                 );
 
-                if cache_control.private() {
-                    // we did not know in advance that this was a query with a private scope, so we update the cache key
-                    if !is_known_private {
-                        let size = {
-                            let mut private_queries = self.private_queries.write().await;
-                            private_queries.put(private_query_key.clone(), ());
-                            private_queries.len()
-                        };
-                        self.lru_size_instrument.update(size as u64);
-
-                        if let Some(s) = private_id.as_ref() {
-                            root_cache_key = format!("{root_cache_key}:{s}");
-                        }
-                    }
-
-                    if self.debug {
-                        response.context.upsert::<_, CacheKeysContext>(
-                            CONTEXT_DEBUG_CACHE_KEYS,
-                            |mut val| {
-                                val.push(
-                                    CacheKeyContext {
-                                        key: root_cache_key.clone(),
-                                        hashed_private_id: private_id.clone(),
-                                        invalidation_keys: invalidation_keys
-                                            .clone()
-                                            .into_iter()
-                                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                            .collect(),
-                                        kind: CacheEntryKind::RootFields {
-                                            root_fields: root_operation_fields,
-                                        },
-                                        subgraph_name: self.name.clone(),
-                                        subgraph_request: debug_subgraph_request
-                                            .unwrap_or_default(),
-                                        source: CacheKeySource::Subgraph,
-                                        cache_control: cache_control.clone(),
-                                        data: serde_json_bytes::to_value(
-                                            response.response.body().clone(),
-                                        )
-                                        .unwrap_or_default(),
-                                        warnings: Vec::new(),
-                                        should_store: false,
-                                    }
-                                    .update_metadata(),
-                                );
-
-                                val
-                            },
-                        )?;
-                    }
-
-                    if private_id.is_none() {
-                        // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
-                        // We don't need to fill the context with this cache key as it will never be cached
-                        return Ok(response);
-                    }
-                } else if self.debug {
+                if self.debug {
                     response.context.upsert::<_, CacheKeysContext>(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
@@ -1057,7 +1001,29 @@ impl CacheService {
 
                             val
                         },
-                    )?;
+                    )?
+                }
+
+                if cache_control.private() {
+                    // we did not know in advance that this was a query with a private scope, so we update the cache key
+                    if !is_known_private {
+                        let size = {
+                            let mut private_queries = self.private_queries.write().await;
+                            private_queries.put(private_query_key.clone(), ());
+                            private_queries.len()
+                        };
+                        self.lru_size_instrument.update(size as u64);
+
+                        if let Some(s) = private_id.as_ref() {
+                            root_cache_key = format!("{root_cache_key}:{s}");
+                        }
+                    }
+
+                    if private_id.is_none() {
+                        // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
+                        // We don't need to fill the context with this cache key as it will never be cached
+                        return Ok(response);
+                    }
                 }
 
                 if cache_control.should_store() {
