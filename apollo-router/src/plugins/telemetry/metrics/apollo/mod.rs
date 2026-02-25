@@ -7,9 +7,13 @@ use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_otlp::WithTonicConfig;
-use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::Temporality;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
@@ -35,10 +39,30 @@ use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 pub(crate) mod histogram;
 pub(crate) mod studio;
 
+/// Default histogram buckets for Apollo metrics
 fn default_buckets() -> Vec<f64> {
     vec![
         0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
     ]
+}
+
+/// Generate exponential histogram buckets.
+///
+/// Creates `count` buckets where each bucket boundary is `start * factor^i` for i in 0..count.
+/// This matches the behavior of prometheus::exponential_buckets.
+fn exponential_buckets(start: f64, factor: f64, count: usize) -> Vec<f64> {
+    (0..count)
+        .map(|i| start * factor.powi(i as i32))
+        .collect()
+}
+
+/// Exponential buckets for Apollo realtime metrics.
+///
+/// This aggregation uses the Apollo histogram format where a duration, x, in μs is
+/// counted in the bucket of index max(0, min(ceil(ln(x)/ln(1.1)), 383)).
+/// Returns buckets from ~1.4ms to ~5min.
+fn realtime_buckets() -> Vec<f64> {
+    exponential_buckets(0.001399084909, 1.1, 129)
 }
 
 impl MetricsConfigurator for Config {
@@ -201,9 +225,45 @@ impl Config {
             .with_reader(MeterProviderType::Apollo, default_reader)
             .with_resource(MeterProviderType::Apollo, resource.clone());
 
+        // Configure histogram buckets for Apollo metrics
+        let apollo_buckets = default_buckets();
+        builder.with_view(MeterProviderType::Apollo, move |instrument: &Instrument| {
+            if instrument.kind() == InstrumentKind::Histogram {
+                Stream::builder()
+                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries: apollo_buckets.clone(),
+                        record_min_max: true,
+                    })
+                    .build()
+                    .ok()
+            } else {
+                None
+            }
+        });
+
         builder
             .with_reader(MeterProviderType::ApolloRealtime, realtime_reader)
             .with_resource(MeterProviderType::ApolloRealtime, resource.clone());
+
+        // Configure exponential histogram buckets for Apollo realtime metrics
+        let realtime_histogram_buckets = realtime_buckets();
+        builder.with_view(
+            MeterProviderType::ApolloRealtime,
+            move |instrument: &Instrument| {
+                if instrument.kind() == InstrumentKind::Histogram {
+                    Stream::builder()
+                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                            boundaries: realtime_histogram_buckets.clone(),
+                            record_min_max: true,
+                        })
+                        .build()
+                        .ok()
+                } else {
+                    None
+                }
+            },
+        );
+
         Ok(())
     }
 

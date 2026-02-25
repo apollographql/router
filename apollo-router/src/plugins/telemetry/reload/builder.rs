@@ -112,9 +112,9 @@ impl<'a> Builder<'a> {
 
             // If no exporters are configured, we still need to set a noop provider
             // to replace any previously configured provider during hot reload.
-            if !meter_providers.contains_key(&MeterProviderType::Public) {
-                meter_providers.insert(MeterProviderType::Public, FilterMeterProvider::noop());
-            }
+            meter_providers
+                .entry(MeterProviderType::Public)
+                .or_insert_with(FilterMeterProvider::noop);
 
             self.activation.add_meter_providers(meter_providers);
         }

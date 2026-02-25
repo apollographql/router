@@ -37,8 +37,11 @@ static DATADOG_HEADER_FIELDS: Lazy<[String; 3]> = Lazy::new(|| {
     ]
 });
 
+/// Builder for constructing Datadog trace state.
+/// Used in tests to create expected SpanContext values.
 #[derive(Default)]
-pub struct DatadogTraceStateBuilder {
+#[cfg(test)]
+struct DatadogTraceStateBuilder {
     sampling_priority: SamplingPriority,
     measuring: Option<bool>,
 }
@@ -55,6 +58,7 @@ fn trace_flag_to_boolean(value: &str) -> bool {
     value == TRACE_STATE_TRUE_VALUE
 }
 
+#[cfg(test)]
 #[allow(clippy::needless_update)]
 impl DatadogTraceStateBuilder {
     pub fn with_priority_sampling(self, sampling_priority: SamplingPriority) -> Self {
@@ -93,7 +97,7 @@ impl DatadogTraceStateBuilder {
     }
 }
 
-pub trait DatadogTraceState {
+pub(crate) trait DatadogTraceState {
     fn with_measuring(&self, enabled: bool) -> TraceState;
 
     fn measuring_enabled(&self) -> bool;
@@ -159,17 +163,6 @@ impl Display for SamplingPriority {
     }
 }
 
-impl SamplingPriority {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            SamplingPriority::UserReject => "-1",
-            SamplingPriority::AutoReject => "0",
-            SamplingPriority::AutoKeep => "1",
-            SamplingPriority::UserKeep => "2",
-        }
-    }
-}
-
 impl TryFrom<&str> for SamplingPriority {
     type Error = ExtractError;
 
@@ -196,7 +189,7 @@ pub(crate) enum ExtractError {
 /// The Datadog header format does not have an explicit spec, but can be divined from the client libraries,
 /// such as [dd-trace-go](https://github.com/DataDog/dd-trace-go/blob/v1.28.0/ddtrace/tracer/textmap.go#L293)
 #[derive(Clone, Debug, Default)]
-pub struct DatadogPropagator {
+pub(crate) struct DatadogPropagator {
     _private: (),
 }
 
@@ -205,11 +198,6 @@ fn create_trace_state_and_flags(trace_flags: TraceFlags) -> (TraceState, TraceFl
 }
 
 impl DatadogPropagator {
-    /// Creates a new `DatadogPropagator`.
-    pub fn new() -> Self {
-        DatadogPropagator::default()
-    }
-
     fn extract_trace_id(&self, trace_id: &str) -> Result<TraceId, ExtractError> {
         trace_id
             .parse::<u64>()
