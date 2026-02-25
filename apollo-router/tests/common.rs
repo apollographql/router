@@ -421,6 +421,7 @@ impl Telemetry {
                 .with_span_processor(
                     BatchSpanProcessor::builder(
                         opentelemetry_zipkin::ZipkinExporter::builder()
+                            .with_collector_endpoint("http://127.0.0.1:9411/api/v2/spans")
                             .build()
                             .expect("zipkin pipeline failed"),
                         runtime::Tokio,
