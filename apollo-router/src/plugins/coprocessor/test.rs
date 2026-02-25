@@ -5522,6 +5522,7 @@ mod tests {
                         .collect();
 
                     let response = request_service::Response::test_new(
+                        req.context.clone(),
                         req.key,
                         Default::default(),
                         serde_json_bytes::json!("ok"),
@@ -6136,6 +6137,7 @@ mod tests {
         {
             tower::service_fn(|_req: request_service::Request| async {
                 Ok(request_service::Response {
+                    context: _req.context,
                     transport_result: Err(
                         apollo_federation::connectors::runtime::errors::Error::TransportFailure(
                             "original error".to_string(),

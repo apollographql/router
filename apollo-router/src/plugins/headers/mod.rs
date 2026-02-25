@@ -1588,6 +1588,7 @@ mod test {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
         Ok(connector::request_service::Response::test_new(
+            _req.context.clone(),
             key,
             Vec::new(),
             json!(""),

@@ -151,6 +151,11 @@ pub(crate) enum ConnectorSelector {
         /// set, returns true when the response contains a non-200 status code
         connector_on_response_error: bool,
     },
+    /// The context ID of the request (unique per request).
+    ContextId {
+        /// The context ID
+        context_id: bool,
+    },
 }
 
 impl Selector for ConnectorSelector {
@@ -249,6 +254,9 @@ impl Selector for ConnectorSelector {
                 .ok()
                 .flatten()
                 .map(opentelemetry::Value::from),
+            ConnectorSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(request.context.id.clone()))
+            }
             _ => None,
         }
     }
@@ -314,6 +322,9 @@ impl Selector for ConnectorSelector {
             } if *connector_on_response_error => {
                 Some(matches!(response.mapped_response, MappedResponse::Error { .. }).into())
             }
+            ConnectorSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(response.context.id.clone()))
+            }
             _ => None,
         }
     }
@@ -322,6 +333,9 @@ impl Selector for ConnectorSelector {
         match self {
             ConnectorSelector::Error { .. } => Some(error.to_string().into()),
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            ConnectorSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(_ctx.id.clone()))
+            }
             _ => None,
         }
     }
@@ -347,6 +361,7 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::RequestContext { .. }
                     | ConnectorSelector::SupergraphOperationName { .. }
                     | ConnectorSelector::SupergraphOperationKind { .. }
+                    | ConnectorSelector::ContextId { .. }
             ),
             Stage::Response => matches!(
                 self,
@@ -359,6 +374,7 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::StaticField { .. }
                     | ConnectorSelector::ResponseMappingProblems { .. }
                     | ConnectorSelector::OnResponseError { .. }
+                    | ConnectorSelector::ContextId { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
@@ -370,6 +386,7 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::ConnectorHttpMethod { .. }
                     | ConnectorSelector::ConnectorUrlTemplate { .. }
                     | ConnectorSelector::StaticField { .. }
+                    | ConnectorSelector::ContextId { .. }
             ),
             Stage::Drop => matches!(self, ConnectorSelector::StaticField { .. }),
         }
@@ -403,6 +420,7 @@ mod tests {
     use opentelemetry::Array;
     use opentelemetry::StringValue;
     use opentelemetry::Value;
+    use tower::BoxError;
 
     use super::ConnectorSelector;
     use super::ConnectorSource;
@@ -506,6 +524,7 @@ mod tests {
         mapping_problems: Vec<Problem>,
     ) -> Response {
         Response {
+            context: Context::new(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
@@ -526,6 +545,7 @@ mod tests {
 
     fn connector_response_with_mapped_error(status_code: StatusCode) -> Response {
         Response {
+            context: Context::new(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
@@ -544,6 +564,7 @@ mod tests {
 
     fn connector_response_with_header() -> Response {
         Response {
+            context: Context::new(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(200)
@@ -976,6 +997,44 @@ mod tests {
         assert_eq!(
             selector.on_error(&err.into(), &Context::new()).unwrap(),
             Value::String("invalid digit found in string".into())
+        );
+    }
+
+    #[test]
+    fn connector_context_id() {
+        let selector = ConnectorSelector::ContextId { context_id: true };
+        let context = Context::new();
+        let expected_id = context.id.clone();
+
+        // Test on_request
+        assert_eq!(
+            selector.on_request(&connector_request(
+                http_request(),
+                Some(context.clone()),
+                None
+            )),
+            Some(expected_id.clone().into())
+        );
+
+        // Test on_response
+        let mut response = connector_response(StatusCode::OK);
+        response.context = context.clone();
+        assert_eq!(
+            selector.on_response(&response),
+            Some(expected_id.clone().into())
+        );
+
+        // Test on_error
+        assert_eq!(
+            selector.on_error(&BoxError::from("test error".to_string()), &context),
+            Some(expected_id.into())
+        );
+
+        // Test that context_id: false returns None
+        let selector_disabled = ConnectorSelector::ContextId { context_id: false };
+        assert_eq!(
+            selector_disabled.on_request(&connector_request(http_request(), Some(context), None)),
+            None
         );
     }
 }

@@ -885,6 +885,7 @@ connector:
                 connector_events.on_request(&connector_request);
 
                 let connector_response = Response {
+                    context: context.clone(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
@@ -1244,6 +1245,7 @@ subgraph:
                 connector_events.on_request(&connector_request);
 
                 let connector_response = Response {
+                    context: context.clone(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
