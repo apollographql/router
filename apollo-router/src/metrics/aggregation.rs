@@ -351,13 +351,16 @@ type ObservableCallback<T> = Arc<dyn Fn(&dyn AsyncInstrument<T>) + Send + Sync>;
 /// the SDK at build time and live until provider shutdown.
 ///
 /// This registry provides proper lifecycle management:
-/// - Callbacks are stored indexed by instrument_name
+/// - Multiple callbacks can be registered per instrument_name (e.g., different caches
+///   using the same gauge name but different attribute values)
 /// - One OTel instrument per (provider_index, instrument_name) is registered lazily
-/// - The consolidated callback invokes all registered user callbacks for that instrument
+/// - The consolidated callback invokes ALL registered user callbacks for that instrument
 /// - When a provider is replaced, its registrations are cleared so new gauges re-register
 struct ObservableCallbackRegistry<T: Send + Sync + 'static> {
-    /// instrument_name -> callback
-    callbacks: Mutex<HashMap<String, ObservableCallback<T>>>,
+    /// instrument_name -> list of callbacks
+    /// Multiple callbacks can exist for the same instrument name when different components
+    /// (e.g., query planner cache, APQ cache) use the same gauge name with different attributes
+    callbacks: Mutex<HashMap<String, Vec<ObservableCallback<T>>>>,
     /// Tracks which (provider_index, instrument_name) pairs have been registered with OTel SDK
     registered: Mutex<HashSet<(usize, String)>>,
 }
@@ -371,19 +374,24 @@ impl<T: Send + Sync + 'static> ObservableCallbackRegistry<T> {
     }
 
     /// Register a callback for an instrument name.
-    /// For observable gauges, we only keep ONE callback per instrument name.
-    /// This matches gauge semantics where only the latest value matters.
+    /// Multiple callbacks can be registered for the same instrument name.
+    /// This supports scenarios like multiple caches using the same gauge name
+    /// but with different attribute values (e.g., `kind="query planner"` vs `kind="apq"`).
     fn register_callback(&self, instrument_name: &str, callback: ObservableCallback<T>) {
         let mut callbacks = self.callbacks.lock();
-        // Replace any existing callback - gauges should only have one callback per name
-        callbacks.insert(instrument_name.to_string(), callback);
+        callbacks
+            .entry(instrument_name.to_string())
+            .or_default()
+            .push(callback);
     }
 
-    /// Invoke the callback for an instrument name.
+    /// Invoke all callbacks for an instrument name.
     fn invoke_callback(&self, instrument_name: &str, observer: &dyn AsyncInstrument<T>) {
         let callbacks = self.callbacks.lock();
-        if let Some(callback) = callbacks.get(instrument_name) {
-            callback(observer);
+        if let Some(callback_list) = callbacks.get(instrument_name) {
+            for callback in callback_list {
+                callback(observer);
+            }
         }
     }
 
@@ -396,14 +404,15 @@ impl<T: Send + Sync + 'static> ObservableCallbackRegistry<T> {
 
     /// Mark an instrument as registered with a specific provider
     fn mark_registered_for_provider(&self, provider_index: usize, instrument_name: String) {
-        self.registered.lock().insert((provider_index, instrument_name));
+        self.registered
+            .lock()
+            .insert((provider_index, instrument_name));
     }
 
     /// Clear registrations for a specific provider (called when provider is replaced)
     fn clear_provider_registrations(&self, provider_index: usize) {
-        self.registered
-            .lock()
-            .retain(|(idx, _)| *idx != provider_index);
+        let mut registered = self.registered.lock();
+        registered.retain(|(idx, _)| *idx != provider_index);
     }
 
     /// Clear all callbacks (called during reload when services will be recreated)
