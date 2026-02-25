@@ -3336,6 +3336,61 @@ mod tests {
     }
 
     #[test]
+    fn test_matches_selection_set_handles_arrays_with_nullable_elements() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                list: [List]
+            }
+            type List {
+                id: ID!
+                quantity: Int
+                inStock: Boolean
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id list { id quantity inStock }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "list": [
+                {
+                    "id": "LIST1",
+                    "quantity": 100,
+                    "inStock": true
+                },
+                {
+                    "id": "LIST2",
+                    "quantity": 100
+                },
+                null
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
     fn test_matches_selection_subset_handles_arrays() {
         // Simulate the real-world Availability type scenario
         let schema_text = r#"
