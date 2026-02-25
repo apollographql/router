@@ -806,70 +806,12 @@ impl CacheService {
             .variables
             .contains_key(REPRESENTATIONS);
 
-        // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
+        // the response will have a private scope but we don't have a way to differentiate users, so
+        // we know we will not get or store anything in the cache
         if is_known_private && private_id.is_none() {
-            let mut debug_subgraph_request = None;
-            let mut root_operation_fields = Vec::new();
-            if self.debug {
-                root_operation_fields = request
-                    .executable_document
-                    .as_ref()
-                    .and_then(|executable_document| {
-                        let operation_name = request.subgraph_operation_name();
-                        Some(
-                            executable_document
-                                .operations
-                                .get(operation_name)
-                                .ok()?
-                                .root_fields(executable_document)
-                                .map(|f| f.name.to_string())
-                                .collect(),
-                        )
-                    })
-                    .unwrap_or_default();
-                debug_subgraph_request = Some(request.subgraph_request.body().clone());
-            }
-            let resp = self.service.call(request).await?;
-            if self.debug {
-                let cache_control =
-                    CacheControl::new(resp.response.headers(), self.subgraph_ttl.into())?;
-                let kind = if is_entity {
-                    CacheEntryKind::Entity {
-                        typename: "".to_string(),
-                        entity_key: Default::default(),
-                    }
-                } else {
-                    CacheEntryKind::RootFields {
-                        root_fields: root_operation_fields,
-                    }
-                };
-                resp.context.upsert::<_, CacheKeysContext>(
-                    CONTEXT_DEBUG_CACHE_KEYS,
-                    |mut val| {
-                        val.push(
-                            CacheKeyContext {
-                                key: "-".to_string(),
-                                invalidation_keys: vec![],
-                                kind,
-                                hashed_private_id: private_id.clone(),
-                                subgraph_name: self.name.clone(),
-                                subgraph_request: debug_subgraph_request.unwrap_or_default(),
-                                source: CacheKeySource::Subgraph,
-                                cache_control,
-                                data: serde_json_bytes::to_value(resp.response.body().clone())
-                                    .unwrap_or_default(),
-                                warnings: Vec::new(),
-                                should_store: false,
-                            }
-                            .update_metadata(),
-                        );
-
-                        val
-                    },
-                )?;
-            }
-
-            return Ok(resp);
+            return self
+                .call_service_for_private_query_without_id(request, is_entity)
+                .await;
         }
 
         if !is_entity {
@@ -1216,6 +1158,73 @@ impl CacheService {
                 }
             }
         }
+    }
+
+    async fn call_service_for_private_query_without_id(
+        mut self,
+        request: subgraph::Request,
+        is_entity: bool,
+    ) -> Result<subgraph::Response, BoxError> {
+        let mut debug_subgraph_request = None;
+        let mut root_operation_fields = Vec::new();
+        if self.debug {
+            root_operation_fields = request
+                .executable_document
+                .as_ref()
+                .and_then(|executable_document| {
+                    let operation_name = request.subgraph_operation_name();
+                    Some(
+                        executable_document
+                            .operations
+                            .get(operation_name)
+                            .ok()?
+                            .root_fields(executable_document)
+                            .map(|f| f.name.to_string())
+                            .collect(),
+                    )
+                })
+                .unwrap_or_default();
+            debug_subgraph_request = Some(request.subgraph_request.body().clone());
+        }
+        let resp = self.service.call(request).await?;
+        if self.debug {
+            let cache_control =
+                CacheControl::new(resp.response.headers(), self.subgraph_ttl.into())?;
+            let kind = if is_entity {
+                CacheEntryKind::Entity {
+                    typename: "".to_string(),
+                    entity_key: Default::default(),
+                }
+            } else {
+                CacheEntryKind::RootFields {
+                    root_fields: root_operation_fields,
+                }
+            };
+            resp.context
+                .upsert::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS, |mut val| {
+                    val.push(
+                        CacheKeyContext {
+                            key: "-".to_string(),
+                            invalidation_keys: vec![],
+                            kind,
+                            hashed_private_id: None,
+                            subgraph_name: self.name.clone(),
+                            subgraph_request: debug_subgraph_request.unwrap_or_default(),
+                            source: CacheKeySource::Subgraph,
+                            cache_control,
+                            data: serde_json_bytes::to_value(resp.response.body().clone())
+                                .unwrap_or_default(),
+                            warnings: Vec::new(),
+                            should_store: false,
+                        }
+                        .update_metadata(),
+                    );
+
+                    val
+                })?;
+        }
+
+        Ok(resp)
     }
 
     fn get_private_id(&self, context: &Context) -> Option<String> {
