@@ -815,8 +815,7 @@ impl CacheService {
                     .executable_document
                     .as_ref()
                     .and_then(|executable_document| {
-                        let operation_name =
-                            request.subgraph_request.body().operation_name.as_deref();
+                        let operation_name = request.subgraph_operation_name();
                         Some(
                             executable_document
                                 .operations
@@ -921,8 +920,7 @@ impl CacheService {
                                 .executable_document
                                 .as_ref()
                                 .and_then(|executable_document| {
-                                    let operation_name =
-                                        request.subgraph_request.body().operation_name.as_deref();
+                                    let operation_name = request.subgraph_operation_name();
                                     Some(
                                         executable_document
                                             .operations

@@ -146,6 +146,10 @@ impl Request {
             .extensions()
             .with_lock(|lock| lock.contains_key::<BatchQuery>())
     }
+
+    pub(crate) fn subgraph_operation_name(&self) -> Option<&str> {
+        self.subgraph_request.body().operation_name.as_deref()
+    }
 }
 
 impl Clone for Request {
