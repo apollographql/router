@@ -61,21 +61,21 @@ fn trace_flag_to_boolean(value: &str) -> bool {
 #[cfg(test)]
 #[allow(clippy::needless_update)]
 impl DatadogTraceStateBuilder {
-    pub fn with_priority_sampling(self, sampling_priority: SamplingPriority) -> Self {
+    pub (crate) fn with_priority_sampling(self, sampling_priority: SamplingPriority) -> Self {
         Self {
             sampling_priority,
             ..self
         }
     }
 
-    pub fn with_measuring(self, enabled: bool) -> Self {
+    pub (crate) fn with_measuring(self, enabled: bool) -> Self {
         Self {
             measuring: Some(enabled),
             ..self
         }
     }
 
-    pub fn build(self) -> TraceState {
+    pub (crate) fn build(self) -> TraceState {
         if let Some(measuring) = self.measuring {
             let values = [
                 (TRACE_STATE_MEASURE, boolean_to_trace_state_flag(measuring)),
