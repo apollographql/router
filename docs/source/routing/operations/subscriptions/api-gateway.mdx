@@ -93,6 +93,4 @@ Streaming of HTTP multipart is supported out of the box with no additional confi
 
 ## AWS API Gateway
 
-Amazon API Gateway now supports response streaming for REST APIs, so you can use HTTP multipart subscriptions when the router is fronted by AWS API Gateway. Previously, AWS API Gateway did not support streaming of HTTP data; support was added in November 2025. For details, see the [Amazon API Gateway response streaming for REST APIs announcement](https://aws.amazon.com/about-aws/whats-new/2025/11/api-gateway-response-streaming-rest-apis/).
-
-Enable response streaming for your REST API (for example, when using HTTP proxy integration to the router) so that multipart responses are streamed instead of buffered. For configuration, see [Response transfer mode](https://docs.aws.amazon.com/apigateway/latest/developerguide/response-transfer-mode.html) in the Amazon API Gateway documentation.
+Amazon API Gateway supports response streaming for REST APIs, which you can use to enable HTTP multipart subscriptions for the router. To configure response streaming, see the Amazon API Gateway documentation on [Response transfer mode](https://docs.aws.amazon.com/apigateway/latest/developerguide/response-transfer-mode.html).
