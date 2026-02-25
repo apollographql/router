@@ -960,6 +960,30 @@ impl CacheService {
                     cache_control.clone(),
                 );
 
+                let mut should_store = true;
+
+                if cache_control.private() {
+                    // we did not know in advance that this was a query with a private scope, so we update the cache key
+                    if !is_known_private {
+                        let size = {
+                            let mut private_queries = self.private_queries.write().await;
+                            private_queries.put(private_query_key.clone(), ());
+                            private_queries.len()
+                        };
+                        self.lru_size_instrument.update(size as u64);
+
+                        if let Some(s) = private_id.as_ref() {
+                            root_cache_key = format!("{root_cache_key}:{s}");
+                        }
+                    }
+
+                    if private_id.is_none() {
+                        // the response has a private scope but we don't have a way to differentiate
+                        // users, so we do not store the response in cache
+                        should_store = false;
+                    }
+                }
+
                 if self.debug {
                     let cache_key_context = CacheKeyContext {
                         key: root_cache_key.clone(),
@@ -981,29 +1005,7 @@ impl CacheService {
                     add_cache_key_to_context(&response.context, cache_key_context)?;
                 }
 
-                if cache_control.private() {
-                    // we did not know in advance that this was a query with a private scope, so we update the cache key
-                    if !is_known_private {
-                        let size = {
-                            let mut private_queries = self.private_queries.write().await;
-                            private_queries.put(private_query_key.clone(), ());
-                            private_queries.len()
-                        };
-                        self.lru_size_instrument.update(size as u64);
-
-                        if let Some(s) = private_id.as_ref() {
-                            root_cache_key = format!("{root_cache_key}:{s}");
-                        }
-                    }
-
-                    if private_id.is_none() {
-                        // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
-                        // We don't need to fill the context with this cache key as it will never be cached
-                        return Ok(response);
-                    }
-                }
-
-                if cache_control.should_store() {
+                if should_store && cache_control.should_store() {
                     cache_store_root_from_response(
                         storage,
                         self.subgraph_ttl,
