@@ -74,6 +74,7 @@ mod tests {
 
     use super::super::*;
     use crate::assert_response_eq_ignoring_error_id;
+    use crate::context::deprecated::DEPRECATED_CLIENT_NAME;
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::json_ext::Value;
@@ -92,6 +93,7 @@ mod tests {
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::coprocessor::was_incoming_payload_valid;
+    use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::external::Externalizable;
@@ -4313,6 +4315,36 @@ mod tests {
         assert_eq!(
             target_context.get_json_value("key_not_sent"),
             Some(serde_json_bytes::json!("preserved_value"))
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_update_context_from_coprocessor_handles_deprecated_key_names(
+        #[values(DEPRECATED_CLIENT_NAME, CLIENT_NAME)] target_context_key_name: &str,
+        #[values(
+            ContextConf::Deprecated(true),
+            ContextConf::NewContextConf(NewContextConf::Deprecated)
+        )]
+        context_conf: ContextConf,
+    ) {
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
+
+        let target_context =
+            Context::from_iter([(target_context_key_name.to_string(), "v1".into())]);
+        let returned_context =
+            Context::from_iter([(DEPRECATED_CLIENT_NAME.to_string(), "v2".into())]);
+
+        update_context_from_coprocessor(&target_context, returned_context, &context_conf).unwrap();
+
+        assert_eq!(
+            target_context.get_json_value(CLIENT_NAME),
+            Some(json!("v2")),
+        );
+
+        assert!(
+            !target_context.contains_key(DEPRECATED_CLIENT_NAME),
+            "DEPRECATED_CLIENT_NAME should not be present"
         );
     }
 
