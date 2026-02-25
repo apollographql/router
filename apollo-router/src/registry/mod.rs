@@ -337,8 +337,7 @@ fn extract_host(registry: &str) -> Option<String> {
 /// hostname portion (stripping any port).
 fn is_unsecure_host(registry: &str, hosts: &[String]) -> bool {
     extract_host(registry)
-        .map(|host| hosts.iter().any(|h| h == &host))
-        .unwrap_or(false)
+        .map_or(false, |host| hosts.iter().any(|h| h == &host))
 }
 
 /// Determine whether to use HTTP or HTTPS for the OCI registry.
