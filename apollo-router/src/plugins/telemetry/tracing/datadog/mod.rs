@@ -19,8 +19,10 @@ use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanKind;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 pub(crate) use propagator::DatadogPropagator;
@@ -224,7 +226,7 @@ impl TracingConfigurator for Config {
         };
         let named_exporter = NamedSpanExporter::new(wrapper, "datadog");
 
-        let batch_processor = opentelemetry_sdk::trace::BatchSpanProcessor::builder(named_exporter)
+        let batch_processor = BatchSpanProcessor::builder(named_exporter, runtime::Tokio)
             .with_batch_config(self.batch_processor.clone().into())
             .build()
             .filtered();

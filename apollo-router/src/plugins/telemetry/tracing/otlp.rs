@@ -1,7 +1,8 @@
 //! Configuration for Otlp tracing.
 use std::result::Result;
 
-use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::runtime;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::Conf;
@@ -22,7 +23,7 @@ impl TracingConfigurator for super::super::otlp::Config {
     fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         let exporter = self.build_span_exporter()?;
         let named_exporter = NamedSpanExporter::new(exporter, "otlp");
-        let batch_span_processor = BatchSpanProcessor::builder(named_exporter)
+        let batch_span_processor = BatchSpanProcessor::builder(named_exporter, runtime::Tokio)
             .with_batch_config(self.batch_processor.clone().into())
             .build()
             .filtered();

@@ -1,6 +1,7 @@
 use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+use opentelemetry_sdk::runtime;
 use tower::BoxError;
 
 use crate::metrics::aggregation::MeterProviderType;
@@ -27,7 +28,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
         let named_exporter = NamedMetricExporter::new(exporter, "otlp");
         builder.with_reader(
             MeterProviderType::Public,
-            PeriodicReader::builder(named_exporter)
+            PeriodicReader::builder(named_exporter, runtime::Tokio)
                 .with_interval(self.batch_processor.scheduled_delay)
                 .build(),
         );

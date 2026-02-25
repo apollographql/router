@@ -2,7 +2,8 @@
 use std::sync::LazyLock;
 
 use http::Uri;
-use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::runtime;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_zipkin::ZipkinExporter;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -53,7 +54,7 @@ impl TracingConfigurator for Config {
 
         let named_exporter = NamedSpanExporter::new(exporter, "zipkin");
         builder.with_span_processor(
-            BatchSpanProcessor::builder(named_exporter)
+            BatchSpanProcessor::builder(named_exporter, runtime::Tokio)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),
