@@ -428,7 +428,7 @@ impl PluginPrivate for ResponseCache {
                     storage: self.storage.clone(),
                     subgraph_ttl,
                     private_queries,
-                    private_id,
+                    private_id_key_name: private_id,
                     debug: self.debug,
                     supergraph_schema: self.supergraph_schema.clone(),
                     subgraph_enums: self.subgraph_enums.clone(),
@@ -688,7 +688,7 @@ struct CacheService {
     storage: Arc<StorageInterface>,
     subgraph_ttl: Duration,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
-    private_id: Option<String>,
+    private_id_key_name: Option<String>,
     debug: bool,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: Arc<HashMap<String, String>>,
@@ -1219,15 +1219,13 @@ impl CacheService {
     }
 
     fn get_private_id(&self, context: &Context) -> Option<String> {
-        self.private_id.as_ref().and_then(|key| {
-            context.get_json_value(key).and_then(|value| {
-                value.as_str().map(|s| {
-                    let mut digest = blake3::Hasher::new();
-                    digest.update(s.as_bytes());
-                    digest.finalize().to_hex().to_string()
-                })
-            })
-        })
+        let private_id = context
+            .get_json_value(self.private_id_key_name.as_ref()?)?
+            .as_str()?;
+
+        let mut digest = blake3::Hasher::new();
+        digest.update(private_id.as_bytes());
+        Some(digest.finalize().to_hex().to_string())
     }
 }
 
