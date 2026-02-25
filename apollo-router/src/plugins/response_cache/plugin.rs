@@ -2184,10 +2184,22 @@ pub(in crate::plugins) fn matches_selection_set(
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
     for field in selection_set.root_fields(&Default::default()) {
+        // NB(%nullability-note): We allow nullable fields in selection sets (ie, those fields that
+        // identify an entity, usually [if not always] listed in `@key`). That _doesn't_ mean that
+        // entities definitively must allow nullable fields, only that we happen to allow it right now.
+        // It's probably a bit of a schema-development smell to have an entity identifiable by nullable
+        // fields, but it makes practical sense if you're wanting to cache partial responses.
+        let field_is_nullable = !field.definition.ty.is_non_null();
+
         // the heart of finding the match: we take the field from the selection
         // set and try to find it in the entity representation;
         let Some(value) = representation.get(field.name.as_str()) else {
-            return false;
+            // allow missing field to match nullable field type (see NB(%nullability-note))
+            if field_is_nullable {
+                continue;
+            } else {
+                return false;
+            }
         };
 
         // This field selection is not expecting any subdata.
@@ -2209,15 +2221,16 @@ pub(in crate::plugins) fn matches_selection_set(
             }
 
             Value::Array(arr) => {
-                // Recurse into array values
+                // Recurse into array values, filtering out any `null` objects if we're allowed to do so
+                // NB: we have to do this here where the field type is known, as the selection set doesn't
+                //  include knowledge of whether the type is nullable
+                // See NB(%nullability-note)
+                let exclude_value = |value: &&Value| field_is_nullable && value.is_null();
+                let arr = arr.iter().filter(|value| !exclude_value(value));
                 matches_array_of_objects(arr, &field.selection_set)
             }
 
-            // We allow nullable fields in selection sets (ie, those fields that identify an entity, usually
-            // [if not always] listed in `@key`). That _doesn't_ mean that entities definitively
-            // must allow nullable fields, only that we happen to allow it right now; it's probably
-            // a bit of a schema-development smell to have an entity identifiable by nullable
-            // fields, but it makes practical sense if you're wanting to cache partial responses
+            // See NB(%nullability-note)
             Value::Null => {
                 return true;
             }
@@ -2247,14 +2260,14 @@ fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
 /// * Note: The array can be multi-dimensional. (the @key field set can match any levels of nested
 ///   arrays)
 /// * Precondition: `selection_set` must be non-empty.
-fn matches_array_of_objects(
-    arr: &[Value],
+fn matches_array_of_objects<'a, I: Iterator<Item = &'a Value>>(
+    arr: I,
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
-    for item in arr.iter() {
+    for item in arr {
         let result = match item {
             Value::Object(obj) => matches_selection_set(obj, selection_set),
-            Value::Array(arr) => matches_array_of_objects(arr, selection_set),
+            Value::Array(arr) => matches_array_of_objects(arr.iter(), selection_set),
             _other => false,
         };
         if !result {
@@ -3344,9 +3357,9 @@ mod tests {
             }
             type Test {
                 id: ID!
-                list: [List]
+                list: [NullableListElement]
             }
-            type List {
+            type NullableListElement {
                 id: ID!
                 quantity: Int
                 inStock: Boolean
