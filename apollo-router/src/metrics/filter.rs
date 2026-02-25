@@ -39,6 +39,18 @@ impl OtelMeterProvider for MeterProviderInner {
     }
 }
 
+impl MeterProviderInner {
+    /// Shutdown the underlying SDK meter provider.
+    /// This should be called before dropping to prevent OTel SDK's Drop from
+    /// emitting tracing events, which can panic if tracing's thread locals
+    /// have already been destroyed during thread exit.
+    pub(crate) fn shutdown(&self) {
+        if let MeterProviderInner::Sdk(p) = self {
+            let _ = p.shutdown();
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct FilterMeterProvider {
     delegate: MeterProviderInner,
@@ -117,6 +129,13 @@ impl FilterMeterProvider {
             MeterProviderInner::Dynamic(_) => Ok(()),
         }
     }
+
+    /// Shutdown the underlying meter provider.
+    /// This should be called before dropping to prevent OTel SDK's Drop from
+    /// emitting tracing events during thread local destruction.
+    pub(crate) fn shutdown(&self) {
+        self.delegate.shutdown();
+    }
 }
 
 struct FilteredInstrumentProvider {
@@ -183,16 +202,28 @@ macro_rules! filter_observable_instrument_fn {
                 (_, Some(allow)) if !allow.is_match(&builder.name) => &self.noop,
                 (_, _) => &self.delegate,
             };
-            let mut b = meter.$name(builder.name.clone());
-            if let Some(description) = &builder.description {
-                b = b.with_description(description.clone());
+
+            // Extract builder fields before consuming callbacks
+            let name = builder.name;
+            let description = builder.description;
+            let unit = builder.unit;
+
+            // Wrap callbacks in Arc for sharing
+            let shared_callbacks: Vec<std::sync::Arc<dyn Fn(&dyn opentelemetry::metrics::AsyncInstrument<$ty>) + Send + Sync>> =
+                builder.callbacks.into_iter().map(std::sync::Arc::from).collect();
+
+            let mut b = meter.$name(name);
+            if let Some(desc) = &description {
+                b = b.with_description(desc.clone());
             }
-            if let Some(unit) = &builder.unit {
-                b = b.with_unit(unit.clone());
+            if let Some(u) = &unit {
+                b = b.with_unit(u.clone());
             }
-            // Note: Callbacks from the original builder are not forwarded
-            // as they may contain references to the original instrument.
-            // Callbacks should be set on the result if needed.
+            // Forward callbacks to the delegate
+            for callback in shared_callbacks {
+                let cb = std::sync::Arc::clone(&callback);
+                b = b.with_callback(move |observer| cb(observer));
+            }
             b.build()
         }
     };

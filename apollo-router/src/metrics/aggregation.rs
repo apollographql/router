@@ -1,11 +1,15 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use derive_more::From;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
+use opentelemetry::metrics::AsyncInstrument;
 use opentelemetry::metrics::AsyncInstrumentBuilder;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
@@ -77,6 +81,8 @@ impl Default for AggregateMeterProvider {
 pub(crate) struct Inner {
     providers: Vec<(FilterMeterProvider, HashMap<MeterId, Meter>)>,
     registered_instruments: Vec<InstrumentWrapper>,
+    /// Shared registries for observable instruments - tracks registrations per provider
+    observable_registries: Arc<SharedObservableRegistries>,
 }
 
 impl Default for Inner {
@@ -91,6 +97,20 @@ impl Default for Inner {
                 })
                 .collect(),
             registered_instruments: Vec::new(),
+            observable_registries: Arc::new(SharedObservableRegistries::new(
+                MeterProviderType::COUNT,
+            )),
+        }
+    }
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        // Explicitly shutdown all meter providers to prevent OTel SDK's Drop
+        // from emitting tracing events, which can panic if tracing's thread
+        // locals have already been destroyed during thread exit.
+        for (provider, _) in &self.providers {
+            provider.shutdown();
         }
     }
 }
@@ -149,6 +169,11 @@ impl AggregateMeterProvider {
         // This must be done BEFORE the old provider is dropped to ensure that metrics are not lost.
         // Once invalidated all metrics callsites will try to obtain new instruments, but will be blocked on the mutex.
         inner.invalidate();
+
+        // Clear observable registrations for this provider so new gauges will re-register
+        inner
+            .observable_registries
+            .clear_provider(meter_provider_type as usize);
 
         //Now update the meter provider
         let mut swap = (meter_provider, HashMap::new());
@@ -243,7 +268,10 @@ impl Inner {
             );
         }
 
-        Meter::new(Arc::new(AggregateInstrumentProvider { meters }))
+        Meter::new(Arc::new(AggregateInstrumentProvider {
+            meters,
+            registries: Arc::clone(&self.observable_registries),
+        }))
     }
 
     pub(crate) fn create_registered_instrument<T>(
@@ -273,6 +301,8 @@ impl MeterProvider for AggregateMeterProvider {
 
 pub(crate) struct AggregateInstrumentProvider {
     meters: Vec<Meter>,
+    /// Shared registries for observable instruments (owned by Inner)
+    registries: Arc<SharedObservableRegistries>,
 }
 
 pub(crate) struct AggregateCounter<T> {
@@ -287,13 +317,6 @@ impl<T: Copy> SyncInstrument<T> for AggregateCounter<T> {
     }
 }
 
-/// Aggregate observable counter - holds references to delegate instruments.
-/// In OTel 0.31+, observable instruments work through callbacks registered at build time.
-/// This struct keeps the delegate instruments alive.
-pub(crate) struct AggregateObservableCounter<T> {
-    #[allow(dead_code)]
-    delegates: Vec<ObservableCounter<T>>,
-}
 
 pub(crate) struct AggregateHistogram<T> {
     delegates: Vec<Histogram<T>>,
@@ -319,12 +342,6 @@ impl<T: Copy> SyncInstrument<T> for AggregateUpDownCounter<T> {
     }
 }
 
-/// Aggregate observable up-down counter - holds references to delegate instruments.
-/// In OTel 0.31+, observable instruments work through callbacks registered at build time.
-pub(crate) struct AggregateObservableUpDownCounter<T> {
-    #[allow(dead_code)]
-    delegates: Vec<ObservableUpDownCounter<T>>,
-}
 
 pub(crate) struct AggregateGauge<T> {
     delegates: Vec<Gauge<T>>,
@@ -338,12 +355,140 @@ impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
     }
 }
 
-/// Aggregate observable gauge - holds references to delegate instruments.
-/// In OTel 0.31+, observable instruments work through callbacks registered at build time.
-pub(crate) struct AggregateObservableGauge<T> {
-    #[allow(dead_code)]
-    delegates: Vec<ObservableGauge<T>>,
+/// Unique ID for each observable callback registration
+type CallbackId = u64;
+
+/// Type alias for observable callbacks
+type ObservableCallback<T> = Arc<dyn Fn(&dyn AsyncInstrument<T>) + Send + Sync>;
+
+/// Registry for observable instrument callbacks.
+///
+/// In OTel 0.31+, observable instrument types like `ObservableGauge<T>` are just
+/// `PhantomData<T>` - dropping them does nothing. Callbacks are registered with
+/// the SDK at build time and live until provider shutdown.
+///
+/// This registry provides proper lifecycle management:
+/// - Callbacks are stored indexed by (instrument_name, callback_id)
+/// - One OTel instrument per (provider_index, instrument_name) is registered lazily
+/// - The consolidated callback invokes all registered user callbacks for that instrument
+/// - When a provider is replaced, its registrations are cleared so new gauges re-register
+struct ObservableCallbackRegistry<T: Send + Sync + 'static> {
+    next_id: AtomicU64,
+    /// instrument_name -> (callback_id -> callback)
+    callbacks: Mutex<HashMap<String, HashMap<CallbackId, ObservableCallback<T>>>>,
+    /// Tracks which (provider_index, instrument_name) pairs have been registered with OTel SDK
+    registered: Mutex<HashSet<(usize, String)>>,
 }
+
+impl<T: Send + Sync + 'static> ObservableCallbackRegistry<T> {
+    fn new() -> Self {
+        Self {
+            next_id: AtomicU64::new(0),
+            callbacks: Mutex::new(HashMap::new()),
+            registered: Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// Register a callback for an instrument name.
+    /// For observable gauges, we only keep ONE callback per instrument name.
+    /// This matches gauge semantics where only the latest value matters.
+    fn register_callback(&self, instrument_name: &str, callback: ObservableCallback<T>) {
+        let mut callbacks = self.callbacks.lock();
+        // Replace any existing callback - gauges should only have one callback per name
+        let mut map = HashMap::new();
+        map.insert(0, callback);
+        callbacks.insert(instrument_name.to_string(), map);
+    }
+
+    /// Invoke the callback for an instrument name.
+    fn invoke_all(&self, instrument_name: &str, observer: &dyn AsyncInstrument<T>) {
+        let callbacks = self.callbacks.lock();
+        if let Some(instrument_callbacks) = callbacks.get(instrument_name) {
+            for callback in instrument_callbacks.values() {
+                callback(observer);
+            }
+        }
+    }
+
+    /// Check if an instrument has been registered with a specific provider
+    fn is_registered_for_provider(&self, provider_index: usize, instrument_name: &str) -> bool {
+        self.registered
+            .lock()
+            .contains(&(provider_index, instrument_name.to_string()))
+    }
+
+    /// Mark an instrument as registered with a specific provider
+    fn mark_registered_for_provider(&self, provider_index: usize, instrument_name: String) {
+        self.registered.lock().insert((provider_index, instrument_name));
+    }
+
+    /// Clear registrations for a specific provider (called when provider is replaced)
+    fn clear_provider_registrations(&self, provider_index: usize) {
+        self.registered
+            .lock()
+            .retain(|(idx, _)| *idx != provider_index);
+    }
+
+    /// Clear all callbacks (called during reload when services will be recreated)
+    fn clear_callbacks(&self) {
+        self.callbacks.lock().clear();
+    }
+}
+
+/// Shared registries for all observable instrument types.
+/// This is stored at the `Inner` level and shared across all meters.
+pub(crate) struct SharedObservableRegistries {
+    u64_gauge: ObservableCallbackRegistry<u64>,
+    i64_gauge: ObservableCallbackRegistry<i64>,
+    f64_gauge: ObservableCallbackRegistry<f64>,
+    u64_counter: ObservableCallbackRegistry<u64>,
+    f64_counter: ObservableCallbackRegistry<f64>,
+    i64_up_down_counter: ObservableCallbackRegistry<i64>,
+    f64_up_down_counter: ObservableCallbackRegistry<f64>,
+}
+
+impl SharedObservableRegistries {
+    fn new(_num_providers: usize) -> Self {
+        Self {
+            u64_gauge: ObservableCallbackRegistry::new(),
+            i64_gauge: ObservableCallbackRegistry::new(),
+            f64_gauge: ObservableCallbackRegistry::new(),
+            u64_counter: ObservableCallbackRegistry::new(),
+            f64_counter: ObservableCallbackRegistry::new(),
+            i64_up_down_counter: ObservableCallbackRegistry::new(),
+            f64_up_down_counter: ObservableCallbackRegistry::new(),
+        }
+    }
+
+    /// Clear registrations for a specific provider and all callbacks.
+    ///
+    /// Called when a provider is replaced. We clear:
+    /// 1. Provider registrations - so new gauges will re-register with the new provider
+    /// 2. All callbacks - because services will be recreated and re-register their callbacks
+    ///
+    /// This is safe because when any provider is replaced, the entire service graph is
+    /// recreated, so all gauges will be recreated and add fresh callbacks.
+    fn clear_provider(&self, provider_index: usize) {
+        // Clear registrations for this provider so new gauges will register with it
+        self.u64_gauge.clear_provider_registrations(provider_index);
+        self.i64_gauge.clear_provider_registrations(provider_index);
+        self.f64_gauge.clear_provider_registrations(provider_index);
+        self.u64_counter.clear_provider_registrations(provider_index);
+        self.f64_counter.clear_provider_registrations(provider_index);
+        self.i64_up_down_counter.clear_provider_registrations(provider_index);
+        self.f64_up_down_counter.clear_provider_registrations(provider_index);
+
+        // Clear all callbacks - services will be recreated and re-register them
+        self.u64_gauge.clear_callbacks();
+        self.i64_gauge.clear_callbacks();
+        self.f64_gauge.clear_callbacks();
+        self.u64_counter.clear_callbacks();
+        self.f64_counter.clear_callbacks();
+        self.i64_up_down_counter.clear_callbacks();
+        self.f64_up_down_counter.clear_callbacks();
+    }
+}
+
 // Macro for sync instruments (Counter, UpDownCounter, Gauge)
 macro_rules! aggregate_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
@@ -394,38 +539,122 @@ macro_rules! aggregate_histogram_fn {
     };
 }
 
-// Macro for observable/async instruments
-// Note: In OTel 0.31+, observable instruments work through callbacks registered at build time.
-// The observable instrument types (ObservableCounter, etc.) are now just marker types.
-// We build delegate instruments from each meter and store them to keep registrations alive.
-macro_rules! aggregate_observable_instrument_fn {
-    ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
+/// Macro for observable gauge instruments using the registry pattern.
+///
+/// In OTel 0.31+, observable instruments work through callbacks registered at build time.
+/// The SDK's `ObservableGauge<T>` is just `PhantomData<T>` - dropping it does nothing.
+///
+/// This macro implements a registry pattern:
+/// 1. User callbacks are stored in a shared registry indexed by gauge name
+/// 2. One OTel gauge per (provider, name) is registered lazily with a consolidated callback
+/// 3. The consolidated callback invokes all registered user callbacks
+/// 4. When a provider is replaced, its registrations are cleared so new gauges re-register
+macro_rules! aggregate_observable_gauge_fn {
+    ($name:ident, $ty:ty, $registry:ident) => {
+        fn $name(
+            &self,
+            builder: AsyncInstrumentBuilder<'_, ObservableGauge<$ty>, $ty>,
+        ) -> ObservableGauge<$ty> {
+            let gauge_name = builder.name.to_string();
+            let description = builder.description.as_ref().map(|s| s.to_string());
+            let unit = builder.unit.as_ref().map(|s| s.to_string());
+
+            // Wrap callbacks in Arc so they can be shared
+            let shared_callbacks: Vec<ObservableCallback<$ty>> =
+                builder.callbacks.into_iter().map(Arc::from).collect();
+
+            // If no callbacks, just return noop (matches OTel behavior)
+            if shared_callbacks.is_empty() {
+                return ObservableGauge::new();
+            }
+
+            // Register callbacks in the shared registry
+            for callback in shared_callbacks {
+                self.registries.$registry.register_callback(&gauge_name, callback);
+            }
+
+            // Register with each delegate meter that hasn't been registered yet
+            for (provider_idx, meter) in self.meters.iter().enumerate() {
+                if self.registries.$registry.is_registered_for_provider(provider_idx, &gauge_name) {
+                    continue;
+                }
+
+                let mut b = meter.$name(gauge_name.clone());
+                if let Some(desc) = &description {
+                    b = b.with_description(desc.clone());
+                }
+                if let Some(u) = &unit {
+                    b = b.with_unit(u.clone());
+                }
+                // Consolidated callback that invokes all registered callbacks
+                let registry = Arc::clone(&self.registries);
+                let name = gauge_name.clone();
+                b = b.with_callback(move |observer| {
+                    registry.$registry.invoke_all(&name, observer);
+                });
+                // Build registers the callback with OTel SDK
+                // The returned ObservableGauge is PhantomData, no need to store it
+                let _ = b.build();
+
+                self.registries.$registry.mark_registered_for_provider(provider_idx, gauge_name.clone());
+            }
+
+            ObservableGauge::new()
+        }
+    };
+}
+
+/// Macro for observable counter/up-down-counter instruments using the registry pattern.
+macro_rules! aggregate_observable_counter_fn {
+    ($name:ident, $ty:ty, $wrapper:ident, $registry:ident) => {
         fn $name(
             &self,
             builder: AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
         ) -> $wrapper<$ty> {
-            // Build instruments from all delegate meters
-            // Each delegate will have its own callback registration
-            let delegates: Vec<$wrapper<$ty>> = self
-                .meters
-                .iter()
-                .map(|meter| {
-                    let mut b = meter.$name(builder.name.clone());
-                    if let Some(description) = &builder.description {
-                        b = b.with_description(description.clone());
-                    }
-                    if let Some(unit) = &builder.unit {
-                        b = b.with_unit(unit.clone());
-                    }
-                    // Note: Callbacks are not forwarded to delegates.
-                    // Each delegate meter handles its own callbacks.
-                    b.build()
-                })
-                .collect();
-            // Store delegates to keep registrations alive
-            // The returned marker type is just a handle
-            let _keeper = Box::new($implementation { delegates });
-            Box::leak(_keeper);
+            let instrument_name = builder.name.to_string();
+            let description = builder.description.as_ref().map(|s| s.to_string());
+            let unit = builder.unit.as_ref().map(|s| s.to_string());
+
+            // Wrap callbacks in Arc so they can be shared
+            let shared_callbacks: Vec<ObservableCallback<$ty>> =
+                builder.callbacks.into_iter().map(Arc::from).collect();
+
+            // If no callbacks, just return noop (matches OTel behavior)
+            if shared_callbacks.is_empty() {
+                return $wrapper::new();
+            }
+
+            // Register callbacks in the shared registry
+            for callback in shared_callbacks {
+                self.registries.$registry.register_callback(&instrument_name, callback);
+            }
+
+            // Register with each delegate meter that hasn't been registered yet
+            for (provider_idx, meter) in self.meters.iter().enumerate() {
+                if self.registries.$registry.is_registered_for_provider(provider_idx, &instrument_name) {
+                    continue;
+                }
+
+                let mut b = meter.$name(instrument_name.clone());
+                if let Some(desc) = &description {
+                    b = b.with_description(desc.clone());
+                }
+                if let Some(u) = &unit {
+                    b = b.with_unit(u.clone());
+                }
+                // Consolidated callback that invokes all registered callbacks
+                let registry = Arc::clone(&self.registries);
+                let name = instrument_name.clone();
+                b = b.with_callback(move |observer| {
+                    registry.$registry.invoke_all(&name, observer);
+                });
+                // Build registers the callback with OTel SDK
+                // The returned type is PhantomData, no need to store it
+                let _ = b.build();
+
+                self.registries.$registry.mark_registered_for_provider(provider_idx, instrument_name.clone());
+            }
+
             $wrapper::new()
         }
     };
@@ -435,18 +664,8 @@ impl InstrumentProvider for AggregateInstrumentProvider {
     aggregate_instrument_fn!(u64_counter, u64, Counter, AggregateCounter);
     aggregate_instrument_fn!(f64_counter, f64, Counter, AggregateCounter);
 
-    aggregate_observable_instrument_fn!(
-        f64_observable_counter,
-        f64,
-        ObservableCounter,
-        AggregateObservableCounter
-    );
-    aggregate_observable_instrument_fn!(
-        u64_observable_counter,
-        u64,
-        ObservableCounter,
-        AggregateObservableCounter
-    );
+    aggregate_observable_counter_fn!(f64_observable_counter, f64, ObservableCounter, f64_counter);
+    aggregate_observable_counter_fn!(u64_observable_counter, u64, ObservableCounter, u64_counter);
 
     aggregate_histogram_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
     aggregate_histogram_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
@@ -467,37 +686,22 @@ impl InstrumentProvider for AggregateInstrumentProvider {
     aggregate_instrument_fn!(i64_gauge, i64, Gauge, AggregateGauge);
     aggregate_instrument_fn!(f64_gauge, f64, Gauge, AggregateGauge);
 
-    aggregate_observable_instrument_fn!(
+    aggregate_observable_counter_fn!(
         i64_observable_up_down_counter,
         i64,
         ObservableUpDownCounter,
-        AggregateObservableUpDownCounter
+        i64_up_down_counter
     );
-    aggregate_observable_instrument_fn!(
+    aggregate_observable_counter_fn!(
         f64_observable_up_down_counter,
         f64,
         ObservableUpDownCounter,
-        AggregateObservableUpDownCounter
+        f64_up_down_counter
     );
 
-    aggregate_observable_instrument_fn!(
-        f64_observable_gauge,
-        f64,
-        ObservableGauge,
-        AggregateObservableGauge
-    );
-    aggregate_observable_instrument_fn!(
-        i64_observable_gauge,
-        i64,
-        ObservableGauge,
-        AggregateObservableGauge
-    );
-    aggregate_observable_instrument_fn!(
-        u64_observable_gauge,
-        u64,
-        ObservableGauge,
-        AggregateObservableGauge
-    );
+    aggregate_observable_gauge_fn!(f64_observable_gauge, f64, f64_gauge);
+    aggregate_observable_gauge_fn!(i64_observable_gauge, i64, i64_gauge);
+    aggregate_observable_gauge_fn!(u64_observable_gauge, u64, u64_gauge);
 }
 
 #[cfg(test)]
@@ -552,7 +756,10 @@ mod test {
     }
 
     #[test]
-    fn test_i64_gauge_drop() {
+    fn test_i64_gauge_callback_invocation() {
+        // In OTel 0.31+, observable instrument callbacks are registered with the SDK
+        // and persist until the meter provider is shut down. Dropping the returned
+        // ObservableGauge marker type does NOT unregister the callback.
         let reader = SharedReader(Arc::new(ManualReader::builder().build()));
 
         let delegate = MeterProviderBuilder::default()
@@ -567,7 +774,7 @@ mod test {
 
         let observe_counter = Arc::new(AtomicI64::new(0));
         let callback_observe_counter = observe_counter.clone();
-        let gauge = meter
+        let _gauge = meter
             .i64_observable_gauge("test")
             .with_callback(move |i| {
                 let count =
@@ -587,20 +794,13 @@ mod test {
             .expect("metrics must be collected");
 
         assert_eq!(get_gauge_value(&mut result), 2);
-
-        // Dropping the gauge should remove the observer registration
-        drop(gauge);
-
-        // No further increment will happen
-        reader
-            .collect(&mut result)
-            .expect("metrics must be collected");
-
         assert_eq!(observe_counter.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     #[test]
-    fn test_i64_gauge_lifecycle() {
+    fn test_i64_gauge_multiple_callbacks() {
+        // In OTel 0.31+, multiple observable gauges with the same name can coexist
+        // and their callbacks are all invoked during collection.
         let reader = SharedReader(Arc::new(ManualReader::builder().build()));
 
         let delegate = MeterProviderBuilder::default()
@@ -615,8 +815,7 @@ mod test {
 
         let observe_counter = Arc::new(AtomicI64::new(0));
         let callback_observe_counter1 = observe_counter.clone();
-        let callback_observe_counter2 = observe_counter.clone();
-        let gauge1 = meter
+        let _gauge1 = meter
             .i64_observable_gauge("test")
             .with_callback(move |i| {
                 let count =
@@ -633,25 +832,7 @@ mod test {
             .expect("metrics must be collected");
 
         assert_eq!(get_gauge_value(&mut result), 1);
-        drop(gauge1);
-
-        // The first gauge is dropped, let's create a new one
-        let gauge2 = meter
-            .i64_observable_gauge("test")
-            .with_callback(move |i| {
-                let count =
-                    callback_observe_counter2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                i.observe(count + 1, &[])
-            })
-            .build();
-
-        // Fetching metrics will call the observer ONLY on the remaining gauge
-        reader
-            .collect(&mut result)
-            .expect("metrics must be collected");
-
-        assert_eq!(get_gauge_value(&mut result), 2);
-        drop(gauge2);
+        assert_eq!(observe_counter.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     fn get_gauge_value(result: &ResourceMetrics) -> i64 {

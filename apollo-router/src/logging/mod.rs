@@ -68,9 +68,8 @@ pub(crate) mod test {
             } else {
                 let parsed_log: Vec<Value> = log
                     .lines()
-                    .map(|line| {
+                    .filter_map(|line| {
                         let mut line: serde_json::Value = serde_json::from_str(line).unwrap();
-                        // move the message field to the top level
                         let fields = line
                             .as_object_mut()
                             .unwrap()
@@ -78,11 +77,21 @@ pub(crate) mod test {
                             .unwrap()
                             .as_object_mut()
                             .unwrap();
+
+                        // Filter out OTel SDK internal log messages (e.g. MeterProvider.Drop)
+                        // These are noise from the SDK internals, not relevant to test assertions
+                        if let Some(name) = fields.get("name").and_then(|n| n.as_str()) {
+                            if name.starts_with("MeterProvider.") {
+                                return None;
+                            }
+                        }
+
+                        // move the message field to the top level
                         let message = fields.remove("message").unwrap_or_default();
                         line.as_object_mut()
                             .unwrap()
                             .insert("message".to_string(), message);
-                        line
+                        Some(line)
                     })
                     .collect();
                 serde_json::json!(parsed_log)
