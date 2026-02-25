@@ -72,6 +72,20 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 use crate::services::supergraph;
 
+/// Extends attributes with new values, updating existing keys instead of duplicating.
+/// This is needed because OTel 0.31+ uses Vec<KeyValue> instead of HashMap for attributes,
+/// so we need to manually deduplicate when the same attribute is returned across multiple
+/// lifecycle stages (request, response, response_event, error).
+fn extend_attributes(attrs: &mut Vec<KeyValue>, new_attrs: Vec<KeyValue>) {
+    for new_kv in new_attrs {
+        if let Some(existing) = attrs.iter_mut().find(|kv| kv.key == new_kv.key) {
+            *existing = new_kv;
+        } else {
+            attrs.push(new_kv);
+        }
+    }
+}
+
 pub(crate) const METER_NAME: &str = "apollo/router";
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
@@ -1827,7 +1841,7 @@ where
             .as_ref()
             .map(|s| s.on_response(response).into_iter().collect())
             .unwrap_or_default();
-        inner.attributes.extend(attrs);
+        extend_attributes(&mut inner.attributes, attrs);
 
         if let Some(selected_value) = inner
             .selector
@@ -1877,7 +1891,8 @@ where
         // Response event may be called multiple times so we don't extend inner.attributes
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
+            extend_attributes(
+                &mut attrs,
                 selectors
                     .on_response_event(response, ctx)
                     .into_iter()
@@ -1934,7 +1949,8 @@ where
 
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
+            extend_attributes(
+                &mut attrs,
                 selectors
                     .on_error(error, ctx)
                     .into_iter()
@@ -2263,7 +2279,7 @@ where
             .as_ref()
             .map(|s| s.on_response(response).into_iter().collect())
             .unwrap_or_default();
-        inner.attributes.extend(attrs);
+        extend_attributes(&mut inner.attributes, attrs);
         if let Some(selected_value) = inner
             .selector
             .as_ref()
@@ -2314,7 +2330,8 @@ where
         // Response event may be called multiple times so we don't extend inner.attributes
         let mut attrs: Vec<KeyValue> = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
+            extend_attributes(
+                &mut attrs,
                 selectors
                     .on_response_event(response, ctx)
                     .into_iter()
@@ -2368,12 +2385,16 @@ where
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
-        let mut attrs: Vec<KeyValue> = inner
-            .selectors
-            .as_ref()
-            .map(|s| s.on_error(error, ctx).into_iter().collect())
-            .unwrap_or_default();
-        attrs.append(&mut inner.attributes);
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            extend_attributes(
+                &mut attrs,
+                selectors
+                    .on_error(error, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
 
         let increment = match &inner.increment {
             Increment::Unit | Increment::EventUnit | Increment::FieldUnit => {

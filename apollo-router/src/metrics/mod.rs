@@ -329,9 +329,14 @@ pub(crate) mod test_utils {
             count: bool,
             attributes: &[KeyValue],
         ) -> bool {
-            if let Some(metric) = self.find(name) {
-                if let AggregatedMetrics::U64(metric_data) = metric.data() {
-                    return Self::check_metric_data(metric_data, ty, value, count, attributes);
+            // Try ALL metrics with this name, not just the first one
+            for scope_metrics in self.resource_metrics.scope_metrics() {
+                for metric in scope_metrics.metrics().filter(|m| m.name() == name) {
+                    if let AggregatedMetrics::U64(metric_data) = metric.data() {
+                        if Self::check_metric_data(metric_data, ty, value, count, attributes) {
+                            return true;
+                        }
+                    }
                 }
             }
             false
@@ -345,9 +350,14 @@ pub(crate) mod test_utils {
             count: bool,
             attributes: &[KeyValue],
         ) -> bool {
-            if let Some(metric) = self.find(name) {
-                if let AggregatedMetrics::I64(metric_data) = metric.data() {
-                    return Self::check_metric_data(metric_data, ty, value, count, attributes);
+            // Try ALL metrics with this name, not just the first one
+            for scope_metrics in self.resource_metrics.scope_metrics() {
+                for metric in scope_metrics.metrics().filter(|m| m.name() == name) {
+                    if let AggregatedMetrics::I64(metric_data) = metric.data() {
+                        if Self::check_metric_data(metric_data, ty, value, count, attributes) {
+                            return true;
+                        }
+                    }
                 }
             }
             false
@@ -361,9 +371,15 @@ pub(crate) mod test_utils {
             count: bool,
             attributes: &[KeyValue],
         ) -> bool {
-            if let Some(metric) = self.find(name) {
-                if let AggregatedMetrics::F64(metric_data) = metric.data() {
-                    return Self::check_metric_data(metric_data, ty, value, count, attributes);
+            // Try ALL metrics with this name across all scopes
+            // (there can be multiple metrics with the same name but different types)
+            for scope_metrics in self.resource_metrics.scope_metrics() {
+                for metric in scope_metrics.metrics().filter(|m| m.name() == name) {
+                    if let AggregatedMetrics::F64(metric_data) = metric.data() {
+                        if Self::check_metric_data(metric_data, ty, value, count, attributes) {
+                            return true;
+                        }
+                    }
                 }
             }
             false
@@ -413,7 +429,9 @@ pub(crate) mod test_utils {
             false
         }
 
-        pub(crate) fn metric_exists<T: Debug + PartialEq + Display + ToPrimitive + Copy + 'static>(
+        pub(crate) fn metric_exists<
+            T: Debug + PartialEq + Display + ToPrimitive + Copy + 'static,
+        >(
             &self,
             name: &str,
             ty: MetricType,
@@ -443,23 +461,23 @@ pub(crate) mod test_utils {
             match metric_data {
                 MetricData::Gauge(gauge) => {
                     if matches!(ty, MetricType::Gauge) {
-                        return gauge
-                            .data_points()
-                            .any(|datapoint| Self::equal_attributes(attributes, datapoint.attributes()));
+                        return gauge.data_points().any(|datapoint| {
+                            Self::equal_attributes(attributes, datapoint.attributes())
+                        });
                     }
                 }
                 MetricData::Sum(sum) => {
                     if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
-                        return sum
-                            .data_points()
-                            .any(|datapoint| Self::equal_attributes(attributes, datapoint.attributes()));
+                        return sum.data_points().any(|datapoint| {
+                            Self::equal_attributes(attributes, datapoint.attributes())
+                        });
                     }
                 }
                 MetricData::Histogram(histogram) => {
                     if matches!(ty, MetricType::Histogram) {
-                        return histogram
-                            .data_points()
-                            .any(|datapoint| Self::equal_attributes(attributes, datapoint.attributes()));
+                        return histogram.data_points().any(|datapoint| {
+                            Self::equal_attributes(attributes, datapoint.attributes())
+                        });
                     }
                 }
                 MetricData::ExponentialHistogram(_) => {}
@@ -748,9 +766,15 @@ pub(crate) mod test_utils {
         fn from(value: &AggregatedMetrics) -> Self {
             let mut metric_data = SerdeMetricData::default();
             match value {
-                AggregatedMetrics::F64(data) => Self::extract_datapoints_f64(&mut metric_data, data),
-                AggregatedMetrics::U64(data) => Self::extract_datapoints_u64(&mut metric_data, data),
-                AggregatedMetrics::I64(data) => Self::extract_datapoints_i64(&mut metric_data, data),
+                AggregatedMetrics::F64(data) => {
+                    Self::extract_datapoints_f64(&mut metric_data, data)
+                }
+                AggregatedMetrics::U64(data) => {
+                    Self::extract_datapoints_u64(&mut metric_data, data)
+                }
+                AggregatedMetrics::I64(data) => {
+                    Self::extract_datapoints_i64(&mut metric_data, data)
+                }
             }
             metric_data
         }
