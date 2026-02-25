@@ -809,12 +809,9 @@ impl CacheService {
         // the response will have a private scope but we don't have a way to differentiate users, so
         // we know we will not get or store anything in the cache
         if is_known_private && private_id.is_none() {
-            return self
-                .call_service_for_private_query_without_id(request, is_entity)
-                .await;
-        }
-
-        if is_entity {
+            self.call_service_for_private_query_without_id(request, is_entity)
+                .await
+        } else if is_entity {
             self.call_service_for_entities_query(
                 request,
                 storage,
