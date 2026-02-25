@@ -198,8 +198,9 @@ impl Activation {
             let tracer = tracer_provider.tracer_with_scope(scope);
             hot_tracer.reload(tracer);
 
-            // Install the new provider globally
-            opentelemetry::global::set_tracer_provider(tracer_provider);
+            // Install the new provider globally. The old provider is returned and must be
+            // dropped in a blocking task to avoid deadlocking the async runtime during shutdown.
+            spawn_blocking(move || opentelemetry::global::set_tracer_provider(tracer_provider));
         }
     }
 
