@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::error::OTelSdkResult;
-use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::Temporality;
+use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
@@ -30,13 +30,15 @@ impl<E: SpanExporter> Debug for NamedSpanExporter<E> {
 }
 
 impl<E: SpanExporter> SpanExporter for NamedSpanExporter<E> {
-    fn export(&self, batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+    fn export(
+        &self,
+        batch: Vec<SpanData>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
         let name = self.name;
         let fut = self.inner.export(batch);
         async move {
-            fut.await.map_err(|err| {
-                OTelSdkError::InternalFailure(format!("[{} traces] {}", name, err))
-            })
+            fut.await
+                .map_err(|err| OTelSdkError::InternalFailure(format!("[{} traces] {}", name, err)))
         }
     }
 
@@ -117,8 +119,8 @@ mod tests {
 
     use opentelemetry_sdk::error::OTelSdkError;
     use opentelemetry_sdk::error::OTelSdkResult;
-    use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::Temporality;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::trace::SpanData;
     use opentelemetry_sdk::trace::SpanExporter;
@@ -132,7 +134,11 @@ mod tests {
             &self,
             _batch: Vec<SpanData>,
         ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-            async { Err(OTelSdkError::InternalFailure("connection failed".to_string())) }
+            async {
+                Err(OTelSdkError::InternalFailure(
+                    "connection failed".to_string(),
+                ))
+            }
         }
 
         fn shutdown(&mut self) -> OTelSdkResult {
@@ -149,7 +155,7 @@ mod tests {
     #[tokio::test]
     async fn test_named_span_exporter_adds_prefix() {
         let inner = FailingSpanExporter;
-        let mut named = super::NamedSpanExporter::new(inner, "test-exporter");
+        let named = super::NamedSpanExporter::new(inner, "test-exporter");
 
         let result = named.export(vec![]).await;
 

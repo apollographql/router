@@ -178,14 +178,11 @@ pub(crate) mod test_utils {
     use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::data::AggregatedMetrics;
-    use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::GaugeDataPoint;
-    use opentelemetry_sdk::metrics::data::Histogram;
     use opentelemetry_sdk::metrics::data::HistogramDataPoint;
     use opentelemetry_sdk::metrics::data::Metric;
     use opentelemetry_sdk::metrics::data::MetricData;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::data::Sum;
     use opentelemetry_sdk::metrics::data::SumDataPoint;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use serde::Serialize;
