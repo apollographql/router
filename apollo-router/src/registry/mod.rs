@@ -323,12 +323,14 @@ fn unsecure_hosts() -> Vec<String> {
 /// an IPv6 address like "[::1]:port", using `url::Url` for robust parsing.
 /// IPv6 addresses are returned without brackets (e.g. "::1" not "[::1]").
 fn extract_host(registry: &str) -> Option<String> {
-    Url::parse(&format!("dummy://{registry}")).ok().and_then(|url| {
-        url.host().map(|h| match h {
-            url::Host::Ipv6(addr) => addr.to_string(),
-            other => other.to_string(),
+    Url::parse(&format!("dummy://{registry}"))
+        .ok()
+        .and_then(|url| {
+            url.host().map(|h| match h {
+                url::Host::Ipv6(addr) => addr.to_string(),
+                other => other.to_string(),
+            })
         })
-    })
 }
 
 /// Check whether `registry` matches any entry in `hosts`, comparing only the
@@ -1056,7 +1058,10 @@ mod tests {
     #[test]
     fn test_extract_host_simple() {
         assert_eq!(extract_host("localhost"), Some("localhost".to_string()));
-        assert_eq!(extract_host("localhost:5000"), Some("localhost".to_string()));
+        assert_eq!(
+            extract_host("localhost:5000"),
+            Some("localhost".to_string())
+        );
     }
 
     #[test]
