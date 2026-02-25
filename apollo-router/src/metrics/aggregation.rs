@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 
 use derive_more::From;
 use opentelemetry::InstrumentationScope;

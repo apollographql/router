@@ -1,10 +1,6 @@
 use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::Aggregation;
-use opentelemetry_sdk::metrics::Instrument;
-use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::metrics::Stream;
 use tower::BoxError;
 
 use crate::metrics::aggregation::MeterProviderType;
@@ -35,22 +31,6 @@ impl MetricsConfigurator for super::super::otlp::Config {
                 .with_interval(self.batch_processor.scheduled_delay)
                 .build(),
         );
-
-        // Register view for histogram bucket boundaries
-        let boundaries = builder.metrics_common().buckets.clone();
-        builder.with_view(MeterProviderType::Public, move |instrument: &Instrument| {
-            if instrument.kind() == InstrumentKind::Histogram {
-                Stream::builder()
-                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: boundaries.clone(),
-                        record_min_max: true,
-                    })
-                    .build()
-                    .ok()
-            } else {
-                None
-            }
-        });
 
         Ok(())
     }

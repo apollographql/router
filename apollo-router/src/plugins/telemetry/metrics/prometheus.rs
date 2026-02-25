@@ -4,10 +4,6 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use opentelemetry_prometheus::ResourceSelector;
-use opentelemetry_sdk::metrics::Aggregation;
-use opentelemetry_sdk::metrics::Instrument;
-use opentelemetry_sdk::metrics::InstrumentKind;
-use opentelemetry_sdk::metrics::Stream;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -87,22 +83,6 @@ impl MetricsConfigurator for Config {
 
         builder.with_reader(MeterProviderType::Public, exporter);
         builder.with_prometheus_registry(registry);
-
-        // Register view for histogram bucket boundaries
-        let boundaries = builder.metrics_common().buckets.clone();
-        builder.with_view(MeterProviderType::Public, move |instrument: &Instrument| {
-            if instrument.kind() == InstrumentKind::Histogram {
-                Stream::builder()
-                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: boundaries.clone(),
-                        record_min_max: true,
-                    })
-                    .build()
-                    .ok()
-            } else {
-                None
-            }
-        });
 
         Ok(())
     }

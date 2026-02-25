@@ -20,9 +20,13 @@
 //! - `Public` - For standard metrics exposed via Prometheus or sent to OTLP collectors
 //! - `Apollo`/`ApolloRealtime` - For metrics sent to Apollo Studio with specific filtering
 
+use std::collections::HashSet;
+
 use ahash::HashMap;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::Stream;
@@ -173,6 +177,36 @@ impl<'a> MetricsBuilder<'a> {
     }
 
     pub(crate) fn configure_views(&mut self, meter_provider_type: MeterProviderType) {
+        // Collect names of instruments with custom views - these should NOT get default buckets
+        // because their custom views will handle aggregation (avoiding duplicate metrics)
+        let custom_view_names: HashSet<String> = self
+            .metrics_common()
+            .views
+            .iter()
+            .map(|v| v.name.clone())
+            .collect();
+
+        // Register default histogram bucket view for all histograms WITHOUT custom views
+        let boundaries = self.metrics_common().buckets.clone();
+        self.with_view(meter_provider_type, move |instrument: &Instrument| {
+            // Skip instruments with custom views - they'll be handled below
+            if custom_view_names.contains(instrument.name()) {
+                return None;
+            }
+            if instrument.kind() == InstrumentKind::Histogram {
+                Stream::builder()
+                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries: boundaries.clone(),
+                        record_min_max: true,
+                    })
+                    .build()
+                    .ok()
+            } else {
+                None
+            }
+        });
+
+        // Register custom views from configuration
         for metric_view in self.metrics_common().views.clone() {
             self.with_view(meter_provider_type, metric_view.into_view_fn());
         }
