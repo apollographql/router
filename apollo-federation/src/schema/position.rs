@@ -7825,6 +7825,25 @@ impl From<ObjectOrInterfaceFieldDefinitionPosition> for DirectiveTargetPosition 
     }
 }
 
+impl From<ObjectFieldDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: ObjectFieldDefinitionPosition) -> Self {
+        DirectiveTargetPosition::ObjectField(pos)
+    }
+}
+
+impl From<ObjectOrInterfaceTypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: ObjectOrInterfaceTypeDefinitionPosition) -> Self {
+        match pos {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(pos) => {
+                DirectiveTargetPosition::ObjectType(pos)
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(pos) => {
+                DirectiveTargetPosition::InterfaceType(pos)
+            }
+        }
+    }
+}
+
 impl From<ObjectTypeDefinitionPosition> for DirectiveTargetPosition {
     fn from(pos: ObjectTypeDefinitionPosition) -> Self {
         DirectiveTargetPosition::ObjectType(pos)

@@ -311,6 +311,7 @@ pub(crate) mod tests {
     use crate::merger::merge::CompositionOptions;
     use crate::schema::FederationSchema;
     use crate::schema::position::EnumTypeDefinitionPosition;
+    use crate::utils::FallibleOnceCell;
 
     fn insert_enum_type(schema: &mut FederationSchema, name: Name) -> Result<(), FederationError> {
         let status_pos = EnumTypeDefinitionPosition {
@@ -452,6 +453,7 @@ pub(crate) mod tests {
             latest_federation_version_used: FEDERATION_VERSIONS.latest().version().clone(),
             applied_directives_to_merge: Default::default(),
             access_control_directives_in_supergraph: Default::default(),
+            access_control_additional_sources: FallibleOnceCell::new(),
         })
     }
 }

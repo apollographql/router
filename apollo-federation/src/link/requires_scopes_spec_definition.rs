@@ -58,7 +58,7 @@ impl RequiresScopesSpecDefinition {
                     },
                     default_value: None,
                 },
-                composition_strategy: Some(ArgumentCompositionStrategy::Union),
+                composition_strategy: Some(ArgumentCompositionStrategy::DnfConjunction),
             }],
             false, // not repeatable
             &[
