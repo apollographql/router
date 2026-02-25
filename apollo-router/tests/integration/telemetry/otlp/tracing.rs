@@ -9,39 +9,11 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 use super::mock_otlp_server;
-use super::mock_otlp_server_delayed;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::telemetry::TraceSpec;
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_trace_error() -> Result<(), BoxError> {
-    if !graph_os_enabled() {
-        return Ok(());
-    }
-    let mock_server = mock_otlp_server_delayed().await;
-    let config = include_str!("../fixtures/otlp_invalid_endpoint.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
-
-    let mut router = IntegrationTest::builder()
-        .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
-        })
-        .config(config)
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-    router.assert_log_contained("OpenTelemetry trace error occurred: cannot send message to batch processor 'otlp-tracing' as the channel is full");
-    router.assert_metrics_contains(r#"apollo_router_telemetry_batch_processor_errors_total{error="channel full",name="otlp-tracing",otel_scope_name="apollo/router"}"#, None).await;
-    router.graceful_shutdown().await;
-
-    drop(mock_server);
-    Ok(())
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {

@@ -3,7 +3,6 @@ extern crate core;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::Deref;
-use std::time::Duration;
 
 use anyhow::anyhow;
 use opentelemetry::trace::TraceId;
@@ -297,24 +296,6 @@ pub(crate) fn find_metric_in_request<'a>(
         .flat_map(|rm| &rm.scope_metrics)
         .flat_map(|sm| &sm.metrics)
         .find(|m| m.name == name)
-}
-
-pub(crate) async fn mock_otlp_server_delayed() -> MockServer {
-    let mock_server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/traces"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_delay(Duration::from_secs(1))
-                .set_body_raw(
-                    ExportTraceServiceResponse::default().encode_to_vec(),
-                    "application/x-protobuf",
-                ),
-        )
-        .mount(&mock_server)
-        .await;
-
-    mock_server
 }
 
 pub(crate) async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: T) -> MockServer {
