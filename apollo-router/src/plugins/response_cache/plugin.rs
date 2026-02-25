@@ -1164,9 +1164,8 @@ impl CacheService {
     }
 
     fn get_private_id(&self, context: &Context) -> Option<String> {
-        let private_id = context
-            .get_json_value(self.private_id_key_name.as_ref()?)?
-            .as_str()?;
+        let private_id_value = context.get_json_value(self.private_id_key_name.as_ref()?)?;
+        let private_id = private_id_value.as_str()?;
 
         let mut digest = blake3::Hasher::new();
         digest.update(private_id.as_bytes());
