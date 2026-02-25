@@ -7,17 +7,17 @@
 use std::fmt::Display;
 
 use once_cell::sync::Lazy;
-use opentelemetry::propagation::text_map_propagator::FieldIter;
+use opentelemetry::Context;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
-use opentelemetry::Context;
 
 const DATADOG_TRACE_ID_HEADER: &str = "x-datadog-trace-id";
 const DATADOG_PARENT_ID_HEADER: &str = "x-datadog-parent-id";
@@ -61,21 +61,21 @@ fn trace_flag_to_boolean(value: &str) -> bool {
 #[cfg(test)]
 #[allow(clippy::needless_update)]
 impl DatadogTraceStateBuilder {
-    pub (crate) fn with_priority_sampling(self, sampling_priority: SamplingPriority) -> Self {
+    pub(crate) fn with_priority_sampling(self, sampling_priority: SamplingPriority) -> Self {
         Self {
             sampling_priority,
             ..self
         }
     }
 
-    pub (crate) fn with_measuring(self, enabled: bool) -> Self {
+    pub(crate) fn with_measuring(self, enabled: bool) -> Self {
         Self {
             measuring: Some(enabled),
             ..self
         }
     }
 
-    pub (crate) fn build(self) -> TraceState {
+    pub(crate) fn build(self) -> TraceState {
         if let Some(measuring) = self.measuring {
             let values = [
                 (TRACE_STATE_MEASURE, boolean_to_trace_state_flag(measuring)),
@@ -125,9 +125,8 @@ impl DatadogTraceState for TraceState {
     }
 
     fn sampling_priority(&self) -> Option<SamplingPriority> {
-        self.get(TRACE_STATE_PRIORITY_SAMPLING).map(|value| {
-            SamplingPriority::try_from(value).unwrap_or(SamplingPriority::AutoReject)
-        })
+        self.get(TRACE_STATE_PRIORITY_SAMPLING)
+            .map(|value| SamplingPriority::try_from(value).unwrap_or(SamplingPriority::AutoReject))
     }
 }
 
