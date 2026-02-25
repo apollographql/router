@@ -168,6 +168,7 @@ opentelemetry_sdk = { version = "0.31", default-features = false, features = [
     "metrics",
     "spec_unstable_metrics_views",
     "experimental_trace_batch_span_processor_with_async_runtime",
+    "experimental_metrics_periodicreader_with_async_runtime",
 ] }
 opentelemetry-aws = "0.19"
 opentelemetry-datadog = { version = "0.19", features = ["reqwest-client"] }

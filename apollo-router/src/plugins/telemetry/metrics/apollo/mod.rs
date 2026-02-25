@@ -11,8 +11,9 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::InstrumentKind;
-use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::metrics::Temporality;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
@@ -195,11 +196,11 @@ impl Config {
         let named_exporter = NamedMetricExporter::new(exporter, "apollo");
         let named_realtime_exporter = NamedMetricExporter::new(realtime_exporter, "apollo");
 
-        let default_reader = PeriodicReader::builder(named_exporter)
+        let default_reader = PeriodicReader::builder(named_exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
             .build();
 
-        let realtime_reader = PeriodicReader::builder(named_realtime_exporter)
+        let realtime_reader = PeriodicReader::builder(named_realtime_exporter, runtime::Tokio)
             .with_interval(batch_config.scheduled_delay)
             .build();
 

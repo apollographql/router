@@ -675,12 +675,12 @@ impl IntegrationTest {
         Mock::given(method(Method::POST))
             .and(path("/v1/metrics"))
             .and(move |req: &wiremock::Request| {
-                // Decode the OTLP request
+                // Decode the OTLP request and forward to the channel
                 if let Ok(msg) = ExportMetricsServiceRequest::decode(req.body.as_ref()) {
-                    // We don't care about the result of send here
                     let _ = apollo_otlp_metrics_tx.try_send(msg);
                 }
-                false
+                // Always match so we return 200 OK
+                true
             })
             .respond_with(ResponseTemplate::new(200))
             .mount(&apollo_otlp_server)
@@ -1109,19 +1109,27 @@ impl IntegrationTest {
         let mut metrics = Vec::new();
 
         while Instant::now() < deadline {
-            if let Some(msg) = self.apollo_otlp_metrics_rx.recv().await {
-                // Only break once we see a batch with metrics in it
-                if msg
-                    .resource_metrics
-                    .iter()
-                    .any(|rm| !rm.scope_metrics.is_empty())
-                {
-                    metrics.push(msg);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match tokio::time::timeout(remaining, self.apollo_otlp_metrics_rx.recv()).await {
+                Ok(Some(msg)) => {
+                    // Only break once we see a batch with metrics in it
+                    if msg
+                        .resource_metrics
+                        .iter()
+                        .any(|rm| !rm.scope_metrics.is_empty())
+                    {
+                        metrics.push(msg);
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    // channel closed
                     break;
                 }
-            } else {
-                // channel closed
-                break;
+                Err(_) => {
+                    // timeout elapsed
+                    break;
+                }
             }
         }
 
