@@ -1,5 +1,6 @@
 //! Tracing configuration for apollo telemetry.
-use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::runtime;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -50,7 +51,7 @@ impl TracingConfigurator for Config {
             .build()?;
         let named_exporter = NamedSpanExporter::new(exporter, "apollo");
         builder.with_span_processor(
-            BatchSpanProcessor::builder(named_exporter)
+            BatchSpanProcessor::builder(named_exporter, runtime::Tokio)
                 .with_batch_config(self.tracing.batch_processor.clone().into())
                 .build(),
         );

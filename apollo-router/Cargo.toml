@@ -167,6 +167,7 @@ opentelemetry_sdk = { version = "0.31", default-features = false, features = [
     "trace",
     "metrics",
     "spec_unstable_metrics_views",
+    "experimental_trace_batch_span_processor_with_async_runtime",
 ] }
 opentelemetry-aws = "0.19"
 opentelemetry-datadog = { version = "0.19", features = ["reqwest-client"] }
@@ -320,7 +321,7 @@ num-traits = "0.2.19"
 once_cell.workspace = true
 opentelemetry-stdout = { version = "0.31", features = ["trace"] }
 opentelemetry = { version = "0.31", features = ["testing"] }
-opentelemetry_sdk = { version = "0.31", features = ["testing"] }
+opentelemetry_sdk = { version = "0.31", features = ["testing", "experimental_trace_batch_span_processor_with_async_runtime"] }
 opentelemetry-proto = { version = "0.31", features = [
     "metrics",
     "trace",
