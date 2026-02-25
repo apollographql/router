@@ -467,6 +467,15 @@ pub(super) enum ContextConf {
     NewContextConf(NewContextConf),
 }
 
+impl ContextConf {
+    fn is_deprecated(&self) -> bool {
+        match self {
+            Self::Deprecated(v) => *v,
+            Self::NewContextConf(c) => *c == NewContextConf::Deprecated,
+        }
+    }
+}
+
 impl Default for ContextConf {
     fn default() -> Self {
         Self::Deprecated(false)
@@ -564,7 +573,7 @@ pub(crate) fn update_context_from_coprocessor(
 
     for (mut key, value) in context_returned.try_into_iter()? {
         // Handle deprecated key names - convert back to actual key names
-        if let ContextConf::NewContextConf(NewContextConf::Deprecated) = context_config {
+        if context_config.is_deprecated() {
             key = context_key_from_deprecated(key);
         }
 
