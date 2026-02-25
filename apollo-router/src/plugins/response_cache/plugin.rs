@@ -937,14 +937,7 @@ impl CacheService {
                         let response = self.service.call(request).await?;
 
                         let cache_control =
-                            if response.response.headers().contains_key(CACHE_CONTROL) {
-                                CacheControl::new(
-                                    response.response.headers(),
-                                    self.subgraph_ttl.into(),
-                                )?
-                            } else {
-                                CacheControl::no_store()
-                            };
+                            response.subgraph_cache_control(self.subgraph_ttl.into())?;
 
                         // Support cache tags coming from subgraph response extensions
                         if let Some(Value::Array(cache_tags)) = response
@@ -1185,15 +1178,8 @@ impl CacheService {
                         }
                     };
 
-                    let mut cache_control = if response
-                        .response
-                        .headers()
-                        .contains_key(CACHE_CONTROL)
-                    {
-                        CacheControl::new(response.response.headers(), self.subgraph_ttl.into())?
-                    } else {
-                        CacheControl::no_store()
-                    };
+                    let mut cache_control =
+                        response.subgraph_cache_control(self.subgraph_ttl.into())?;
 
                     save_original_cache_control(
                         response.id.clone(),

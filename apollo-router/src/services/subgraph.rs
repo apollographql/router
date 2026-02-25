@@ -4,10 +4,12 @@ use std::collections::HashSet;
 use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
+use http::header::CACHE_CONTROL;
 use multimap::MultiMap;
 use serde::Deserialize;
 use serde::Serialize;
@@ -33,6 +35,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::query_planner::fetch::OperationKind;
 use crate::spec::QueryHash;
 
@@ -385,6 +388,17 @@ impl Response {
             subgraph_name,
             id,
         )
+    }
+
+    pub(crate) fn subgraph_cache_control(
+        &self,
+        default_ttl: Option<Duration>,
+    ) -> Result<CacheControl, BoxError> {
+        if self.response.headers().contains_key(&CACHE_CONTROL) {
+            CacheControl::new(self.response.headers(), default_ttl)
+        } else {
+            Ok(CacheControl::no_store())
+        }
     }
 }
 
