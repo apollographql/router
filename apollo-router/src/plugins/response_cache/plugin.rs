@@ -970,35 +970,27 @@ impl CacheService {
                 );
 
                 if self.debug {
+                    let context = CacheKeyContext {
+                        key: root_cache_key.clone(),
+                        hashed_private_id: private_id.clone(),
+                        invalidation_keys: external_invalidation_keys(invalidation_keys.clone()),
+                        kind: CacheEntryKind::RootFields {
+                            root_fields: root_operation_fields,
+                        },
+                        subgraph_name: self.name.clone(),
+                        subgraph_request: debug_subgraph_request.unwrap_or_default(),
+                        source: CacheKeySource::Subgraph,
+                        cache_control: cache_control.clone(),
+                        data: serde_json_bytes::to_value(response.response.body().clone())
+                            .unwrap_or_default(),
+                        warnings: Vec::new(),
+                        should_store: true,
+                    }
+                    .update_metadata();
                     response.context.upsert::<_, CacheKeysContext>(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
-                            val.push(
-                                CacheKeyContext {
-                                    key: root_cache_key.clone(),
-                                    hashed_private_id: private_id.clone(),
-                                    invalidation_keys: invalidation_keys
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                        .collect(),
-                                    kind: CacheEntryKind::RootFields {
-                                        root_fields: root_operation_fields,
-                                    },
-                                    subgraph_name: self.name.clone(),
-                                    subgraph_request: debug_subgraph_request.unwrap_or_default(),
-                                    source: CacheKeySource::Subgraph,
-                                    cache_control: cache_control.clone(),
-                                    data: serde_json_bytes::to_value(
-                                        response.response.body().clone(),
-                                    )
-                                    .unwrap_or_default(),
-                                    warnings: Vec::new(),
-                                    should_store: true,
-                                }
-                                .update_metadata(),
-                            );
-
+                            val.push(context);
                             val
                         },
                     )?
@@ -1082,9 +1074,7 @@ impl CacheService {
                         ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                             hashed_private_id: private_id.clone(),
                             key: cache_entry.key.clone(),
-                            invalidation_keys: ir.invalidation_keys.clone().into_iter()
-                                .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                .collect(),
+                            invalidation_keys: external_invalidation_keys(ir.invalidation_keys.clone()),
                             kind: CacheEntryKind::Entity {
                                 typename: ir.typename.clone(),
                                 entity_key: ir.entity_key.clone().unwrap_or_default(),
@@ -1266,13 +1256,7 @@ async fn cache_lookup_root(
                                     hashed_private_id: private_id.map(ToString::to_string),
                                     invalidation_keys: value
                                         .cache_tags
-                                        .map(|ct| {
-                                            ct.into_iter()
-                                                .filter(|k| {
-                                                    !k.starts_with(INTERNAL_CACHE_TAG_PREFIX)
-                                                })
-                                                .collect::<Vec<_>>()
-                                        })
+                                        .map(external_invalidation_keys)
                                         .unwrap_or_default(),
                                     kind: CacheEntryKind::RootFields {
                                         root_fields: root_operation_fields,
@@ -1554,11 +1538,7 @@ async fn cache_lookup_entities(
                         invalidation_keys: cache_entry
                             .cache_tags
                             .clone()
-                            .map(|ct| {
-                                ct.into_iter()
-                                    .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                    .collect::<Vec<_>>()
-                            })
+                            .map(external_invalidation_keys)
                             .unwrap_or_default(),
                         kind: CacheEntryKind::Entity {
                             typename: ir.typename.clone(),
@@ -2484,11 +2464,9 @@ async fn insert_entities_in_result(
                         CacheKeyContext {
                             key: key.clone(),
                             hashed_private_id: private_id_for_dbg.clone(),
-                            invalidation_keys: invalidation_keys
-                                .clone()
-                                .into_iter()
-                                .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                .collect(),
+                            invalidation_keys: external_invalidation_keys(
+                                invalidation_keys.clone(),
+                            ),
                             kind: CacheEntryKind::Entity {
                                 typename: typename.clone(),
                                 entity_key: entity_key.clone().unwrap_or_default(),
@@ -2547,6 +2525,13 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
+}
+
+fn external_invalidation_keys<I: IntoIterator<Item = String>>(invalidation_keys: I) -> Vec<String> {
+    invalidation_keys
+        .into_iter()
+        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+        .collect()
 }
 
 fn assemble_response_from_errors(
