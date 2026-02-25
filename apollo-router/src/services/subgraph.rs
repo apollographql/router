@@ -418,6 +418,10 @@ impl Response {
             Ok(CacheControl::no_store())
         }
     }
+
+    pub(crate) fn get_from_extensions(&self, key: &str) -> Option<&Value> {
+        self.response.body().extensions.get(key)
+    }
 }
 
 impl Request {

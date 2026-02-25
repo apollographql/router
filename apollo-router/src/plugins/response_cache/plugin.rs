@@ -939,22 +939,22 @@ impl CacheService {
                     CacheMetricContextKey::new(request.subgraph_name.clone()),
                     CacheSubgraph(cache_hit),
                 );
+
+                // extract debug information
                 let mut root_operation_fields: Vec<String> = Vec::new();
                 let mut debug_subgraph_request = None;
                 if self.debug {
                     root_operation_fields = request.root_operation_fields();
                     debug_subgraph_request = Some(request.subgraph_request.body().clone());
                 }
+
                 let response = self.service.call(request).await?;
 
                 let cache_control = response.subgraph_cache_control(self.subgraph_ttl.into())?;
 
                 // Support cache tags coming from subgraph response extensions
-                if let Some(Value::Array(cache_tags)) = response
-                    .response
-                    .body()
-                    .extensions
-                    .get(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
+                if let Some(Value::Array(cache_tags)) =
+                    response.get_from_extensions(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
                 {
                     invalidation_keys.extend(
                         cache_tags
