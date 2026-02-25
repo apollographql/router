@@ -800,6 +800,11 @@ impl CacheService {
                 .await
                 .contains(&private_query_key)
         };
+        let is_entity = request
+            .subgraph_request
+            .body()
+            .variables
+            .contains_key(REPRESENTATIONS);
 
         // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
         if is_known_private && private_id.is_none() {
@@ -825,11 +830,6 @@ impl CacheService {
                     .unwrap_or_default();
                 debug_subgraph_request = Some(request.subgraph_request.body().clone());
             }
-            let is_entity = request
-                .subgraph_request
-                .body()
-                .variables
-                .contains_key(REPRESENTATIONS);
             let resp = self.service.call(request).await?;
             if self.debug {
                 let cache_control =
@@ -873,12 +873,7 @@ impl CacheService {
             return Ok(resp);
         }
 
-        if !request
-            .subgraph_request
-            .body()
-            .variables
-            .contains_key(REPRESENTATIONS)
-        {
+        if !is_entity {
             if request.operation_kind == OperationKind::Query {
                 let mut cache_hit: HashMap<String, CacheHitMiss> = HashMap::new();
                 match cache_lookup_root(
