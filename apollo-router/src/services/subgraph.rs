@@ -153,6 +153,24 @@ impl Request {
     pub(crate) fn subgraph_operation_name(&self) -> Option<&str> {
         self.subgraph_request.body().operation_name.as_deref()
     }
+
+    pub(crate) fn root_operation_fields(&self) -> Vec<String> {
+        self.executable_document
+            .as_ref()
+            .and_then(|executable_document| {
+                let operation_name = self.subgraph_operation_name();
+                Some(
+                    executable_document
+                        .operations
+                        .get(operation_name)
+                        .ok()?
+                        .root_fields(executable_document)
+                        .map(|f| f.name.to_string())
+                        .collect(),
+                )
+            })
+            .unwrap_or_default()
+    }
 }
 
 impl Clone for Request {

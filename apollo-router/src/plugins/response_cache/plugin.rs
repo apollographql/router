@@ -843,22 +843,7 @@ impl CacheService {
         let mut debug_subgraph_request = None;
         let mut root_operation_fields = Vec::new();
         if self.debug {
-            root_operation_fields = request
-                .executable_document
-                .as_ref()
-                .and_then(|executable_document| {
-                    let operation_name = request.subgraph_operation_name();
-                    Some(
-                        executable_document
-                            .operations
-                            .get(operation_name)
-                            .ok()?
-                            .root_fields(executable_document)
-                            .map(|f| f.name.to_string())
-                            .collect(),
-                    )
-                })
-                .unwrap_or_default();
+            root_operation_fields = request.root_operation_fields();
             debug_subgraph_request = Some(request.subgraph_request.body().clone());
         }
         let resp = self.service.call(request).await?;
@@ -957,22 +942,7 @@ impl CacheService {
                 let mut root_operation_fields: Vec<String> = Vec::new();
                 let mut debug_subgraph_request = None;
                 if self.debug {
-                    root_operation_fields = request
-                        .executable_document
-                        .as_ref()
-                        .and_then(|executable_document| {
-                            let operation_name = request.subgraph_operation_name();
-                            Some(
-                                executable_document
-                                    .operations
-                                    .get(operation_name)
-                                    .ok()?
-                                    .root_fields(executable_document)
-                                    .map(|f| f.name.to_string())
-                                    .collect(),
-                            )
-                        })
-                        .unwrap_or_default();
+                    root_operation_fields = request.root_operation_fields();
                     debug_subgraph_request = Some(request.subgraph_request.body().clone());
                 }
                 let response = self.service.call(request).await?;
@@ -1304,6 +1274,7 @@ async fn cache_lookup_root(
                 save_original_cache_control(request.id.clone(), &request.context, control.clone());
                 update_cache_control(&request.context, &control);
                 if debug {
+                    // TODO: this uses iter() rather than get(request.subgraph_operation_name()) - why?
                     let root_operation_fields: Vec<String> = request
                         .executable_document
                         .as_ref()
