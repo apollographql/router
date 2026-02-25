@@ -54,6 +54,10 @@ pub(crate) trait MetricsConfigurator {
 pub(crate) struct MetricsBuilder<'a> {
     pub(super) meter_provider_builders:
         HashMap<MeterProviderType, opentelemetry_sdk::metrics::MeterProviderBuilder>,
+    /// Tracks which provider types have readers configured.
+    /// Only providers with readers are returned from build() to avoid OTel SDK errors
+    /// when observable instruments are registered with providers that have no readers.
+    providers_with_readers: HashSet<MeterProviderType>,
     apollo_metrics_sender: Sender,
     prometheus_registry: Option<Registry>,
     metrics_common: &'a MetricsCommon,
@@ -72,6 +76,10 @@ impl<'a> MetricsBuilder<'a> {
             self.prometheus_registry,
             self.meter_provider_builders
                 .into_iter()
+                // Only include providers that have readers configured.
+                // Providers with only views but no readers would cause OTel SDK to emit
+                // errors when observable instruments are registered.
+                .filter(|(k, _)| self.providers_with_readers.contains(k))
                 .map(|(k, v)| {
                     (
                         k,
@@ -103,6 +111,7 @@ impl<'a> MetricsBuilder<'a> {
 
         Self {
             meter_provider_builders: HashMap::default(),
+            providers_with_readers: HashSet::new(),
             resource,
             apollo_metrics_sender: Sender::default(),
             prometheus_registry: None,
@@ -130,6 +139,8 @@ impl<'a> MetricsBuilder<'a> {
     ) -> &mut Self {
         let meter_provider = self.meter_provider(meter_provider_type);
         *meter_provider = std::mem::take(meter_provider).with_reader(reader);
+        // Track that this provider has a reader - only providers with readers will be returned
+        self.providers_with_readers.insert(meter_provider_type);
         self
     }
 

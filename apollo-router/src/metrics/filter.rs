@@ -27,14 +27,16 @@ impl InstrumentProvider for NoopInstrumentProvider {}
 #[derive(Clone)]
 enum MeterProviderInner {
     Sdk(SdkMeterProvider),
-    Dynamic(Arc<dyn OtelMeterProvider + Send + Sync>),
+    /// Noop provider - returns noop instruments without going through OTel SDK.
+    /// Used as a placeholder to avoid OTel SDK errors during startup/reconfiguration.
+    Noop,
 }
 
 impl OtelMeterProvider for MeterProviderInner {
     fn meter_with_scope(&self, scope: InstrumentationScope) -> Meter {
         match self {
             MeterProviderInner::Sdk(p) => p.meter_with_scope(scope),
-            MeterProviderInner::Dynamic(p) => p.meter_with_scope(scope),
+            MeterProviderInner::Noop => Meter::new(Arc::new(NoopInstrumentProvider)),
         }
     }
 }
@@ -104,17 +106,6 @@ impl FilterMeterProvider {
             .build()
     }
 
-    /// Create a public filter from a dynamic meter provider (e.g., from opentelemetry::global::meter_provider())
-    pub(crate) fn public_dynamic(delegate: Arc<dyn OtelMeterProvider + Send + Sync>) -> Self {
-        FilterMeterProvider::builder()
-            .delegate(MeterProviderInner::Dynamic(delegate))
-            .deny(
-                Regex::new(r"apollo\.router\.(config|entities|instance|operations\.(connectors|fetch|request_size|response_size|error)|schema\.connectors)(\..*|$)")
-                    .expect("regex should have been valid"),
-            )
-            .build()
-    }
-
     #[cfg(test)]
     pub(crate) fn all(delegate: SdkMeterProvider) -> Self {
         FilterMeterProvider::builder()
@@ -122,11 +113,21 @@ impl FilterMeterProvider {
             .build()
     }
 
+    /// Create a noop filter provider that returns noop instruments.
+    /// Used as a placeholder to avoid OTel SDK errors during startup/reconfiguration.
+    pub(crate) fn noop() -> Self {
+        FilterMeterProvider {
+            delegate: MeterProviderInner::Noop,
+            deny: None,
+            allow: None,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         match &self.delegate {
             MeterProviderInner::Sdk(p) => p.force_flush(),
-            MeterProviderInner::Dynamic(_) => Ok(()),
+            MeterProviderInner::Noop => Ok(()),
         }
     }
 
@@ -196,12 +197,19 @@ macro_rules! filter_observable_instrument_fn {
             &self,
             builder: AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
         ) -> $wrapper<$ty> {
-            let meter = match (&self.deny, &self.allow) {
+            let is_filtered = match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&builder.name) => &self.noop,
-                (_, Some(allow)) if !allow.is_match(&builder.name) => &self.noop,
-                (_, _) => &self.delegate,
+                (Some(deny), _) if deny.is_match(&builder.name) => true,
+                (_, Some(allow)) if !allow.is_match(&builder.name) => true,
+                (_, _) => false,
             };
+
+            // For filtered observable instruments, return noop immediately.
+            // This avoids registering callbacks with the SDK which would log
+            // errors about views not producing measures in OTel 0.31+.
+            if is_filtered {
+                return $wrapper::new();
+            }
 
             // Extract builder fields before consuming callbacks
             let name = builder.name;
@@ -212,7 +220,7 @@ macro_rules! filter_observable_instrument_fn {
             let shared_callbacks: Vec<std::sync::Arc<dyn Fn(&dyn opentelemetry::metrics::AsyncInstrument<$ty>) + Send + Sync>> =
                 builder.callbacks.into_iter().map(std::sync::Arc::from).collect();
 
-            let mut b = meter.$name(name);
+            let mut b = self.delegate.$name(name);
             if let Some(desc) = &description {
                 b = b.with_description(desc.clone());
             }

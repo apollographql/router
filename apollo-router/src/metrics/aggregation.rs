@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 
 use derive_more::From;
 use opentelemetry::InstrumentationScope;
@@ -23,7 +22,6 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
 use strum::Display;
 use strum::EnumCount;
@@ -61,19 +59,11 @@ pub(crate) struct AggregateMeterProvider {
 
 impl Default for AggregateMeterProvider {
     fn default() -> Self {
-        let meter_provider = AggregateMeterProvider {
+        // All providers start as noop to avoid OTel SDK errors.
+        // Real providers are set via set() during configuration.
+        AggregateMeterProvider {
             inner: Arc::new(Mutex::new(Some(Inner::default()))),
-        };
-
-        // If the regular global meter provider has been set then the aggregate meter provider will use it. Otherwise it'll default to a no-op.
-        // For this to work the global meter provider must be set before the aggregate meter provider is created.
-        // This functionality is not guaranteed to stay like this, so use at your own risk.
-        meter_provider.set(
-            MeterProviderType::OtelDefault,
-            FilterMeterProvider::public_dynamic(opentelemetry::global::meter_provider()),
-        );
-
-        meter_provider
+        }
     }
 }
 
@@ -87,13 +77,10 @@ pub(crate) struct Inner {
 impl Default for Inner {
     fn default() -> Self {
         Inner {
+            // Initialize with noop providers to avoid OTel SDK errors during startup.
+            // Real providers are set via AggregateMeterProvider::set() during configuration.
             providers: (0..MeterProviderType::COUNT)
-                .map(|_| {
-                    (
-                        FilterMeterProvider::public(SdkMeterProvider::default()),
-                        HashMap::new(),
-                    )
-                })
+                .map(|_| (FilterMeterProvider::noop(), HashMap::new()))
                 .collect(),
             registered_instruments: Vec::new(),
             observable_registries: Arc::new(SharedObservableRegistries::new(
@@ -354,9 +341,6 @@ impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
     }
 }
 
-/// Unique ID for each observable callback registration
-type CallbackId = u64;
-
 /// Type alias for observable callbacks
 type ObservableCallback<T> = Arc<dyn Fn(&dyn AsyncInstrument<T>) + Send + Sync>;
 
@@ -367,14 +351,13 @@ type ObservableCallback<T> = Arc<dyn Fn(&dyn AsyncInstrument<T>) + Send + Sync>;
 /// the SDK at build time and live until provider shutdown.
 ///
 /// This registry provides proper lifecycle management:
-/// - Callbacks are stored indexed by (instrument_name, callback_id)
+/// - Callbacks are stored indexed by instrument_name
 /// - One OTel instrument per (provider_index, instrument_name) is registered lazily
 /// - The consolidated callback invokes all registered user callbacks for that instrument
 /// - When a provider is replaced, its registrations are cleared so new gauges re-register
 struct ObservableCallbackRegistry<T: Send + Sync + 'static> {
-    next_id: AtomicU64,
-    /// instrument_name -> (callback_id -> callback)
-    callbacks: Mutex<HashMap<String, HashMap<CallbackId, ObservableCallback<T>>>>,
+    /// instrument_name -> callback
+    callbacks: Mutex<HashMap<String, ObservableCallback<T>>>,
     /// Tracks which (provider_index, instrument_name) pairs have been registered with OTel SDK
     registered: Mutex<HashSet<(usize, String)>>,
 }
@@ -382,7 +365,6 @@ struct ObservableCallbackRegistry<T: Send + Sync + 'static> {
 impl<T: Send + Sync + 'static> ObservableCallbackRegistry<T> {
     fn new() -> Self {
         Self {
-            next_id: AtomicU64::new(0),
             callbacks: Mutex::new(HashMap::new()),
             registered: Mutex::new(HashSet::new()),
         }
@@ -394,18 +376,14 @@ impl<T: Send + Sync + 'static> ObservableCallbackRegistry<T> {
     fn register_callback(&self, instrument_name: &str, callback: ObservableCallback<T>) {
         let mut callbacks = self.callbacks.lock();
         // Replace any existing callback - gauges should only have one callback per name
-        let mut map = HashMap::new();
-        map.insert(0, callback);
-        callbacks.insert(instrument_name.to_string(), map);
+        callbacks.insert(instrument_name.to_string(), callback);
     }
 
     /// Invoke the callback for an instrument name.
-    fn invoke_all(&self, instrument_name: &str, observer: &dyn AsyncInstrument<T>) {
+    fn invoke_callback(&self, instrument_name: &str, observer: &dyn AsyncInstrument<T>) {
         let callbacks = self.callbacks.lock();
-        if let Some(instrument_callbacks) = callbacks.get(instrument_name) {
-            for callback in instrument_callbacks.values() {
-                callback(observer);
-            }
+        if let Some(callback) = callbacks.get(instrument_name) {
+            callback(observer);
         }
     }
 
@@ -589,7 +567,7 @@ macro_rules! aggregate_observable_gauge_fn {
                 let registry = Arc::clone(&self.registries);
                 let name = gauge_name.clone();
                 b = b.with_callback(move |observer| {
-                    registry.$registry.invoke_all(&name, observer);
+                    registry.$registry.invoke_callback(&name, observer);
                 });
                 // Build registers the callback with OTel SDK
                 // The returned ObservableGauge is PhantomData, no need to store it
@@ -645,7 +623,7 @@ macro_rules! aggregate_observable_counter_fn {
                 let registry = Arc::clone(&self.registries);
                 let name = instrument_name.clone();
                 b = b.with_callback(move |observer| {
-                    registry.$registry.invoke_all(&name, observer);
+                    registry.$registry.invoke_callback(&name, observer);
                 });
                 // Build registers the callback with OTel SDK
                 // The returned type is PhantomData, no need to store it
