@@ -19,6 +19,7 @@ use thiserror::Error;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument::WithSubscriber;
+use url::Url;
 
 use crate::uplink::schema::SchemaState;
 
@@ -296,14 +297,57 @@ async fn fetch_oci_blob(
     Ok(blob_data)
 }
 
-/// The oci reference may not contain the protocol, only hostname[:port]. As a result,
-/// in order to test locally without SSL, either (1) protocol needs to be exposed as an
-/// env var or (2) protocol needs to be inferred from hostname. Rather than introduce a
-/// largely unused configuration option, this function checks the hostname for local
-/// development/testing and disables SSL accordingly.
+const UNSECURE_HOSTS_ENV_VAR: &str = "APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS";
+const DEFAULT_UNSECURE_HOSTS: &[&str] = &["localhost", "127.0.0.1", "dockerhost"];
+
+/// Parse a comma-separated string of unsecure hosts. Empty entries are ignored.
+fn parse_unsecure_hosts(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn unsecure_hosts() -> Vec<String> {
+    match std::env::var(UNSECURE_HOSTS_ENV_VAR) {
+        Ok(val) => parse_unsecure_hosts(&val),
+        Err(_) => DEFAULT_UNSECURE_HOSTS
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+    }
+}
+
+/// Extract the hostname from a registry string like "host", "host:port", or
+/// an IPv6 address like "[::1]:port", using `url::Url` for robust parsing.
+/// IPv6 addresses are returned without brackets (e.g. "::1" not "[::1]").
+fn extract_host(registry: &str) -> Option<String> {
+    Url::parse(&format!("dummy://{registry}")).ok().and_then(|url| {
+        url.host().map(|h| match h {
+            url::Host::Ipv6(addr) => addr.to_string(),
+            other => other.to_string(),
+        })
+    })
+}
+
+/// Check whether `registry` matches any entry in `hosts`, comparing only the
+/// hostname portion (stripping any port).
+fn is_unsecure_host(registry: &str, hosts: &[String]) -> bool {
+    extract_host(registry)
+        .map(|host| hosts.iter().any(|h| h == &host))
+        .unwrap_or(false)
+}
+
+/// Determine whether to use HTTP or HTTPS for the OCI registry.
+///
+/// Uses the `APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS` environment variable, which
+/// contains a comma-separated list of hostnames that should use HTTP instead of
+/// HTTPS. When the variable is unset, the defaults are "localhost", "127.0.0.1",
+/// and "dockerhost". Setting it to an empty string disables all HTTP overrides.
 async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
-    let host = registry.split(":").next().expect("host must be provided");
-    if host == "localhost" || host == "127.0.0.1" || host == "dockerhost" {
+    let hosts = unsecure_hosts();
+    if is_unsecure_host(registry, &hosts) {
         ClientProtocol::Http
     } else {
         ClientProtocol::Https
@@ -923,6 +967,127 @@ mod tests {
         // included here as a second layer of security.
         let result = infer_oci_protocol("").await;
         assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[test]
+    fn test_parse_unsecure_hosts_comma_separated() {
+        let hosts = parse_unsecure_hosts("host1,host2,host3");
+        assert_eq!(hosts, vec!["host1", "host2", "host3"]);
+    }
+
+    #[test]
+    fn test_parse_unsecure_hosts_with_whitespace() {
+        let hosts = parse_unsecure_hosts(" host1 , host2 , host3 ");
+        assert_eq!(hosts, vec!["host1", "host2", "host3"]);
+    }
+
+    #[test]
+    fn test_parse_unsecure_hosts_empty_string() {
+        let hosts = parse_unsecure_hosts("");
+        assert!(hosts.is_empty());
+    }
+
+    #[test]
+    fn test_parse_unsecure_hosts_trailing_commas() {
+        let hosts = parse_unsecure_hosts("host1,,host2,");
+        assert_eq!(hosts, vec!["host1", "host2"]);
+    }
+
+    #[test]
+    fn test_parse_unsecure_hosts_single_host() {
+        let hosts = parse_unsecure_hosts("myregistry.local");
+        assert_eq!(hosts, vec!["myregistry.local"]);
+    }
+
+    #[test]
+    fn test_is_unsecure_host_exact_match() {
+        let hosts = vec!["myregistry.local".to_string()];
+        assert!(is_unsecure_host("myregistry.local", &hosts));
+        assert!(is_unsecure_host("myregistry.local:5000", &hosts));
+    }
+
+    #[test]
+    fn test_is_unsecure_host_no_match() {
+        let hosts = vec!["myregistry.local".to_string()];
+        assert!(!is_unsecure_host("other.registry.com", &hosts));
+        assert!(!is_unsecure_host("docker.io", &hosts));
+    }
+
+    #[test]
+    fn test_is_unsecure_host_empty_list() {
+        let hosts: Vec<String> = vec![];
+        assert!(!is_unsecure_host("localhost", &hosts));
+        assert!(!is_unsecure_host("127.0.0.1", &hosts));
+    }
+
+    #[test]
+    fn test_is_unsecure_host_defaults() {
+        let hosts: Vec<String> = DEFAULT_UNSECURE_HOSTS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(is_unsecure_host("localhost", &hosts));
+        assert!(is_unsecure_host("localhost:5000", &hosts));
+        assert!(is_unsecure_host("127.0.0.1", &hosts));
+        assert!(is_unsecure_host("127.0.0.1:5000", &hosts));
+        assert!(is_unsecure_host("dockerhost", &hosts));
+        assert!(is_unsecure_host("dockerhost:5000", &hosts));
+        assert!(!is_unsecure_host("docker.io", &hosts));
+        assert!(!is_unsecure_host("registry.apollographql.com", &hosts));
+    }
+
+    #[test]
+    fn test_is_unsecure_host_custom_list_replaces_defaults() {
+        let hosts = parse_unsecure_hosts("internal.registry.corp");
+        assert!(is_unsecure_host("internal.registry.corp", &hosts));
+        assert!(is_unsecure_host("internal.registry.corp:8080", &hosts));
+        assert!(!is_unsecure_host("localhost", &hosts));
+        assert!(!is_unsecure_host("127.0.0.1", &hosts));
+        assert!(!is_unsecure_host("dockerhost", &hosts));
+    }
+
+    #[test]
+    fn test_is_unsecure_host_no_substring_match() {
+        let hosts = vec!["localhost".to_string()];
+        assert!(!is_unsecure_host("localhost.example.com", &hosts));
+        assert!(!is_unsecure_host("notlocalhost", &hosts));
+    }
+
+    #[test]
+    fn test_extract_host_simple() {
+        assert_eq!(extract_host("localhost"), Some("localhost".to_string()));
+        assert_eq!(extract_host("localhost:5000"), Some("localhost".to_string()));
+    }
+
+    #[test]
+    fn test_extract_host_ipv4() {
+        assert_eq!(extract_host("127.0.0.1"), Some("127.0.0.1".to_string()));
+        assert_eq!(
+            extract_host("127.0.0.1:5000"),
+            Some("127.0.0.1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_host_ipv6() {
+        assert_eq!(extract_host("[::1]"), Some("::1".to_string()));
+        assert_eq!(extract_host("[::1]:5000"), Some("::1".to_string()));
+    }
+
+    #[test]
+    fn test_extract_host_domain_with_port() {
+        assert_eq!(
+            extract_host("registry.example.com:443"),
+            Some("registry.example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_is_unsecure_host_ipv6() {
+        let hosts = vec!["::1".to_string()];
+        assert!(is_unsecure_host("[::1]", &hosts));
+        assert!(is_unsecure_host("[::1]:5000", &hosts));
+        assert!(!is_unsecure_host("localhost", &hosts));
     }
 
     #[test]
