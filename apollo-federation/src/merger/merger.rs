@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::rc::Rc;
 use std::sync::LazyLock;
@@ -53,6 +54,7 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
+use crate::merger::merge_directive::AdditionalDirectiveSources;
 use crate::merger::merge_directive::AppliedDirectivesToMerge;
 use crate::merger::merge_enum::EnumExample;
 use crate::merger::merge_enum::EnumExampleAst;
@@ -85,6 +87,7 @@ use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
+use crate::utils::FallibleOnceCell;
 use crate::utils::MultiIndexMap;
 use crate::utils::first_max_by_key;
 use crate::utils::human_readable::human_readable_subgraph_names;
@@ -162,6 +165,8 @@ pub(crate) struct Merger {
     pub(in crate::merger) latest_federation_version_used: Version,
     pub(in crate::merger) applied_directives_to_merge: AppliedDirectivesToMerge,
     pub(in crate::merger) access_control_directives_in_supergraph: Vec<(Name, Name)>,
+    pub(in crate::merger) access_control_additional_sources:
+        FallibleOnceCell<HashMap<String, AdditionalDirectiveSources>>,
 }
 
 #[allow(dead_code)]
@@ -235,6 +240,7 @@ impl Merger {
             latest_federation_version_used,
             applied_directives_to_merge: Vec::new(),
             access_control_directives_in_supergraph: Vec::new(),
+            access_control_additional_sources: FallibleOnceCell::new(),
         };
 
         // Now call prepare_supergraph as a member function
@@ -1709,14 +1715,22 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     fn add_missing_interface_object_fields_to_implementations(
         &mut self,
     ) -> Result<(), FederationError> {
-        let mut fields_to_insert: HashMap<
-            ObjectOrInterfaceFieldDefinitionPosition,
-            FieldDefinition,
-        > = HashMap::new();
+        let mut fields_to_insert: HashMap<ObjectFieldDefinitionPosition, FieldDefinition> =
+            HashMap::new();
+
+        let access_control_directive_names: IndexSet<Name> = self
+            .access_control_directives_in_supergraph
+            .iter()
+            .map(|(_, name)| name.clone())
+            .collect();
+        let mut access_control_sources: IndexMap<
+            ObjectFieldDefinitionPosition,
+            Sources<DirectiveTargetPosition>,
+        > = IndexMap::default();
         // For each merged object types, we check if we're missing a field from one of the implemented interface.
         // If we do, then we look if one of the subgraph provides that field as a (non-external) interface object
         // type, and if that's the case, we add the field to the object.
-        for subgraph in self.subgraphs.iter() {
+        for (index, subgraph) in self.subgraphs.iter().enumerate() {
             // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
             // have a specific validation that return a user-friendly error in such incorrect cases, see
             // `post_merge_validations`). We must first check that there is some subgraph that implement
@@ -1752,6 +1766,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                 .schema()
                                 .directive_definitions
                                 .contains_key(&d.name)
+                            // filter access control directives for now as they will be merged later one
+                            && !access_control_directive_names.contains(&d.name)
                         });
                         missing_obj_node.arguments.iter_mut().for_each(|arg| {
                             arg.make_mut().directives.retain(|d| {
@@ -1769,15 +1785,15 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         missing_obj_node
                             .directives
                             .push(JoinFieldBuilder::new().build());
-
-                        fields_to_insert.insert(
-                            ObjectFieldDefinitionPosition {
-                                type_name: implementer.type_name().clone(),
-                                field_name: itf_obj_field.field_name.clone(),
-                            }
-                            .into(),
-                            missing_obj_node,
-                        );
+                        let merged_field = ObjectFieldDefinitionPosition {
+                            type_name: implementer.type_name().clone(),
+                            field_name: itf_obj_field.field_name.clone(),
+                        };
+                        access_control_sources
+                            .entry(merged_field.clone())
+                            .or_default()
+                            .insert(index, Some(itf_obj_field.clone().into()));
+                        fields_to_insert.insert(merged_field, missing_obj_node);
                     }
                 }
             }
@@ -1786,6 +1802,15 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         for (dest, ast_node) in fields_to_insert {
             trace!("Filling in missing interface object field {dest} with {ast_node}",);
             dest.insert(&mut self.merged, Component::new(ast_node))?;
+            // now we can merge access control directives
+            for directive_name in &access_control_directive_names {
+                self.merge_applied_directive(
+                    directive_name,
+                    access_control_sources.entry(dest.clone()).or_default(),
+                    &dest.clone().into(),
+                )?;
+            }
+
             // If we had to add a field here, it means that, for this particular implementation, the
             // field is only provided through the @interfaceObject. But because the field wasn't
             // merged, it also means we haven't validated field sharing for that field, and we could
@@ -1804,7 +1829,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 .collect();
             self.validate_field_sharing(
                 &sources,
-                &dest,
+                &dest.clone().into(),
                 &FieldMergeContext::new(sources.keys().copied()),
             )?;
         }
@@ -1840,7 +1865,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         is_input_position: bool,
     ) -> Result<bool, FederationError>
     where
-        T: Display + HasType,
+        T: Display + HasType + Debug,
     {
         if sources.is_empty() {
             self.error_reporter_mut()
