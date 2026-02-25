@@ -472,9 +472,18 @@ The `apollo.subscription.end_reason` attribute can have these values:
 | `schema_reload` | The subscription was terminated because Apollo Router's supergraph schema was updated. Clients can reconnect to resume the subscription. |
 | `config_reload` | The subscription was terminated because Apollo Router's configuration was updated. Clients can reconnect to resume the subscription. |
 
+### Tracking subgraph connection failures and closures
+
+Apollo Router emits counter metrics to track when subgraph WebSocket connections fail or close:
+
+- `apollo.router.operations.subscriptions.rejected.subgraph` (attribute: `subgraph.service.name`): Incremented when a subscription request is rejected because the subgraph WebSocket connection failed, such as a connection refusal, protocol error, or failed subscription handshake.
+- `apollo.router.operations.subscriptions.ended.subgraph` (attribute: `subgraph.service.name`): Incremented when a subgraph closes its WebSocket connection, ending the subscription stream for all deduplicated clients listening on that connection.
+
 #### Example: Monitor subscription health
 
-Use the `apollo.subscription.end_reason` attribute to monitor the health of your subscriptions:
+Use the `apollo.subscription.end_reason` attribute and subgraph counter metrics to monitor the health of your subscriptions:
 
 - Frequent `subgraph_error` values might indicate issues with your subgraph subscription sources closing unexpectedly.
 - The `server_close` value indicates healthy subscription lifecycles where the subgraph properly signals closure.
+- A high rate of `apollo.router.operations.subscriptions.rejected.subgraph` for a specific subgraph may indicate connectivity issues or misconfigured WebSocket endpoints.
+- The `apollo.router.operations.subscriptions.ended.subgraph` metric helps track how often subgraphs are closing connections, which can inform capacity planning and subgraph stability monitoring.
