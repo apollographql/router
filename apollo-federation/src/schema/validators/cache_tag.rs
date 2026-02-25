@@ -1,3 +1,6 @@
+// PORT_NOTE: Port of JS `@cacheTag` directive validation, called from `FederationBlueprint#onValidation`
+// in the JS codebase (federation PR #3274). Validates format string, root-field vs entity rules,
+// and key-field-set intersection for entity types.
 use std::fmt;
 use std::ops::Range;
 
@@ -18,6 +21,8 @@ use crate::connectors::StringTemplateError;
 use crate::connectors::spec::connect_spec_from_schema;
 use crate::error::ErrorCode;
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::CacheTagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -29,6 +34,21 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 
 const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
+
+/// Validates `@cacheTag` directives and pushes any errors into `errors`.
+/// Use this from `FederationBlueprint::on_validation` so cache tag validation
+/// runs in the main subgraph validation path.
+pub(crate) fn validate_cache_tag_directives_into(
+    schema: &FederationSchema,
+    errors: &mut MultipleFederationErrors,
+) -> Result<(), FederationError> {
+    let mut messages = Vec::new();
+    validate_cache_tag_directives(schema, &mut messages)?;
+    for msg in messages {
+        errors.push(msg.into_federation_error());
+    }
+    Ok(())
+}
 
 pub(crate) fn validate_cache_tag_directives(
     schema: &FederationSchema,
@@ -442,6 +462,47 @@ impl Message {
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.error)
+    }
+}
+
+impl Message {
+    /// Converts this message into a `FederationError` for pushing into
+    /// `MultipleFederationErrors` (e.g. from blueprint validation).
+    pub(crate) fn into_federation_error(self) -> FederationError {
+        match self.error {
+            CacheTagValidationError::FederationError { error } => error,
+            e => FederationError::SingleFederationError(cache_tag_validation_error_to_single(e)),
+        }
+    }
+}
+
+fn cache_tag_validation_error_to_single(e: CacheTagValidationError) -> SingleFederationError {
+    match e {
+        CacheTagValidationError::CacheTagInvalidFormat { message } => {
+            SingleFederationError::CacheTagInvalidFormat { message }
+        }
+        CacheTagValidationError::CacheTagNotOnRootField {
+            type_name,
+            field_name,
+        } => SingleFederationError::CacheTagNotOnRootField {
+            type_name,
+            field_name,
+        },
+        CacheTagValidationError::CacheTagInvalidFormatArgumentOnRootField => {
+            SingleFederationError::CacheTagInvalidFormatArgumentOnRootField
+        }
+        CacheTagValidationError::CacheTagInvalidFormatArgumentOnEntity { type_name, format } => {
+            SingleFederationError::CacheTagInvalidFormatArgumentOnEntity { type_name, format }
+        }
+        CacheTagValidationError::CacheTagEntityNotResolvable(type_name) => {
+            SingleFederationError::CacheTagEntityNotResolvable(type_name)
+        }
+        CacheTagValidationError::CacheTagInvalidFormatFieldSetOnEntity { type_name, format } => {
+            SingleFederationError::CacheTagInvalidFormatFieldSetOnEntity { type_name, format }
+        }
+        CacheTagValidationError::FederationError { .. } => {
+            unreachable!("FederationError is handled in into_federation_error")
+        }
     }
 }
 

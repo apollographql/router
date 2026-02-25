@@ -100,7 +100,11 @@ pub mod internal_composition_api {
         pub errors: Vec<cache_tag::Message>,
     }
 
-    /// Validates `@cacheTag` directives in the original (unexpanded) subgraph schema.
+    /// Validates `@cacheTag` directives in the subgraph schema.
+    ///
+    /// Uses `expand_links_without_validation` so only cache-tag validation runs (full
+    /// blueprint validation is not run during expand).
+    ///
     /// * name: Subgraph name
     /// * url: Subgraph URL
     /// * sdl: Subgraph schema
@@ -115,7 +119,7 @@ pub mod internal_composition_api {
         let subgraph =
             typestate::Subgraph::parse(name, url, sdl).map_err(|e| e.into_federation_error())?;
         let subgraph = subgraph
-            .expand_links()
+            .expand_links_without_validation()
             .map_err(|e| e.into_federation_error())?;
         let mut result = ValidationResult::default();
         cache_tag::validate_cache_tag_directives(subgraph.schema(), &mut result.errors)?;

@@ -1,3 +1,8 @@
+// This `cacheTag` spec is a supergraph-only feature spec to indicate that some of the subgraphs
+// use the `@cacheTag` directive. The `@cacheTag` directive itself is not used in supergraph
+// schema, since `@cacheTag` directive applications are composed using the `@join__directive`
+// directive.
+// PORT_NOTE: Ported from internals-js/src/specs/cacheTagSpec.ts (federation PR #3274).
 use std::sync::LazyLock;
 
 use apollo_compiler::schema::DirectiveLocation;
@@ -39,7 +44,6 @@ impl CacheTagSpecDefinition {
     }
 
     fn directive_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
-        // TODO: Port the JS federation PR (#3274), once Rust composition is implemented.
         Box::new(DirectiveSpecification::new(
             FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
             &[DirectiveArgumentSpecification {

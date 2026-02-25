@@ -36,8 +36,10 @@ use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
 use crate::link::Link;
+use crate::link::cache_tag_spec_definition::CACHE_TAG_VERSIONS;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
@@ -353,6 +355,26 @@ impl Merger {
         let directives_merge_info = self.collect_core_directives_to_compose()?;
 
         self.validate_and_maybe_add_specs(&directives_merge_info)?;
+
+        // If any subgraph uses @cacheTag, add the supergraph-only cacheTag spec (marker) so
+        // gateways/routers know the supergraph uses cacheTag (per federation 2.12 / JS PR #3274).
+        let any_subgraph_uses_cache_tag = self.subgraphs.iter().any(|s| {
+            s.schema()
+                .cache_tag_directive_applications()
+                .map(|apps| !apps.is_empty())
+                .unwrap_or(false)
+        });
+        if any_subgraph_uses_cache_tag
+            && let Some(cache_tag_spec) = CACHE_TAG_VERSIONS.find(&Version { major: 0, minor: 1 })
+        {
+            self.link_spec_definition.apply_feature_to_schema(
+                &mut self.merged,
+                cache_tag_spec,
+                None,
+                cache_tag_spec.purpose(),
+                None,
+            )?;
+        }
 
         // Populate the graph enum with subgraph information and store the mapping
         self.subgraph_names_to_join_spec_name = self
@@ -2341,6 +2363,16 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 {
                     should_include_as_join_directive =
                         self.should_use_join_directive_for_url(&url_for_directive.link.url);
+                    // Federation directives that are composed via @join__directive in the
+                    // supergraph (e.g. @cacheTag per federation 2.12 / JS PR #3274).
+                    if !should_include_as_join_directive
+                        && url_for_directive.link.url.identity == Identity::federation_identity()
+                        && let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema)
+                        && let Ok(cache_tag_def) = fed_spec.cache_tag_directive_definition(schema)
+                        && directive.name == cache_tag_def.name
+                    {
+                        should_include_as_join_directive = true;
+                    }
                 }
 
                 if should_include_as_join_directive {
