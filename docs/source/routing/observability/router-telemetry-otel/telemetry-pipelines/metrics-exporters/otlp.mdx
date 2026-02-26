@@ -69,11 +69,22 @@ Defaults to:
 * http://127.0.0.1:4317 for gRPC
 * http://127.0.0.1:4318 for HTTP
 
-<Note>
+<Warning>
 
-If your environment sets `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, these variables take precedence over the `endpoint` configured in your `router.yaml`. If metrics aren't appearing at your expected endpoint, check if these environment variables are set and unset them if necessary.
+If your environment defines any of the following OpenTelemetry (OTEL) environment variables:
 
-</Note>
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
+- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+- `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
+
+be aware that they can override or interfere with the Router’s built-in telemetry configuration.
+
+**In Apollo Router versions earlier than v2.12.0**, these variables take precedence over Router telemetry settings and may cause traces or metrics to be sent to an unintended destination.
+
+**Starting in Apollo Router v2.12.0 and later, the Router will _refuse to start_ if any of these variables are set.**  
+They must be removed from the environment before launching the Router.
+
+</Warning>
 
 ### `grpc`
 
