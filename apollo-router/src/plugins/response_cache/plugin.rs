@@ -144,10 +144,10 @@ impl StorageInterface {
 
     /// Activate all storages so they can start emitting metrics.
     pub(crate) fn activate(&self) {
-        if let Some(all) = &self.all {
-            if let Some(storage) = all.get() {
-                storage.activate();
-            }
+        if let Some(all) = &self.all
+            && let Some(storage) = all.get()
+        {
+            storage.activate();
         }
         for storage in self.subgraphs.values() {
             if let Some(storage) = storage.get() {

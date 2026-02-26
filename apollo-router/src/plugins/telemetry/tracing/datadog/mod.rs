@@ -1,7 +1,6 @@
 //! Configuration for datadog tracing.
 
 mod agent_sampling;
-pub(crate) mod propagator;
 mod span_processor;
 
 use std::fmt::Debug;
@@ -25,8 +24,6 @@ use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
-pub(crate) use propagator::DatadogPropagator;
-pub(crate) use propagator::DatadogTraceState;
 use schemars::JsonSchema;
 use serde::Deserialize;
 pub(crate) use span_processor::DatadogSpanProcessor;
@@ -50,6 +47,8 @@ use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
+use crate::plugins::telemetry::tracing::datadog_exporter;
+use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -147,7 +146,7 @@ impl TracingConfigurator for Config {
             .endpoint
             .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT));
 
-        let exporter = opentelemetry_datadog::new_pipeline()
+        let exporter = datadog_exporter::new_pipeline()
             .with_agent_endpoint(endpoint.to_string().trim_end_matches('/'))
             .with(&resource_mappings, |builder, resource_mappings| {
                 let resource_mappings = resource_mappings.clone();
@@ -245,7 +244,7 @@ impl TracingConfigurator for Config {
 }
 
 struct ExporterWrapper {
-    delegate: opentelemetry_datadog::DatadogExporter,
+    delegate: datadog_exporter::DatadogExporter,
     span_metrics: HashMap<String, bool>,
 }
 

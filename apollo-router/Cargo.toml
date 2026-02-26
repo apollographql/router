@@ -171,7 +171,6 @@ opentelemetry_sdk = { version = "0.31", default-features = false, features = [
     "experimental_metrics_periodicreader_with_async_runtime",
 ] }
 opentelemetry-aws = "0.19"
-opentelemetry-datadog = { version = "0.19", features = ["reqwest-client"] }
 rmp = "0.8"
 opentelemetry-http = "0.31"
 opentelemetry-jaeger-propagator = "0.31"

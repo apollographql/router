@@ -117,7 +117,7 @@ pub(crate) fn create_propagator(
         }
 
         propagators.push(Box::<
-            crate::plugins::telemetry::tracing::datadog::DatadogPropagator,
+            crate::plugins::telemetry::tracing::datadog_exporter::DatadogPropagator,
         >::default());
     }
     if propagation.aws_xray {
