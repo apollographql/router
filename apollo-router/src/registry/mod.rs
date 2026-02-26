@@ -916,204 +916,80 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_should_use_ssl_localhost() {
-        assert!(!should_use_ssl("localhost:5000/test-graph:latest"));
+    #[rstest::rstest]
+    #[case::external_registry("registry.apollographql.com/my-graph:latest")]
+    #[case::docker_io("docker.io/library/alpine:latest")]
+    #[case::invalid_reference_defaults_true("")]
+    #[case::no_substring_match("localhost.example.com/my-graph:latest")]
+    fn should_use_ssl_true(#[case] reference: &str) {
+        assert!(should_use_ssl(reference));
     }
 
-    #[test]
-    fn test_should_use_ssl_127_0_0_1() {
-        assert!(!should_use_ssl("127.0.0.1:5000/test-graph:latest"));
+    #[rstest::rstest]
+    #[case::localhost("localhost:5000/test-graph:latest")]
+    #[case::loopback("127.0.0.1:5000/test-graph:latest")]
+    #[case::dockerhost("dockerhost:5000/test-graph:latest")]
+    fn should_use_ssl_false(#[case] reference: &str) {
+        assert!(!should_use_ssl(reference));
     }
 
-    #[test]
-    fn test_should_use_ssl_dockerhost() {
-        assert!(!should_use_ssl("dockerhost:5000/test-graph:latest"));
+    #[rstest::rstest]
+    #[case::comma_separated("host1,host2,host3", vec!["host1", "host2", "host3"])]
+    #[case::with_whitespace(" host1 , host2 , host3 ", vec!["host1", "host2", "host3"])]
+    #[case::empty_string("", vec![])]
+    #[case::trailing_commas("host1,,host2,", vec!["host1", "host2"])]
+    #[case::single_host("myregistry.local", vec!["myregistry.local"])]
+    fn parse_unsecure_hosts_cases(#[case] input: &str, #[case] expected: Vec<&str>) {
+        assert_eq!(parse_unsecure_hosts(input), expected);
     }
 
-    #[test]
-    fn test_should_use_ssl_external_registry() {
-        assert!(should_use_ssl("registry.apollographql.com/my-graph:latest"));
+    #[rstest::rstest]
+    #[case::exact("myregistry.local", &["myregistry.local"], true)]
+    #[case::with_port("myregistry.local:5000", &["myregistry.local"], true)]
+    #[case::no_match("other.registry.com", &["myregistry.local"], false)]
+    #[case::empty_list("localhost", &[], false)]
+    #[case::default_localhost("localhost", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_localhost_port("localhost:5000", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_loopback("127.0.0.1", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_loopback_port("127.0.0.1:5000", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_dockerhost("dockerhost", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_dockerhost_port("dockerhost:5000", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_docker_io("docker.io", DEFAULT_UNSECURE_HOSTS, false)]
+    #[case::default_apollo("registry.apollographql.com", DEFAULT_UNSECURE_HOSTS, false)]
+    #[case::no_substring("localhost.example.com", &["localhost"], false)]
+    #[case::no_prefix_match("notlocalhost", &["localhost"], false)]
+    #[case::custom_replaces_defaults("internal.registry.corp", &["internal.registry.corp"], true)]
+    #[case::custom_port("internal.registry.corp:8080", &["internal.registry.corp"], true)]
+    #[case::custom_missing_localhost("localhost", &["internal.registry.corp"], false)]
+    #[case::ipv6_match("[::1]", &["::1"], true)]
+    #[case::ipv6_match_port("[::1]:5000", &["::1"], true)]
+    #[case::ipv6_no_match("localhost", &["::1"], false)]
+    fn is_unsecure_host_cases(
+        #[case] registry: &str,
+        #[case] hosts: &[&str],
+        #[case] expected: bool,
+    ) {
+        let hosts: Vec<String> = hosts.iter().map(|s| s.to_string()).collect();
+        assert_eq!(is_unsecure_host(registry, &hosts), expected);
     }
 
-    #[test]
-    fn test_should_use_ssl_docker_io() {
-        assert!(should_use_ssl("docker.io/library/alpine:latest"));
-    }
-
-    #[test]
-    fn test_should_use_ssl_invalid_reference_defaults_true() {
-        assert!(should_use_ssl(""));
-    }
-
-    #[test]
-    fn test_should_use_ssl_no_substring_match() {
-        assert!(should_use_ssl("localhost.example.com/my-graph:latest"));
-    }
-
-    #[test]
-    fn test_parse_unsecure_hosts_comma_separated() {
-        let hosts = parse_unsecure_hosts("host1,host2,host3");
-        assert_eq!(hosts, vec!["host1", "host2", "host3"]);
-    }
-
-    #[test]
-    fn test_parse_unsecure_hosts_with_whitespace() {
-        let hosts = parse_unsecure_hosts(" host1 , host2 , host3 ");
-        assert_eq!(hosts, vec!["host1", "host2", "host3"]);
-    }
-
-    #[test]
-    fn test_parse_unsecure_hosts_empty_string() {
-        let hosts = parse_unsecure_hosts("");
-        assert!(hosts.is_empty());
-    }
-
-    #[test]
-    fn test_parse_unsecure_hosts_trailing_commas() {
-        let hosts = parse_unsecure_hosts("host1,,host2,");
-        assert_eq!(hosts, vec!["host1", "host2"]);
-    }
-
-    #[test]
-    fn test_parse_unsecure_hosts_single_host() {
-        let hosts = parse_unsecure_hosts("myregistry.local");
-        assert_eq!(hosts, vec!["myregistry.local"]);
-    }
-
-    #[test]
-    fn test_is_unsecure_host_exact_match() {
-        let hosts = vec!["myregistry.local".to_string()];
-        assert!(is_unsecure_host("myregistry.local", &hosts));
-        assert!(is_unsecure_host("myregistry.local:5000", &hosts));
-    }
-
-    #[test]
-    fn test_is_unsecure_host_no_match() {
-        let hosts = vec!["myregistry.local".to_string()];
-        assert!(!is_unsecure_host("other.registry.com", &hosts));
-        assert!(!is_unsecure_host("docker.io", &hosts));
-    }
-
-    #[test]
-    fn test_is_unsecure_host_empty_list() {
-        let hosts: Vec<String> = vec![];
-        assert!(!is_unsecure_host("localhost", &hosts));
-        assert!(!is_unsecure_host("127.0.0.1", &hosts));
-    }
-
-    #[test]
-    fn test_is_unsecure_host_defaults() {
-        let hosts: Vec<String> = DEFAULT_UNSECURE_HOSTS
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        assert!(is_unsecure_host("localhost", &hosts));
-        assert!(is_unsecure_host("localhost:5000", &hosts));
-        assert!(is_unsecure_host("127.0.0.1", &hosts));
-        assert!(is_unsecure_host("127.0.0.1:5000", &hosts));
-        assert!(is_unsecure_host("dockerhost", &hosts));
-        assert!(is_unsecure_host("dockerhost:5000", &hosts));
-        assert!(!is_unsecure_host("docker.io", &hosts));
-        assert!(!is_unsecure_host("registry.apollographql.com", &hosts));
-    }
-
-    #[test]
-    fn test_is_unsecure_host_custom_list_replaces_defaults() {
-        let hosts = parse_unsecure_hosts("internal.registry.corp");
-        assert!(is_unsecure_host("internal.registry.corp", &hosts));
-        assert!(is_unsecure_host("internal.registry.corp:8080", &hosts));
-        assert!(!is_unsecure_host("localhost", &hosts));
-        assert!(!is_unsecure_host("127.0.0.1", &hosts));
-        assert!(!is_unsecure_host("dockerhost", &hosts));
-    }
-
-    #[test]
-    fn test_is_unsecure_host_no_substring_match() {
-        let hosts = vec!["localhost".to_string()];
-        assert!(!is_unsecure_host("localhost.example.com", &hosts));
-        assert!(!is_unsecure_host("notlocalhost", &hosts));
-    }
-
-    #[test]
-    fn test_extract_host_simple() {
-        assert_eq!(extract_host("localhost"), Some("localhost".to_string()));
-        assert_eq!(
-            extract_host("localhost:5000"),
-            Some("localhost".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_host_ipv4() {
-        assert_eq!(extract_host("127.0.0.1"), Some("127.0.0.1".to_string()));
-        assert_eq!(
-            extract_host("127.0.0.1:5000"),
-            Some("127.0.0.1".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_host_ipv6() {
-        assert_eq!(extract_host("[::1]"), Some("::1".to_string()));
-        assert_eq!(extract_host("[::1]:5000"), Some("::1".to_string()));
-    }
-
-    #[test]
-    fn test_extract_host_domain_with_port() {
-        assert_eq!(
-            extract_host("registry.example.com:443"),
-            Some("registry.example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_host_with_http_scheme() {
-        assert_eq!(
-            extract_host("http://localhost:5000"),
-            Some("localhost".to_string())
-        );
-        assert_eq!(
-            extract_host("http://127.0.0.1:5000"),
-            Some("127.0.0.1".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_host_with_https_scheme() {
-        assert_eq!(
-            extract_host("https://registry.example.com"),
-            Some("registry.example.com".to_string())
-        );
-        assert_eq!(
-            extract_host("https://registry.example.com:443"),
-            Some("registry.example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_host_with_scheme_and_path() {
-        assert_eq!(
-            extract_host("https://registry.example.com/v2/repo"),
-            Some("registry.example.com".to_string())
-        );
-        assert_eq!(
-            extract_host("http://localhost:5000/v2/my-graph/manifests/latest"),
-            Some("localhost".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_host_with_scheme_ipv6() {
-        assert_eq!(extract_host("http://[::1]:5000"), Some("::1".to_string()));
-    }
-
-    #[test]
-    fn test_is_unsecure_host_ipv6() {
-        let hosts = vec!["::1".to_string()];
-        assert!(is_unsecure_host("[::1]", &hosts));
-        assert!(is_unsecure_host("[::1]:5000", &hosts));
-        assert!(!is_unsecure_host("localhost", &hosts));
+    #[rstest::rstest]
+    #[case::simple("localhost", "localhost")]
+    #[case::simple_port("localhost:5000", "localhost")]
+    #[case::ipv4("127.0.0.1", "127.0.0.1")]
+    #[case::ipv4_port("127.0.0.1:5000", "127.0.0.1")]
+    #[case::ipv6("[::1]", "::1")]
+    #[case::ipv6_port("[::1]:5000", "::1")]
+    #[case::domain_port("registry.example.com:443", "registry.example.com")]
+    #[case::http_scheme("http://localhost:5000", "localhost")]
+    #[case::http_ipv4("http://127.0.0.1:5000", "127.0.0.1")]
+    #[case::https_scheme("https://registry.example.com", "registry.example.com")]
+    #[case::https_port("https://registry.example.com:443", "registry.example.com")]
+    #[case::https_path("https://registry.example.com/v2/repo", "registry.example.com")]
+    #[case::http_path("http://localhost:5000/v2/my-graph/manifests/latest", "localhost")]
+    #[case::http_ipv6("http://[::1]:5000", "::1")]
+    fn extract_host_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(extract_host(input), Some(expected.to_string()));
     }
 
     #[test]
