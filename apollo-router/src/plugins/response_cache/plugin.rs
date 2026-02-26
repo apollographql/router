@@ -2177,6 +2177,11 @@ fn collect_key_field_sets(
 /// * This function and `get_entity_key_from_selection_set` are separate because this is called for
 ///   multiple possible `@key` fields to find the matching one, while
 ///   `get_entity_key_from_selection_set` is only called once the matching `@key` fields is found.
+// NB(%nullability-note): We allow nullable fields in selection sets (ie, those fields that
+// identify an entity, usually [if not always] listed in `@key`). That _doesn't_ mean that
+// entities definitively must allow nullable fields, only that we happen to allow it right now.
+// It's probably a bit of a schema-development smell to have an entity identifiable by nullable
+// fields, but it makes practical sense if you're wanting to cache partial responses.
 pub(in crate::plugins) fn matches_selection_set(
     // the JSON representation of the entity data
     representation: &serde_json_bytes::Map<ByteString, Value>,
@@ -2184,21 +2189,14 @@ pub(in crate::plugins) fn matches_selection_set(
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
     for field in selection_set.root_fields(&Default::default()) {
-        // NB(%nullability-note): We allow nullable fields in selection sets (ie, those fields that
-        // identify an entity, usually [if not always] listed in `@key`). That _doesn't_ mean that
-        // entities definitively must allow nullable fields, only that we happen to allow it right now.
-        // It's probably a bit of a schema-development smell to have an entity identifiable by nullable
-        // fields, but it makes practical sense if you're wanting to cache partial responses.
-        let field_is_nullable = !field.definition.ty.is_non_null();
-
         // the heart of finding the match: we take the field from the selection
         // set and try to find it in the entity representation;
         let Some(value) = representation.get(field.name.as_str()) else {
-            // allow missing field to match nullable field type (see NB(%nullability-note))
-            if field_is_nullable {
-                continue;
-            } else {
+            if field.definition.ty.is_non_null() {
                 return false;
+            } else {
+                // allow missing field to match nullable field type (see NB(%nullability-note))
+                continue;
             }
         };
 
@@ -2225,8 +2223,8 @@ pub(in crate::plugins) fn matches_selection_set(
                 // NB: we have to do this here where the field type is known, as the selection set doesn't
                 //  include knowledge of whether the type is nullable
                 // See NB(%nullability-note)
-                let list_entry_is_nullable = !field.definition.ty.item_type().is_non_null();
-                let exclude_value = |value: &&Value| list_entry_is_nullable && value.is_null();
+                let list_item_is_nullable = !field.definition.ty.item_type().is_non_null();
+                let exclude_value = |value: &&Value| list_item_is_nullable && value.is_null();
                 let arr = arr.iter().filter(|value| !exclude_value(value));
                 matches_array_of_objects(arr, &field.selection_set)
             }
