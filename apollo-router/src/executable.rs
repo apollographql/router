@@ -768,7 +768,7 @@ fn graph_os() -> bool {
 /// Of the environment variable names provided, return a list of those which are set in the environment.
 fn env_variables_set(variables: &[&'static str]) -> Vec<&'static str> {
     variables
-        .into_iter()
+        .iter()
         .filter(|v| !matches!(std::env::var(v), Err(std::env::VarError::NotPresent)))
         .cloned()
         .collect()
