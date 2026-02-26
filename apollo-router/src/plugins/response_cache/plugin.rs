@@ -2225,7 +2225,8 @@ pub(in crate::plugins) fn matches_selection_set(
                 // NB: we have to do this here where the field type is known, as the selection set doesn't
                 //  include knowledge of whether the type is nullable
                 // See NB(%nullability-note)
-                let exclude_value = |value: &&Value| field_is_nullable && value.is_null();
+                let list_entry_is_nullable = !field.definition.ty.item_type().is_non_null();
+                let exclude_value = |value: &&Value| list_entry_is_nullable && value.is_null();
                 let arr = arr.iter().filter(|value| !exclude_value(value));
                 matches_array_of_objects(arr, &field.selection_set)
             }
