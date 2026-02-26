@@ -6,7 +6,6 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use bytes::Bytes;
-
 pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;
@@ -381,12 +380,14 @@ fn mapping_debug(f: &Option<FieldMapping>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
+    use http::Request;
+    use http::Response;
+    use opentelemetry_http::HttpError;
+
     use super::*;
     use crate::plugins::telemetry::tracing::datadog_exporter::ApiVersion::Version05;
     use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::tests::get_span;
-    use bytes::Bytes;
-    use http::{Request, Response};
-    use opentelemetry_http::HttpError;
 
     #[test]
     fn test_out_of_order_group() {

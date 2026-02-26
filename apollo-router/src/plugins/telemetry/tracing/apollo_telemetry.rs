@@ -18,7 +18,6 @@ use http::header::CACHE_CONTROL;
 use itertools::Itertools;
 use lru::LruCache;
 use opentelemetry::Key;
-use parking_lot::Mutex;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
 use opentelemetry::trace::SpanId;
@@ -30,6 +29,7 @@ use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
+use parking_lot::Mutex;
 use prost::Message;
 use rand::Rng;
 use serde::de::DeserializeOwned;
@@ -1186,7 +1186,10 @@ fn extract_http_data(span: &LightSpanData) -> (Http, Option<CacheControl>) {
 
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
-    fn export(&self, batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+    fn export(
+        &self,
+        batch: Vec<SpanData>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
         self.inner.lock().export_impl(batch)
     }
 

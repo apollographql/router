@@ -194,8 +194,7 @@ impl MetricView {
                 stream = stream.with_aggregation(agg.clone());
             }
             if let Some(ref keys) = allowed_attribute_keys {
-                stream =
-                    stream.with_allowed_attribute_keys(keys.iter().cloned().map(Key::new));
+                stream = stream.with_allowed_attribute_keys(keys.iter().cloned().map(Key::new));
             }
             stream.build().ok()
         }
@@ -720,7 +719,10 @@ impl TracingCommon {
             .with_resource(self.to_resource());
 
         if self.preview_datadog_agent_sampling.unwrap_or_default() {
-            builder.with_sampler(DatadogAgentSampling::new(sampler, self.parent_based_sampler))
+            builder.with_sampler(DatadogAgentSampling::new(
+                sampler,
+                self.parent_based_sampler,
+            ))
         } else {
             builder.with_sampler(sampler)
         }

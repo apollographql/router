@@ -263,7 +263,6 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
-    use opentelemetry_sdk::Resource;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -281,6 +280,7 @@ mod tests {
     use apollo_federation::connectors::runtime::responses::MappedResponse;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
+    use opentelemetry_sdk::Resource;
     use parking_lot::Mutex;
     use parking_lot::MutexGuard;
     use tests::events::EventLevel;

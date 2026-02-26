@@ -144,7 +144,11 @@ impl<'a> MetricsBuilder<'a> {
         self
     }
 
-    pub(crate) fn with_view<T>(&mut self, meter_provider_type: MeterProviderType, view: T) -> &mut Self
+    pub(crate) fn with_view<T>(
+        &mut self,
+        meter_provider_type: MeterProviderType,
+        view: T,
+    ) -> &mut Self
     where
         T: Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static,
     {

@@ -258,9 +258,10 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
             // of the callsites in the code that led to the error happening.
             // `std::error::Error::backtrace` is a nightly-only API and cannot be
             // used here until the feature is stabilized.
-            self.event_builder
-                .attributes
-                .push(KeyValue::new(FIELD_EXCEPTION_STACKTRACE, Value::Array(chain.clone().into())));
+            self.event_builder.attributes.push(KeyValue::new(
+                FIELD_EXCEPTION_STACKTRACE,
+                Value::Array(chain.clone().into()),
+            ));
         }
 
         if self.exception_config.propagate
@@ -284,9 +285,10 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
         self.event_builder
             .attributes
             .push(KeyValue::new(field.name(), error_msg));
-        self.event_builder
-            .attributes
-            .push(KeyValue::new(format!("{}.chain", field.name()), Value::Array(chain.into())));
+        self.event_builder.attributes.push(KeyValue::new(
+            format!("{}.chain", field.name()),
+            Value::Array(chain.into()),
+        ));
     }
 }
 
@@ -399,11 +401,17 @@ impl field::Visit for SpanAttributeVisitor<'_> {
             // of the callsites in the code that led to the error happening.
             // `std::error::Error::backtrace` is a nightly-only API and cannot be
             // used here until the feature is stabilized.
-            self.record(KeyValue::new(FIELD_EXCEPTION_STACKTRACE, Value::Array(chain.clone().into())));
+            self.record(KeyValue::new(
+                FIELD_EXCEPTION_STACKTRACE,
+                Value::Array(chain.clone().into()),
+            ));
         }
 
         self.record(KeyValue::new(field.name(), error_msg));
-        self.record(KeyValue::new(format!("{}.chain", field.name()), Value::Array(chain.into())));
+        self.record(KeyValue::new(
+            format!("{}.chain", field.name()),
+            Value::Array(chain.into()),
+        ));
     }
 }
 

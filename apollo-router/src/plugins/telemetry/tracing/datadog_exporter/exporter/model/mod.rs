@@ -193,6 +193,7 @@ pub(crate) mod tests {
     use std::time::SystemTime;
 
     use base64::Engine;
+    use opentelemetry::InstrumentationScope;
     use opentelemetry::KeyValue;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
@@ -201,7 +202,6 @@ pub(crate) mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry::InstrumentationScope;
     use opentelemetry_sdk::trace::SpanEvents;
     use opentelemetry_sdk::trace::SpanLinks;
 

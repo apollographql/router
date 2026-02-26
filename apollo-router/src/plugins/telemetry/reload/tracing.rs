@@ -22,8 +22,8 @@
 
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry_sdk::trace::SpanProcessor;
 use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::SpanProcessor;
 use tower::BoxError;
 
 use crate::plugins::telemetry::CustomTraceIdPropagator;

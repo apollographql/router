@@ -256,7 +256,8 @@ impl EventDynAttribute for ::tracing::Span {
                                     Some(event_attributes) => {
                                         // No need to use the upsert function here as they're going into a Map
                                         event_attributes.extend(
-                                            attributes.map(|KeyValue { key, value, .. }| (key, value)),
+                                            attributes
+                                                .map(|KeyValue { key, value, .. }| (key, value)),
                                         );
                                     }
                                     None => {

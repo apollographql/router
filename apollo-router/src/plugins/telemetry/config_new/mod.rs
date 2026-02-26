@@ -173,7 +173,9 @@ pub(crate) fn trace_id() -> Option<TraceId> {
 pub(crate) fn get_baggage(key: &str) -> Option<opentelemetry::Value> {
     let context = Span::current().context();
     let baggage = context.baggage();
-    baggage.get(key).map(|v| opentelemetry::Value::String(v.clone()))
+    baggage
+        .get(key)
+        .map(|v| opentelemetry::Value::String(v.clone()))
 }
 
 pub(crate) trait ToOtelValue {

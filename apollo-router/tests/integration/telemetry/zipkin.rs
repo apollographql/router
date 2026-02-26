@@ -81,7 +81,9 @@ impl Verifier for ZipkinTraceSpec {
 
         // Verify we have spans from client, router, and subgraph by checking for characteristic span names
         let has_client_span = span_names.iter().any(|n| n == "client_request");
-        let has_router_span = span_names.iter().any(|n| n == "router" || n == "supergraph");
+        let has_router_span = span_names
+            .iter()
+            .any(|n| n == "router" || n == "supergraph");
         let has_subgraph_span = span_names
             .iter()
             .any(|n| n == "subgraph server" || n.starts_with("subgraph"));

@@ -12,9 +12,9 @@ use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
 use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::metrics::Temporality;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
@@ -52,9 +52,7 @@ fn default_buckets() -> Vec<f64> {
 /// Creates `count` buckets where each bucket boundary is `start * factor^i` for i in 0..count.
 /// This matches the behavior of prometheus::exponential_buckets.
 fn exponential_buckets(start: f64, factor: f64, count: usize) -> Vec<f64> {
-    (0..count)
-        .map(|i| start * factor.powi(i as i32))
-        .collect()
+    (0..count).map(|i| start * factor.powi(i as i32)).collect()
 }
 
 /// Exponential buckets for Apollo realtime metrics.

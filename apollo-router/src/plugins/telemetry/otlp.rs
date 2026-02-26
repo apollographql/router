@@ -153,19 +153,16 @@ pub(super) fn process_endpoint(
 }
 
 impl Config {
-    pub(crate) fn build_span_exporter(
-        &self,
-    ) -> Result<opentelemetry_otlp::SpanExporter, BoxError> {
+    pub(crate) fn build_span_exporter(&self) -> Result<opentelemetry_otlp::SpanExporter, BoxError> {
         match self.protocol {
             Protocol::Grpc => self.build_grpc_span_exporter(),
             Protocol::Http => self.build_http_span_exporter(),
         }
     }
 
-    fn build_grpc_span_exporter(
-        &self,
-    ) -> Result<opentelemetry_otlp::SpanExporter, BoxError> {
-        let endpoint_opt = process_endpoint(&self.endpoint, &TelemetryDataKind::Traces, &self.protocol)?;
+    fn build_grpc_span_exporter(&self) -> Result<opentelemetry_otlp::SpanExporter, BoxError> {
+        let endpoint_opt =
+            process_endpoint(&self.endpoint, &TelemetryDataKind::Traces, &self.protocol)?;
         let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
             if !endpoint.is_empty() {
                 let tls_url = Uri::try_from(endpoint)?;
@@ -191,10 +188,9 @@ impl Config {
         Ok(exporter_builder.build()?)
     }
 
-    fn build_http_span_exporter(
-        &self,
-    ) -> Result<opentelemetry_otlp::SpanExporter, BoxError> {
-        let endpoint_opt = process_endpoint(&self.endpoint, &TelemetryDataKind::Traces, &self.protocol)?;
+    fn build_http_span_exporter(&self) -> Result<opentelemetry_otlp::SpanExporter, BoxError> {
+        let endpoint_opt =
+            process_endpoint(&self.endpoint, &TelemetryDataKind::Traces, &self.protocol)?;
 
         let mut exporter_builder = opentelemetry_otlp::SpanExporter::builder()
             .with_http()

@@ -50,7 +50,8 @@ impl super::super::otlp::Config {
         use opentelemetry_otlp::WithTonicConfig;
         use tonic::metadata::MetadataMap;
 
-        let endpoint_opt = process_endpoint(&self.endpoint, &TelemetryDataKind::Metrics, &self.protocol)?;
+        let endpoint_opt =
+            process_endpoint(&self.endpoint, &TelemetryDataKind::Metrics, &self.protocol)?;
         let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
             if !endpoint.is_empty() {
                 let tls_url = Uri::try_from(endpoint)?;
@@ -81,7 +82,8 @@ impl super::super::otlp::Config {
     fn build_http_metric_exporter(&self) -> Result<MetricExporter, BoxError> {
         use opentelemetry_otlp::WithHttpConfig;
 
-        let endpoint_opt = process_endpoint(&self.endpoint, &TelemetryDataKind::Metrics, &self.protocol)?;
+        let endpoint_opt =
+            process_endpoint(&self.endpoint, &TelemetryDataKind::Metrics, &self.protocol)?;
 
         let mut exporter_builder = MetricExporter::builder()
             .with_http()

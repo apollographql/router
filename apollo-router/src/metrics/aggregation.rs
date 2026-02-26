@@ -303,7 +303,6 @@ impl<T: Copy> SyncInstrument<T> for AggregateCounter<T> {
     }
 }
 
-
 pub(crate) struct AggregateHistogram<T> {
     delegates: Vec<Histogram<T>>,
 }
@@ -327,7 +326,6 @@ impl<T: Copy> SyncInstrument<T> for AggregateUpDownCounter<T> {
         }
     }
 }
-
 
 pub(crate) struct AggregateGauge<T> {
     delegates: Vec<Gauge<T>>,
@@ -459,10 +457,14 @@ impl SharedObservableRegistries {
         self.u64_gauge.clear_provider_registrations(provider_index);
         self.i64_gauge.clear_provider_registrations(provider_index);
         self.f64_gauge.clear_provider_registrations(provider_index);
-        self.u64_counter.clear_provider_registrations(provider_index);
-        self.f64_counter.clear_provider_registrations(provider_index);
-        self.i64_up_down_counter.clear_provider_registrations(provider_index);
-        self.f64_up_down_counter.clear_provider_registrations(provider_index);
+        self.u64_counter
+            .clear_provider_registrations(provider_index);
+        self.f64_counter
+            .clear_provider_registrations(provider_index);
+        self.i64_up_down_counter
+            .clear_provider_registrations(provider_index);
+        self.f64_up_down_counter
+            .clear_provider_registrations(provider_index);
 
         // Clear all callbacks - services will be recreated and re-register them
         self.u64_gauge.clear_callbacks();
@@ -556,12 +558,18 @@ macro_rules! aggregate_observable_gauge_fn {
 
             // Register callbacks in the shared registry
             for callback in shared_callbacks {
-                self.registries.$registry.register_callback(&gauge_name, callback);
+                self.registries
+                    .$registry
+                    .register_callback(&gauge_name, callback);
             }
 
             // Register with each delegate meter that hasn't been registered yet
             for (provider_idx, meter) in self.meters.iter().enumerate() {
-                if self.registries.$registry.is_registered_for_provider(provider_idx, &gauge_name) {
+                if self
+                    .registries
+                    .$registry
+                    .is_registered_for_provider(provider_idx, &gauge_name)
+                {
                     continue;
                 }
 
@@ -582,7 +590,9 @@ macro_rules! aggregate_observable_gauge_fn {
                 // The returned ObservableGauge is PhantomData, no need to store it
                 let _ = b.build();
 
-                self.registries.$registry.mark_registered_for_provider(provider_idx, gauge_name.clone());
+                self.registries
+                    .$registry
+                    .mark_registered_for_provider(provider_idx, gauge_name.clone());
             }
 
             ObservableGauge::new()
@@ -593,10 +603,7 @@ macro_rules! aggregate_observable_gauge_fn {
 /// Macro for observable counter/up-down-counter instruments using the registry pattern.
 macro_rules! aggregate_observable_counter_fn {
     ($name:ident, $ty:ty, $wrapper:ident, $registry:ident) => {
-        fn $name(
-            &self,
-            builder: AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
-        ) -> $wrapper<$ty> {
+        fn $name(&self, builder: AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>) -> $wrapper<$ty> {
             let instrument_name = builder.name.to_string();
             let description = builder.description.as_ref().map(|s| s.to_string());
             let unit = builder.unit.as_ref().map(|s| s.to_string());
@@ -612,12 +619,18 @@ macro_rules! aggregate_observable_counter_fn {
 
             // Register callbacks in the shared registry
             for callback in shared_callbacks {
-                self.registries.$registry.register_callback(&instrument_name, callback);
+                self.registries
+                    .$registry
+                    .register_callback(&instrument_name, callback);
             }
 
             // Register with each delegate meter that hasn't been registered yet
             for (provider_idx, meter) in self.meters.iter().enumerate() {
-                if self.registries.$registry.is_registered_for_provider(provider_idx, &instrument_name) {
+                if self
+                    .registries
+                    .$registry
+                    .is_registered_for_provider(provider_idx, &instrument_name)
+                {
                     continue;
                 }
 
@@ -638,7 +651,9 @@ macro_rules! aggregate_observable_counter_fn {
                 // The returned type is PhantomData, no need to store it
                 let _ = b.build();
 
-                self.registries.$registry.mark_registered_for_provider(provider_idx, instrument_name.clone());
+                self.registries
+                    .$registry
+                    .mark_registered_for_provider(provider_idx, instrument_name.clone());
             }
 
             $wrapper::new()

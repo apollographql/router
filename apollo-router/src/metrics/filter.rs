@@ -193,10 +193,7 @@ macro_rules! filter_histogram_fn {
 
 macro_rules! filter_observable_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident) => {
-        fn $name(
-            &self,
-            builder: AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
-        ) -> $wrapper<$ty> {
+        fn $name(&self, builder: AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>) -> $wrapper<$ty> {
             let is_filtered = match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
                 (Some(deny), _) if deny.is_match(&builder.name) => true,
@@ -217,8 +214,15 @@ macro_rules! filter_observable_instrument_fn {
             let unit = builder.unit;
 
             // Wrap callbacks in Arc for sharing
-            let shared_callbacks: Vec<std::sync::Arc<dyn Fn(&dyn opentelemetry::metrics::AsyncInstrument<$ty>) + Send + Sync>> =
-                builder.callbacks.into_iter().map(std::sync::Arc::from).collect();
+            let shared_callbacks: Vec<
+                std::sync::Arc<
+                    dyn Fn(&dyn opentelemetry::metrics::AsyncInstrument<$ty>) + Send + Sync,
+                >,
+            > = builder
+                .callbacks
+                .into_iter()
+                .map(std::sync::Arc::from)
+                .collect();
 
             let mut b = self.delegate.$name(name);
             if let Some(desc) = &description {
