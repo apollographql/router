@@ -3367,7 +3367,7 @@ mod tests {
             .expect("should be able to parse field set");
 
         matches_selection_set(
-            &representation.as_object().expect("must provide an object"),
+            representation.as_object().expect("must provide an object"),
             &field_set.selection_set,
         )
     }
