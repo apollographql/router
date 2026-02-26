@@ -288,6 +288,10 @@ impl Opt {
     fn err_require_opt(env_var: &str) -> anyhow::Error {
         anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
     }
+
+    fn prohibit_env_vars(env_vars: &[&str]) -> Result<(), anyhow::Error> {
+        reject_environment_variables(&env_variables_set(env_vars))
+    }
 }
 
 /// This is the main router entrypoint.
@@ -478,7 +482,7 @@ impl Executable {
         opt.hot_reload = opt.hot_reload || opt.dev;
 
         // ROUTER-1609: prevent router from starting if OTEL environment variables are set.
-        reject_environment_variables(&env_variables_set(&FORBIDDEN_OTEL_VARS))?;
+        Opt::prohibit_env_vars(&FORBIDDEN_OTEL_VARS)?;
 
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
