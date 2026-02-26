@@ -1,9 +1,12 @@
 use serde::Deserialize;
 use serde::Serialize;
+use tower::BoxError;
 
+use crate::Context;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::response_cache::cache_control::CacheControl;
+use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 
 pub(super) type CacheKeysContext = Vec<CacheKeyContext>;
 
@@ -155,4 +158,24 @@ impl CacheKeyContext {
     pub(super) fn update_metadata(self) -> Self {
         self.compute_warnings().compute_should_store()
     }
+}
+
+pub(super) fn add_cache_key_to_context(
+    context: &Context,
+    cache_key_context: CacheKeyContext,
+) -> Result<(), BoxError> {
+    context.upsert::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS, |mut val| {
+        val.push(cache_key_context);
+        val
+    })
+}
+
+pub(super) fn add_cache_keys_to_context<I: Iterator<Item = CacheKeyContext>>(
+    context: &Context,
+    cache_keys_context: I,
+) -> Result<(), BoxError> {
+    context.upsert::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS, |mut val| {
+        val.extend(cache_keys_context);
+        val
+    })
 }
