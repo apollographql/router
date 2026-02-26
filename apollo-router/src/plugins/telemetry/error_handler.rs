@@ -130,15 +130,10 @@ mod tests {
     struct FailingSpanExporter;
 
     impl SpanExporter for FailingSpanExporter {
-        fn export(
-            &self,
-            _batch: Vec<SpanData>,
-        ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-            async {
-                Err(OTelSdkError::InternalFailure(
-                    "connection failed".to_string(),
-                ))
-            }
+        async fn export(&self, _batch: Vec<SpanData>) -> OTelSdkResult {
+            Err(OTelSdkError::InternalFailure(
+                "connection failed".to_string(),
+            ))
         }
 
         fn shutdown(&mut self) -> OTelSdkResult {
@@ -171,11 +166,8 @@ mod tests {
     struct FailingMetricExporter;
 
     impl PushMetricExporter for FailingMetricExporter {
-        fn export(
-            &self,
-            _metrics: &ResourceMetrics,
-        ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-            async { Err(OTelSdkError::InternalFailure("export failed".to_string())) }
+        async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
+            Err(OTelSdkError::InternalFailure("export failed".to_string()))
         }
 
         fn force_flush(&self) -> OTelSdkResult {

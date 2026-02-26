@@ -794,7 +794,7 @@ mod test {
             .collect(&mut result)
             .expect("metrics must be collected");
 
-        assert_eq!(get_gauge_value(&mut result), 2);
+        assert_eq!(get_gauge_value(&result), 2);
         assert_eq!(observe_counter.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
@@ -832,7 +832,7 @@ mod test {
             .collect(&mut result)
             .expect("metrics must be collected");
 
-        assert_eq!(get_gauge_value(&mut result), 1);
+        assert_eq!(get_gauge_value(&result), 1);
         assert_eq!(observe_counter.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 

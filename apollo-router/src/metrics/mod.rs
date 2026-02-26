@@ -255,16 +255,9 @@ pub(crate) mod test_utils {
         }
     }
 
+    #[derive(Default)]
     pub(crate) struct Metrics {
         resource_metrics: ResourceMetrics,
-    }
-
-    impl Default for Metrics {
-        fn default() -> Self {
-            Metrics {
-                resource_metrics: ResourceMetrics::default(),
-            }
-        }
     }
 
     pub(crate) fn collect_metrics() -> Metrics {
@@ -329,10 +322,10 @@ pub(crate) mod test_utils {
             // Try ALL metrics with this name, not just the first one
             for scope_metrics in self.resource_metrics.scope_metrics() {
                 for metric in scope_metrics.metrics().filter(|m| m.name() == name) {
-                    if let AggregatedMetrics::U64(metric_data) = metric.data() {
-                        if Self::check_metric_data(metric_data, ty, value, count, attributes) {
-                            return true;
-                        }
+                    if let AggregatedMetrics::U64(metric_data) = metric.data()
+                        && Self::check_metric_data(metric_data, ty, value, count, attributes)
+                    {
+                        return true;
                     }
                 }
             }
@@ -350,10 +343,10 @@ pub(crate) mod test_utils {
             // Try ALL metrics with this name, not just the first one
             for scope_metrics in self.resource_metrics.scope_metrics() {
                 for metric in scope_metrics.metrics().filter(|m| m.name() == name) {
-                    if let AggregatedMetrics::I64(metric_data) = metric.data() {
-                        if Self::check_metric_data(metric_data, ty, value, count, attributes) {
-                            return true;
-                        }
+                    if let AggregatedMetrics::I64(metric_data) = metric.data()
+                        && Self::check_metric_data(metric_data, ty, value, count, attributes)
+                    {
+                        return true;
                     }
                 }
             }
@@ -372,10 +365,10 @@ pub(crate) mod test_utils {
             // (there can be multiple metrics with the same name but different types)
             for scope_metrics in self.resource_metrics.scope_metrics() {
                 for metric in scope_metrics.metrics().filter(|m| m.name() == name) {
-                    if let AggregatedMetrics::F64(metric_data) = metric.data() {
-                        if Self::check_metric_data(metric_data, ty, value, count, attributes) {
-                            return true;
-                        }
+                    if let AggregatedMetrics::F64(metric_data) = metric.data()
+                        && Self::check_metric_data(metric_data, ty, value, count, attributes)
+                    {
+                        return true;
                     }
                 }
             }
@@ -426,9 +419,7 @@ pub(crate) mod test_utils {
             false
         }
 
-        pub(crate) fn metric_exists<
-            T: Debug + PartialEq + Display + ToPrimitive + Copy + 'static,
-        >(
+        pub(crate) fn metric_exists(
             &self,
             name: &str,
             ty: MetricType,
@@ -1404,36 +1395,36 @@ macro_rules! assert_counter_not_exists {
 
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Counter, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Counter, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
 
     ($name:literal, $value: ty, $attributes: expr) => {
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, $attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Counter, $attributes);
         assert_no_metric!(result, $name, None, None, None, &$attributes);
     };
 
     ($name:literal, $value: ty) => {
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, &[]);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Counter, &[]);
         assert_no_metric!(result, $name, None, None, None, &[]);
     };
 }
@@ -1591,30 +1582,30 @@ macro_rules! assert_histogram_exists {
 
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty) => {
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
         assert_metric!(result, $name, None, None, None, &[]);
     };
 }
@@ -1628,30 +1619,30 @@ macro_rules! assert_histogram_not_exists {
 
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty) => {
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
         assert_no_metric!(result, $name, None, None, None, &[]);
     };
 }
