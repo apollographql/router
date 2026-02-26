@@ -2,6 +2,319 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.12.0] - 2026-02-24
+
+## 🚀 Features
+
+### Support Unix domain socket (UDS) communication for coprocessors ([Issue #5739](https://github.com/apollographql/router/issues/5739))
+
+Many coprocessor deployments run side-by-side with the router, typically on the same host (for example, within the same Kubernetes pod).
+
+This change brings coprocessor communication to parity with subgraphs by adding Unix domain socket (UDS) support. When the router and coprocessor are co-located, communicating over a Unix domain socket bypasses the full TCP/IP network stack and uses shared host memory instead, which can meaningfully reduce latency compared to HTTP.
+
+By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/8348
+
+### Add `redact_query_validation_errors` supergraph config option ([PR #8888](https://github.com/apollographql/router/pull/8888))
+
+The new `redact_query_validation_errors` option in the `supergraph` configuration section replaces all query validation errors with a single generic error:
+
+```json
+{
+  "message": "invalid query",
+  "extensions": {
+    "code": "UNKNOWN_ERROR"
+  }
+}
+```
+
+By [@phryneas](https://github.com/phryneas) in https://github.com/apollographql/router/pull/8888
+
+### Support multiple `@listSize` directives on the same field ([PR #8872](https://github.com/apollographql/router/pull/8872))
+
+> [!WARNING]
+>
+> Multiple `@listSize` directives on a field only take effect after Federation supports repeatable `@listSize` in the supergraph schema. Until then, composition continues to expose at most one directive per field. This change makes the router ready for that Federation release.
+
+The router now supports multiple `@listSize` directives on a single field, enabling more flexible cost estimation when directives from different subgraphs are combined during federation composition.
+
+- The router processes all `@listSize` directives on a field (stored as `Vec<ListSizeDirective>` instead of `Option<ListSizeDirective>`).
+- When multiple directives specify `assumedSize` values, the router uses the maximum value for cost calculation.
+- Existing schemas with single directives continue to work exactly as before.
+
+This change prepares the router for federation's upcoming support for repeatable `@listSize` directives, and maintains full compatibility with current non-repeatable directive schemas.
+
+By [@cmorris](https://github.com/cmorris) in https://github.com/apollographql/router/pull/8872
+
+### Add parser recursion and lexical token metrics ([PR #8845](https://github.com/apollographql/router/pull/8845))
+
+The router now emits two new metrics: `apollo.router.operations.recursion` for the recursion level reached, and `apollo.router.operations.lexical_tokens` for the number of lexical tokens in a query.
+
+By [@jhrldev](https://github.com/jhrldev) in https://github.com/apollographql/router/pull/8845
+
+### Support subgraph-level demand control ([PR #8829](https://github.com/apollographql/router/pull/8829))
+
+Subgraph-level demand control lets you enforce per-subgraph query cost limits in the router, in addition to the existing global cost limit for the whole supergraph. This helps you protect specific backend services that have different capacity or cost profiles from being overwhelmed by expensive operations.
+
+When a subgraph-specific cost limit is exceeded, the router:
+
+- Still runs the rest of the operation, including other subgraphs whose cost is within limits.
+- Skips calls to only the over-budget subgraph, and composes the response as if that subgraph had returned null, instead of rejecting the entire query.
+
+Per-subgraph limits apply to the total work for that subgraph in a single operation. For each request, the router tracks the aggregate estimated cost per subgraph across the entire query plan. If the same subgraph is fetched multiple times (for example, through entity lookups, nested fetches, or conditional branches), those costs are summed together and the subgraph's limit is enforced against that total.
+
+#### Configuration
+
+```yaml
+demand_control:
+  enabled: true
+  mode: enforce
+  strategy:
+    static_estimated:
+      max: 10
+      list_size: 10
+      actual_cost_mode: by_subgraph
+      subgraphs: # everything from here down is new (all fields optional)
+        all:
+          max: 8
+          list_size: 10
+        subgraphs:
+          products:
+            max: 6
+            # list_size omitted, 10 implied because of all.list_size
+          reviews:
+            list_size: 50
+            # max omitted, 8 implied because of all.max
+```
+
+#### Example
+
+Consider a `topProducts` query that fetches a list of products from a products subgraph and then performs an entity lookup for each product in a reviews subgraph. Assume the products cost is 10 and the reviews cost is 5, leading to a total estimated cost of 15 (10 + 5).
+
+Previously, you could only restrict that query via `demand_control.static_estimated.max`:
+
+- If you set it to 15 or higher, the query executes.
+- If you set it below 15, the query is rejected.
+
+Subgraph-level demand control enables much more granular control. In addition to `demand_control.static_estimated.max`, which operates as before, you can also set per-subgraph limits.
+
+For example, if you set `max = 20` and `reviews.max = 2`, the query passes the aggregate check (15 < 20) and executes on the products subgraph (no limit specified), but doesn't execute against the reviews subgraph (5 > 2). The result is composed as if the reviews subgraph had returned null.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8829
+
+### Improve `@listSize` directive parsing and nested path support ([PR #8893](https://github.com/apollographql/router/pull/8893))
+
+Demand control cost calculation now supports:
+
+- Array-style parsing for `@listSize` sizing (for example, list arguments)
+- Nested input paths when resolving list size from query arguments
+- Nested field paths in the `sizedFields` argument on `@listSize` for more accurate cost estimation
+
+These changes are backward compatible with existing schemas and directives.
+
+By [@cmorris](https://github.com/cmorris) in https://github.com/apollographql/router/pull/8893
+
+### Add coprocessor hooks for connector request and response stages ([PR #8869](https://github.com/apollographql/router/pull/8869))
+
+You can now configure a coprocessor hook for the `ConnectorRequest` and `ConnectorResponse` stages of the router lifecycle.
+
+```yaml
+coprocessor:
+  url: http://localhost:3007
+  connector:
+    all:
+      request:
+        uri: true
+        headers: true
+        body: true
+        context: all
+        service_name: true
+      response:
+        headers: true
+        body: true
+        context: all
+        service_name: true
+```
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/8869
+
+## 🐛 Fixes
+
+### Pass variables to introspection queries ([PR #8816](https://github.com/apollographql/router/pull/8816))
+
+Introspection queries now receive variables, enabling `@include` and `@skip` directives during introspection.
+
+By [@jephuff](https://github.com/jephuff) in https://github.com/apollographql/router/pull/8816
+
+### Log warning instead of returning error for non-UTF-8 headers in `externalize_header_map` ([PR #8828](https://github.com/apollographql/router/pull/8828))
+
+- The router now emits a warning log with the name of the header instead of returning an error.
+- The remaining valid headers are returned, which is more consistent with the router's default behavior when a coprocessor isn't used.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8828
+
+### Place `http_client` span attributes on the `http_request` span ([PR #8798](https://github.com/apollographql/router/pull/8798))
+
+Attributes configured under `telemetry.instrumentation.spans.http_client` are now added to the `http_request` span instead of `subgraph_request`.
+
+Given this config:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      http_client:
+        attributes:
+          http.request.header.content-type:
+            request_header: "content-type"
+          http.response.header.content-type:
+            response_header: "content-type"
+```
+
+Both attributes are now placed on the `http_request` span.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8798
+
+### Validate `ObjectValue` variable fields against input type definitions ([PR #8821](https://github.com/apollographql/router/pull/8821) and [PR #8884](https://github.com/apollographql/router/pull/8884))
+
+The router now validates individual fields of input object variables against their type definitions. Previously, variable validation checked that the variable itself was present but didn't validate the fields within the object.
+
+Example:
+```graphql
+## schema ##
+input MessageInput {
+    content: String
+    author: String
+}
+type Receipt {
+    id: ID!
+}
+type Query{
+    send(message: MessageInput): Receipt
+}
+
+## query ##
+query(: MessageInput) {
+    send(message: ) {
+        id
+    }
+}
+
+## input variables ##
+{"msg":
+    {
+    "content": "Hello",
+    "author": "Me",
+    "unknownField": "unknown",
+    }
+}
+```
+This request previously passed validation because the variable `msg` was present in the input, but the fields of `msg` weren't validated against the `MessageInput` type.
+
+> [!WARNING]
+> To opt out of this behavior, set the `supergraph.strict_variable_validation` config option to `measure`.
+
+Enabled:
+```yaml
+supergraph:
+  strict_variable_validation: enforce
+```
+
+Disabled:
+```yaml
+supergraph:
+  strict_variable_validation: measure
+```
+
+By [@conwuegb](https://github.com/conwuegb) in https://github.com/apollographql/router/pull/8821 and https://github.com/apollographql/router/pull/8884
+
+### Increase internal Redis timeout from 5s to 10s ([PR #8863](https://github.com/apollographql/router/pull/8863))
+
+Because mTLS handshakes can be slow in some environments, the internal Redis timeout is now 10s (previously 5s). The connection "unresponsive" threshold is also increased from 5s to 10s.
+
+By [@aaronarinder](https://github.com/aaronarinder) in https://github.com/apollographql/router/pull/8863
+
+### Enforce and log operation limits for cached query plans ([PR #8810](https://github.com/apollographql/router/pull/8810))
+
+The router now logs the operation-limits warning for cached query plans as well, ensuring the query text is included whenever limits are exceeded. This also fixes a case where a cached plan could bypass enforcement after changing `warn_only` from `true` to `false` during a hot reload.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8810
+
+### Prevent duplicate `content-type` headers in connectors ([PR #8867](https://github.com/apollographql/router/pull/8867))
+
+When you override the `content-type` header in a connector `@source` directive, the router no longer appends the default value. The custom header value now properly replaces the default.
+
+For example:
+
+```graphql
+@source(
+    name: "datasetInsightsAPI"
+    http: {
+        headers: [
+            { name: "Content-Type", value: "application/vnd.iaas.v1+json" },
+        ]
+    }
+)
+```
+
+Previously resulted in:
+
+```http
+content-type: application/json, application/vnd.iaas.v1+json
+```
+
+Now correctly results in:
+
+```http
+content-type: application/vnd.iaas.v1+json
+```
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/8867
+
+### Prevent duplicate tags in router spans added by dynamic attributes ([PR #8865](https://github.com/apollographql/router/pull/8865))
+
+When dynamic attributes are added via `SpanDynAttribute::insert`, `SpanDynAttribute::extend`, `LogAttributes::insert`, `LogAttributes::extend`, `EventAttributes::insert`, or `EventAttributes::extend` and the key already exists, the router now replaces the existing value instead of creating duplicate attributes.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8865
+
+### Compute actual demand control costs across all subgraph fetches ([PR #8827](https://github.com/apollographql/router/pull/8827))
+
+The demand control feature estimates query costs by summing together the cost of each subgraph operation, capturing any intermediate work that must be completed to return a complete response.
+
+Previously, the actual query cost computation only considered the final response shape and didn't include any of the intermediate work in its total.
+
+The router now computes the actual query cost as the sum of all subgraph response costs. This more accurately reflects the work done per operation and enables a more meaningful comparison between actual and estimated costs.
+
+To disable the new actual cost computation behavior, set the router configuration option `demand_control.strategy.static_estimated.actual_cost_mode` to `response_shape`:
+
+```yaml
+demand_control:
+  enabled: true
+  mode: enforce
+  strategy:
+    static_estimated:
+      max: 10
+      list_size: 10
+      actual_cost_mode: by_subgraph # the default value
+      # actual_cost_mode: response_shape # revert to prior actual cost computation mode
+```
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8827
+
+## 📚 Documentation
+
+### Correct response caching FAQ for schema updates and multi-root-field caching ([PR #8794](https://github.com/apollographql/router/pull/8794))
+
+Updated the response caching FAQ to accurately describe caching behavior:
+
+- Clarify that schema updates generate new cache keys, so old entries don't receive cache hits (effectively expired from your perspective) instead of implying stale data might be served.
+- Correct the multi-root-field caching explanation to state that the router caches the entire subgraph response as a single unit, not separately per root field.
+- Add clarification that the configured TTL is a fallback when subgraph responses don't include `Cache-Control: max-age` headers.
+- Change example TTL from `300s` to `5m` for better readability.
+
+By [@the-gigi-apollo](https://github.com/the-gigi-apollo) in https://github.com/apollographql/router/pull/8794
+
+
+
 # [2.11.0] - 2026-01-27
 
 ## 🚀 Features
