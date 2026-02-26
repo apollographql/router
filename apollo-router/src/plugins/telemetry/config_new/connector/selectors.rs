@@ -8,6 +8,7 @@ use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sha2::Digest;
+use std::sync::atomic::Ordering;
 use tower::BoxError;
 
 use crate::Context;
@@ -25,6 +26,7 @@ use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationKind;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+use crate::services::http::service::WireByteCount;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -95,6 +97,10 @@ pub(crate) enum ConnectorSelector {
     ConnectorResponseStatus {
         /// The connector HTTP response status code.
         connector_http_response_status: ResponseStatus,
+    },
+    ConnectorResponseBodySize {
+        /// The connector HTTP response body size (wire bytes before decompression).
+        connector_http_response_body_size: bool,
     },
     ConnectorHttpMethod {
         /// The connector HTTP method.
@@ -287,6 +293,19 @@ impl Selector for ConnectorSelector {
                     None
                 }
             }
+            ConnectorSelector::ConnectorResponseBodySize {
+                connector_http_response_body_size,
+            } if *connector_http_response_body_size => {
+                if let Ok(TransportResponse::Http(ref http_response)) = response.transport_result {
+                    http_response
+                        .inner
+                        .extensions
+                        .get::<WireByteCount>()
+                        .map(|c| Value::I64(c.0.load(Ordering::Relaxed) as i64))
+                } else {
+                    None
+                }
+            }
             ConnectorSelector::ResponseMappingProblems {
                 connector_response_mapping_problems: mapping_problems,
             } => {
@@ -352,6 +371,7 @@ impl Selector for ConnectorSelector {
                 self,
                 ConnectorSelector::ConnectorResponseHeader { .. }
                     | ConnectorSelector::ConnectorResponseStatus { .. }
+                    | ConnectorSelector::ConnectorResponseBodySize { .. }
                     | ConnectorSelector::SubgraphName { .. }
                     | ConnectorSelector::ConnectorSource { .. }
                     | ConnectorSelector::ConnectorHttpMethod { .. }

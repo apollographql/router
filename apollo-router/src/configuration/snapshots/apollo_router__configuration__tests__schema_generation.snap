@@ -2375,6 +2375,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "connector_http_response_body_size": {
+              "description": "The connector HTTP response body size (wire bytes before decompression).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_http_response_body_size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "connector_http_method": {
               "description": "The connector HTTP method.",
               "type": "boolean"
@@ -10101,6 +10114,19 @@ expression: "&schema"
           },
           "required": [
             "subgraph_response_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "subgraph_response_body_size": {
+              "description": "The subgraph response body size.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_response_body_size"
           ],
           "type": "object"
         },

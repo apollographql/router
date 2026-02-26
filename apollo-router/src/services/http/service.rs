@@ -1,15 +1,21 @@
 use std::error::Error as _;
 use std::fmt::Display;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Duration;
 
 use ::serde::Deserialize;
+use bytes::Buf;
 use futures::future::BoxFuture;
 use http::HeaderValue;
 use http::Request;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
+use http_body::Body;
+use http_body::Frame;
 use http_body_util::BodyExt;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -17,10 +23,12 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyperlocal::UnixConnector;
 use opentelemetry::global::get_text_map_propagator;
 use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_STATUS_CODE;
+use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
 use tower::BoxError;
+use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
 #[cfg(unix)]
@@ -47,14 +55,115 @@ use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 
+// Stores the wire (pre-decompression) body byte count in HTTP response extensions.
+#[derive(Clone)]
+pub(crate) struct WireByteCount(pub Arc<AtomicU64>);
+
+pin_project! {
+    /// A body wrapper that counts bytes flowing through before decompression.
+    struct ByteCountingBody<B> {
+        #[pin]
+        inner: B,
+        counter: Arc<AtomicU64>,
+    }
+}
+
+impl<B> Body for ByteCountingBody<B>
+where
+    B: Body,
+    B::Data: Buf,
+{
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.project();
+        match this.inner.poll_frame(cx) {
+            Poll::Ready(Some(Ok(frame))) => {
+                if let Some(data) = frame.data_ref() {
+                    this.counter.fetch_add(data.remaining() as u64, Ordering::Relaxed);
+                }
+                Poll::Ready(Some(Ok(frame)))
+            }
+            other => other,
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+/// Tower layer that wraps response bodies with [`ByteCountingBody`] to record
+/// the number of raw (wire) bytes before any decompression layer processes them.
+#[derive(Clone, Copy)]
+struct WireBodySizeLayer;
+
+impl<S> Layer<S> for WireBodySizeLayer {
+    type Service = WireBodySizeService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        WireBodySizeService { inner }
+    }
+}
+
+#[derive(Clone)]
+struct WireBodySizeService<S> {
+    inner: S,
+}
+
+impl<S, ReqBody, ResBody> tower::Service<http::Request<ReqBody>> for WireBodySizeService<S>
+where
+    S: tower::Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
+    S::Future: Send + 'static,
+    S::Error: Send + 'static,
+    ResBody: Body + Send + 'static,
+    ResBody::Data: Buf,
+{
+    type Response = http::Response<ByteCountingBody<ResBody>>;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
+        let fut = self.inner.call(req);
+        Box::pin(async move {
+            let response = fut.await?;
+            let (mut parts, body) = response.into_parts();
+            let counter = Arc::new(AtomicU64::new(0));
+            parts.extensions.insert(WireByteCount(counter.clone()));
+            Ok(http::Response::from_parts(
+                parts,
+                ByteCountingBody {
+                    inner: body,
+                    counter,
+                },
+            ))
+        })
+    }
+}
+
 type HTTPClient = Decompression<
-    hyper_util::client::legacy::Client<
-        HttpsConnector<HttpConnector<AsyncHyperResolver>>,
-        RouterBody,
+    WireBodySizeService<
+        hyper_util::client::legacy::Client<
+            HttpsConnector<HttpConnector<AsyncHyperResolver>>,
+            RouterBody,
+        >,
     >,
 >;
 #[cfg(unix)]
-type UnixHTTPClient = Decompression<hyper_util::client::legacy::Client<UnixConnector, RouterBody>>;
+type UnixHTTPClient =
+    Decompression<WireBodySizeService<hyper_util::client::legacy::Client<UnixConnector, RouterBody>>>;
 #[cfg(unix)]
 type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
@@ -227,12 +336,14 @@ impl HttpClientService {
 
             ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
+                .layer(WireBodySizeLayer)
                 .service(unix_client_inner)
         };
 
         Ok(Self {
             http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
+                .layer(WireBodySizeLayer)
                 .service(http_client),
             #[cfg(unix)]
             unix_client,
@@ -460,6 +571,7 @@ mod tests {
     use crate::services::http::BoxService;
     use crate::services::http::HttpClientService;
     use crate::services::http::HttpRequest;
+    use crate::services::http::service::WireByteCount;
     use crate::services::router;
 
     async fn emulate_subgraph_with_status_code(listener: TcpListener, status_code: StatusCode) {
@@ -752,6 +864,92 @@ mod tests {
             Some(opentelemetry::Value::String(
                 "response-value".to_string().into()
             ))
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_wire_body_size_counts_compressed_bytes() {
+        use async_compression::tokio::write::GzipEncoder;
+        use http::header::CONTENT_ENCODING;
+        use std::sync::atomic::Ordering;
+        use tokio::io::AsyncWriteExt;
+
+        let uncompressed_body = r#"{"data":{"me":{"name":"Ada Lovelace"}}}"#;
+
+        let mut encoder = GzipEncoder::new(Vec::new());
+        encoder.write_all(uncompressed_body.as_bytes()).await.unwrap();
+        encoder.shutdown().await.unwrap();
+        let compressed_body = encoder.into_inner();
+        let compressed_len = compressed_body.len();
+
+        assert_ne!(
+            compressed_len,
+            uncompressed_body.len(),
+            "test is only meaningful when the compressed and uncompressed sizes differ"
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        tokio::task::spawn(async move {
+            crate::services::http::tests::serve(listener, move |_| {
+                let compressed_body = compressed_body.clone();
+                async move {
+                    Ok(http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .header(CONTENT_ENCODING, "gzip")
+                        .status(StatusCode::OK)
+                        .body(compressed_body.into())
+                        .unwrap())
+                }
+            })
+            .await
+            .unwrap();
+        });
+
+        let http_client_service = HttpClientService::new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            crate::configuration::shared::Client::builder().build(),
+        )
+        .expect("can create a HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = http_client_service
+            .oneshot(HttpRequest {
+                http_request: http::Request::builder()
+                    .uri(url)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .body(router::body::from_bytes(r#"{"query":"{ me { name } }"#))
+                    .unwrap(),
+                context: Context::new(),
+            })
+            .await
+            .unwrap();
+
+        let (parts, body) = response.http_response.into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+
+        let wire_byte_count = parts
+            .extensions
+            .get::<WireByteCount>()
+            .expect("WireByteCount must be present in response extensions");
+        let counter = wire_byte_count.0.clone();
+
+        let decompressed = router::body::into_bytes(body).await.unwrap();
+        assert_eq!(
+            std::str::from_utf8(&decompressed).unwrap(),
+            uncompressed_body,
+            "body should be decompressed"
+        );
+
+        let wire_size = counter.load(Ordering::Relaxed);
+        assert_eq!(
+            wire_size, compressed_len as u64,
+            "WireByteCount should equal the compressed (wire) size, not the decompressed size"
         );
     }
 }
