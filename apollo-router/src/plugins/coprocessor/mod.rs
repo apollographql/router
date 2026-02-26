@@ -18,13 +18,10 @@ use http::HeaderName;
 use http::HeaderValue;
 use http::header;
 use http_body_util::BodyExt;
-use hyper_rustls::ConfigBuilderExt;
-use hyper_rustls::HttpsConnector;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::TokioExecutor;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -40,13 +37,12 @@ use crate::graphql;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
-use crate::plugins::traffic_shaping::Http2Config;
-use crate::register_plugin;
+use crate::register_private_plugin;
 use crate::services;
 use crate::services::external::Control;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
@@ -54,8 +50,8 @@ use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::externalize_header_map;
-use crate::services::hickory_dns_connector::AsyncHyperResolver;
-use crate::services::hickory_dns_connector::new_async_http_connector;
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
@@ -63,53 +59,23 @@ use crate::services::subgraph;
 #[cfg(test)]
 mod test;
 
+mod connector;
 mod execution;
 mod supergraph;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
-const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-type MapFn = fn(http::Response<hyper::body::Incoming>) -> http::Response<RouterBody>;
-
-type HTTPClientService = tower::util::MapResponse<
-    tower::timeout::Timeout<
-        hyper_util::client::legacy::Client<
-            HttpsConnector<HttpConnector<AsyncHyperResolver>>,
-            RouterBody,
-        >,
-    >,
-    MapFn,
->;
+// Type alias for coprocessor HTTP client - uses HttpClientService with timeout
+type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClientService>;
 
 #[async_trait::async_trait]
-impl Plugin for CoprocessorPlugin<HTTPClientService> {
+impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();
-        let mut http_connector =
-            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
-        http_connector.set_nodelay(true);
-        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-        http_connector.enforce_http(false);
-
-        let tls_config = rustls::ClientConfig::builder()
-            .with_native_roots()?
-            .with_no_client_auth();
-
-        let builder = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
-            .https_or_http()
-            .enable_http1();
-
-        let experimental_http2 = client_config.experimental_http2.unwrap_or_default();
-        let connector = if experimental_http2 != Http2Config::Disable {
-            builder.enable_http2().wrap_connector(http_connector)
-        } else {
-            builder.wrap_connector(http_connector)
-        };
 
         if matches!(
             init.config.router.request.context,
@@ -175,22 +141,62 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
                 "Configuration `coprocessor.subgraph.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
         }
-
-        let http_client = ServiceBuilder::new()
-            .map_response(
-                |http_response: http::Response<hyper::body::Incoming>| -> http::Response<RouterBody> {
-                    let (parts, body) = http_response.into_parts();
-                    http::Response::from_parts(parts, body.map_err(axum::Error::new).boxed_unsync())
-                } as MapFn,
-            )
-            .layer(TimeoutLayer::new(init.config.timeout))
-            .service(
-                hyper_util::client::legacy::Client::builder(TokioExecutor::new())
-                    .http2_only(experimental_http2 == Http2Config::Http2Only)
-                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                    .build(connector),
+        if matches!(
+            init.config.connector.all.request.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.connector.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
             );
-        CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
+        }
+        if matches!(
+            init.config.connector.all.response.context,
+            ContextConf::Deprecated(true)
+        ) {
+            tracing::warn!(
+                "Configuration `coprocessor.connector.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+            );
+        }
+
+        // Validate all coprocessor URLs
+        validate_coprocessor_url(&init.config.url, "coprocessor.url")?;
+        if let Some(ref url) = init.config.router.request.url {
+            validate_coprocessor_url(url, "coprocessor.router.request.url")?;
+        }
+        if let Some(ref url) = init.config.router.response.url {
+            validate_coprocessor_url(url, "coprocessor.router.response.url")?;
+        }
+        if let Some(ref url) = init.config.supergraph.request.url {
+            validate_coprocessor_url(url, "coprocessor.supergraph.request.url")?;
+        }
+        if let Some(ref url) = init.config.supergraph.response.url {
+            validate_coprocessor_url(url, "coprocessor.supergraph.response.url")?;
+        }
+        if let Some(ref url) = init.config.execution.request.url {
+            validate_coprocessor_url(url, "coprocessor.execution.request.url")?;
+        }
+        if let Some(ref url) = init.config.execution.response.url {
+            validate_coprocessor_url(url, "coprocessor.execution.response.url")?;
+        }
+        if let Some(ref url) = init.config.subgraph.all.request.url {
+            validate_coprocessor_url(url, "coprocessor.subgraph.all.request.url")?;
+        }
+        if let Some(ref url) = init.config.subgraph.all.response.url {
+            validate_coprocessor_url(url, "coprocessor.subgraph.all.response.url")?;
+        }
+
+        // Use shared HttpClientService infrastructure instead of duplicated client creation
+        let tls_root_store =
+            crate::services::http::service::HttpClientService::native_roots_store();
+        let http_client_service =
+            crate::services::http::service::HttpClientService::from_config_for_coprocessor(
+                &tls_root_store,
+                client_config,
+            )?;
+
+        let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
+
+        CoprocessorPlugin::new(client, init.config, init.supergraph_sdl)
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -214,14 +220,22 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         self.subgraph_service(name, service)
     }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        self.connector_request_service(&source_name, service)
+    }
 }
 
 // This macro allows us to use it in our plugin registry!
-// register_plugin takes a group name, and a plugin name.
+// register_private_plugin takes a group name, and a plugin name.
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!(
+register_private_plugin!(
     "apollo",
     "coprocessor",
     CoprocessorPlugin<HTTPClientService>
@@ -236,12 +250,12 @@ register_plugin!(
 #[derive(Debug)]
 struct CoprocessorPlugin<C>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     http_client: C,
     configuration: Conf,
@@ -250,12 +264,12 @@ where
 
 impl<C> CoprocessorPlugin<C>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     fn new(http_client: C, configuration: Conf, sdl: Arc<String>) -> Result<Self, BoxError> {
         Ok(Self {
@@ -308,6 +322,19 @@ where
             self.configuration.url.clone(),
             name.to_string(),
             self.configuration.response_validation,
+        )
+    }
+
+    fn connector_request_service(
+        &self,
+        source_name: &str,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
+        self.configuration.connector.all.as_service(
+            self.http_client.clone(),
+            service,
+            self.configuration.url.clone(),
+            source_name.to_string(),
         )
     }
 }
@@ -403,7 +430,7 @@ pub(super) struct SubgraphResponseConf {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "CoprocessorConfig")]
 struct Conf {
-    /// The url you'd like to offload processing to (can be overridden per-stage)
+    /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs
     url: String,
     client: Option<Client>,
     /// The timeout for external requests
@@ -426,6 +453,9 @@ struct Conf {
     /// The subgraph stage request/response configuration
     #[serde(default)]
     subgraph: SubgraphStages,
+    /// The connector stage request/response configuration
+    #[serde(default)]
+    connector: connector::ConnectorStages,
 }
 
 /// Configures the context
@@ -435,6 +465,15 @@ pub(super) enum ContextConf {
     /// Deprecated configuration using a boolean
     Deprecated(bool),
     NewContextConf(NewContextConf),
+}
+
+impl ContextConf {
+    fn is_deprecated(&self) -> bool {
+        match self {
+            Self::Deprecated(v) => *v,
+            Self::NewContextConf(c) => *c == NewContextConf::Deprecated,
+        }
+    }
 }
 
 impl Default for ContextConf {
@@ -495,6 +534,31 @@ fn default_response_validation() -> bool {
     true
 }
 
+/// Validate a coprocessor URL.
+/// Returns an error if the URL is invalid or if it's a Unix socket URL with an empty path.
+fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(), BoxError> {
+    if let Some(path) = url.strip_prefix("unix://") {
+        if path.is_empty() {
+            return Err(format!(
+                "{config_path}: Unix socket URL must include a path (e.g., 'unix:///var/run/coprocessor.sock')"
+            )
+            .into());
+        }
+        // Basic sanity check - path should be absolute
+        if !path.starts_with('/') {
+            return Err(format!(
+                "{config_path}: Unix socket path should be absolute (e.g., 'unix:///var/run/coprocessor.sock'), got 'unix://{path}'"
+            )
+            .into());
+        }
+    } else {
+        // Validate HTTP/HTTPS URLs can be parsed
+        url.parse::<http::Uri>()
+            .map_err(|e| format!("{config_path}: invalid URL '{url}': {e}"))?;
+    }
+    Ok(())
+}
+
 /// Update the target context based on the context returned from the coprocessor.
 /// This function handles both updates/inserts and deletions:
 /// - Keys present in the returned context (with non-null values) are updated/inserted
@@ -509,7 +573,7 @@ pub(crate) fn update_context_from_coprocessor(
 
     for (mut key, value) in context_returned.try_into_iter()? {
         // Handle deprecated key names - convert back to actual key names
-        if let ContextConf::NewContextConf(NewContextConf::Deprecated) = context_config {
+        if context_config.is_deprecated() {
             key = context_key_from_deprecated(key);
         }
 
@@ -574,15 +638,12 @@ impl RouterStage {
         response_validation: bool,
     ) -> router::BoxService
     where
-        C: Service<
-                http::Request<RouterBody>,
-                Response = http::Response<RouterBody>,
-                Error = BoxError,
-            > + Clone
+        C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
+            + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+        <C as tower::Service<HttpRequest>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -708,15 +769,12 @@ impl SubgraphStage {
         response_validation: bool,
     ) -> subgraph::BoxService
     where
-        C: Service<
-                http::Request<RouterBody>,
-                Response = http::Response<RouterBody>,
-                Error = BoxError,
-            > + Clone
+        C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
+            + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+        <C as tower::Service<HttpRequest>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -831,12 +889,12 @@ async fn process_router_request_stage<C>(
     executed: &mut bool,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     let should_be_executed = request_config
         .condition
@@ -854,8 +912,7 @@ where
 
     let headers_to_send = request_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
 
     // HTTP GET requests don't have a body
     let body_to_send = request_config
@@ -883,7 +940,16 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+    // HttpClientService) intended for subgraph requests, not for the coprocessor
+    // endpoint
+    //
+    // WARN: be careful if you're changing out this context to using the request's context; see
+    // above, but also validate what happens downstream for that context
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, Context::new())
+        .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
     let duration = start.elapsed();
@@ -1000,12 +1066,12 @@ async fn process_router_response_stage<C>(
     executed: &mut bool,
 ) -> Result<router::Response, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
@@ -1036,8 +1102,7 @@ where
     // Encode headers, body, status, context, sdl to create a payload
     let headers_to_send = response_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
     let body_to_send = response_config
         .body
         .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
@@ -1059,7 +1124,16 @@ where
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+    // HttpClientService) intended for subgraph requests, not for the coprocessor
+    // endpoint
+    //
+    // WARN: be careful if you're changing out this context to using the request's context; see
+    // above, but also validate what happens downstream for that context
+    let co_processor_result = payload
+        .call(http_client.clone(), &coprocessor_url, Context::new())
+        .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
     let duration = start.elapsed();
@@ -1134,8 +1208,15 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
+                // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+                // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+                // HttpClientService) intended for subgraph requests, not for the coprocessor
+                // endpoint
+                //
+                // WARN: be careful if you're changing out this context to using the request's context; see
+                // above, but also validate what happens downstream for that context
                 let co_processor_result = payload
-                    .call(generator_client, &generator_coprocessor_url)
+                    .call(generator_client, &generator_coprocessor_url, Context::new())
                     .await;
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
@@ -1198,12 +1279,12 @@ async fn process_subgraph_request_stage<C>(
     executed: &mut bool,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if request_config.condition.evaluate_request(&request) != Some(true) {
         return Ok(ControlFlow::Continue(request));
@@ -1215,8 +1296,7 @@ where
 
     let headers_to_send = request_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
 
     let body_to_send = request_config
         .body
@@ -1245,7 +1325,16 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+    // HttpClientService) intended for subgraph requests, not for the coprocessor
+    // endpoint
+    //
+    // WARN: be careful if you're changing out this context to using the request's context; see
+    // above, but also validate what happens downstream for that context
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, Context::new())
+        .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
     let duration = start.elapsed();
@@ -1359,12 +1448,12 @@ async fn process_subgraph_response_stage<C>(
     executed: &mut bool,
 ) -> Result<subgraph::Response, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
@@ -1377,8 +1466,7 @@ where
 
     let headers_to_send = response_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
 
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
 
@@ -1405,7 +1493,16 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+    // HttpClientService) intended for subgraph requests, not for the coprocessor
+    // endpoint
+    //
+    // WARN: be careful if you're changing out this context to using the request's context; see
+    // above, but also validate what happens downstream for that context
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, Context::new())
+        .await;
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
     let duration = start.elapsed();

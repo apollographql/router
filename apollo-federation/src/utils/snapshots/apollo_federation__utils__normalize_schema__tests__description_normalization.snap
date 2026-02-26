@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/utils/normalize_schema.rs
+expression: normalized.to_string()
+---
+"""My Schema Description"""
+schema {
+  query: Query
+}
+
+"""My custom directive"""
+directive @custom(
+  """optional argument"""
+  arg: String,
+) on FIELD_DEFINITION
+
+"""Enum Description"""
+enum MyEnum {
+  ONE_WITHOUT
+  """Enum Value Description"""
+  ONE_WITH_DESCRIPTION
+}
+
+"""Description on Object"""
+type Query {
+  """Description on field"""
+  a: String!
+  b(
+    """Argument Description"""
+    name: String,
+  ): String
+  c(input: ScalarEmptyDescription): Int @custom
+  d: MyEnum
+}
+
+scalar ScalarEmptyDescription

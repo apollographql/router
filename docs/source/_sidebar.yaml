@@ -17,6 +17,8 @@ items:
     children:
       - label: "Overview"
         href: "./configuration/overview"
+      - label: "Hot Reload"
+        href: "./configuration/hot-reload-schema"
       - label: "Environment Variable Reference"
         href: "./configuration/envvars"
       - label: "CLI Reference"
@@ -191,6 +193,8 @@ items:
             href: "./performance/traffic-shaping"
           - label: "Query Batching"
             href: "./performance/query-batching"
+          - label: "Circuit Breaking"
+            href: "./performance/circuit-breaking"
       - label: "Client Features"
         children:
           - label: "APQ"
