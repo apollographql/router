@@ -3349,9 +3349,41 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_matches_selection_set_handles_arrays_with_nullable_elements() {
-        // Simulate the real-world Availability type scenario
+    fn repr_matches_selection_set_for_schema(
+        schema: &str,
+        named_type: &str,
+        selection_text: &str,
+        representation: serde_json_bytes::Value,
+    ) -> bool {
+        let schema = Schema::parse_and_validate(schema, "test.graphql")
+            .expect("should be able to parse schema");
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new(named_type).unwrap(),
+                selection_text,
+                "test.graphql",
+            )
+            .expect("should be able to parse field set");
+
+        matches_selection_set(
+            &representation.as_object().expect("must provide an object"),
+            &field_set.selection_set,
+        )
+    }
+
+    #[rstest::rstest]
+    #[case::null_list(json!(null))]
+    #[case::null_element(json!([null]))]
+    #[case::null_element(json!([{"id": "TEST1"}, null]))]
+    #[case::null_value_for_nullable_field(json!([{"id": "TEST1"}]))]
+    #[case::null_value_for_nullable_field(json!([{"id": "TEST1", "quantity": 5}]))]
+    #[case::multiple_differently_null_objects(json!([{"id": "TEST1"}, null, {"id": "TEST3", "quantity": null}]))]
+    fn test_matches_selection_set_handles_arrays_with_nullable_elements(
+        #[case] list_repr: serde_json_bytes::Value,
+    ) {
         let schema_text = r#"
             type Query {
                 test: Test
@@ -3366,42 +3398,22 @@ mod tests {
                 inStock: Boolean
             }
         "#;
-        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
 
-        let mut parser = Parser::new();
-        let field_set = parser
-            .parse_field_set(
-                &schema,
-                apollo_compiler::ast::NamedType::new("Test").unwrap(),
-                "id list { id quantity inStock }",
-                "test.graphql",
-            )
-            .unwrap();
+        let named_type = "Test";
+        let selection_text = "id list { id quantity inStock }";
 
-        // Test with complex nested array structure
         let representation = json!({
             "id": "TEST123",
-            "list": [
-                {
-                    "id": "LIST1",
-                    "quantity": 100,
-                    "inStock": true
-                },
-                {
-                    "id": "LIST2",
-                    "quantity": 100
-                },
-                null
-            ]
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+            "list": list_repr
+        });
 
-        assert!(
-            matches_selection_set(&representation, &field_set.selection_set),
-            "complex nested arrays should match"
+        let matches_selection_set = repr_matches_selection_set_for_schema(
+            schema_text,
+            named_type,
+            selection_text,
+            representation,
         );
+        assert!(matches_selection_set);
     }
 
     #[rstest::rstest]
@@ -3414,7 +3426,8 @@ mod tests {
     fn test_matches_selection_set_handles_arrays_with_non_nullable_elements(
         #[case] list_repr: serde_json_bytes::Value,
     ) {
-        // Simulate the real-world Availability type scenario
+        // NB: same as test_matches_selection_set_handles_arrays_with_nullable_elements but with a
+        //  NonNullableListElement! rather than a NullableListElement
         let schema_text = r#"
             type Query {
                 test: Test
@@ -3429,31 +3442,23 @@ mod tests {
                 inStock: Boolean
             }
         "#;
-        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
 
-        let mut parser = Parser::new();
-        let field_set = parser
-            .parse_field_set(
-                &schema,
-                apollo_compiler::ast::NamedType::new("Test").unwrap(),
-                "id list { id quantity inStock }",
-                "test.graphql",
-            )
-            .unwrap();
+        let named_type = "Test";
+        let selection_text = "id list { id quantity inStock }";
 
         // Test with complex nested array structure
         let representation = json!({
             "id": "TEST123",
             "list": list_repr
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+        });
 
-        assert!(
-            !matches_selection_set(&representation, &field_set.selection_set),
-            "representation contains null and shouldn't match"
+        let matches_selection_set = repr_matches_selection_set_for_schema(
+            schema_text,
+            named_type,
+            selection_text,
+            representation,
         );
+        assert!(!matches_selection_set);
     }
 
     #[test]
