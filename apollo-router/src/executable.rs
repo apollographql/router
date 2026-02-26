@@ -289,21 +289,8 @@ impl Opt {
         anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
     }
 
-    fn validate_otel_envs_not_present() -> Result<(), anyhow::Error> {
-        let present: Vec<&'static str> = FORBIDDEN_OTEL_VARS
-            .into_iter()
-            .filter(|k| std::env::var_os(k).is_some())
-            .collect();
-
-        if present.is_empty() {
-            return Ok(());
-        }
-
-        // Do not print values (could include auth headers in some setups).
-        Err(anyhow!(
-            "Router startup blocked: the following OTEL environment variables must not be set: {}",
-            present.join(", ")
-        ))
+    fn prohibit_env_vars(env_vars: &[&'static str]) -> Result<(), anyhow::Error> {
+        reject_environment_variables(&env_variables_set(env_vars))
     }
 }
 
@@ -494,9 +481,8 @@ impl Executable {
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
 
-        // ROUTER-1609
-        // New rule that will prevent Router from starting if OTEL environment variables are set.
-        Opt::validate_otel_envs_not_present()?;
+        // ROUTER-1609: prevent router from starting if OTEL environment variables are set.
+        Opt::prohibit_env_vars(&FORBIDDEN_OTEL_VARS)?;
 
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
@@ -783,6 +769,27 @@ fn graph_os() -> bool {
         && crate::services::APOLLO_GRAPH_REF.lock().is_some()
 }
 
+/// Of the environment variable names provided, return a list of those which are set in the environment.
+fn env_variables_set(variables: &[&'static str]) -> Vec<&'static str> {
+    variables
+        .iter()
+        .filter(|v| !matches!(std::env::var(v), Err(std::env::VarError::NotPresent)))
+        .cloned()
+        .collect()
+}
+
+/// Return an error if the list of environment variables provided is not empty
+fn reject_environment_variables(variables: &[&str]) -> Result<(), anyhow::Error> {
+    if variables.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "the following environment variables must not be set: {}",
+            variables.join(", ")
+        ))
+    }
+}
+
 fn setup_panic_handler() {
     // Redirect panics to the logs.
     let backtrace_env = std::env::var("RUST_BACKTRACE");
@@ -811,6 +818,8 @@ fn setup_panic_handler() {
 #[cfg(test)]
 mod tests {
     use crate::executable::add_log_filter;
+    use crate::executable::env_variables_set;
+    use crate::executable::reject_environment_variables;
 
     #[test]
     fn simplest_logging_modifications() {
@@ -1045,54 +1054,34 @@ mod tests {
                 "Error should mention the conflicting options"
             );
         }
+    }
 
-        use super::super::*;
+    #[test]
+    fn it_observes_environment_variables() {
+        const VALID_ENV_VAR: &str = "CARGO_HOME";
 
-        fn clear_vars() {
-            for k in FORBIDDEN_OTEL_VARS {
-                unsafe {
-                    std::env::remove_var(k);
-                }
-            }
-        }
+        // if we're running tests, we should have a CARGO_HOME env variable present
+        assert!(std::env::var(VALID_ENV_VAR).is_ok());
 
-        #[test]
-        fn passes_when_none_set() {
-            clear_vars();
-            assert!(Opt::validate_otel_envs_not_present().is_ok());
-        }
+        // make sure the env_variables_set function can see that, both alone and in a list
+        assert!(env_variables_set(&[VALID_ENV_VAR]).contains(&VALID_ENV_VAR));
+        assert!(
+            env_variables_set(&[VALID_ENV_VAR, "ANOTHER_ENV_VARIABLE"]).contains(&VALID_ENV_VAR)
+        );
 
-        #[test]
-        fn fails_when_one_set() {
-            clear_vars();
-            unsafe {
-                std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "http://example:4317");
-            }
-            let err = Opt::validate_otel_envs_not_present()
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("OTEL_EXPORTER_OTLP_ENDPOINT"));
-        }
+        // make sure the env_variables_set variable doesn't find not-present environment variables
+        assert!(env_variables_set(&["AN_EXTREMELY_UNLIKELY_TO_BE_SET_VARIABLE"]).is_empty());
+    }
 
-        #[test]
-        fn fails_and_lists_all_that_are_set() {
-            clear_vars();
-            unsafe {
-                std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "x");
-            }
-            unsafe {
-                std::env::set_var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "y");
-            }
-            unsafe {
-                std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "z");
-            }
+    #[test]
+    fn it_returns_an_error_when_env_variable_provided() {
+        assert!(reject_environment_variables(&[]).is_ok());
 
-            let err = Opt::validate_otel_envs_not_present()
-                .unwrap_err()
-                .to_string();
-            for k in FORBIDDEN_OTEL_VARS {
-                assert!(err.contains(k), "expected error to list {k}, got: {err}");
-            }
-        }
+        let err = reject_environment_variables(&["env1"]).unwrap_err();
+        assert!(err.to_string().contains("env1"));
+
+        let err = reject_environment_variables(&["env1", "env2"]).unwrap_err();
+        assert!(err.to_string().contains("env1"));
+        assert!(err.to_string().contains("env2"));
     }
 }
