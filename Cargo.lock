@@ -418,6 +418,7 @@ dependencies = [
  "sha2",
  "shellexpand",
  "similar",
+ "socket2 0.5.10",
  "static_assertions",
  "strum 0.27.2",
  "sys-info",
