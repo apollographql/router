@@ -289,7 +289,7 @@ impl Opt {
         anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
     }
 
-    fn prohibit_env_vars(env_vars: &[&str]) -> Result<(), anyhow::Error> {
+    fn prohibit_env_vars(env_vars: &[&'static str]) -> Result<(), anyhow::Error> {
         reject_environment_variables(&env_variables_set(env_vars))
     }
 }
