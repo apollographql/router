@@ -3403,6 +3403,58 @@ mod tests {
         );
     }
 
+    #[rstest::rstest]
+    #[case::null_element(json!([null]))]
+    #[case::null_element(json!([{"id": "TEST1"}, null]))]
+    #[case::null_value_for_nonnullable_field(json!([{}]))]
+    #[case::null_value_for_nonnullable_field(json!([{"quantity": 5}]))]
+    #[case::null_value_for_nonnullable_field(json!([{"id": "TEST1"}, {}]))]
+    #[case::null_value_for_nonnullable_field(json!([{"id": "TEST1"}, {"quantity": 5}]))]
+    fn test_matches_selection_set_handles_arrays_with_non_nullable_elements(
+        #[case] list_repr: serde_json_bytes::Value,
+    ) {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                list: [NonNullableListElement!]
+            }
+            type NonNullableListElement {
+                id: ID!
+                quantity: Int
+                inStock: Boolean
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id list { id quantity inStock }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "list": list_repr
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(
+            !matches_selection_set(&representation, &field_set.selection_set),
+            "representation contains null and shouldn't match"
+        );
+    }
+
     #[test]
     fn test_matches_selection_subset_handles_arrays() {
         // Simulate the real-world Availability type scenario
