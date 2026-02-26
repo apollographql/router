@@ -141,6 +141,20 @@ impl StorageInterface {
         let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
         storage.get()
     }
+
+    /// Activate all storages so they can start emitting metrics.
+    pub(crate) fn activate(&self) {
+        if let Some(all) = &self.all {
+            if let Some(storage) = all.get() {
+                storage.activate();
+            }
+        }
+        for storage in self.subgraphs.values() {
+            if let Some(storage) = storage.get() {
+                storage.activate();
+            }
+        }
+    }
 }
 
 #[cfg(all(
@@ -360,7 +374,9 @@ impl PluginPrivate for ResponseCache {
         })
     }
 
-    fn activate(&self) {}
+    fn activate(&self) {
+        self.storage.activate();
+    }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let debug = self.debug;

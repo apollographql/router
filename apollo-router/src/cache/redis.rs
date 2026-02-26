@@ -129,8 +129,15 @@ struct DropSafeRedisPool {
     pool: Arc<RedisPool>,
     caller: &'static str,
     heartbeat_abort_handle: AbortHandle,
-    // Metrics collector handles its own abort and gauges
-    _metrics_collector: RedisMetricsCollector,
+    // Metrics collector handles its own abort and spawns a background task for gauge updates
+    metrics_collector: RedisMetricsCollector,
+}
+
+impl DropSafeRedisPool {
+    /// Signal that the meter provider is ready and metrics gauges can be created.
+    fn activate(&self) {
+        self.metrics_collector.activate();
+    }
 }
 
 impl Deref for DropSafeRedisPool {
@@ -483,7 +490,7 @@ impl RedisCacheStorage {
                 pool: pooled_client_arc,
                 caller,
                 heartbeat_abort_handle: heartbeat_handle.abort_handle(),
-                _metrics_collector: metrics_collector,
+                metrics_collector,
             }),
             namespace: namespace.map(Arc::new),
             ttl,
@@ -494,6 +501,14 @@ impl RedisCacheStorage {
 
     pub(crate) fn ttl(&self) -> Option<Duration> {
         self.ttl
+    }
+
+    /// Signal that the meter provider is ready and metrics gauges can be created.
+    ///
+    /// This MUST be called after `Telemetry.activate()` to ensure gauges are
+    /// registered with the correct meter provider.
+    pub(crate) fn activate(&self) {
+        self.inner.activate();
     }
 
     /// Helper method to record Redis errors for metrics
