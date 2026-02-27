@@ -85,7 +85,8 @@ async fn test_report_txt_endpoint() {
     let (status, body, headers) = make_request(&mut router, Method::GET, "/report.txt").await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("SYSTEM INFORMATION"));
+    // Report content is produced by system_info::collect_resources(): MEMORY INFORMATION, CPU INFORMATION, SYSTEM LOAD, etc.
+    assert!(body.contains("MEMORY INFORMATION"));
     assert_eq!(
         headers.get(http::header::CONTENT_TYPE).unwrap(),
         "text/plain; charset=utf-8"
