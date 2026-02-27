@@ -3955,7 +3955,8 @@ async fn no_store_on_subgraph_timeout() {
     let mut response = service.oneshot(request).await.unwrap();
 
     // The response must contain `no-store` because the `orga` subgraph timed out.
-    let cache_control_header = get_cache_control_header(&response).expect("missing cache-control header");
+    let cache_control_header =
+        get_cache_control_header(&response).expect("missing cache-control header");
     assert!(
         cache_control_contains_no_store(&cache_control_header),
         "expected Cache-Control: no-store when a subgraph times out, got: {:?}",
@@ -4067,7 +4068,8 @@ async fn no_store_on_partial_subgraph_failure() {
 
     // The response must contain `no-store` — not `max-age` or `public` — because one subgraph
     // returned an error. Caching a partial response would be incorrect.
-    let cache_control_header = get_cache_control_header(&response).expect("missing cache-control header");
+    let cache_control_header =
+        get_cache_control_header(&response).expect("missing cache-control header");
     assert!(
         cache_control_contains_no_store(&cache_control_header),
         "expected Cache-Control: no-store on partial failure, got: {:?}",
