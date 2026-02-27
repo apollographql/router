@@ -36,7 +36,7 @@ pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 pub(crate) const IS_SUCCESS_ARGUMENT_NAME: Name = name!("isSuccess");
 
-pub(super) const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
+pub(super) const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_3;
 
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,

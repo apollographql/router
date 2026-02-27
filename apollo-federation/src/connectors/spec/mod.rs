@@ -122,7 +122,7 @@ impl ConnectSpec {
     /// because using it production code leads to sudden accidental upgrades.
     #[cfg(test)]
     pub(crate) fn latest() -> Self {
-        Self::V0_2
+        Self::V0_3
     }
 
     /// Returns the next version of the [`ConnectSpec`] to be released.
