@@ -374,13 +374,15 @@ impl PluginPrivate for ResponseCache {
                     .get_json_value(CONTAINS_GRAPHQL_ERROR)
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                if has_errors {
-                    let _ = CacheControl::no_store().to_headers(response.response.headers_mut());
-                } else if let Some(cache_control) = response
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.get::<CacheControl>().cloned())
-                {
+                let cache_control = if has_errors {
+                    Some(CacheControl::no_store())
+                } else {
+                    response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<CacheControl>().cloned())
+                };
+                if let Some(cache_control) = cache_control {
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
