@@ -898,6 +898,9 @@ impl RouterCreator {
         ));
 
         // NOTE: This is the start of the router pipeline (router_service)
+        let buffer_size = configuration
+            .experimental_buffer_size
+            .unwrap_or(DEFAULT_BUFFER_SIZE);
         let sb = Buffer::new(
             ServiceBuilder::new()
                 .layer(static_page.clone())
@@ -909,7 +912,7 @@ impl RouterCreator {
                         .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
                 )
                 .boxed(),
-            DEFAULT_BUFFER_SIZE,
+            buffer_size,
         );
 
         Ok(Self {

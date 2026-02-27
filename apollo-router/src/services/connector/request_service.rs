@@ -31,7 +31,6 @@ use tower::buffer::Buffer;
 use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
@@ -151,6 +150,7 @@ impl ConnectorRequestServiceFactory {
         http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         plugins: Arc<Plugins>,
         connector_sources: Arc<HashSet<String>>,
+        buffer_size: usize,
     ) -> Self {
         let mut map = HashMap::with_capacity(connector_sources.len());
         for source in connector_sources.iter() {
@@ -166,7 +166,7 @@ impl ConnectorRequestServiceFactory {
                         |acc, (_, e)| e.connector_request_service(acc, source.clone()),
                     )
                     .boxed(),
-                DEFAULT_BUFFER_SIZE,
+                buffer_size,
             );
             map.insert(source.clone(), service);
         }

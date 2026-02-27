@@ -223,6 +223,15 @@ pub struct Configuration {
     /// Type conditioned fetching configuration.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
+
+    /// Configures the size of the internal request buffer used in the router pipeline.
+    /// This buffer controls the maximum number of requests that can be queued
+    /// before backpressure is applied. Applies to the router, supergraph, subgraph
+    /// and connector service pipelines.
+    ///
+    /// Defaults to 50,000 if not set.
+    #[serde(default)]
+    pub(crate) experimental_buffer_size: Option<usize>,
 }
 
 impl PartialEq for Configuration {
@@ -257,6 +266,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: chaos::Config,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
+            experimental_buffer_size: Option<usize>,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -288,6 +298,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
+            experimental_buffer_size: ad_hoc.experimental_buffer_size,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
@@ -328,6 +339,7 @@ impl Configuration {
         chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
+        experimental_buffer_size: Option<usize>,
         batching: Option<Batching>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
@@ -357,6 +369,7 @@ impl Configuration {
             batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            experimental_buffer_size,
             notify,
         };
 

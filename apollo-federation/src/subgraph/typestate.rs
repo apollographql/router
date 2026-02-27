@@ -49,6 +49,7 @@ use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -656,7 +657,7 @@ impl<S: HasMetadata> Subgraph<S> {
             .directive_name_in_schema(self.schema(), &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
     }
 
-    pub(crate) fn interface_object_fields(&self) -> Vec<ObjectFieldDefinitionPosition> {
+    pub(crate) fn interface_objects(&self) -> Vec<ObjectTypeDefinitionPosition> {
         let Ok(Some(interface_object_def)) = self
             .metadata()
             .federation_spec_definition()
@@ -665,19 +666,12 @@ impl<S: HasMetadata> Subgraph<S> {
             return vec![];
         };
 
-        let itf_objects = &self
-            .schema()
+        self.schema()
             .referencers()
             .get_directive(&interface_object_def.name)
-            .object_types;
-        if itf_objects.is_empty() {
-            return vec![];
-        }
-
-        itf_objects
+            .object_types
             .iter()
-            .filter_map(|obj| obj.fields(self.schema().schema()).ok())
-            .flatten()
+            .cloned()
             .collect()
     }
 

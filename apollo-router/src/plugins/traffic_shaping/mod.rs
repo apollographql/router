@@ -70,6 +70,11 @@ struct Shaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
+    /// Configures the size of the internal request buffer for this subgraph.
+    /// Controls how many requests can be queued before backpressure is applied.
+    /// Overrides the global `experimental_buffer_size` for this specific subgraph.
+    /// Defaults to the global `experimental_buffer_size` or 50,000 if not set.
+    experimental_buffer_size: Option<usize>,
 }
 
 #[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
@@ -107,6 +112,9 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.dns_resolution_strategy.as_ref())
                     .cloned(),
+                experimental_buffer_size: self
+                    .experimental_buffer_size
+                    .or(fallback.experimental_buffer_size),
             },
         }
     }
@@ -541,6 +549,23 @@ impl TrafficShaping {
                 dns_resolution_strategy: config.dns_resolution_strategy,
             })
             .unwrap_or_default()
+    }
+
+    /// Returns the configured buffer size for a given subgraph, merging the subgraph-specific
+    /// config with the `all` fallback. Returns `None` if neither specifies a buffer size.
+    pub(crate) fn subgraph_buffer_size(&self, name: &str) -> Option<usize> {
+        let all_size = self
+            .config
+            .all
+            .as_ref()
+            .and_then(|a| a.shaping.experimental_buffer_size);
+        let sub_size = self
+            .config
+            .subgraphs
+            .get(name)
+            .and_then(|s| s.shaping.experimental_buffer_size);
+        // subgraph-specific overrides `all`
+        sub_size.or(all_size)
     }
 }
 

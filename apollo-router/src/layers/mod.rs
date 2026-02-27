@@ -33,8 +33,9 @@ pub mod sync_checkpoint;
 // so high, 50_000, because we anticipate that many users will want to
 //
 // Think of this as a backstop for when there are no other backpressure
-// enforcing limits configured in a router. In future we may tweak this
-// value higher or lower or expose it as a configurable.
+// enforcing limits configured in a router. This value can be overridden
+// via the `experimental_buffer_size` configuration option.
+// In future we may tweak this value higher or lower or expose it as a configurable.
 pub(crate) const DEFAULT_BUFFER_SIZE: usize = 50_000;
 
 /// Extension to the [`ServiceBuilder`] trait to make it easy to add router specific capabilities

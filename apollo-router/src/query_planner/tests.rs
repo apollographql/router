@@ -61,6 +61,8 @@ fn subgraph_service_factory(
         // Required for subscriptions: we are not testing that here
         Default::default(),
         None,
+        crate::layers::DEFAULT_BUFFER_SIZE,
+        Default::default(),
     )
 }
 

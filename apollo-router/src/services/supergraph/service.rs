@@ -41,6 +41,7 @@ use crate::plugins::subscription::SubscriptionExecutionLayer;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
+use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlannerService;
@@ -544,6 +545,28 @@ impl PluggableSupergraphServiceBuilder {
             .map(|c| c.source_config_keys.clone())
             .unwrap_or_default();
 
+        // Build a per-subgraph buffer size map from traffic_shaping config.
+        // Subgraphs with an explicit `experimental_buffer_size` in traffic_shaping will
+        // override the global `experimental_buffer_size` for their outer request queue.
+        let per_subgraph_buffer_size: std::collections::HashMap<String, usize> = self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING)
+            .and_then(|plugin| {
+                (*plugin.1)
+                    .as_any()
+                    .downcast_ref::<TrafficShaping>()
+            })
+            .map(|ts| {
+                self.subgraph_services
+                    .iter()
+                    .filter_map(|(name, _)| {
+                        ts.subgraph_buffer_size(name).map(|s| (name.clone(), s))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let fetch_service_factory = Arc::new(FetchServiceFactory::new(
             schema.clone(),
             subgraph_schemas.clone(),
@@ -555,6 +578,10 @@ impl PluggableSupergraphServiceBuilder {
                 self.plugins.clone(),
                 configuration.notify.clone(),
                 subscription_plugin_conf.clone().map(Arc::new),
+                configuration
+                    .experimental_buffer_size
+                    .unwrap_or(DEFAULT_BUFFER_SIZE),
+                per_subgraph_buffer_size,
             )),
             subscription_plugin_conf.clone(),
             Arc::new(ConnectorServiceFactory::new(
@@ -570,6 +597,9 @@ impl PluggableSupergraphServiceBuilder {
                     Arc::new(self.http_service_factory),
                     self.plugins.clone(),
                     connector_sources,
+                    configuration
+                        .experimental_buffer_size
+                        .unwrap_or(DEFAULT_BUFFER_SIZE),
                 )),
             )),
         ));
@@ -615,7 +645,9 @@ impl PluggableSupergraphServiceBuilder {
                         }),
                 )
                 .boxed(),
-            DEFAULT_BUFFER_SIZE,
+            configuration
+                .experimental_buffer_size
+                .unwrap_or(DEFAULT_BUFFER_SIZE),
         );
 
         Ok(SupergraphCreator {

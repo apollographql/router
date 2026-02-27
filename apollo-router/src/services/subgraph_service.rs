@@ -56,7 +56,6 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
-use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
@@ -1126,9 +1125,15 @@ impl SubgraphServiceFactory {
         plugins: Arc<Plugins>,
         notify: Notify<String, graphql::Response>,
         subscription_config: Option<Arc<SubscriptionConfig>>,
+        buffer_size: usize,
+        per_subgraph_buffer_size: HashMap<String, usize>,
     ) -> Self {
         let mut map = HashMap::with_capacity(services.len());
         for (name, maker) in services.into_iter() {
+            let effective_buffer_size = per_subgraph_buffer_size
+                .get(&name)
+                .copied()
+                .unwrap_or(buffer_size);
             // We have to do a little dance here to insert the subscription layer at the right
             // place: *after* all user plugins, but *before* the subgraph service proper.
             let inner_service = ServiceBuilder::new()
@@ -1139,7 +1144,7 @@ impl SubgraphServiceFactory {
                 ))
                 .service(maker.make())
                 .boxed();
-            let service = ServiceBuilder::new().buffer(DEFAULT_BUFFER_SIZE).service(
+            let service = ServiceBuilder::new().buffer(effective_buffer_size).service(
                 plugins
                     .iter()
                     .rev()

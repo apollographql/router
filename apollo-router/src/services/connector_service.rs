@@ -269,6 +269,7 @@ impl ConnectorServiceFactory {
                 Default::default(),
                 Default::default(),
                 Default::default(),
+                crate::layers::DEFAULT_BUFFER_SIZE,
             )),
         )
     }
