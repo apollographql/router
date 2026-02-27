@@ -3878,32 +3878,10 @@ async fn no_store_on_subgraph_timeout() {
     let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
         .unwrap();
-    let subgraphs_conf = create_subgraph_conf(
-        [
-            (
-                "user".to_string(),
-                Subgraph {
-                    redis: None,
-                    private_id: Some("sub".to_string()),
-                    enabled: true.into(),
-                    ttl: None,
-                    ..Default::default()
-                },
-            ),
-            (
-                "orga".to_string(),
-                Subgraph {
-                    redis: None,
-                    private_id: Some("sub".to_string()),
-                    enabled: true.into(),
-                    ttl: None,
-                    ..Default::default()
-                },
-            ),
-        ]
-        .into_iter()
-        .collect(),
-    );
+    let subgraphs_conf = create_subgraph_conf(HashMap::from([
+        ("user".to_string(), Subgraph::default()),
+        ("orga".to_string(), Subgraph::default()),
+    ]));
     let response_cache = ResponseCache::for_test(
         storage.clone(),
         subgraphs_conf,
@@ -3982,9 +3960,9 @@ async fn no_store_on_subgraph_timeout() {
 }
 
 /// When one subgraph returns data with a `Cache-Control: max-age=N, public` header and another
-/// subgraph returns errors (simulating a timeout or partial failure), the final HTTP response
-/// must carry `Cache-Control: no-store` to prevent intermediate caches (CDNs, reverse proxies)
-/// from caching an incomplete or error response.
+/// subgraph returns errors (simulating a partial failure), the final HTTP response must carry
+/// `Cache-Control: no-store` to prevent intermediate caches (CDNs, reverse proxies) from caching an
+/// incomplete or error response.
 #[tokio::test]
 async fn no_store_on_partial_subgraph_failure() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
@@ -4011,32 +3989,10 @@ async fn no_store_on_partial_subgraph_failure() {
     let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
         .unwrap();
-    let subgraphs_conf = create_subgraph_conf(
-        [
-            (
-                "user".to_string(),
-                Subgraph {
-                    redis: None,
-                    private_id: Some("sub".to_string()),
-                    enabled: true.into(),
-                    ttl: None,
-                    ..Default::default()
-                },
-            ),
-            (
-                "orga".to_string(),
-                Subgraph {
-                    redis: None,
-                    private_id: Some("sub".to_string()),
-                    enabled: true.into(),
-                    ttl: None,
-                    ..Default::default()
-                },
-            ),
-        ]
-        .into_iter()
-        .collect(),
-    );
+    let subgraphs_conf = create_subgraph_conf(HashMap::from([
+        ("user".to_string(), Subgraph::default()),
+        ("orga".to_string(), Subgraph::default()),
+    ]));
     let response_cache = ResponseCache::for_test(
         storage.clone(),
         subgraphs_conf,
