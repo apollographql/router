@@ -53,6 +53,107 @@ fn generates_a_valid_supergraph() {
     assert_snapshot!(api_schema.schema());
 }
 
+/// Ensures that when a type implements an interface in both a base definition (subgraph A)
+/// and an extension (subgraph B), the supergraph SDL emits "type Foo implements I" on the
+/// main type definition line rather than splitting into "type Foo" + "extend type Foo implements I".
+///
+/// Expected (what we must get):
+///   type BrokerResearchDocumentType implements DocumentType
+///     @join__implements(graph: BROKER_RESEARCH, interface: "DocumentType")
+///     @join__implements(graph: DOCUMENT, interface: "DocumentType")
+///     @join__type(extension: true, graph: BROKER_RESEARCH, key: "documentId")
+///     @join__type(graph: DOCUMENT, key: "documentId")
+///   { ... }
+///
+/// Not actual (bug we fixed):
+///   type BrokerResearchDocumentType
+///     @join__implements(...) @join__type(...)
+///   extend type BrokerResearchDocumentType implements DocumentType
+#[test]
+fn implements_on_type_definition_not_extend_type() {
+    let subgraph_a = ServiceDefinition {
+        name: "DOCUMENT",
+        type_defs: r#"
+            type Query {
+              doc: BrokerResearchDocumentType
+            }
+
+            interface DocumentType {
+              documentId: ID!
+            }
+
+            type BrokerResearchDocumentType implements DocumentType @key(fields: "documentId") {
+              documentId: ID!
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "BROKER_RESEARCH",
+        type_defs: r#"
+            interface DocumentType {
+              documentId: ID!
+            }
+
+            extend type BrokerResearchDocumentType implements DocumentType @key(fields: "documentId") {
+              documentId: ID!
+              researchNote: String
+            }
+        "#,
+    };
+
+    let supergraph =
+        compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]).expect("composition should succeed");
+
+    let type_def = supergraph
+        .schema()
+        .schema()
+        .types
+        .get("BrokerResearchDocumentType")
+        .expect("BrokerResearchDocumentType exists in the schema");
+
+    let type_sdl = type_def.to_string();
+
+    // Exact expected from the task: type line must include "implements DocumentType" and must NOT
+    // be split into a separate "extend type ... implements DocumentType".
+    assert!(
+        type_sdl.starts_with("type BrokerResearchDocumentType implements DocumentType"),
+        "expected: type BrokerResearchDocumentType implements DocumentType ...\nactual first line: {}",
+        type_sdl.lines().next().unwrap_or("")
+    );
+    assert!(
+        !type_sdl.contains("extend type BrokerResearchDocumentType implements DocumentType"),
+        "expected: no separate 'extend type BrokerResearchDocumentType implements DocumentType' block\nactual: {}",
+        type_sdl
+    );
+
+    // Ensure we get the expected directive semantics (both graphs, extension on BROKER_RESEARCH).
+    assert!(
+        type_sdl.contains("@join__implements(graph: BROKER_RESEARCH, interface: \"DocumentType\")"),
+        "expected @join__implements for BROKER_RESEARCH in: {}",
+        type_sdl
+    );
+    assert!(
+        type_sdl.contains("@join__implements(graph: DOCUMENT, interface: \"DocumentType\")"),
+        "expected @join__implements for DOCUMENT in: {}",
+        type_sdl
+    );
+    assert!(
+        type_sdl.contains("@join__type(graph: DOCUMENT, key: \"documentId\")"),
+        "expected @join__type for DOCUMENT in: {}",
+        type_sdl
+    );
+    assert!(
+        type_sdl.contains("extension: true")
+            && type_sdl.contains("BROKER_RESEARCH")
+            && type_sdl.contains("documentId"),
+        "expected @join__type(extension: true, ...) for BROKER_RESEARCH in: {}",
+        type_sdl
+    );
+
+    assert_snapshot!(type_sdl);
+}
+
 #[test]
 fn preserves_descriptions() {
     let subgraph1 = ServiceDefinition {

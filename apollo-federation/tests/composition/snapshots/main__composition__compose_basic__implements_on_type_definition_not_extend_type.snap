@@ -1,0 +1,8 @@
+---
+source: apollo-federation/tests/composition/compose_basic.rs
+expression: type_sdl
+---
+type BrokerResearchDocumentType implements DocumentType @join__implements(graph: DOCUMENT, interface: "DocumentType") @join__implements(graph: BROKER_RESEARCH, interface: "DocumentType") @join__type(graph: DOCUMENT, key: "documentId") @join__type(graph: BROKER_RESEARCH, key: "documentId", extension: true) {
+  documentId: ID!
+  researchNote: String @join__field(graph: BROKER_RESEARCH)
+}
