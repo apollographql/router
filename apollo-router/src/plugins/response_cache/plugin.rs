@@ -960,7 +960,8 @@ impl CacheService {
 
                 let response = self.service.call(request).await?;
 
-                let cache_control = response.subgraph_cache_control(self.subgraph_ttl.into())?;
+                let mut cache_control =
+                    response.subgraph_cache_control(self.subgraph_ttl.into())?;
 
                 // Support cache tags coming from subgraph response extensions
                 if let Some(Value::Array(cache_tags)) =
@@ -978,8 +979,6 @@ impl CacheService {
                     &response.context,
                     cache_control.clone(),
                 );
-
-                let mut should_store = true;
 
                 if cache_control.private() {
                     // we did not know in advance that this was a query with a private scope, so we update the cache key
@@ -999,8 +998,13 @@ impl CacheService {
                     if private_id.is_none() {
                         // the response has a private scope but we don't have a way to differentiate
                         // users, so we do not store the response in cache
-                        should_store = false;
+                        cache_control.no_store = true;
                     }
+                }
+
+                // if the request had no_store on it, propagate that to this cache control
+                if let Some(request_cache_control) = request_cache_control {
+                    cache_control.no_store |= request_cache_control.no_store;
                 }
 
                 if self.debug {
@@ -1024,7 +1028,7 @@ impl CacheService {
                     add_cache_key_to_context(&response.context, cache_key_context)?;
                 }
 
-                if should_store && cache_control.should_store() {
+                if cache_control.should_store() {
                     cache_store_root_from_response(
                         storage,
                         self.subgraph_ttl,
@@ -1153,6 +1157,11 @@ impl CacheService {
 
                 if let Some(control_from_cached) = cache_result.1 {
                     cache_control = cache_control.merge(&control_from_cached);
+                }
+
+                // if the request had no_store on it, propagate that to this cache control
+                if let Some(request_cache_control) = request_cache_control {
+                    cache_control.no_store |= request_cache_control.no_store;
                 }
 
                 if !is_known_private && cache_control.private() {
