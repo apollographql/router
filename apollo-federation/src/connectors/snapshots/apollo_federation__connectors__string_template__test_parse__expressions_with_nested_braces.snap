@@ -119,7 +119,7 @@ StringTemplate {
                             },
                         },
                     ),
-                    spec: V0_2,
+                    spec: V0_3,
                 },
                 location: 6..35,
             },

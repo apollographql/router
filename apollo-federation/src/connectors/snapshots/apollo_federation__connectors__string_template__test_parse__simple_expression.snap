@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/connectors/string_template.rs
-expression: "StringTemplate::from_str(\"{$config.one}\").unwrap()"
+expression: "StringTemplate::parse_with_spec(\"{$config.one}\",\nConnectSpec::latest()).unwrap()"
 ---
 StringTemplate {
     parts: [
@@ -45,7 +45,7 @@ StringTemplate {
                             },
                         },
                     ),
-                    spec: V0_2,
+                    spec: V0_3,
                 },
                 location: 1..12,
             },
