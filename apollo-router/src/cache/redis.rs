@@ -345,6 +345,7 @@ impl RedisCacheStorage {
         .await
     }
 
+    // TODO: docs: why split
     #[allow(clippy::too_many_arguments)]
     async fn create_client(
         client_config: RedisConfig,
@@ -358,6 +359,36 @@ impl RedisCacheStorage {
         metrics_interval: Duration,
         required_to_start: bool,
     ) -> Result<Self, BoxError> {
+        let inner = Self::create_inner_client(
+            client_config,
+            timeout,
+            pool_size,
+            is_cluster,
+            caller,
+            metrics_interval,
+            required_to_start,
+        )
+        .await?;
+
+        Ok(Self {
+            inner,
+            namespace: namespace.map(Arc::new),
+            ttl,
+            is_cluster,
+            reset_ttl,
+        })
+    }
+
+    // TODO: docs: why split
+    async fn create_inner_client(
+        client_config: RedisConfig,
+        timeout: Duration,
+        pool_size: usize,
+        is_cluster: bool,
+        caller: &'static str,
+        metrics_interval: Duration,
+        required_to_start: bool,
+    ) -> Result<Arc<DropSafeRedisPool>, BoxError> {
         let pooled_client = Builder::from_config(client_config)
             .with_config(|client_config| {
                 if is_cluster {
@@ -401,62 +432,8 @@ impl RedisCacheStorage {
             .build_pool(pool_size)?;
 
         for client in pooled_client.clients() {
-            // spawn tasks that listen for connection close or reconnect events
-            let mut error_rx = client.error_rx();
-            let mut reconnect_rx = client.reconnect_rx();
-            let mut unresponsive_rx = client.unresponsive_rx();
-
+            setup_event_listeners(caller, client);
             ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
-
-            tokio::spawn(async move {
-                loop {
-                    match error_rx.recv().await {
-                        Ok((error, _)) => record_redis_error(&error, caller, "client"),
-                        Err(RecvError::Lagged(_)) => continue,
-                        Err(RecvError::Closed) => break,
-                    }
-                }
-            });
-
-            tokio::spawn(async move {
-                loop {
-                    match unresponsive_rx.recv().await {
-                        Ok(server) => {
-                            tracing::debug!("Redis client ({server:?}) unresponsive");
-                            u64_counter_with_unit!(
-                                "apollo.router.cache.redis.unresponsive",
-                                "Counter for Redis client unresponsive events",
-                                "{event}",
-                                1,
-                                kind = caller,
-                                server = server.to_string()
-                            );
-                        }
-                        Err(RecvError::Lagged(_)) => continue,
-                        Err(RecvError::Closed) => break,
-                    }
-                }
-            });
-
-            tokio::spawn(async move {
-                loop {
-                    match reconnect_rx.recv().await {
-                        Ok(server) => {
-                            u64_counter_with_unit!(
-                                "apollo.router.cache.redis.reconnection",
-                                "Counter for Redis client reconnection events",
-                                "{reconnection}",
-                                1,
-                                kind = caller,
-                                server = server.to_string()
-                            );
-                            tracing::info!("Redis client connected to {server:?}")
-                        }
-                        Err(RecvError::Lagged(_)) => continue,
-                        Err(RecvError::Closed) => break,
-                    }
-                }
-            });
         }
 
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
@@ -466,14 +443,17 @@ impl RedisCacheStorage {
             tracing::trace!("redis connections established");
         }
 
+        // We spawn a task for watching pool shutdown; shutdown can happen either when reconnection
+        // attempts are exhausted or, if configured to never stop trying to reconnect, when quit()
+        // is called by us (it's never called within fred)
+        //
+        // Don't mistake connections for clients. This is a pool of clients that handles
+        // connections, and if a connection breaks, fred will internally (attempt to) recreate it
         tokio::spawn(async move {
-            // the handles will resolve when the clients finish terminating. per the `fred` docs:
-            // > [the connect] function returns a `JoinHandle` to a task that drives the connection.
-            // > It will not resolve until the connection closes, or if a reconnection policy with
-            // > unlimited attempts is provided then it will run until `QUIT` is called.
             let results = join_all(client_handles).await;
             ACTIVE_CLIENT_COUNT.fetch_sub(results.len() as u64, Ordering::Relaxed);
         });
+
         let heartbeat_clients = pooled_client.clone();
         let heartbeat_handle = tokio::spawn(async move {
             heartbeat_clients
@@ -485,18 +465,12 @@ impl RedisCacheStorage {
         let metrics_collector =
             RedisMetricsCollector::new(pooled_client_arc.clone(), caller, metrics_interval);
 
-        Ok(Self {
-            inner: Arc::new(DropSafeRedisPool {
-                pool: pooled_client_arc,
-                caller,
-                heartbeat_abort_handle: heartbeat_handle.abort_handle(),
-                metrics_collector,
-            }),
-            namespace: namespace.map(Arc::new),
-            ttl,
-            is_cluster,
-            reset_ttl,
-        })
+        Ok(Arc::new(DropSafeRedisPool {
+            pool: pooled_client_arc,
+            caller,
+            heartbeat_abort_handle: heartbeat_handle.abort_handle(),
+            _metrics_collector: metrics_collector,
+        }))
     }
 
     pub(crate) fn ttl(&self) -> Option<Duration> {
@@ -841,6 +815,66 @@ impl RedisCacheStorage {
             Box::pin(self.client().scan(pattern, count, None))
         }
     }
+}
+
+/// TODO: add docs
+fn setup_event_listeners(caller: &'static str, client: &Client) {
+    let mut error_rx = client.error_rx();
+    let mut reconnect_rx = client.reconnect_rx();
+    let mut unresponsive_rx = client.unresponsive_rx();
+
+    // listen for error events
+    tokio::spawn(async move {
+        loop {
+            match error_rx.recv().await {
+                Ok((error, _)) => record_redis_error(&error, caller, "client"),
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+
+    // listen for unresponsive client events
+    tokio::spawn(async move {
+        loop {
+            match unresponsive_rx.recv().await {
+                Ok(server) => {
+                    tracing::debug!("Redis client ({server:?}) unresponsive");
+                    u64_counter_with_unit!(
+                        "apollo.router.cache.redis.unresponsive",
+                        "Counter for Redis client unresponsive events",
+                        "{event}",
+                        1,
+                        kind = caller,
+                        server = server.to_string()
+                    );
+                }
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+
+    // listen for reconnection events
+    tokio::spawn(async move {
+        loop {
+            match reconnect_rx.recv().await {
+                Ok(server) => {
+                    u64_counter_with_unit!(
+                        "apollo.router.cache.redis.reconnection",
+                        "Counter for Redis client reconnection events",
+                        "{reconnection}",
+                        1,
+                        kind = caller,
+                        server = server.to_string()
+                    );
+                    tracing::info!("Redis client connected to {server:?}")
+                }
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 #[cfg(all(
