@@ -789,7 +789,9 @@ impl CacheService {
                         .build());
                 }
             };
-            if !cache_control.should_store() {
+
+            // Don't use cache at all if both no-store and no-cache are set in cache-control header
+            if cache_control.is_no_cache() && cache_control.is_no_store() {
                 let mut resp = self.service.call(request).await?;
                 cache_control.to_headers(resp.response.headers_mut())?;
                 return Ok(resp);
