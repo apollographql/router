@@ -386,6 +386,10 @@ impl CacheControl {
         !expired && !self.no_store
     }
 
+    pub(crate) fn is_no_cache(&self) -> bool {
+        self.no_cache
+    }
+
     pub(crate) fn is_no_store(&self) -> bool {
         self.no_store
     }

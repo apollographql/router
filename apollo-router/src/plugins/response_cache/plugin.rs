@@ -759,7 +759,14 @@ impl CacheService {
         if request.is_part_of_batch() {
             return self.service.call(request).await;
         }
-        // Don't use cache at all if no-store is set in cache-control header
+
+        // [RFC 9111](https://datatracker.ietf.org/doc/html/rfc9111):
+        //  * no-store: allows serving response from cache, but prohibits storing response in cache
+        //  * no-cache: prohibits serving response from cache, but allows storing response in cache
+        //
+        // NB: no-cache actually prohibits serving response from cache _without revalidation_, but
+        //  in the router this is the same thing
+
         let cache_control = if request
             .subgraph_request
             .headers()
@@ -1214,6 +1221,12 @@ async fn cache_lookup_root(
 
     Span::current().record("cache.key", key.clone());
 
+    if cache_control.is_some_and(|c| c.is_no_cache()) {
+        // skip cache lookup if no-cache is set - we have no means of revalidating entries without
+        // just performing the query, so there's no benefit to hitting the cache
+        return Ok(ControlFlow::Continue((request, key, invalidation_keys)));
+    }
+
     match cache.fetch(&key, &request.subgraph_name).await {
         Ok(value) => {
             if value.control.can_use() {
@@ -1424,6 +1437,7 @@ fn get_invalidation_root_keys_from_schema(
     root.result.into_inner()
 }
 
+#[derive(Default)]
 struct ResponseCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
 
 #[allow(clippy::too_many_arguments)]
@@ -1463,6 +1477,15 @@ async fn cache_lookup_entities(
                 .collect(),
         )),
     );
+
+    if cache_control.is_some_and(|c| c.is_no_cache()) {
+        // skip cache lookup if no-cache is set - we have no means of revalidating entries without
+        // just performing the query, so there's no benefit to hitting the cache
+        return Ok(ControlFlow::Continue((
+            request,
+            ResponseCacheResults::default(),
+        )));
+    }
 
     let cache_result: Vec<Option<CacheEntry>> = match cache_result {
         Ok(res) => res
