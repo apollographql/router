@@ -30,10 +30,6 @@ const ROUTER_RELEVANT_ENV_VARS: &[&str] = &[
     "RUST_LOG",
 ];
 
-/// Env vars safe to show values for in diagnostics (e.g. graph ref, log level).
-/// Others are shown as name only or "(set)".
-pub(crate) const SAFE_ENV_VARS: &[&str] = &["APOLLO_GRAPH_REF", "APOLLO_ROUTER_LOG"];
-
 /// Returns sorted list of **set** Router-relevant env var names (values never included).
 pub(crate) fn set_relevant_env_var_names() -> Vec<String> {
     let mut names: Vec<String> = ROUTER_RELEVANT_ENV_VARS
@@ -43,29 +39,6 @@ pub(crate) fn set_relevant_env_var_names() -> Vec<String> {
         .collect();
     names.sort();
     names
-}
-
-/// Returns set Router-relevant env vars for diagnostics: (name, value_for_display).
-/// Safe vars get Some(truncated_value); others get None (display as "(set)").
-pub(crate) fn relevant_env_vars_for_diagnostics() -> Vec<(String, Option<String>)> {
-    let mut out: Vec<(String, Option<String>)> = ROUTER_RELEVANT_ENV_VARS
-        .iter()
-        .filter_map(|name| {
-            let value = std::env::var(name).ok()?;
-            let display = if SAFE_ENV_VARS.contains(name) {
-                Some(if value.len() > 200 {
-                    format!("{}... (truncated, {} chars total)", &value[..200], value.len())
-                } else {
-                    value
-                })
-            } else {
-                None
-            };
-            Some(((*name).to_string(), display))
-        })
-        .collect();
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
 }
 
 /// Redacted startup options for display (secrets shown as "set" only).
@@ -146,26 +119,26 @@ impl RouterSystemInfo {
         out.push_str(")\n");
         out.push_str("Build type: ");
         out.push_str(&self.build_type);
-        out.push_str("\n");
+        out.push('\n');
         if let Some(ref rv) = self.rust_version {
             out.push_str("Rust version: ");
             out.push_str(rv);
-            out.push_str("\n");
+            out.push('\n');
         }
         if let Some(ref p) = self.build_profile {
             out.push_str("Build profile: ");
             out.push_str(p);
-            out.push_str("\n");
+            out.push('\n');
         }
         if let Some(ref t) = self.target_triple {
             out.push_str("Target triple: ");
             out.push_str(t);
-            out.push_str("\n");
+            out.push('\n');
         }
         if let Some(ref o) = self.optimization_level {
             out.push_str("Optimization level: ");
             out.push_str(o);
-            out.push_str("\n");
+            out.push('\n');
         }
         out.push_str("Startup options:\n");
         if let Some(ref l) = self.startup_options.log_level {
@@ -231,22 +204,10 @@ impl RouterSystemInfo {
 
     /// Compact format for boot log (path + hash only for config/supergraph).
     pub(crate) fn format_for_boot_log(&self) -> String {
-        let config = self
-            .config_path
-            .as_deref()
-            .unwrap_or("default");
-        let config_hash = self
-            .config_hash
-            .as_deref()
-            .unwrap_or("-");
-        let supergraph = self
-            .supergraph_source
-            .as_deref()
-            .unwrap_or("-");
-        let schema_hash = self
-            .supergraph_hash
-            .as_deref()
-            .unwrap_or("-");
+        let config = self.config_path.as_deref().unwrap_or("default");
+        let config_hash = self.config_hash.as_deref().unwrap_or("-");
+        let supergraph = self.supergraph_source.as_deref().unwrap_or("-");
+        let schema_hash = self.supergraph_hash.as_deref().unwrap_or("-");
         format!(
             "router info: version={} os={} arch={} config={} config_hash={} supergraph={} schema_hash={} env_count={}",
             self.version,
@@ -268,7 +229,7 @@ mod tests {
     #[test]
     fn test_set_relevant_env_var_names_sorted_and_set_only() {
         let names = set_relevant_env_var_names();
-        let sorted: Vec<String> = names.iter().cloned().collect();
+        let sorted = names.clone();
         let mut sorted_expected = sorted.clone();
         sorted_expected.sort();
         assert_eq!(sorted, sorted_expected, "names should be sorted");

@@ -47,11 +47,8 @@
 //!   - Individual CPU core usage percentages
 //!   - Average CPU usage
 //!
-//! - **Environment Variables**
-//!   - Apollo-specific configuration variables (APOLLO_GRAPH_REF)
+//! Static deployment info (OS, arch, version, env var names) is in [`crate::info::RouterSystemInfo`].
 
-use std::env::consts::ARCH;
-use std::env::consts::OS;
 use std::fmt;
 use std::time::Duration;
 
@@ -81,128 +78,11 @@ impl ResourceAndLoadInfo {
 
 impl fmt::Display for ResourceAndLoadInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}{}{}", self.memory, self.jemalloc, self.cpu, self.system_load)
-    }
-}
-
-/// Static system info (OS, arch, router/rust version, build, env vars). Use [`collect_static_system_info()`].
-struct StaticSystemInfo {
-    basic_system: BasicSystemInfo,
-    rust: RustInfo,
-    environment: EnvironmentInfo,
-}
-
-impl StaticSystemInfo {
-    async fn collect() -> Self {
-        Self {
-            basic_system: BasicSystemInfo::new().await,
-            rust: RustInfo::new(),
-            environment: EnvironmentInfo::new(),
-        }
-    }
-}
-
-impl fmt::Display for StaticSystemInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}{}", self.basic_system, self.rust, self.environment)
-    }
-}
-
-/// Basic system information (OS, architecture, container).
-struct BasicSystemInfo {
-    operating_system: &'static str,
-    architecture: &'static str,
-    target_family: &'static str,
-    container_environment: Vec<String>,
-}
-
-impl BasicSystemInfo {
-    /// Collect basic system information
-    async fn new() -> Self {
-        let container_environment = Self::collect_container_environment_info().await;
-        Self {
-            operating_system: OS,
-            architecture: ARCH,
-            target_family: std::env::consts::FAMILY,
-            container_environment,
-        }
-    }
-
-    /// Enhanced container environment detection
-    async fn collect_container_environment_info() -> Vec<String> {
-        let mut container_indicators = Vec::new();
-
-        // Docker
-        if std::path::Path::new("/.dockerenv").exists() {
-            container_indicators.push("Docker".to_string());
-        }
-
-        // Podman
-        if std::path::Path::new("/run/.containerenv").exists() {
-            container_indicators.push("Podman".to_string());
-        }
-
-        // Generic container indicators
-        if std::env::var("container").is_ok() {
-            container_indicators.push("Generic Container".to_string());
-        }
-
-        // Kubernetes
-        if std::env::var("KUBERNETES_SERVICE_HOST").is_ok() {
-            container_indicators.push("Kubernetes".to_string());
-        }
-
-        container_indicators
-    }
-}
-
-impl fmt::Display for BasicSystemInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "SYSTEM INFORMATION")?;
-        writeln!(f, "==================")?;
-        writeln!(f)?;
-        writeln!(f, "Operating System: {}", self.operating_system)?;
-        writeln!(f, "Architecture: {}", self.architecture)?;
-        writeln!(f, "Target Family: {}", self.target_family)?;
-
-        if self.container_environment.is_empty() {
-            writeln!(
-                f,
-                "Container Environment: Not detected (likely bare metal/VM)"
-            )?;
-        } else {
-            writeln!(
-                f,
-                "Container Environment: {} detected",
-                self.container_environment.join(", ")
-            )?;
-        }
-
-        writeln!(f)
-    }
-}
-
-/// Rust and router version information (build info lives in crate::info::RouterSystemInfo).
-struct RustInfo {
-    router_version: &'static str,
-    rust_version: &'static str,
-}
-
-impl RustInfo {
-    /// Collect Rust and Cargo version information
-    fn new() -> Self {
-        Self {
-            router_version: env!("CARGO_PKG_VERSION"),
-            rust_version: env!("CARGO_PKG_RUST_VERSION"),
-        }
-    }
-}
-
-impl fmt::Display for RustInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Router Version: {}", self.router_version)?;
-        writeln!(f, "Rust Version: {}", self.rust_version)?;
-        writeln!(f)
+        write!(
+            f,
+            "{}{}{}{}",
+            self.memory, self.jemalloc, self.cpu, self.system_load
+        )
     }
 }
 
@@ -858,64 +738,12 @@ impl fmt::Display for SystemLoadInfo {
     }
 }
 
-/// Environment variables (Router-relevant allowlist).
-struct EnvironmentInfo {
-    /// (var_name, Some(display_value) for safe vars, None for secret-bearing vars shown as "(set)")
-    relevant_vars: Vec<(String, Option<String>)>,
-}
-
-impl EnvironmentInfo {
-    /// Collect relevant environment variables using the shared allowlist.
-    ///
-    /// SECURITY: Only vars from crate::info allowlist; safe vars get truncated values,
-    /// others get name-only / "(set)".
-    fn new() -> Self {
-        let relevant_vars = crate::info::relevant_env_vars_for_diagnostics();
-        Self { relevant_vars }
-    }
-}
-
-impl fmt::Display for EnvironmentInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "RELEVANT ENVIRONMENT VARIABLES")?;
-        writeln!(f, "------------------------------")?;
-
-        if self.relevant_vars.is_empty() {
-            writeln!(f, "No relevant Apollo environment variables set")?;
-        } else {
-            for (var, value_opt) in &self.relevant_vars {
-                match value_opt {
-                    Some(value) => writeln!(f, "{}: {}", var, value)?,
-                    None => writeln!(f, "{}: (set)", var)?,
-                }
-            }
-        }
-
-        writeln!(f)
-    }
-}
-
-/// Collect static system information (OS, arch, container, router/rust version, build, env vars).
-///
-/// Use for static deployment info. For memory/CPU/load use [`collect_resources()`].
-pub(crate) async fn collect_static_system_info() -> DiagnosticsResult<String> {
-    let info = StaticSystemInfo::collect().await;
-    Ok(info.to_string())
-}
-
 /// Collect active resource and load information (memory, jemalloc, CPU, system load).
 ///
-/// Use for the Resources tab and report.txt. For static deployment info use [`collect_static_system_info()`].
+/// Used for the Resources tab and report.txt. Static deployment info is in [`crate::info::RouterSystemInfo`].
 pub(crate) async fn collect_resources() -> DiagnosticsResult<String> {
     let info = ResourceAndLoadInfo::collect().await;
     Ok(info.to_string())
-}
-
-/// Collect resource and load information (alias for [`collect_resources()`]).
-///
-/// Kept for backward compatibility. Prefer [`collect_resources()`] or [`collect_static_system_info()`].
-pub(crate) async fn collect() -> DiagnosticsResult<String> {
-    collect_resources().await
 }
 
 /// CGroup version enumeration

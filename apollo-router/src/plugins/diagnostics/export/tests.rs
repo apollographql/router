@@ -738,13 +738,13 @@ async fn test_non_unix_memory_handling() {
 #[tokio::test]
 async fn test_system_info_collection() {
     // Test that system information collection works on all platforms
-    let result = super::super::system_info::collect().await;
+    let result = super::super::system_info::collect_resources().await;
     assert!(result.is_ok(), "System info collection should succeed");
 
     let system_info = result.unwrap();
     assert!(!system_info.is_empty(), "System info should not be empty");
 
-    // collect() returns only resources/load (memory, jemalloc, CPU, system load)
+    // collect_resources() returns only resources/load (memory, jemalloc, CPU, system load); env vars are in RouterSystemInfo
     assert!(
         system_info.contains("MEMORY INFORMATION"),
         "Should contain memory information section"
@@ -758,8 +758,8 @@ async fn test_system_info_collection() {
         "Should contain CPU core count"
     );
     assert!(
-        system_info.contains("RELEVANT ENVIRONMENT VARIABLES"),
-        "Should contain environment variables section"
+        !system_info.contains("RELEVANT ENVIRONMENT VARIABLES"),
+        "Resources output should not contain env vars (those are in System info / RouterSystemInfo)"
     );
 
     // Platform-specific checks
@@ -843,8 +843,8 @@ async fn test_system_info_in_archive_extraction() {
 
 #[tokio::test]
 async fn test_system_info_resources_only_no_env() {
-    // collect() returns only resources/load; env vars are only in System info tab (RouterSystemInfo)
-    let system_info = super::super::system_info::collect()
+    // collect_resources() returns only resources/load; env vars are only in System info tab (RouterSystemInfo)
+    let system_info = super::super::system_info::collect_resources()
         .await
         .expect("Should collect system info");
 
@@ -857,7 +857,7 @@ async fn test_system_info_resources_only_no_env() {
 #[tokio::test]
 async fn test_system_info_cpu_count() {
     // Test that CPU count detection works on all platforms
-    let system_info = super::super::system_info::collect()
+    let system_info = super::super::system_info::collect_resources()
         .await
         .expect("Should collect system info");
 

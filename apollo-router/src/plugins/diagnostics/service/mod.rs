@@ -48,13 +48,12 @@ use mime::APPLICATION_JSON;
 use mime::TEXT_HTML_UTF_8;
 use mime::TEXT_PLAIN_UTF_8;
 
-use crate::info::get_router_system_info;
-
 use super::constants;
 use super::export::Exporter;
 use super::html_generator::HtmlGenerator;
 use super::memory::MemoryService;
 use super::static_resources::StaticResourceHandler;
+use crate::info::get_router_system_info;
 
 #[cfg(test)]
 mod tests;

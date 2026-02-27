@@ -172,7 +172,7 @@ impl Exporter {
     /// - `manifest.txt` - Archive metadata and system information
     /// - `router.yaml` - Current router configuration
     /// - `supergraph.graphql` - Supergraph schema
-        /// - `report.txt` - Full diagnostic report
+    /// - `report.txt` - Full diagnostic report
     /// - `memory/` - Memory profiling data (heap dumps on Unix platforms with jemalloc)
     /// - `diagnostics_report.html` - Self-contained HTML report with all diagnostic data embedded
     ///
@@ -242,11 +242,12 @@ impl Exporter {
     }
 
     /// Add system information to the archive with async I/O.
-    /// Prepend static router system info block when available, then full collect() (memory/CPU/etc.).
+    /// Prepend static router system info block when available, then full collect_resources() (memory/CPU/etc.).
     async fn add_system_info_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
     ) -> DiagnosticsResult<()> {
-        let full_system_info = crate::plugins::diagnostics::system_info::collect_resources().await?;
+        let full_system_info =
+            crate::plugins::diagnostics::system_info::collect_resources().await?;
         let content = if let Some(router_info) = crate::info::get_router_system_info() {
             format!(
                 "ROUTER SYSTEM INFO (static)\n{}\n{}\n\n{}",
@@ -285,7 +286,8 @@ impl Exporter {
         let generator = HtmlGenerator::new()?;
 
         // Get system info content
-        let system_info_content = crate::plugins::diagnostics::system_info::collect_resources().await?;
+        let system_info_content =
+            crate::plugins::diagnostics::system_info::collect_resources().await?;
 
         // Read memory dumps from the directory using the memory module
         let memory_directory = Path::new(&config.output_directory).join("memory");

@@ -22,10 +22,6 @@ use regex::Regex;
 use url::ParseError;
 use url::Url;
 
-use crate::info::RouterSystemInfo;
-use crate::info::StartupOptions;
-use crate::info::set_relevant_env_var_names;
-use crate::info::set_router_system_info;
 use crate::LicenseSource;
 use crate::configuration::Discussed;
 use crate::configuration::expansion::Expansion;
@@ -33,6 +29,10 @@ use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::schema::Mode;
 use crate::configuration::validate_yaml_configuration;
+use crate::info::RouterSystemInfo;
+use crate::info::StartupOptions;
+use crate::info::set_relevant_env_var_names;
+use crate::info::set_router_system_info;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
@@ -302,10 +302,7 @@ fn build_router_system_info_from_opt(
         log_level: Some(opt.log_level.clone()),
         hot_reload: opt.hot_reload,
         dev: opt.dev,
-        listen_address: opt
-            .listen_address
-            .as_ref()
-            .map(|a| a.to_string()),
+        listen_address: opt.listen_address.as_ref().map(|a| a.to_string()),
         config_path: opt
             .config_path
             .as_ref()
@@ -519,7 +516,9 @@ impl Executable {
                 Discussed::new().print_preview();
                 Ok(())
             }
-            Some(Commands::Info) => unreachable!("router info command is handled before init_telemetry"),
+            Some(Commands::Info) => {
+                unreachable!("router info command is handled before init_telemetry")
+            }
             None => Self::inner_start(shutdown, schema, config, license, opt).await,
         };
 
@@ -763,7 +762,9 @@ impl Executable {
             )),
             SchemaSource::Registry(_) => Some("uplink".to_string()),
             SchemaSource::OCI(_) => Some("oci".to_string()),
-            SchemaSource::Static { .. } | SchemaSource::Stream(_) => Some("static/stream".to_string()),
+            SchemaSource::Static { .. } | SchemaSource::Stream(_) => {
+                Some("static/stream".to_string())
+            }
         };
         let router_info = build_router_system_info_from_opt(
             &opt,

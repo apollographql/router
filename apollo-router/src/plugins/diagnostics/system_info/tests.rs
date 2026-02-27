@@ -2,11 +2,11 @@ use crate::plugins::diagnostics::system_info;
 
 #[tokio::test]
 async fn test_system_info_collection() {
-    let result = system_info::collect().await;
+    let result = system_info::collect_resources().await;
     assert!(result.is_ok());
 
     let info = result.unwrap();
-    // collect() returns only resources/load (memory, jemalloc, CPU, system load); static info is in RouterSystemInfo
+    // collect_resources() returns only resources/load (memory, jemalloc, CPU, system load); static info is in RouterSystemInfo
     assert!(info.contains("MEMORY INFORMATION"));
     assert!(info.contains("CPU INFORMATION"));
     assert!(info.contains("SYSTEM LOAD"));
@@ -14,7 +14,7 @@ async fn test_system_info_collection() {
 
 #[tokio::test]
 async fn test_system_info_cpu_count() {
-    let result = system_info::collect().await;
+    let result = system_info::collect_resources().await;
     assert!(result.is_ok());
 
     let info = result.unwrap();
@@ -28,7 +28,7 @@ async fn test_system_info_cpu_count() {
 
 #[tokio::test]
 async fn test_system_info_resources_only_no_env_section() {
-    let result = system_info::collect().await;
+    let result = system_info::collect_resources().await;
     assert!(result.is_ok());
 
     let info = result.unwrap();
@@ -38,7 +38,7 @@ async fn test_system_info_resources_only_no_env_section() {
 
 #[tokio::test]
 async fn test_system_info_memory_details() {
-    let result = system_info::collect().await;
+    let result = system_info::collect_resources().await;
     assert!(result.is_ok());
 
     let info = result.unwrap();
@@ -51,7 +51,7 @@ async fn test_system_info_memory_details() {
 
 #[tokio::test]
 async fn test_system_info_resources_only_no_basic_system() {
-    let result = system_info::collect().await;
+    let result = system_info::collect_resources().await;
     assert!(result.is_ok());
 
     let info = result.unwrap();
@@ -62,7 +62,7 @@ async fn test_system_info_resources_only_no_basic_system() {
 
 #[tokio::test]
 async fn test_system_info_cpu_load_collection() {
-    let result = system_info::collect().await;
+    let result = system_info::collect_resources().await;
     assert!(result.is_ok());
 
     let info = result.unwrap();
@@ -101,7 +101,7 @@ async fn test_system_info_cpu_load_collection() {
 async fn test_system_info_in_archive_extraction() {
     // This test verifies system info can be collected without errors
     // when running in different environments (like during archive extraction)
-    let result = system_info::collect().await;
+    let result = system_info::collect_resources().await;
     assert!(result.is_ok());
 
     let info = result.unwrap();
