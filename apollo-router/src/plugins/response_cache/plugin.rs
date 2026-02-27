@@ -2067,6 +2067,11 @@ fn collect_key_field_sets(
 /// * This function and `get_entity_key_from_selection_set` are separate because this is called for
 ///   multiple possible `@key` fields to find the matching one, while
 ///   `get_entity_key_from_selection_set` is only called once the matching `@key` fields is found.
+// NB(nullability-note): We allow nullable fields in selection sets (ie, those fields that
+// identify an entity, usually [if not always] listed in `@key`). That _doesn't_ mean that
+// entities definitively must allow nullable fields, only that we happen to allow it right now.
+// It's probably a bit of a schema-development smell to have an entity identifiable by nullable
+// fields, but it makes practical sense if you're wanting to cache partial responses.
 pub(in crate::plugins) fn matches_selection_set(
     // the JSON representation of the entity data
     representation: &serde_json_bytes::Map<ByteString, Value>,
@@ -2077,7 +2082,12 @@ pub(in crate::plugins) fn matches_selection_set(
         // the heart of finding the match: we take the field from the selection
         // set and try to find it in the entity representation;
         let Some(value) = representation.get(field.name.as_str()) else {
-            return false;
+            if field.definition.ty.is_non_null() {
+                return false;
+            } else {
+                // allow missing field to match nullable field type (see NB(nullability-note))
+                continue;
+            }
         };
 
         // This field selection is not expecting any subdata.
@@ -2099,15 +2109,17 @@ pub(in crate::plugins) fn matches_selection_set(
             }
 
             Value::Array(arr) => {
-                // Recurse into array values
+                // Recurse into array values, filtering out any `null` objects if we're allowed to do so
+                // NB: we have to do this here where the field type is known, as the selection set doesn't
+                //  include knowledge of whether the type is nullable
+                // See NB(nullability-note)
+                let list_item_is_nullable = !field.definition.ty.item_type().is_non_null();
+                let exclude_value = |value: &&Value| list_item_is_nullable && value.is_null();
+                let arr = arr.iter().filter(|value| !exclude_value(value));
                 matches_array_of_objects(arr, &field.selection_set)
             }
 
-            // We allow nullable fields in selection sets (ie, those fields that identify an entity, usually
-            // [if not always] listed in `@key`). That _doesn't_ mean that entities definitively
-            // must allow nullable fields, only that we happen to allow it right now; it's probably
-            // a bit of a schema-development smell to have an entity identifiable by nullable
-            // fields, but it makes practical sense if you're wanting to cache partial responses
+            // See NB(nullability-note)
             Value::Null => {
                 return true;
             }
@@ -2137,14 +2149,14 @@ fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
 /// * Note: The array can be multi-dimensional. (the @key field set can match any levels of nested
 ///   arrays)
 /// * Precondition: `selection_set` must be non-empty.
-fn matches_array_of_objects(
-    arr: &[Value],
+fn matches_array_of_objects<'a, I: Iterator<Item = &'a Value>>(
+    arr: I,
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
-    for item in arr.iter() {
+    for item in arr {
         let result = match item {
             Value::Object(obj) => matches_selection_set(obj, selection_set),
-            Value::Array(arr) => matches_array_of_objects(arr, selection_set),
+            Value::Array(arr) => matches_array_of_objects(arr.iter(), selection_set),
             _other => false,
         };
         if !result {
@@ -3225,6 +3237,118 @@ mod tests {
             matches_selection_set(&representation, &field_set.selection_set),
             "complex nested arrays should match"
         );
+    }
+
+    fn repr_matches_selection_set_for_schema(
+        schema: &str,
+        named_type: &str,
+        selection_text: &str,
+        representation: serde_json_bytes::Value,
+    ) -> bool {
+        let schema = Schema::parse_and_validate(schema, "test.graphql")
+            .expect("should be able to parse schema");
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new(named_type).unwrap(),
+                selection_text,
+                "test.graphql",
+            )
+            .expect("should be able to parse field set");
+
+        matches_selection_set(
+            representation.as_object().expect("must provide an object"),
+            &field_set.selection_set,
+        )
+    }
+
+    #[rstest::rstest]
+    #[case::null_list(json!(null))]
+    #[case::null_element(json!([null]))]
+    #[case::null_element(json!([{"id": "TEST1"}, null]))]
+    #[case::null_value_for_nullable_field(json!([{"id": "TEST1"}]))]
+    #[case::null_value_for_nullable_field(json!([{"id": "TEST1", "quantity": 5}]))]
+    #[case::multiple_differently_null_objects(json!([{"id": "TEST1"}, null, {"id": "TEST3", "quantity": null}]))]
+    fn test_matches_selection_set_handles_arrays_with_nullable_elements(
+        #[case] list_repr: serde_json_bytes::Value,
+    ) {
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                list: [NullableListElement]
+            }
+            type NullableListElement {
+                id: ID!
+                quantity: Int
+                inStock: Boolean
+            }
+        "#;
+
+        let named_type = "Test";
+        let selection_text = "id list { id quantity inStock }";
+
+        let representation = json!({
+            "id": "TEST123",
+            "list": list_repr
+        });
+
+        let matches_selection_set = repr_matches_selection_set_for_schema(
+            schema_text,
+            named_type,
+            selection_text,
+            representation,
+        );
+        assert!(matches_selection_set);
+    }
+
+    #[rstest::rstest]
+    #[case::null_element(json!([null]))]
+    #[case::null_element(json!([{"id": "TEST1"}, null]))]
+    #[case::null_value_for_nonnullable_field(json!([{}]))]
+    #[case::null_value_for_nonnullable_field(json!([{"quantity": 5}]))]
+    #[case::null_value_for_nonnullable_field(json!([{"id": "TEST1"}, {}]))]
+    #[case::null_value_for_nonnullable_field(json!([{"id": "TEST1"}, {"quantity": 5}]))]
+    fn test_matches_selection_set_handles_arrays_with_non_nullable_elements(
+        #[case] list_repr: serde_json_bytes::Value,
+    ) {
+        // NB: same as test_matches_selection_set_handles_arrays_with_nullable_elements but with a
+        //  NonNullableListElement! rather than a NullableListElement
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                list: [NonNullableListElement!]
+            }
+            type NonNullableListElement {
+                id: ID!
+                quantity: Int
+                inStock: Boolean
+            }
+        "#;
+
+        let named_type = "Test";
+        let selection_text = "id list { id quantity inStock }";
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "list": list_repr
+        });
+
+        let matches_selection_set = repr_matches_selection_set_for_schema(
+            schema_text,
+            named_type,
+            selection_text,
+            representation,
+        );
+        assert!(!matches_selection_set);
     }
 
     #[test]
