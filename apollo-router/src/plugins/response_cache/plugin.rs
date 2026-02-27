@@ -2067,7 +2067,7 @@ fn collect_key_field_sets(
 /// * This function and `get_entity_key_from_selection_set` are separate because this is called for
 ///   multiple possible `@key` fields to find the matching one, while
 ///   `get_entity_key_from_selection_set` is only called once the matching `@key` fields is found.
-// NB(%nullability-note): We allow nullable fields in selection sets (ie, those fields that
+// NB(nullability-note): We allow nullable fields in selection sets (ie, those fields that
 // identify an entity, usually [if not always] listed in `@key`). That _doesn't_ mean that
 // entities definitively must allow nullable fields, only that we happen to allow it right now.
 // It's probably a bit of a schema-development smell to have an entity identifiable by nullable
@@ -2085,7 +2085,7 @@ pub(in crate::plugins) fn matches_selection_set(
             if field.definition.ty.is_non_null() {
                 return false;
             } else {
-                // allow missing field to match nullable field type (see NB(%nullability-note))
+                // allow missing field to match nullable field type (see NB(nullability-note))
                 continue;
             }
         };
@@ -2112,14 +2112,14 @@ pub(in crate::plugins) fn matches_selection_set(
                 // Recurse into array values, filtering out any `null` objects if we're allowed to do so
                 // NB: we have to do this here where the field type is known, as the selection set doesn't
                 //  include knowledge of whether the type is nullable
-                // See NB(%nullability-note)
+                // See NB(nullability-note)
                 let list_item_is_nullable = !field.definition.ty.item_type().is_non_null();
                 let exclude_value = |value: &&Value| list_item_is_nullable && value.is_null();
                 let arr = arr.iter().filter(|value| !exclude_value(value));
                 matches_array_of_objects(arr, &field.selection_set)
             }
 
-            // See NB(%nullability-note)
+            // See NB(nullability-note)
             Value::Null => {
                 return true;
             }
