@@ -6,6 +6,8 @@ redirectFrom:
   - /graphos/routing/graphos-reporting
 ---
 
+import OTelEnvVarsCaution from '../../../../shared/otel-envvars-caution.mdx';
+
 The GraphOS Router and Apollo Router Core can report operation usage metrics to [GraphOS](/graphos/) that you can then visualize in GraphOS Studio. These metrics also enable powerful GraphOS features like [schema checks](/graphos/delivery/schema-checks/).
 
 ## Enabling usage reporting
@@ -67,24 +69,7 @@ telemetry:
         sampler: 0.01
 ```
 
-<Caution>
-
-
-If your environment defines any of the following OpenTelemetry (OTEL) environment variables:
-
-- `OTEL_EXPORTER_OTLP_ENDPOINT`
-- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
-- `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
-
-be aware that they can override or interfere with your router's built-in telemetry configuration.
-
-**In Apollo Router v2.12.0 and earlier, these variables take precedence over your router's telemetry settings and may cause traces or metrics to be sent to an unintended destination.
-
-**In Apollo Router v2.13.0 and later, your router will **not** start if any of these variables are set.**
-Remove them from the environment before launching Router.
-
-
-</Caution>
+<OTelEnvVarsCaution />
 
 ## Reporting field-level traces
 

@@ -9,6 +9,7 @@ redirectFrom:
 ---
 import BatchProcessorPreamble from '../../../../../../shared/batch-processor-preamble.mdx';
 import BatchProcessorRef from '../../../../../../shared/batch-processor-ref.mdx';
+import OTelEnvVarsCaution from '../../../../../../shared/otel-envvars-caution.mdx';
 
 Enable and configure the [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md) exporter for tracing in the GraphOS Router or Apollo Router Core.
 
@@ -65,22 +66,7 @@ Specify only the base URL in the endpoint parameter. The router automatically ad
 
 </Note>
 
-<Caution>
-
-If your environment defines any of the following OpenTelemetry (OTEL) environment variables:
-
-- `OTEL_EXPORTER_OTLP_ENDPOINT`
-- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
-- `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
-
-be aware that they can override or interfere with your router's built-in telemetry configuration.
-
-**In Apollo Router v2.12.0 and earlier, these variables take precedence over your router telemetry settings and may cause traces or metrics to be sent to an unintended destination.
-
-**In Apollo Router v2.13.0 and later, your router will **not** start if any of these variables are set.**
-Remove them from the environment before launching Router.
-
-</Caution>
+<OTelEnvVarsCaution />
 
 ### `grpc`
 Settings specific to the gRPC protocol for setting a custom SSL certificate, domain name, and metadata.
