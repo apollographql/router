@@ -407,6 +407,17 @@ pub trait Plugin: Send + Sync + 'static {
         service
     }
 
+    /// This service handles individual requests to Apollo Connectors
+    /// Define `connector_request_service` to configure this communication (for example, to dynamically add headers to pass to a REST API).
+    /// The `_source_name` parameter is useful if you need to apply a customization only specific connectors.
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        _source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
