@@ -180,7 +180,10 @@ where
                             let array = array.iter().map(|a| a.as_str()).collect::<Vec<_>>();
                             serializer.serialize_entry(kv.key.as_str(), &array)?;
                         }
-                        _ => {} // Handle future Value/Array variants
+                        _ => {
+                            // If otel adds more types, we should add support
+                            unreachable!("Unhandled value type")
+                        }
                     }
                 }
             }
