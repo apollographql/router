@@ -65,7 +65,7 @@ impl super::super::otlp::Config {
 
         let mut exporter_builder = MetricExporter::builder()
             .with_tonic()
-            .with_temporality((&self.temporality).into())
+            .with_temporality(self.temporality.into())
             .with_timeout(self.batch_processor.max_export_timeout)
             .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
 
@@ -87,7 +87,7 @@ impl super::super::otlp::Config {
 
         let mut exporter_builder = MetricExporter::builder()
             .with_http()
-            .with_temporality((&self.temporality).into())
+            .with_temporality(self.temporality.into())
             .with_timeout(self.batch_processor.max_export_timeout)
             .with_headers(self.http.headers.clone());
 

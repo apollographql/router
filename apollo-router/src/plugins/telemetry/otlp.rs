@@ -281,7 +281,7 @@ pub(crate) enum Protocol {
     Http,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Copy)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Temporality {
     /// Export cumulative metrics.
@@ -291,8 +291,8 @@ pub(crate) enum Temporality {
     Delta,
 }
 
-impl From<&Temporality> for SdkTemporality {
-    fn from(value: &Temporality) -> Self {
+impl From<Temporality> for SdkTemporality {
+    fn from(value: Temporality) -> Self {
         match value {
             Temporality::Cumulative => SdkTemporality::Cumulative,
             Temporality::Delta => SdkTemporality::Delta,
