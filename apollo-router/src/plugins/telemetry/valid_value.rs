@@ -1,5 +1,6 @@
-use regex::Regex;
 use std::sync::LazyLock;
+
+use regex::Regex;
 
 // Regex for allowed values for client and library names and versions
 static VALID_VALUE_REGEX: LazyLock<Regex> =
