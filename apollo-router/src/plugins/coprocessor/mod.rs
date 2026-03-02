@@ -231,7 +231,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
 }
 
 // This macro allows us to use it in our plugin registry!
-// register_private_plugin takes a group name, and a plugin name.
+// register_plugin takes a group name, and a plugin name.
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
