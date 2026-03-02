@@ -2,15 +2,11 @@
 use std::collections::HashMap;
 
 use http::Uri;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_otlp::WithHttpConfig;
-use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
@@ -150,58 +146,6 @@ pub(super) fn process_endpoint(
             }
         })
         .transpose()
-}
-
-impl Config {
-    pub(crate) fn build_span_exporter(&self) -> Result<opentelemetry_otlp::SpanExporter, BoxError> {
-        match self.protocol {
-            Protocol::Grpc => self.build_grpc_span_exporter(),
-            Protocol::Http => self.build_http_span_exporter(),
-        }
-    }
-
-    fn build_grpc_span_exporter(&self) -> Result<opentelemetry_otlp::SpanExporter, BoxError> {
-        let endpoint_opt =
-            process_endpoint(&self.endpoint, &TelemetryDataKind::Traces, &self.protocol)?;
-        let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
-            if !endpoint.is_empty() {
-                let tls_url = Uri::try_from(endpoint)?;
-                Some(self.grpc.clone().to_tls_config(&tls_url)?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let mut exporter_builder = opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic()
-            .with_timeout(self.batch_processor.max_export_timeout)
-            .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
-
-        if let Some(endpoint) = endpoint_opt {
-            exporter_builder = exporter_builder.with_endpoint(endpoint);
-        }
-        if let Some(tls_config) = tls_config_opt {
-            exporter_builder = exporter_builder.with_tls_config(tls_config);
-        }
-        Ok(exporter_builder.build()?)
-    }
-
-    fn build_http_span_exporter(&self) -> Result<opentelemetry_otlp::SpanExporter, BoxError> {
-        let endpoint_opt =
-            process_endpoint(&self.endpoint, &TelemetryDataKind::Traces, &self.protocol)?;
-
-        let mut exporter_builder = opentelemetry_otlp::SpanExporter::builder()
-            .with_http()
-            .with_timeout(self.batch_processor.max_export_timeout)
-            .with_headers(self.http.headers.clone());
-
-        if let Some(endpoint) = endpoint_opt {
-            exporter_builder = exporter_builder.with_endpoint(endpoint);
-        }
-        Ok(exporter_builder.build()?)
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema, PartialEq)]
