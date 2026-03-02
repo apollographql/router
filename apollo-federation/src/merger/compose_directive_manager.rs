@@ -387,7 +387,18 @@ impl ComposeDirectiveManager {
                 continue;
             }
 
-            for linked_element in linked_elements {
+            // Sort ascending by minor version so the version cursor only ever moves upward.
+            // Without sorting, if a higher-minor-version subgraph appears before a
+            // lower-minor-version one in the input slice (i.e., it was passed earlier in the
+            // `subgraphs` argument), `linked_element.version.satisfies(latest.version)` would
+            // return false and the entire spec would be incorrectly marked as wont_merge —
+            // even though the two minor versions are semantically compatible.
+            // Processing in ascending order ensures the `satisfies` check always succeeds for
+            // valid minor-compatible combinations.
+            let mut sorted_elements: Vec<&MergeDirectiveItem> = linked_elements.iter().collect();
+            sorted_elements.sort_by_key(|item| item.link.link.url.version.minor);
+
+            for linked_element in sorted_elements {
                 let latest = self.latest_feature_map.entry(identity.clone()).or_insert((
                     linked_element.link.link.clone(),
                     linked_element.subgraph_name.clone(),

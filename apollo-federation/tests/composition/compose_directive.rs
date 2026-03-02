@@ -591,6 +591,128 @@ mod inconsistent_imports {
         insta::assert_snapshot!(result.schema().schema());
     }
 
+    // Regression test: the same scenario as above but with the higher-version subgraph listed
+    // *first* in the composition call. Previously, when the higher-version subgraph was processed
+    // first, the lower-version subgraph's directives failed the `satisfies` version check and the
+    // entire spec was marked as wont-merge, silently dropping both directives from the supergraph.
+    #[test]
+    fn allows_importing_different_directives_from_the_same_spec_in_different_subgraphs_higher_version_first() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@bar"])"#,
+            r#"@composeDirective(name: "@bar")"#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
+           "#,
+            r#"@bar(name: "b")"#,
+        );
+
+        // subgraph_b (v1.1) is intentionally placed before subgraph_a (v1.0) to reproduce the
+        // ordering bug: without the minor-version sort fix this would silently wont-merge the
+        // entire spec.
+        let result = compose(vec![subgraph_b, subgraph_a]).expect("Composition should succeed regardless of argument order");
+        assert_eq!(result.hints().len(), 0);
+
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+        );
+        assert_has_directive_definition(
+            &result,
+            "directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT",
+        );
+    }
+
+    // Regression test: two subgraphs that use the *same* spec version but import completely
+    // disjoint directive subsets should both have their directives composed successfully.
+    #[test]
+    fn allows_disjoint_directive_imports_from_same_spec_version() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!) on FIELD_DEFINITION
+            "#,
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@bar"])"#,
+            r#"@composeDirective(name: "@bar")"#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!) on FIELD_DEFINITION
+            "#,
+            r#"@bar(name: "b")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b])
+            .expect("Composition should succeed when both directives come from the same spec version");
+        assert_eq!(result.hints().len(), 0);
+
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+        );
+        assert_has_directive_definition(
+            &result,
+            "directive @bar(name: String!) on FIELD_DEFINITION",
+        );
+    }
+
+    // Regression test: SG1 imports a superset of directives from a spec; SG2 imports only a
+    // subset. Both subgraphs compose their respective directives. All composed directives should
+    // appear in the supergraph regardless of subgraph ordering.
+    #[test]
+    fn allows_subset_directive_imports_from_same_spec_version() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo", "@bar"])"#,
+            r#"
+            @composeDirective(name: "@foo")
+            @composeDirective(name: "@bar")
+            "#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!) on FIELD_DEFINITION
+            "#,
+            r#"@foo(name: "a") @bar(name: "a2")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!) on FIELD_DEFINITION
+            "#,
+            r#"@foo(name: "b")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b])
+            .expect("Composition should succeed when one subgraph imports a superset");
+        assert_eq!(result.hints().len(), 0);
+
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+        );
+        assert_has_directive_definition(
+            &result,
+            "directive @bar(name: String!) on FIELD_DEFINITION",
+        );
+    }
+
     #[test]
     fn errors_when_exported_but_not_imported() {
         let subgraph_a = generate_subgraph(
