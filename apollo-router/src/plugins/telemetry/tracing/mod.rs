@@ -152,15 +152,13 @@ fn max_concurrent_exports_default() -> usize {
 
 impl From<BatchProcessorConfig> for BatchConfig {
     fn from(config: BatchProcessorConfig) -> Self {
-        // Note: In OTel SDK 0.31, BatchSpanProcessor uses a dedicated thread instead of async runtime.
-        // max_export_timeout and max_concurrent_exports are no longer configurable on BatchConfig
-        // (they require experimental_trace_batch_span_processor_with_async_runtime feature).
-        let _ = config.max_export_timeout; // Acknowledged but not used
-        let _ = config.max_concurrent_exports; // Acknowledged but not used
         BatchConfigBuilder::default()
             .with_scheduled_delay(config.scheduled_delay)
             .with_max_queue_size(config.max_queue_size)
             .with_max_export_batch_size(config.max_export_batch_size)
+            // Concurrent exports and export timeout require experimental_trace_batch_span_processor_with_async_runtime feature
+            .with_max_concurrent_exports(config.max_concurrent_exports)
+            .with_max_export_timeout(config.max_export_timeout)
             .build()
     }
 }
