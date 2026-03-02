@@ -492,6 +492,15 @@ pub trait PluginUnstable: Send + Sync + 'static {
         service
     }
 
+    /// This service handles individual requests to Apollo Connectors
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        _source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -543,6 +552,14 @@ where
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         Plugin::subgraph_service(self, subgraph_name, service)
+    }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        Plugin::connector_request_service(self, service, source_name)
     }
 
     /// Return the name of the plugin.
@@ -692,6 +709,14 @@ where
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         PluginUnstable::subgraph_service(self, subgraph_name, service)
+    }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        PluginUnstable::connector_request_service(self, service, source_name)
     }
 
     /// Return the name of the plugin.
