@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
@@ -8,7 +10,6 @@ use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sha2::Digest;
-use std::sync::atomic::Ordering;
 use tower::BoxError;
 
 use crate::Context;

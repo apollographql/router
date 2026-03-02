@@ -982,16 +982,15 @@ pub(crate) async fn call_single_http(
         }
     }
 
-    if body.as_ref().is_some_and(|r| r.is_ok()) {
-        if let Some(wire_size) = parts
+    if body.as_ref().is_some_and(|r| r.is_ok())
+        && let Some(wire_size) = parts
             .extensions
             .get::<WireByteCount>()
             .map(|c| c.0.load(Relaxed))
-        {
-            context.extensions().with_lock(|lock| {
-                lock.insert::<SubgraphResponseBodySize>(SubgraphResponseBodySize(wire_size));
-            });
-        }
+    {
+        context.extensions().with_lock(|lock| {
+            lock.insert::<SubgraphResponseBodySize>(SubgraphResponseBodySize(wire_size));
+        });
     }
 
     let graphql_response =

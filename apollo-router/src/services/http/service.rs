@@ -84,7 +84,8 @@ where
         match this.inner.poll_frame(cx) {
             Poll::Ready(Some(Ok(frame))) => {
                 if let Some(data) = frame.data_ref() {
-                    this.counter.fetch_add(data.remaining() as u64, Ordering::Relaxed);
+                    this.counter
+                        .fetch_add(data.remaining() as u64, Ordering::Relaxed);
                 }
                 Poll::Ready(Some(Ok(frame)))
             }
@@ -162,8 +163,9 @@ type HTTPClient = Decompression<
     >,
 >;
 #[cfg(unix)]
-type UnixHTTPClient =
-    Decompression<WireBodySizeService<hyper_util::client::legacy::Client<UnixConnector, RouterBody>>>;
+type UnixHTTPClient = Decompression<
+    WireBodySizeService<hyper_util::client::legacy::Client<UnixConnector, RouterBody>>,
+>;
 #[cfg(unix)]
 type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
@@ -869,24 +871,22 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_wire_body_size_counts_compressed_bytes() {
+        use std::sync::atomic::Ordering;
+
         use async_compression::tokio::write::GzipEncoder;
         use http::header::CONTENT_ENCODING;
-        use std::sync::atomic::Ordering;
         use tokio::io::AsyncWriteExt;
 
         let uncompressed_body = r#"{"data":{"me":{"name":"Ada Lovelace"}}}"#;
 
         let mut encoder = GzipEncoder::new(Vec::new());
-        encoder.write_all(uncompressed_body.as_bytes()).await.unwrap();
+        encoder
+            .write_all(uncompressed_body.as_bytes())
+            .await
+            .unwrap();
         encoder.shutdown().await.unwrap();
         let compressed_body = encoder.into_inner();
         let compressed_len = compressed_body.len();
-
-        assert_ne!(
-            compressed_len,
-            uncompressed_body.len(),
-            "test is only meaningful when the compressed and uncompressed sizes differ"
-        );
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();

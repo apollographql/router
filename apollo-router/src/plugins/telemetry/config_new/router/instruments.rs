@@ -1,5 +1,13 @@
 use std::fmt::Debug;
+use std::pin::Pin;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::task::Poll;
 
+use bytes::Bytes;
+use futures::Stream;
+use opentelemetry::metrics::Histogram;
+use pin_project_lite::pin_project;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -163,3 +171,74 @@ pub(crate) type RouterCustomInstruments = CustomInstruments<
     RouterSelector,
     RouterValue,
 >;
+
+/// Stashed by `RouterInstruments::on_response` when the `http.server.response.body.size`
+/// histogram was not recorded during `on_response` (because compression is pending).
+/// Contains the histogram handle and computed attributes so the metric can be recorded
+/// later, after the compressed body stream is fully consumed.
+pub(crate) struct ResponseBodySizeRecording {
+    pub(crate) histogram: Histogram<f64>,
+    pub(crate) attributes: Vec<opentelemetry::KeyValue>,
+    pub(crate) byte_count: AtomicU64,
+}
+
+impl ResponseBodySizeRecording {
+    pub(crate) fn new(histogram: Histogram<f64>, attributes: Vec<opentelemetry::KeyValue>) -> Self {
+        Self {
+            histogram,
+            attributes,
+            byte_count: AtomicU64::new(0),
+        }
+    }
+
+    pub(crate) fn record_byte_count(&self, size: u64) {
+        self.byte_count.store(size, Ordering::Relaxed);
+    }
+}
+
+/// Record the `http.server.response.body.size` histogram when dropped,
+/// using the final value from `byte_count`. This ensures the metric reflects the
+/// actual compressed byte count after the body stream is fully consumed.
+impl Drop for ResponseBodySizeRecording {
+    fn drop(&mut self) {
+        let size = self.byte_count.load(Ordering::Relaxed);
+        self.histogram.record(size as f64, &self.attributes);
+    }
+}
+
+pin_project! {
+    /// Stream wrapper that delegates to an inner stream and records the response body
+    /// size histogram on drop via the contained `ResponseBodySizeRecording` guard.
+    pub(crate) struct ResponseBodySizeRecordingStream<S> {
+        #[pin]
+        inner: S,
+        recording: ResponseBodySizeRecording,
+    }
+}
+
+impl<S> ResponseBodySizeRecordingStream<S> {
+    pub(crate) fn new(inner: S, recording: ResponseBodySizeRecording) -> Self {
+        Self { inner, recording }
+    }
+}
+
+impl<S> Stream for ResponseBodySizeRecordingStream<S>
+where
+    S: Stream<Item = Result<Bytes, BoxError>>,
+{
+    type Item = Result<Bytes, BoxError>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        let next = this.inner.poll_next(cx);
+        if let Poll::Ready(Some(Ok(data))) = &next {
+            this.recording
+                .byte_count
+                .fetch_add(data.len() as u64, Ordering::Relaxed);
+        }
+        next
+    }
+}

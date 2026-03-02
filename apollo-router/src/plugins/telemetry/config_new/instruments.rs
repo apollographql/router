@@ -401,6 +401,8 @@ impl InstrumentsConfig {
                                     )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
+                            // Compressed sizes are not yet known at the time on_response is called,
+                            // so this will always be the uncompressed size.
                             selector: Some(Arc::new(RouterSelector::ResponseSizeHint { response_size_hint: true })),
                             selectors,
                             updated: false,

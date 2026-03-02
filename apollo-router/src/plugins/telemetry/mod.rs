@@ -101,6 +101,7 @@ use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
+use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
@@ -547,6 +548,21 @@ impl PluginPrivate for Telemetry {
                             KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or_default()),
                             KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or_default()),
                         ]);
+
+                        if let Some(http_server_response_body_size) =
+                            &custom_instruments.http_server_response_body_size
+                        {
+                            let inner = http_server_response_body_size.inner.lock();
+                            if !inner.updated
+                                && let Some(histogram) = &inner.histogram
+                            {
+                                let recording = ResponseBodySizeRecording::new(
+                                    histogram.clone(),
+                                    inner.attributes.clone(),
+                                );
+                                ctx.extensions().with_lock(|lock| lock.insert(recording));
+                            }
+                        }
 
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);

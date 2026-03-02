@@ -161,8 +161,9 @@ pub(crate) enum RouterSelector {
         response_status: ResponseStatus,
     },
     /// The size hint of the body.
-    /// This is used as the Content-Length header has not yet been populated
-    /// when selectors are evaluated
+    /// If compression is enabled, this will be the uncompressed size.
+    /// Its not possible to get the compressed size in selector as the
+    /// body has not yet been compressed at the time on_response is called.
     ResponseSizeHint {
         /// Extract response size hint in bytes
         response_size_hint: bool,
