@@ -39,10 +39,12 @@ pub(crate) fn register_memory_allocation_views(builder: &mut MetricsBuilder) {
     let agg_clone = aggregation.clone();
     builder.with_view(MeterProviderType::Public, move |instrument: &Instrument| {
         if instrument.name() == "apollo.router.request.memory" {
-            Stream::builder()
-                .with_aggregation(agg_clone.clone())
-                .build()
-                .ok()
+            Some(
+                Stream::builder()
+                    .with_aggregation(agg_clone.clone())
+                    .build()
+                    .expect("Failed to create stream for apollo.router.request.memory metric"),
+            )
         } else {
             None
         }
@@ -51,10 +53,14 @@ pub(crate) fn register_memory_allocation_views(builder: &mut MetricsBuilder) {
     // Register view for query planner memory metric
     builder.with_view(MeterProviderType::Public, move |instrument: &Instrument| {
         if instrument.name() == "apollo.router.query_planner.memory" {
-            Stream::builder()
-                .with_aggregation(aggregation.clone())
-                .build()
-                .ok()
+            Some(
+                Stream::builder()
+                    .with_aggregation(aggregation.clone())
+                    .build()
+                    .expect(
+                        "Failed to create stream for apollo.router.query_planner.memory metric",
+                    ),
+            )
         } else {
             None
         }

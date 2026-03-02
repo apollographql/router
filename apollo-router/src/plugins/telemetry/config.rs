@@ -163,7 +163,7 @@ impl MetricView {
     pub(crate) fn into_view_fn(
         self,
     ) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
-        let name_pattern = self.name;
+        let name = self.name;
         let rename = self.rename;
         let description = self.description;
         let unit = self.unit;
@@ -177,7 +177,7 @@ impl MetricView {
         let allowed_attribute_keys = self.allowed_attribute_keys;
 
         move |instrument: &Instrument| {
-            if instrument.name() != name_pattern {
+            if instrument.name() != name {
                 return None;
             }
             let mut stream = Stream::builder();
@@ -196,7 +196,7 @@ impl MetricView {
             if let Some(ref keys) = allowed_attribute_keys {
                 stream = stream.with_allowed_attribute_keys(keys.iter().cloned().map(Key::new));
             }
-            stream.build().ok()
+            Some(stream.build().expect("Failed to build metric view"))
         }
     }
 }
