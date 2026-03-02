@@ -179,14 +179,14 @@ impl JSONSelection {
     pub fn named(sub: SubSelection) -> Self {
         Self {
             inner: TopLevelSelection::Named(sub),
-            spec: Self::default_connect_spec(),
+            spec: ConnectSpec::latest(),
         }
     }
 
     pub fn path(path: PathSelection) -> Self {
         Self {
             inner: TopLevelSelection::Path(path),
-            spec: Self::default_connect_spec(),
+            spec: ConnectSpec::latest(),
         }
     }
 
@@ -204,7 +204,7 @@ impl JSONSelection {
     pub fn empty() -> Self {
         Self {
             inner: TopLevelSelection::Named(SubSelection::default()),
-            spec: Self::default_connect_spec(),
+            spec: ConnectSpec::latest(),
         }
     }
 
@@ -221,11 +221,7 @@ impl JSONSelection {
     // as the input type and a custom JSONSelectionParseError type as the error
     // type, rather than using Span or nom::error::Error directly.
     pub fn parse(input: &str) -> Result<Self, JSONSelectionParseError> {
-        JSONSelection::parse_with_spec(input, Self::default_connect_spec())
-    }
-
-    pub(super) fn default_connect_spec() -> ConnectSpec {
-        ConnectSpec::V0_3
+        JSONSelection::parse_with_spec(input, ConnectSpec::latest())
     }
 
     pub fn parse_with_spec(
@@ -1696,11 +1692,8 @@ impl Display for Key {
 
 pub(super) fn is_identifier(input: &str) -> bool {
     // TODO Don't use the whole parser for this?
-    all_consuming(parse_identifier_no_space)(new_span_with_spec(
-        input,
-        JSONSelection::default_connect_spec(),
-    ))
-    .is_ok()
+    all_consuming(parse_identifier_no_space)(new_span_with_spec(input, ConnectSpec::latest()))
+        .is_ok()
 }
 
 fn parse_identifier(input: Span) -> ParseResult<WithRange<String>> {
@@ -1830,15 +1823,6 @@ mod tests {
     use crate::connectors::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::connectors::json_selection::location::new_span;
     use crate::selection;
-
-    #[test]
-    fn test_default_connect_spec() {
-        // We don't necessarily want to update what
-        // JSONSelection::default_connect_spec() returns just because
-        // ConnectSpec::latest() changes, but we want to know when it happens,
-        // so we can consider updating.
-        assert_eq!(JSONSelection::default_connect_spec(), ConnectSpec::latest());
-    }
 
     #[test]
     fn test_identifier() {

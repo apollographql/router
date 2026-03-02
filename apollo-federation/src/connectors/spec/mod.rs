@@ -118,10 +118,8 @@ impl PartialOrd for ConnectSpec {
 }
 
 impl ConnectSpec {
-    /// Returns the most recently released [`ConnectSpec`]. Used only in tests
-    /// because using it production code leads to sudden accidental upgrades.
-    #[cfg(test)]
-    pub(crate) fn latest() -> Self {
+    /// Returns the most recently released [`ConnectSpec`].
+    pub fn latest() -> Self {
         Self::V0_3
     }
 
