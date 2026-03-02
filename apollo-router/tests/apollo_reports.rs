@@ -595,10 +595,42 @@ async fn test_trace_with_client_version_http_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_trace_with_invalid_client_version_http_header() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .header(
+                "apollographql-client-version",
+                r#"invalid client version";||"#,
+            )
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        assert_report!(report);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_with_client_name_http_header() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .header("apollographql-client-name", "my client")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, false, false, None).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_metrics_with_invalid_client_name_http_header() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}}}}")
+        .header("apollographql-client-name", r#"invalid client name";||"#)
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
@@ -621,6 +653,22 @@ async fn test_metrics_with_client_version_http_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_metrics_with_invalid_client_version_http_header() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header(
+            "apollographql-client-version",
+            r#"invalid client version";||"#,
+        )
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, false, false, None).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_with_library_name_http_header() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -634,10 +682,39 @@ async fn test_metrics_with_library_name_http_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_metrics_with_invalid_library_name_http_header() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("apollographql-library-name", r#"invalid library name";||"#)
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, false, false, None).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_with_library_version_http_header() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .header("apollographql-library-version", "apollo library version")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, false, false, None).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_metrics_with_invalid_library_version_http_header() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header(
+            "apollographql-library-version",
+            r#"invalid library version";||"#,
+        )
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
@@ -665,9 +742,45 @@ async fn test_metrics_with_library_name_request_extension() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_metrics_with_invalid_library_name_request_extension() {
+    let mut clients_map = serde_json_bytes::map::Map::new();
+    clients_map.insert("name", r#"invalid library name";||"#.into());
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert("clientLibrary", clients_map.into());
+
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .extensions(extensions_map.clone())
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, false, false, None).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_with_library_version_request_extension() {
     let mut clients_map = serde_json_bytes::map::Map::new();
     clients_map.insert("version", "apollo library version".into());
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert("clientLibrary", clients_map.into());
+
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .extensions(extensions_map.clone())
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, false, false, None).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_metrics_with_invalid_library_version_request_extension() {
+    let mut clients_map = serde_json_bytes::map::Map::new();
+    clients_map.insert("version", r#"invalid library version";||"#.into());
     let mut extensions_map = serde_json_bytes::map::Map::new();
     extensions_map.insert("clientLibrary", clients_map.into());
 

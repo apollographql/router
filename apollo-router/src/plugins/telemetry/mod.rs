@@ -127,6 +127,7 @@ use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
+use crate::plugins::telemetry::valid_value::ValidValue;
 use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
@@ -167,6 +168,7 @@ pub(crate) mod span_ext;
 mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
+mod valid_value;
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
@@ -1587,18 +1589,22 @@ impl Telemetry {
                                     client_name: context
                                         .get(CLIENT_NAME)
                                         .unwrap_or_default()
+                                        .filter(|s: &String| s.is_valid_value())
                                         .unwrap_or_default(),
                                     client_version: context
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
+                                        .filter(|s: &String| s.is_valid_value())
                                         .unwrap_or_default(),
                                     client_library_name: context
                                         .get(CLIENT_LIBRARY_NAME)
                                         .unwrap_or_default()
+                                        .filter(|s: &String| s.is_valid_value())
                                         .unwrap_or_default(),
                                     client_library_version: context
                                         .get(CLIENT_LIBRARY_VERSION)
                                         .unwrap_or_default()
+                                        .filter(|s: &String| s.is_valid_value())
                                         .unwrap_or_default(),
                                     operation_type: operation_kind
                                         .as_apollo_operation_type()
