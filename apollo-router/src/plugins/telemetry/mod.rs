@@ -1589,22 +1589,22 @@ impl Telemetry {
                                     client_name: context
                                         .get(CLIENT_NAME)
                                         .unwrap_or_default()
-                                        .filter(|s: &String| s.is_valid_value())
+                                        .filter(|s: &String| s.is_valid_client_metadata_value())
                                         .unwrap_or_default(),
                                     client_version: context
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
-                                        .filter(|s: &String| s.is_valid_value())
+                                        .filter(|s: &String| s.is_valid_client_metadata_value())
                                         .unwrap_or_default(),
                                     client_library_name: context
                                         .get(CLIENT_LIBRARY_NAME)
                                         .unwrap_or_default()
-                                        .filter(|s: &String| s.is_valid_value())
+                                        .filter(|s: &String| s.is_valid_client_metadata_value())
                                         .unwrap_or_default(),
                                     client_library_version: context
                                         .get(CLIENT_LIBRARY_VERSION)
                                         .unwrap_or_default()
-                                        .filter(|s: &String| s.is_valid_value())
+                                        .filter(|s: &String| s.is_valid_client_metadata_value())
                                         .unwrap_or_default(),
                                     operation_type: operation_kind
                                         .as_apollo_operation_type()
