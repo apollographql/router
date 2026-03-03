@@ -53,6 +53,47 @@ fn generates_a_valid_supergraph() {
     assert_snapshot!(api_schema.schema());
 }
 
+/// Ensures that when a type T implements an interface I in both a base definition (Subgraph1)
+/// and an extension (Subgraph2), the supergraph SDL emits "type T implements I" on the
+/// main type definition line rather than splitting into "type T" + "extend type T implements I".
+#[test]
+fn implements_on_type_definition_not_extend_type() {
+    let subgraph_a = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+            type Query {
+              t: T
+            }
+
+            interface I {
+              id: ID!
+            }
+
+            type T implements I @key(fields: "id") {
+              id: ID!
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+            interface I {
+              id: ID!
+            }
+
+            extend type T implements I @key(fields: "id") {
+              id: ID!
+              note: String
+            }
+        "#,
+    };
+
+    let supergraph =
+        compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]).expect("composition should succeed");
+    assert_snapshot!(supergraph.schema().schema());
+}
+
 #[test]
 fn preserves_descriptions() {
     let subgraph1 = ServiceDefinition {
