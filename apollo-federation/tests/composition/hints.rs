@@ -903,6 +903,73 @@ In subgraph "Subgraph1", the description is:
   """"#,
         );
     }
+
+    #[test]
+    fn hints_on_inconsistent_description_for_merged_type_order() {
+        // Two subgraphs define type Order with different descriptions.
+        // The chosen description is from the subgraph whose name is lexicographically first.
+        let orders_subgraph = ServiceDefinition {
+            name: "Orders",
+            type_defs: r#"
+                schema {
+                    query: Query
+                }
+
+                type Query {
+                    order: Order @shareable
+                }
+
+                """Reference type to order entity in ONE GRAPH"""
+                type Order @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let users_subgraph = ServiceDefinition {
+            name: "Users",
+            type_defs: r#"
+                type Query {
+                    order: Order @shareable
+                }
+
+                """Represents a user order"""
+                type Order @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[orders_subgraph, users_subgraph]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_DESCRIPTION",
+            r#"Element "Order" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Orders"):
+  """
+  Reference type to order entity in ONE GRAPH
+  """
+In subgraph "Users", the description is:
+  """
+  Represents a user order
+  """"#,
+        );
+
+        // Supergraph should have chosen "Orders" description (lexicographically first)
+        let api_schema = result
+            .to_api_schema(Default::default())
+            .expect("api schema");
+        let order_type = api_schema
+            .schema()
+            .types
+            .get("Order")
+            .expect("Order type in schema");
+        let desc = order_type.description().map(|n| n.as_str()).unwrap_or("");
+        assert_eq!(
+            desc.trim(),
+            "Reference type to order entity in ONE GRAPH",
+            "supergraph should use description from Orders subgraph"
+        );
+    }
 }
 
 mod override_directive_hints {

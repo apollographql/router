@@ -91,7 +91,6 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::FallibleOnceCell;
 use crate::utils::MultiIndexMap;
-use crate::utils::first_max_by_key;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
 use crate::utils::iter_into_single_item;
@@ -2200,21 +2199,21 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     where
         T: HasDescription + Display,
     {
-        let mut descriptions: IndexMap<String, usize> = sources
-            .iter()
-            .map(|(idx, source)| {
-                source
-                    .as_ref()
-                    .and_then(|s| s.description(self.subgraphs[*idx].schema()))
-                    .map(|d| d.trim().to_string())
-                    .unwrap_or_default()
-            })
-            .fold(Default::default(), |mut acc, desc| {
-                if !desc.is_empty() {
-                    *acc.entry(desc).or_insert(0) += 1;
-                }
-                acc
-            });
+        let mut descriptions: IndexMap<String, (usize, String)> = Default::default();
+        for (idx, source) in sources.iter() {
+            let desc = source
+                .as_ref()
+                .and_then(|s| s.description(self.subgraphs[*idx].schema()))
+                .map(|d| d.trim().to_string())
+                .unwrap_or_default();
+            if desc.is_empty() {
+                continue;
+            }
+            descriptions
+                .entry(desc)
+                .and_modify(|(count, _)| *count += 1)
+                .or_insert_with(|| (1, self.names[*idx].clone()));
+        }
         // we don't want to raise a hint if a description is ""
         descriptions.shift_remove("");
 
@@ -2223,13 +2222,18 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
             } else {
                 // Find the description with the highest count
-                if let Some((idx, _)) =
-                    first_max_by_key(descriptions.iter().enumerate(), |(_, (_, counts))| *counts)
+                let max_count = descriptions
+                    .values()
+                    .map(|(count, _)| count)
+                    .max()
+                    .copied()
+                    .unwrap_or(0);
+                if let Some((description, _)) = descriptions
+                    .iter()
+                    .filter(|(_, (count, _))| *count == max_count)
+                    .min_by_key(|(_, (_, subgraph_name))| subgraph_name)
                 {
-                    // Get the description at the found index
-                    if let Some((description, _)) = descriptions.iter().nth(idx) {
-                        dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
-                    }
+                    dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
                 }
                 // TODO: Currently showing full descriptions in the hint
                 // messages, which is probably fine in some cases. However this
