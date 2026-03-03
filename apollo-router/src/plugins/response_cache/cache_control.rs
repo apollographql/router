@@ -383,7 +383,7 @@ impl CacheControl {
 
         // FIXME: we don't honor stale-while-revalidate yet
         // !expired || self.stale_while_revalidate
-        !expired && !self.no_store
+        !expired && !self.no_cache
     }
 
     pub(crate) fn is_no_cache(&self) -> bool {
