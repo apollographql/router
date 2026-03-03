@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use std::time::Instant;
@@ -46,6 +46,7 @@ use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rand::Rng;
+use regex::Regex;
 use reload::activation::Activation;
 use reload::tracing::TracingConfigurator;
 use serde_json_bytes::ByteString;
@@ -127,7 +128,6 @@ use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
-use crate::plugins::telemetry::valid_value::ValidValue;
 use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
@@ -168,7 +168,6 @@ pub(crate) mod span_ext;
 mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
-mod valid_value;
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
@@ -1589,22 +1588,22 @@ impl Telemetry {
                                     client_name: context
                                         .get(CLIENT_NAME)
                                         .unwrap_or_default()
-                                        .filter(|s: &String| s.is_valid_client_metadata_value())
+                                        .filter(is_valid_client_metadata_value)
                                         .unwrap_or_default(),
                                     client_version: context
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
-                                        .filter(|s: &String| s.is_valid_client_metadata_value())
+                                        .filter(is_valid_client_metadata_value)
                                         .unwrap_or_default(),
                                     client_library_name: context
                                         .get(CLIENT_LIBRARY_NAME)
                                         .unwrap_or_default()
-                                        .filter(|s: &String| s.is_valid_client_metadata_value())
+                                        .filter(is_valid_client_metadata_value)
                                         .unwrap_or_default(),
                                     client_library_version: context
                                         .get(CLIENT_LIBRARY_VERSION)
                                         .unwrap_or_default()
-                                        .filter(|s: &String| s.is_valid_client_metadata_value())
+                                        .filter(is_valid_client_metadata_value)
                                         .unwrap_or_default(),
                                     operation_type: operation_kind
                                         .as_apollo_operation_type()
@@ -1830,6 +1829,15 @@ impl Telemetry {
                 .unwrap_or(false),
         }
     }
+}
+
+// Regex for allowed values for client and library names and versions
+static VALID_CLIENT_METADATA_VALUE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[ a-zA-Z0-9.@/_\-]{1,60}$").unwrap());
+
+
+fn is_valid_client_metadata_value(value: &String) -> bool {
+    VALID_CLIENT_METADATA_VALUE_REGEX.is_match(value)
 }
 
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
