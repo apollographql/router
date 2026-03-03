@@ -374,7 +374,6 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 ] }
 
 [build-dependencies]
-tonic-build = "0.14.5"
 tonic-prost-build = "0.14.0"
 serde_json.workspace = true
 
