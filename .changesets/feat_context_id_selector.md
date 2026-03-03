@@ -1,4 +1,4 @@
-### Add `context_id` selector for telemetry to expose unique per-request identifier ([GRAPHOS-67](https://apollographql.atlassian.net/browse/GRAPHOS-67))
+### Add `context_id` selector for telemetry to expose unique per-request identifier ([#8899](https://github.com/apollographql/router/pull/8899))
 
 A new `context_id` selector is now available for router, supergraph, subgraph, and connector telemetry instrumentation. This selector exposes the unique per-request context ID that can be used to reliably correlate and debug requests in traces, logs, and custom events.
 

@@ -2196,37 +2196,50 @@ mod test {
     fn subgraph_context_id() {
         let selector = SubgraphSelector::ContextId { context_id: true };
         let context = crate::context::Context::new();
-        let expected_id = context.id.clone();
+        let expected_id: opentelemetry::Value = context.id.clone().into();
 
         // Test on_request
-        let request_result = selector.on_request(
-            &crate::services::SubgraphRequest::fake_builder()
-                .context(context.clone())
-                .build(),
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SubgraphRequest::fake_builder()
+                        .context(context.clone())
+                        .build(),
+                )
+                .unwrap(),
+            expected_id
         );
-        assert_eq!(request_result, Some(expected_id.clone().into()));
 
         // Test on_response
-        let response_result = selector.on_response(
-            &crate::services::SubgraphResponse::fake_builder()
-                .context(context.clone())
-                .build(),
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .context(context.clone())
+                        .build(),
+                )
+                .unwrap(),
+            expected_id
         );
-        assert_eq!(response_result, Some(expected_id.clone().into()));
 
         // Test on_error
-        let error_result = selector.on_error(&BoxError::from(String::from("test error")), &context);
-        assert_eq!(error_result, Some(expected_id.into()));
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from(String::from("test error")), &context)
+                .unwrap(),
+            expected_id
+        );
 
         // Test that context_id: false returns None
         let selector_disabled = SubgraphSelector::ContextId { context_id: false };
-        assert_eq!(
-            selector_disabled.on_request(
-                &crate::services::SubgraphRequest::fake_builder()
-                    .context(context)
-                    .build(),
-            ),
-            None
+        assert!(
+            selector_disabled
+                .on_request(
+                    &crate::services::SubgraphRequest::fake_builder()
+                        .context(context)
+                        .build(),
+                )
+                .is_none()
         );
     }
 }

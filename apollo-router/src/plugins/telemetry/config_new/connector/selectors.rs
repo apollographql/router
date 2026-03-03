@@ -329,12 +329,12 @@ impl Selector for ConnectorSelector {
         }
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) -> Option<Value> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<Value> {
         match self {
             ConnectorSelector::Error { .. } => Some(error.to_string().into()),
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
             ConnectorSelector::ContextId { context_id } if *context_id => {
-                Some(opentelemetry::Value::from(_ctx.id.clone()))
+                Some(opentelemetry::Value::from(ctx.id.clone()))
             }
             _ => None,
         }
@@ -1004,37 +1004,39 @@ mod tests {
     fn connector_context_id() {
         let selector = ConnectorSelector::ContextId { context_id: true };
         let context = Context::new();
-        let expected_id = context.id.clone();
+        let expected_id: Value = context.id.clone().into();
 
         // Test on_request
         assert_eq!(
-            selector.on_request(&connector_request(
-                http_request(),
-                Some(context.clone()),
-                None
-            )),
-            Some(expected_id.clone().into())
+            selector
+                .on_request(&connector_request(
+                    http_request(),
+                    Some(context.clone()),
+                    None
+                ))
+                .unwrap(),
+            expected_id
         );
 
         // Test on_response
         let mut response = connector_response(StatusCode::OK);
         response.context = context.clone();
-        assert_eq!(
-            selector.on_response(&response),
-            Some(expected_id.clone().into())
-        );
+        assert_eq!(selector.on_response(&response).unwrap(), expected_id);
 
         // Test on_error
         assert_eq!(
-            selector.on_error(&BoxError::from("test error".to_string()), &context),
-            Some(expected_id.into())
+            selector
+                .on_error(&BoxError::from("test error".to_string()), &context)
+                .unwrap(),
+            expected_id
         );
 
         // Test that context_id: false returns None
         let selector_disabled = ConnectorSelector::ContextId { context_id: false };
-        assert_eq!(
-            selector_disabled.on_request(&connector_request(http_request(), Some(context), None)),
-            None
+        assert!(
+            selector_disabled
+                .on_request(&connector_request(http_request(), Some(context), None))
+                .is_none()
         );
     }
 }

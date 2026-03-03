@@ -1225,45 +1225,61 @@ mod test {
     fn supergraph_context_id() {
         let selector = SupergraphSelector::ContextId { context_id: true };
         let context = crate::context::Context::new();
-        let expected_id = context.id.clone();
+        let expected_id: opentelemetry::Value = context.id.clone().into();
 
         // Test on_request
-        let request_result = selector.on_request(
-            &crate::services::SupergraphRequest::fake_builder()
-                .context(context.clone())
-                .build()
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SupergraphRequest::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap(),
+            expected_id
         );
-        assert_eq!(request_result, Some(expected_id.clone().into()));
 
         // Test on_response
-        let response_result = selector.on_response(
-            &crate::services::SupergraphResponse::fake_builder()
-                .context(context.clone())
-                .build()
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap(),
+                )
                 .unwrap(),
+            expected_id
         );
-        assert_eq!(response_result, Some(expected_id.clone().into()));
 
         // Test on_response_event
-        let event_result =
-            selector.on_response_event(&crate::graphql::Response::builder().build(), &context);
-        assert_eq!(event_result, Some(expected_id.clone().into()));
+        assert_eq!(
+            selector
+                .on_response_event(&crate::graphql::Response::builder().build(), &context)
+                .unwrap(),
+            expected_id
+        );
 
         // Test on_error
-        let error_result = selector.on_error(&BoxError::from(String::from("test error")), &context);
-        assert_eq!(error_result, Some(expected_id.into()));
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from(String::from("test error")), &context)
+                .unwrap(),
+            expected_id
+        );
 
         // Test that context_id: false returns None
         let selector_disabled = SupergraphSelector::ContextId { context_id: false };
-        assert_eq!(
-            selector_disabled.on_request(
-                &crate::services::SupergraphRequest::fake_builder()
-                    .context(context)
-                    .build()
-                    .unwrap(),
-            ),
-            None
+        assert!(
+            selector_disabled
+                .on_request(
+                    &crate::services::SupergraphRequest::fake_builder()
+                        .context(context)
+                        .build()
+                        .unwrap(),
+                )
+                .is_none()
         );
     }
 }
