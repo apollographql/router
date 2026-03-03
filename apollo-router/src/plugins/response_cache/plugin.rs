@@ -51,6 +51,7 @@ use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::Error;
@@ -366,11 +367,22 @@ impl PluginPrivate for ResponseCache {
         let debug = self.debug;
         ServiceBuilder::new()
             .map_response(move |mut response: supergraph::Response| {
-                if let Some(cache_control) = response
+                if let Some(mut cache_control) = response
                     .context
                     .extensions()
                     .with_lock(|lock| lock.get::<CacheControl>().cloned())
                 {
+                    // If the response contains GraphQL errors, force Cache-Control: no-store to prevent
+                    // intermediate caches (CDNs, reverse proxies) from caching partial or error responses.
+                    let has_errors = response
+                        .context
+                        .get_json_value(CONTAINS_GRAPHQL_ERROR)
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if has_errors {
+                        cache_control = CacheControl::no_store();
+                    }
+
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
