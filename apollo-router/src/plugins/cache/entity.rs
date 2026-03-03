@@ -634,6 +634,16 @@ impl CacheService {
             return self.service.call(request).await;
         }
 
+        let request_cache_control = if request
+            .subgraph_request
+            .headers()
+            .contains_key(&CACHE_CONTROL)
+        {
+            CacheControl::new(request.subgraph_request.headers(), None).ok()
+        } else {
+            None
+        };
+
         if !request
             .subgraph_request
             .body()
@@ -650,6 +660,7 @@ impl CacheService {
                     private_id.as_deref(),
                     self.expose_keys_in_context,
                     request,
+                    request_cache_control.as_ref(),
                 )
                 .instrument(tracing::info_span!("cache.entity.lookup"))
                 .await?
@@ -707,7 +718,9 @@ impl CacheService {
                             .await;
                         }
 
-                        if cache_control.should_store() {
+                        if cache_control.should_store()
+                            && request_cache_control.map_or(true, |c| !c.is_no_store())
+                        {
                             cache_store_root_from_response(
                                 self.storage,
                                 self.subgraph_ttl,
@@ -750,6 +763,7 @@ impl CacheService {
                 private_id.as_deref(),
                 request,
                 self.expose_keys_in_context,
+                request_cache_control.as_ref(),
             )
             .instrument(tracing::info_span!("cache.entity.lookup"))
             .await?
@@ -868,6 +882,7 @@ impl CacheService {
                         cache_result.0,
                         is_known_private,
                         private_id,
+                        request_cache_control,
                     )
                     .await?;
 
@@ -914,6 +929,7 @@ async fn cache_lookup_root(
     private_id: Option<&str>,
     expose_keys_in_context: bool,
     mut request: subgraph::Request,
+    request_cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String)>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
@@ -927,6 +943,10 @@ async fn cache_lookup_root(
         is_known_private,
         private_id,
     );
+
+    if request_cache_control.map_or(false, |c| c.is_no_cache()) {
+        return Ok(ControlFlow::Continue((request, key)));
+    }
 
     let cache_result: Result<RedisValue<CacheEntry>, _> = cache.get(RedisKey(key.clone())).await;
 
@@ -998,7 +1018,15 @@ async fn cache_lookup_entities(
     private_id: Option<&str>,
     mut request: subgraph::Request,
     expose_keys_in_context: bool,
+    request_cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
+    if request_cache_control.map_or(false, |c| c.is_no_cache()) {
+        return Ok(ControlFlow::Continue((
+            request,
+            EntityCacheResults(vec![], None),
+        )));
+    }
+
     let body = request.subgraph_request.body_mut();
     let keys = extract_cache_keys(
         &name,
@@ -1216,6 +1244,7 @@ async fn cache_store_entities_from_response(
     mut result_from_cache: Vec<IntermediateResult>,
     is_known_private: bool,
     private_id: Option<String>,
+    request_cache_control: Option<CacheControl>,
 ) -> Result<(), BoxError> {
     let mut data = response.response.body_mut().data.take();
 
@@ -1246,6 +1275,7 @@ async fn cache_store_entities_from_response(
             &mut result_from_cache,
             update_key_private,
             should_cache_private,
+            request_cache_control,
         )
         .await?;
 
@@ -1634,6 +1664,7 @@ async fn insert_entities_in_result(
     result: &mut Vec<IntermediateResult>,
     update_key_private: Option<String>,
     should_cache_private: bool,
+    request_cache_control: Option<CacheControl>,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
@@ -1698,7 +1729,13 @@ async fn insert_entities_in_result(
                     has_errors = true;
                 }
 
-                if !has_errors && cache_control.should_store() && should_cache_private {
+                if !has_errors
+                    && cache_control.should_store()
+                    && should_cache_private
+                    && request_cache_control
+                        .as_ref()
+                        .map_or(true, |c| !c.is_no_store())
+                {
                     to_insert.push((
                         RedisKey(key),
                         RedisValue(CacheEntry {
