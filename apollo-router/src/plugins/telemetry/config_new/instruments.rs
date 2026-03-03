@@ -69,22 +69,9 @@ use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAtt
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphValue;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::utils::extend_attributes;
 use crate::services::router;
 use crate::services::supergraph;
-
-/// Extends attributes with new values, updating existing keys instead of duplicating.
-/// This is needed because OTel 0.31+ uses Vec<KeyValue> instead of HashMap for attributes,
-/// so we need to manually deduplicate when the same attribute is returned across multiple
-/// lifecycle stages (request, response, response_event, error).
-fn extend_attributes(attrs: &mut Vec<KeyValue>, new_attrs: Vec<KeyValue>) {
-    for new_kv in new_attrs {
-        if let Some(existing) = attrs.iter_mut().find(|kv| kv.key == new_kv.key) {
-            *existing = new_kv;
-        } else {
-            attrs.push(new_kv);
-        }
-    }
-}
 
 pub(crate) const METER_NAME: &str = "apollo/router";
 
