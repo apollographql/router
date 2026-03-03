@@ -1,10 +1,20 @@
 ---
-title: Diagnostics (experimental)
+title: Diagnostics
 subtitle: Debugging and profiling the router
 description: Use the experimental diagnostics plugin to inspect router configuration, system and memory information, and export diagnostic packages for troubleshooting.
+releaseStage: experimental
+minVersion: 2.13.0
 ---
 
-The Router includes an experimental diagnostics plugin that collects system and memory information useful when diagnosing issues such as memory leaks or configuration problems. It has minimal overhead and can be enabled in production, but it exposes potentially sensitive information. Enable it only when needed and control access—for example, do not expose the diagnostics port on pods; use port-forwarding to access it instead.
+<ExperimentalFeature>
+
+This feature is experimental. Your questions and feedback are highly valued—don't hesitate to get in touch with your Apollo contact. You can also discuss this feature in the [Apollo Community](https://discord.com/invite/apollo).
+
+</ExperimentalFeature>
+
+The Apollo Router includes an experimental diagnostics plugin that collects system and memory information. Use it to diagnose issues such as memory leaks or configuration problems. 
+
+It has minimal overhead and can be enabled in production, but it exposes potentially sensitive information. Enable it only when needed and strictly control access. For example, you can use port-forwarding to access the diagnostics port to avoid exposing it to the network.
 
 ## Enabling the plugin
 
