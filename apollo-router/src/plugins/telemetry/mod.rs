@@ -2,7 +2,8 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use std::time::Instant;
@@ -1834,7 +1835,6 @@ impl Telemetry {
 // Regex for allowed values for client and library names and versions
 static VALID_CLIENT_METADATA_VALUE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[ a-zA-Z0-9.@/_\-]{1,60}$").unwrap());
-
 
 fn is_valid_client_metadata_value(value: &String) -> bool {
     VALID_CLIENT_METADATA_VALUE_REGEX.is_match(value)
