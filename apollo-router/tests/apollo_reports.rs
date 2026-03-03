@@ -579,6 +579,22 @@ async fn test_trace_with_client_name_http_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_trace_with_invalid_client_name_http_header() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .header("apollographql-client-name", r#"invalid client name";||"#)
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        assert_report!(report);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_trace_with_client_version_http_header() {
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
