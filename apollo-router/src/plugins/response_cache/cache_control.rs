@@ -475,6 +475,25 @@ mod tests {
         let merged = first.merge_inner(&second, now.into());
         assert!(merged.no_store);
         assert!(!merged.public);
+        assert!(merged.can_use());
+    }
+
+    #[test]
+    fn merge_nocache() {
+        let now = now_epoch_seconds();
+
+        let first = CacheControl {
+            no_cache: true,
+            ..Default::default()
+        };
+
+        let second = CacheControl {
+            no_cache: false,
+            ..Default::default()
+        };
+
+        let merged = first.merge_inner(&second, now.into());
+        assert!(merged.no_cache);
         assert!(!merged.can_use());
     }
 
