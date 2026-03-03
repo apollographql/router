@@ -994,12 +994,6 @@ impl CacheService {
                             root_cache_key = format!("{root_cache_key}:{s}");
                         }
                     }
-
-                    if private_id.is_none() {
-                        // the response has a private scope but we don't have a way to differentiate
-                        // users, so we do not store the response in cache
-                        cache_control.no_store = true;
-                    }
                 }
 
                 // if the request had no_store on it, propagate that to this cache control
@@ -1028,7 +1022,11 @@ impl CacheService {
                     add_cache_key_to_context(&response.context, cache_key_context)?;
                 }
 
-                if cache_control.should_store() {
+                // the response has a private scope but we don't have a way to differentiate
+                // users, so we do not store the response in cache
+                let unstorable_private_response = cache_control.private() && private_id.is_none();
+
+                if !unstorable_private_response && cache_control.should_store() {
                     cache_store_root_from_response(
                         storage,
                         self.subgraph_ttl,

@@ -1381,7 +1381,8 @@ async fn no_store_from_request() {
 
     let cache_control_header = get_cache_control_header(&response).expect("missing header");
     assert!(cache_control_contains_no_store(&cache_control_header));
-    let response = response.next_response().await.unwrap();
+    let mut response = response.next_response().await.unwrap();
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -1446,7 +1447,8 @@ async fn no_store_from_request() {
     let cache_control_header = get_cache_control_header(&response).expect("missing header");
     assert!(cache_control_contains_no_store(&cache_control_header));
 
-    let response = response.next_response().await.unwrap();
+    let mut response = response.next_response().await.unwrap();
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
