@@ -33,6 +33,7 @@ use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::registry::OciConfig;
+use crate::registry::should_use_ssl;
 use crate::registry::validate_oci_reference;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
@@ -264,6 +265,8 @@ impl Opt {
             })
             .unwrap_or(INITIAL_OCI_POLL_INTERVAL);
 
+        let use_ssl = should_use_ssl(&validated_reference);
+
         Ok(OciConfig {
             apollo_key: self
                 .apollo_key
@@ -272,6 +275,7 @@ impl Opt {
             reference: validated_reference,
             hot_reload: self.hot_reload,
             poll_interval,
+            use_ssl,
         })
     }
 
