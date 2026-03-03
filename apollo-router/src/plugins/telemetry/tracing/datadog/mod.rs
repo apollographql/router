@@ -190,7 +190,7 @@ impl TracingConfigurator for Config {
                 &span.name
             })
             .with(
-                &resource.get(&Key::new(SERVICE_NAME)),
+                &resource.get(&SERVICE_NAME.into()),
                 |builder, service_name| {
                     // Datadog exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
@@ -202,7 +202,7 @@ impl TracingConfigurator for Config {
             })
             .with_version(
                 resource
-                    .get(&Key::new(SERVICE_VERSION))
+                    .get(&SERVICE_VERSION.into())
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
