@@ -1587,24 +1587,24 @@ impl Telemetry {
                                 context: StatsContext {
                                     result: "".to_string(),
                                     client_name: context
-                                        .get(CLIENT_NAME)
+                                        .get::<_, String>(CLIENT_NAME)
                                         .unwrap_or_default()
-                                        .filter(is_valid_client_metadata_value)
+                                        .filter(|v| is_valid_client_metadata_value(v))
                                         .unwrap_or_default(),
                                     client_version: context
-                                        .get(CLIENT_VERSION)
+                                        .get::<_, String>(CLIENT_VERSION)
                                         .unwrap_or_default()
-                                        .filter(is_valid_client_metadata_value)
+                                        .filter(|v| is_valid_client_metadata_value(v))
                                         .unwrap_or_default(),
                                     client_library_name: context
-                                        .get(CLIENT_LIBRARY_NAME)
+                                        .get::<_, String>(CLIENT_LIBRARY_NAME)
                                         .unwrap_or_default()
-                                        .filter(is_valid_client_metadata_value)
+                                        .filter(|v| is_valid_client_metadata_value(v))
                                         .unwrap_or_default(),
                                     client_library_version: context
-                                        .get(CLIENT_LIBRARY_VERSION)
+                                        .get::<_, String>(CLIENT_LIBRARY_VERSION)
                                         .unwrap_or_default()
-                                        .filter(is_valid_client_metadata_value)
+                                        .filter(|v| is_valid_client_metadata_value(v))
                                         .unwrap_or_default(),
                                     operation_type: operation_kind
                                         .as_apollo_operation_type()
@@ -1836,7 +1836,7 @@ impl Telemetry {
 static VALID_CLIENT_METADATA_VALUE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[ a-zA-Z0-9.@/_\-]{1,60}$").unwrap());
 
-fn is_valid_client_metadata_value(value: &String) -> bool {
+fn is_valid_client_metadata_value(value: &str) -> bool {
     VALID_CLIENT_METADATA_VALUE_REGEX.is_match(value)
 }
 
