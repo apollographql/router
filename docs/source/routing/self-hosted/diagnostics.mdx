@@ -17,9 +17,9 @@ experimental_diagnostics:
   output_directory: /tmp/router-diagnostics
 ```
 
-- **`enabled`**: Turn the diagnostics plugin on or off.
-- **`listen`**: Socket address and port for the diagnostics server (default: `127.0.0.1:8089`). Keep this bound to localhost; do not expose it to the network.
-- **`output_directory`**: Directory where memory dump files are stored (default: `/tmp/router-diagnostics` on Unix). Created automatically if it does not exist. Memory dumps are only generated on Linux.
+- `enabled`: Turn the diagnostics plugin on or off.
+- `listen`: Socket address and port for the diagnostics server. Default: `127.0.0.1:8089`. Keep this bound to localhost; do not expose it to the network.
+- `output_directory`: Directory where memory dump files are stored. Default: `/tmp/router-diagnostics` on Unix. Created automatically if it does not exist. Memory dumps are only generated on Linux.
 
 After startup, the router logs the diagnostics URL, for example:
 
@@ -35,7 +35,7 @@ The plugin exposes two ways to get system-related information:
 
 ### Static router info (`GET /diagnostics/system_info`)
 
-Returns **JSON** with stable metadata about the router process:
+Returns JSON with stable metadata about the router process:
 
 - Version, OS, architecture, target family, build type
 - Rust version (when available)
@@ -43,7 +43,7 @@ Returns **JSON** with stable metadata about the router process:
 - Startup options (redacted; secrets shown only as “set”)
 - Names of set environment variables the router reads (values are not included)
 
-This endpoint does **not** include live memory or CPU data. Use it when you need build/version/deployment metadata. It is only available after the router has completed startup.
+This endpoint does not include live memory or CPU data. Use it when you need build/version/deployment metadata. It is only available after the router has completed startup.
 
 ```sh
 curl http://127.0.0.1:8089/diagnostics/system_info
@@ -51,7 +51,7 @@ curl http://127.0.0.1:8089/diagnostics/system_info
 
 ### Live system report (`GET /diagnostics/report.txt`)
 
-Returns a **plain-text** report with current system state:
+Returns a plain-text report with current system state:
 
 - Memory (total, used, free, swap; on Linux, detailed `/proc/meminfo`-style information)
 - Jemalloc statistics (when available)
@@ -75,9 +75,9 @@ From the diagnostics dashboard you can:
 
 ## Memory profiling
 
-Memory profiling helps diagnose **memory leaks** (e.g. growth over time after schema reload). It is **not** intended for diagnosing sudden OOMs or peak memory usage from normal allocations.
+Memory profiling helps diagnose memory leaks. For example, tracking growth over time after schema reload. It is not intended for diagnosing sudden out-of-memory (OOM) events or peak memory usage from normal allocations.
 
-**Platform support:** Memory profiling (start, stop, dump, flamegraph, callgraph) works only on **Linux** with the jemalloc allocator. On other platforms (including macOS), the memory endpoints return "not supported."
+Memory profiling (start, stop, dump, flamegraph, callgraph) works only on Linux with the jemalloc allocator. On other platforms,the memory endpoints return "not supported."
 
 ### Workflow for diagnosing leaks
 
@@ -105,19 +105,19 @@ After isolating the area of a leak, you will need to correlate it with the Route
 
 ## Exporting diagnostics
 
-The **Download Diagnostics Package** button (or `GET /diagnostics/export`) produces a **`.tar.gz`** archive containing:
+The **Download Diagnostics Package** button (or `GET /diagnostics/export`) produces a `.tar.gz` archive containing:
 
-- **`manifest.txt`** – Archive metadata and system information
-- **`router.yaml`** – Current router configuration
-- **`supergraph.graphql`** – Supergraph schema
-- **`report.txt`** – Full diagnostic report (system info, memory, CPU, load, etc.)
-- **`memory/`** – Memory profiling dumps (on Linux when available)
-- **`diagnostics_report.html`** – Self-contained HTML report with all diagnostic data embedded
+- `manifest.txt` – Archive metadata and system information
+- `router.yaml` – Current router configuration
+- `supergraph.graphql` – Supergraph schema
+- `report.txt` – Full diagnostic report (system info, memory, CPU, load, etc.)
+- `memory/` – Memory profiling dumps (on Linux when available)
+- `diagnostics_report.html` – Self-contained HTML report with all diagnostic data embedded
 
 You can use this archive for offline analysis or when sharing information with your support or engineering team.
 
 <Caution>
 
-The archive may contain sensitive information (for example, if secrets are hardcoded in your config). **Always review the contents before sharing the file with anyone.**
+The archive may contain sensitive information (for example, if secrets are hardcoded in your config). Always review the contents before sharing the file with anyone.
 
 </Caution>
