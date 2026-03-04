@@ -23,8 +23,6 @@ git-fetch-with-cli = true
 # rustsec advisory exemptions
 ignore = [
     "RUSTSEC-2023-0071",
-    "RUSTSEC-2024-0376", # we do not use tonic::transport::Server
-    "RUSTSEC-2024-0421", # we only resolve trusted subgraphs
 
     # protobuf is used only through prometheus crates, enforced by
     # a `[bans]` entry below. in the prometheus crates, only the protobuf
