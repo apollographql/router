@@ -10,6 +10,24 @@ use crate::plugins::telemetry::config::AttributeValue;
 const UNKNOWN_SERVICE: &str = "unknown_service";
 const OTEL_SERVICE_NAME: &str = "OTEL_SERVICE_NAME";
 
+/// Resource detector that adds a default service name,
+/// which is normally expected to be overwritten by other detectors.
+struct DefaultServiceNameDetector;
+impl ResourceDetector for DefaultServiceNameDetector {
+    fn detect(&self) -> Resource {
+        let executable_name = executable_name();
+        let default_service_name = executable_name
+            .map(|name| format!("{UNKNOWN_SERVICE}:{name}"))
+            .unwrap_or_else(|| UNKNOWN_SERVICE.to_string());
+        Resource::builder_empty()
+            .with_attribute(KeyValue::new(
+                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                default_service_name,
+            ))
+            .build()
+    }
+}
+
 /// This resource detector fills out things like the default service version and executable name.
 /// Users can always override them via config.
 struct StaticResourceDetector;
@@ -40,10 +58,10 @@ impl ResourceDetector for EnvServiceNameDetector {
     fn detect(&self) -> Resource {
         match env::var(OTEL_SERVICE_NAME) {
             Ok(service_name) if !service_name.is_empty() => Resource::builder_empty()
-                .with_attributes([KeyValue::new(
+                .with_attribute(KeyValue::new(
                     opentelemetry_semantic_conventions::resource::SERVICE_NAME,
                     service_name,
-                )])
+                ))
                 .build(),
             Ok(_) | Err(_) => Resource::builder_empty().build(), // return empty resource
         }
@@ -63,34 +81,15 @@ pub trait ConfigResource {
             service_namespace: self.service_namespace().clone(),
             resources: self.resource().clone(),
         };
-
         // Last one wins
         let detectors: Vec<Box<dyn ResourceDetector>> = vec![
+            Box::new(DefaultServiceNameDetector),
             Box::new(StaticResourceDetector),
             Box::new(config_resource_detector),
             Box::new(EnvResourceDetector::new()),
             Box::new(EnvServiceNameDetector),
         ];
-        let resource = Resource::builder_empty().with_detectors(&detectors).build();
-
-        // Default service name if not already set
-        let service_name_key = opentelemetry_semantic_conventions::resource::SERVICE_NAME.into();
-        if resource.get(&service_name_key).is_none() {
-            let executable_name = executable_name();
-            let default_service_name = executable_name
-                .map(|name| format!("{UNKNOWN_SERVICE}:{name}"))
-                .unwrap_or_else(|| UNKNOWN_SERVICE.to_string());
-            // Rebuild with the default service name added
-            Resource::builder_empty()
-                .with_attributes([KeyValue::new(
-                    opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                    default_service_name,
-                )])
-                .with_detectors(&detectors)
-                .build()
-        } else {
-            resource
-        }
+        Resource::builder_empty().with_detectors(&detectors).build()
     }
 }
 
