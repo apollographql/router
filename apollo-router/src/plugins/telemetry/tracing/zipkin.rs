@@ -11,10 +11,10 @@ use tower::BoxError;
 
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
-use crate::plugins::telemetry::error_handler::NamedSpanExporter;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::tracing::NamedSpanExporter;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 
 static DEFAULT_ENDPOINT: LazyLock<Uri> =

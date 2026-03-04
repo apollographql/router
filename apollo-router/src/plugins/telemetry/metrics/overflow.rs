@@ -1,10 +1,16 @@
+//! Cardinality overflow detection for metric exporters.
+//!
+//! When OpenTelemetry SDK exceeds cardinality limits for a metric, it aggregates
+//! overflow measurements into a special data point marked with `otel.metric.overflow=true`.
+//! This module provides wrappers that detect those overflow data points and increment
+//! a counter to make the overflow visible to monitoring systems.
+
 use std::fmt::Debug;
 use std::sync::Weak;
 use std::time::Duration;
 
 use opentelemetry::Value;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::Pipeline;
@@ -15,131 +21,64 @@ use opentelemetry_sdk::metrics::data::MetricData;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::reader::MetricReader;
-use opentelemetry_sdk::trace::SpanData;
-use opentelemetry_sdk::trace::SpanExporter;
 
 use crate::metrics::meter_provider;
 
 const OTEL_METRIC_OVERFLOW_KEY: &str = "otel.metric.overflow";
+const CARDINALITY_OVERFLOW_METRIC: &str = "apollo.router.telemetry.metrics.cardinality_overflow";
 
-/// Wrapper that modifies trace export errors to include exporter name
-pub(crate) struct NamedSpanExporter<E> {
-    name: &'static str,
-    inner: E,
-}
-
-impl<E> NamedSpanExporter<E> {
-    pub(crate) fn new(inner: E, name: &'static str) -> Self {
-        Self { name, inner }
-    }
-}
-
-impl<E: SpanExporter> Debug for NamedSpanExporter<E> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NamedSpanExporter")
-            .field("name", &self.name)
-            .finish()
-    }
-}
-
-impl<E: SpanExporter> SpanExporter for NamedSpanExporter<E> {
-    fn export(
-        &self,
-        batch: Vec<SpanData>,
-    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        let name = self.name;
-        let fut = self.inner.export(batch);
-        async move {
-            fut.await
-                .map_err(|err| OTelSdkError::InternalFailure(format!("[{} traces] {}", name, err)))
-        }
-    }
-
-    fn shutdown(&mut self) -> OTelSdkResult {
-        self.inner.shutdown()
-    }
-
-    fn force_flush(&mut self) -> OTelSdkResult {
-        self.inner.force_flush()
-    }
-
-    fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
-        self.inner.set_resource(resource)
-    }
-}
-
-/// Wrapper for metric exporters and readers that:
-/// - Detects cardinality overflow and increments the overflow counter
-/// - For push exporters: prefixes error messages with the exporter name
+/// Wrapper for metric exporters and readers that detects cardinality overflow.
 ///
 /// Implements `PushMetricExporter` when `T: PushMetricExporter` and
 /// `MetricReader` when `T: MetricReader`.
-pub(crate) struct NamedMetricExporter<T> {
-    /// Name used for error prefixing (only used for PushMetricExporter)
-    name: &'static str,
+pub(crate) struct OverflowMetricExporter<T> {
     inner: T,
 }
 
-impl<T: Clone> Clone for NamedMetricExporter<T> {
+impl<T: Clone> Clone for OverflowMetricExporter<T> {
     fn clone(&self) -> Self {
         Self {
-            name: self.name,
             inner: self.inner.clone(),
         }
     }
 }
 
-impl<T> NamedMetricExporter<T> {
-    pub(crate) fn new_push(inner: T, name: &'static str) -> Self {
-        Self { name, inner }
+impl<T> OverflowMetricExporter<T> {
+    /// Create a new overflow-detecting wrapper for push-based exporters.
+    pub(crate) fn new_push(inner: T) -> Self {
+        Self { inner }
     }
 
-    pub(crate) fn new_pull(inner: T, name: &'static str) -> Self {
-        Self { name, inner }
+    /// Create a new overflow-detecting wrapper for pull-based readers.
+    pub(crate) fn new_pull(inner: T) -> Self {
+        Self { inner }
     }
 }
 
-impl<T: Debug> Debug for NamedMetricExporter<T> {
+impl<T: Debug> Debug for OverflowMetricExporter<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NamedMetricExporter")
-            .field("name", &self.name)
+        f.debug_struct("OverflowMetricExporter")
             .field("inner", &self.inner)
             .finish()
     }
 }
 
-fn prefix_otel_error(name: &'static str, err: OTelSdkError) -> OTelSdkError {
-    match err {
-        OTelSdkError::AlreadyShutdown => OTelSdkError::AlreadyShutdown,
-        OTelSdkError::Timeout(d) => OTelSdkError::Timeout(d),
-        OTelSdkError::InternalFailure(msg) => {
-            OTelSdkError::InternalFailure(format!("[{} metrics] {}", name, msg))
-        }
-    }
-}
-
 /// Implementation for push-based exporters (OTLP, Apollo, etc.)
-impl<T: PushMetricExporter> PushMetricExporter for NamedMetricExporter<T> {
+impl<T: PushMetricExporter> PushMetricExporter for OverflowMetricExporter<T> {
     fn export(
         &self,
         metrics: &ResourceMetrics,
     ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
         report_cardinality_overflow(metrics);
-        let name = self.name;
-        let fut = self.inner.export(metrics);
-        async move { fut.await.map_err(|err| prefix_otel_error(name, err)) }
+        self.inner.export(metrics)
     }
 
     fn force_flush(&self) -> OTelSdkResult {
-        self.inner
-            .force_flush()
-            .map_err(|err| prefix_otel_error(self.name, err))
+        self.inner.force_flush()
     }
 
     fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
-        self.inner
-            .shutdown_with_timeout(timeout)
-            .map_err(|err| prefix_otel_error(self.name, err))
+        self.inner.shutdown_with_timeout(timeout)
     }
 
     fn temporality(&self) -> Temporality {
@@ -148,7 +87,7 @@ impl<T: PushMetricExporter> PushMetricExporter for NamedMetricExporter<T> {
 }
 
 /// Implementation for pull-based readers (Prometheus)
-impl<T: MetricReader> MetricReader for NamedMetricExporter<T> {
+impl<T: MetricReader> MetricReader for OverflowMetricExporter<T> {
     fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
         self.inner.register_pipeline(pipeline)
     }
@@ -178,14 +117,7 @@ impl<T: MetricReader> MetricReader for NamedMetricExporter<T> {
     }
 }
 
-const CARDINALITY_OVERFLOW_METRIC: &str = "apollo.router.telemetry.metrics.cardinality_overflow";
-
 /// Check for cardinality overflow in metrics and report via counter.
-///
-/// When OpenTelemetry SDK exceeds cardinality limits for a metric, it aggregates
-/// overflow measurements into a special data point marked with `otel.metric.overflow=true`.
-/// This function detects those overflow data points and increments a counter to make
-/// the overflow visible to monitoring systems.
 fn report_cardinality_overflow(metrics: &ResourceMetrics) {
     for scope_metrics in metrics.scope_metrics() {
         for metric in scope_metrics.metrics() {
@@ -247,123 +179,20 @@ fn has_overflow_attribute<'a>(attrs: impl Iterator<Item = &'a opentelemetry::Key
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::Debug;
-    use std::time::Duration;
-
     use opentelemetry::KeyValue;
     use opentelemetry::Value;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::Resource;
-    use opentelemetry_sdk::error::OTelSdkError;
-    use opentelemetry_sdk::error::OTelSdkResult;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::metrics::Stream;
-    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::metrics::reader::MetricReader;
-    use opentelemetry_sdk::trace::SpanData;
-    use opentelemetry_sdk::trace::SpanExporter;
 
+    use super::*;
     use crate::metrics::FutureMetricsExt;
     use crate::metrics::test_utils::ClonableManualReader;
-    use crate::plugins::telemetry::error_handler::NamedMetricExporter;
-    use crate::plugins::telemetry::error_handler::OTEL_METRIC_OVERFLOW_KEY;
-    use crate::plugins::telemetry::error_handler::has_overflow_attribute;
-
-    // Mock span exporter to test failures
-    #[derive(Debug)]
-    struct FailingSpanExporter;
-
-    impl SpanExporter for FailingSpanExporter {
-        async fn export(&self, _batch: Vec<SpanData>) -> OTelSdkResult {
-            Err(OTelSdkError::InternalFailure(
-                "connection failed".to_string(),
-            ))
-        }
-
-        fn shutdown(&mut self) -> OTelSdkResult {
-            Ok(())
-        }
-
-        fn force_flush(&mut self) -> OTelSdkResult {
-            Ok(())
-        }
-
-        fn set_resource(&mut self, _resource: &opentelemetry_sdk::Resource) {}
-    }
-
-    #[tokio::test]
-    async fn test_named_span_exporter_adds_prefix() {
-        let inner = FailingSpanExporter;
-        let named = super::NamedSpanExporter::new(inner, "test-exporter");
-
-        let result = named.export(vec![]).await;
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        let err_msg = err.to_string();
-        assert!(err_msg.contains("[test-exporter traces]"));
-        assert!(err_msg.contains("connection failed"));
-    }
-
-    // Mock metrics exporter to test failures
-    #[derive(Debug)]
-    struct FailingMetricExporter;
-
-    impl PushMetricExporter for FailingMetricExporter {
-        async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
-            Err(OTelSdkError::InternalFailure("export failed".to_string()))
-        }
-
-        fn force_flush(&self) -> OTelSdkResult {
-            Ok(())
-        }
-
-        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
-            Ok(())
-        }
-
-        fn temporality(&self) -> Temporality {
-            Temporality::Cumulative
-        }
-    }
-
-    fn empty_resource_metrics() -> ResourceMetrics {
-        ResourceMetrics::default()
-    }
-
-    #[tokio::test]
-    async fn test_named_metric_exporter_adds_prefix() {
-        let inner = FailingMetricExporter;
-        let named = super::NamedMetricExporter::new(inner, "test-exporter");
-
-        let result = named.export(&empty_resource_metrics()).await;
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        match err {
-            OTelSdkError::InternalFailure(msg) => {
-                assert!(msg.contains("[test-exporter metrics]"));
-                assert!(msg.contains("export failed"));
-            }
-            _ => panic!("Expected InternalFailure, got: {:?}", err),
-        }
-    }
-
-    #[test]
-    fn test_prefix_otel_error() {
-        let err = OTelSdkError::InternalFailure("bad config".to_string());
-        let prefixed = super::prefix_otel_error("test-exporter", err);
-
-        match prefixed {
-            OTelSdkError::InternalFailure(msg) => {
-                assert_eq!(msg, "[test-exporter metrics] bad config");
-            }
-            _ => panic!("Expected InternalFailure variant"),
-        }
-    }
 
     #[test]
     fn detects_overflow_attribute() {
@@ -439,9 +268,9 @@ mod tests {
             let mut resource_metrics = ResourceMetrics::default();
             reader.collect(&mut resource_metrics).unwrap();
 
-            // Export through NamedMetricExporter which should detect overflow and increment counter
+            // Export through OverflowMetricExporter which should detect overflow and increment counter
             let inner_exporter = InMemoryMetricExporter::default();
-            let exporter = NamedMetricExporter::new(inner_exporter, "test");
+            let exporter = OverflowMetricExporter::new_push(inner_exporter);
             exporter.export(&resource_metrics).await.unwrap();
 
             // Verify the overflow counter was incremented
@@ -457,12 +286,10 @@ mod tests {
 
     #[tokio::test]
     async fn pull_reader_increments_counter_on_overflow() {
-        use crate::plugins::telemetry::error_handler::NamedMetricExporter;
-
         async {
             // Create a cloneable reader wrapped with overflow detection (simulates Prometheus path)
             let inner_reader = ClonableManualReader::default();
-            let reader = NamedMetricExporter::new_pull(inner_reader, "prometheus");
+            let reader = OverflowMetricExporter::new_pull(inner_reader);
 
             // Clone the reader before passing to builder so we can call collect() later
             let reader_for_collect = reader.clone();
