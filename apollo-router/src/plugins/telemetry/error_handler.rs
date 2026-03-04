@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn detects_overflow_attribute() {
-        let attrs = vec![
+        let attrs = [
             KeyValue::new("http.method", "GET"),
             KeyValue::new(OTEL_METRIC_OVERFLOW_KEY, true),
         ];
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn no_overflow_when_attribute_missing() {
-        let attrs = vec![
+        let attrs = [
             KeyValue::new("http.method", "GET"),
             KeyValue::new("http.status_code", 200),
         ];
