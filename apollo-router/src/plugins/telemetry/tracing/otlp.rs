@@ -6,7 +6,6 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_otlp::WithHttpConfig;
 use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
 
@@ -19,6 +18,7 @@ use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
+use crate::plugins::telemetry::tracing::metered_batch_processor::MeteredBatchSpanProcessor;
 
 impl TracingConfigurator for super::super::otlp::Config {
     fn config(conf: &Conf) -> &Self {
@@ -32,10 +32,11 @@ impl TracingConfigurator for super::super::otlp::Config {
     fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         let exporter = self.build_span_exporter()?;
         let named_exporter = NamedSpanExporter::new(exporter, "otlp");
-        let batch_span_processor = BatchSpanProcessor::builder(named_exporter, runtime::Tokio)
-            .with_batch_config(self.batch_processor.clone().into())
-            .build()
-            .filtered();
+        let batch_span_processor =
+            MeteredBatchSpanProcessor::builder(named_exporter, runtime::Tokio, "otlp")
+                .with_batch_config(self.batch_processor.clone())
+                .build()
+                .filtered();
 
         if builder
             .tracing_common()

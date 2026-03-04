@@ -3,7 +3,6 @@ use std::sync::LazyLock;
 
 use http::Uri;
 use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_zipkin::ZipkinExporter;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -16,6 +15,7 @@ use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
+use crate::plugins::telemetry::tracing::metered_batch_processor::MeteredBatchSpanProcessor;
 
 static DEFAULT_ENDPOINT: LazyLock<Uri> =
     LazyLock::new(|| Uri::from_static("http://127.0.0.1:9411/api/v2/spans"));
@@ -54,8 +54,8 @@ impl TracingConfigurator for Config {
 
         let named_exporter = NamedSpanExporter::new(exporter, "zipkin");
         builder.with_span_processor(
-            BatchSpanProcessor::builder(named_exporter, runtime::Tokio)
-                .with_batch_config(self.batch_processor.clone().into())
+            MeteredBatchSpanProcessor::builder(named_exporter, runtime::Tokio, "zipkin")
+                .with_batch_config(self.batch_processor.clone())
                 .build()
                 .filtered(),
         );
