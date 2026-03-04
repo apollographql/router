@@ -1823,10 +1823,10 @@ where
             return;
         }
 
-        let attrs: Vec<KeyValue> = inner
+        let attrs = inner
             .selectors
             .as_ref()
-            .map(|s| s.on_response(response).into_iter().collect())
+            .map(|s| s.on_response(response))
             .unwrap_or_default();
         extend_attributes(&mut inner.attributes, attrs);
 
@@ -1878,13 +1878,7 @@ where
         // Response event may be called multiple times so we don't extend inner.attributes
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            extend_attributes(
-                &mut attrs,
-                selectors
-                    .on_response_event(response, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
+            extend_attributes(&mut attrs, selectors.on_response_event(response, ctx));
         }
 
         if let Some(selected_value) = inner
@@ -1936,13 +1930,7 @@ where
 
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            extend_attributes(
-                &mut attrs,
-                selectors
-                    .on_error(error, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
+            extend_attributes(&mut attrs, selectors.on_error(error, ctx));
         }
 
         let increment = match &inner.increment {
@@ -2261,10 +2249,10 @@ where
             }
             return;
         }
-        let attrs: Vec<KeyValue> = inner
+        let attrs = inner
             .selectors
             .as_ref()
-            .map(|s| s.on_response(response).into_iter().collect())
+            .map(|s| s.on_response(response))
             .unwrap_or_default();
         extend_attributes(&mut inner.attributes, attrs);
         if let Some(selected_value) = inner
@@ -2317,13 +2305,7 @@ where
         // Response event may be called multiple times so we don't extend inner.attributes
         let mut attrs: Vec<KeyValue> = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            extend_attributes(
-                &mut attrs,
-                selectors
-                    .on_response_event(response, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
+            extend_attributes(&mut attrs, selectors.on_response_event(response, ctx));
         }
 
         if let Some(selected_value) = inner
@@ -2374,13 +2356,7 @@ where
         let mut inner = self.inner.lock();
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            extend_attributes(
-                &mut attrs,
-                selectors
-                    .on_error(error, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
+            extend_attributes(&mut attrs, selectors.on_error(error, ctx));
         }
 
         let increment = match &inner.increment {

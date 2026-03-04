@@ -53,7 +53,10 @@ pub(crate) fn upsert_attribute(attributes: &mut Vec<KeyValue>, kv: KeyValue) {
 }
 
 /// Extends attributes with new values, updating existing keys instead of duplicating.
-pub(crate) fn extend_attributes(attrs: &mut Vec<KeyValue>, new_attrs: Vec<KeyValue>) {
+pub(crate) fn extend_attributes(
+    attrs: &mut Vec<KeyValue>,
+    new_attrs: impl IntoIterator<Item = KeyValue>,
+) {
     for kv in new_attrs {
         upsert_attribute(attrs, kv);
     }
