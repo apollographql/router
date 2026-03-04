@@ -47,9 +47,6 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATI
 #[derive(Derivative, Clone)]
 #[derivative(Debug)]
 pub(crate) struct ApolloOtlpExporter {
-    batch_config: BatchProcessorConfig,
-    endpoint: Url,
-    apollo_key: String,
     instrumentation_scope: InstrumentationScope,
     #[derivative(Debug = "ignore")]
     otlp_exporter: Arc<opentelemetry_otlp::SpanExporter>,
@@ -109,9 +106,6 @@ impl ApolloOtlpExporter {
         );
 
         Ok(Self {
-            endpoint: endpoint.clone(),
-            batch_config: batch_config.clone(),
-            apollo_key: apollo_key.to_string(),
             instrumentation_scope: InstrumentationScope::builder(GLOBAL_TRACER_NAME)
                 .with_version(format!(
                     "{}@{}",
