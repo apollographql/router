@@ -13,9 +13,6 @@ use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 
 /// Wrapper that modifies metric export errors to include exporter name.
-///
-/// This wrapper only handles error prefixing. For cardinality overflow detection,
-/// use [`OverflowMetricExporter`](super::overflow::OverflowMetricExporter).
 pub(crate) struct NamedMetricExporter<T> {
     name: &'static str,
     inner: T,
