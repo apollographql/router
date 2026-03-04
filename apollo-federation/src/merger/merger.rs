@@ -2316,6 +2316,18 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         }
     }
 
+    /// Returns true if this @link imports any directive that is composed via @join__directive.
+    /// Used to decide which link directives to persist in the supergraph. Matches JS logic that
+    /// persists links for specs whose directives use join (directivesUsingJoinDirective).
+    fn link_imports_directive_using_join(link: &Link) -> bool {
+        link.url.identity == Identity::federation_identity()
+            && link.imports.iter().any(|i| {
+                FEDERATION_DIRECTIVES_COMPOSED_VIA_JOIN
+                    .iter()
+                    .any(|n| n == &i.element)
+            })
+    }
+
     /// This method gets called at various points during the merge to allow subgraph directive
     /// applications to be reflected (unapplied) in the supergraph, using the
     /// @join__directive(graphs, name, args) directive.
@@ -2365,8 +2377,13 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         should_include_as_join_directive =
                             self.should_use_join_directive_for_url(&link.url);
 
-                        if should_include_as_join_directive
-                            && SPEC_REGISTRY.get_definition(&link.url).is_some()
+                        // Persist link when the spec uses @join__directive: either the link URL is
+                        // in join_directive_identities (e.g. connect) or the link imports a
+                        // directive that uses join (e.g. federation with @cacheTag). Matches JS
+                        // directivesUsingJoinDirective / joinDirectiveFeatureDefinitionsByIdentity.
+                        if (should_include_as_join_directive
+                            && self.join_directive_identities.contains(&link.url.identity))
+                            || Self::link_imports_directive_using_join(&link)
                         {
                             links_to_persist.push((link.url.clone(), directive.as_ref().clone()));
                         }
