@@ -71,6 +71,8 @@ telemetry:
 You can also have [conditions](/router/configuration/telemetry/instrumentation/conditions) on custom attributes using [selectors](/router/configuration/telemetry/instrumentation/selectors). You can only have conditions on a selector at the same execution level.
 Example you can't have a condition on `response_header` if you want to set an attribute from `request_header`.
 
+Conditions and the `static` selector are supported for the `router`, `supergraph`, `subgraph`, and `connector` services. They are **not** supported for `http_client` span attributes. See [`http_client` span attributes](#http_client-span-attributes) for details.
+
 ```yaml title="desc.router.yaml"
 telemetry:
   instrumentation:
