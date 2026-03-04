@@ -272,6 +272,16 @@ telemetry:
 
 The `http_client` span is created for each HTTP request to a subgraph or REST service. It executes after any [Rhai scripts](/router/customizations/rhai) that modify subgraph requests, so its selectors can observe headers added by scripts.
 
+<Note>
+
+`http_client` span attributes only support the `request_header` and `response_header` selectors. Conditions and the `static` selector are **not** supported. Attempting to use them causes a router startup failure with an error similar to:
+
+```
+could not create router: failed to parse attribute '...': unknown field '...', there are no fields
+```
+
+</Note>
+
 Extract custom attributes from request and response headers using the `request_header` and `response_header` [selectors](/router/configuration/telemetry/instrumentation/selectors).
 
 ```yaml title="router.yaml"
