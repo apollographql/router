@@ -187,7 +187,7 @@ impl DatadogPipelineBuilder {
         self.unified_tags.service().unwrap_or_else(|| {
             SdkProvidedResourceDetector
                 .detect()
-                .get(&opentelemetry::Key::new(semcov::resource::SERVICE_NAME))
+                .get(&semcov::resource::SERVICE_NAME.into())
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "unknown_service".to_string())
         })
