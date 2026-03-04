@@ -713,6 +713,58 @@ mod inconsistent_imports {
         );
     }
 
+    // Regression test: SG1 uses the older spec version (v1.0) and imports a superset of
+    // directives (@foo and @bar), while SG2 uses the newer version (v1.1) but only imports a
+    // subset (@foo). @bar's definition must still be sourced from SG1 (v1.0) and included in
+    // the supergraph. Without the minor-version sort fix, passing SG2 first would cause
+    // v1.0.satisfies(v1.1) = false and mark the entire spec as wont-merge.
+    #[test]
+    fn allows_older_version_superset_and_newer_version_subset_across_subgraphs() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo", "@bar"])"#,
+            r#"
+            @composeDirective(name: "@foo")
+            @composeDirective(name: "@bar")
+            "#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!) on FIELD_DEFINITION
+            "#,
+            r#"@foo(name: "a") @bar(name: "a2")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!) on FIELD_DEFINITION
+            "#,
+            r#"@foo(name: "b")"#,
+        );
+
+        // Test both orderings: the bug only manifested when the higher-version subgraph (SG2,
+        // v1.1) was passed first, because v1.0.satisfies(v1.1) = false.
+        for (first, second, label) in [
+            (&subgraph_a, &subgraph_b, "SG1(v1.0) first"),
+            (&subgraph_b, &subgraph_a, "SG2(v1.1) first"),
+        ] {
+            let result = compose(vec![first.clone(), second.clone()])
+                .unwrap_or_else(|_| panic!("Composition should succeed ({label})"));
+            assert_eq!(result.hints().len(), 0, "Unexpected hints ({label})");
+
+            assert_has_directive_definition(
+                &result,
+                "directive @foo(name: String!) on FIELD_DEFINITION",
+            );
+            assert_has_directive_definition(
+                &result,
+                "directive @bar(name: String!) on FIELD_DEFINITION",
+            );
+        }
+    }
+
     #[test]
     fn errors_when_exported_but_not_imported() {
         let subgraph_a = generate_subgraph(
