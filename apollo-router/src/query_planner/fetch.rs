@@ -346,6 +346,40 @@ impl FetchNode {
                 None,
             )]);
 
+            // the fallback_dir is the immediate parent of the current_dir when the current_dir is
+            // wildcarded (ie, @, which is PathElement::Flatten--conceptually, flattening is the
+            // application of some behavior to every index in an array)
+            //
+            // this is important because sometimes we get paths that don't start with _entities and
+            // we're unsure where to apply any errors returned by subgraphs; previously we applied
+            // them to the wildcarded current_dir, which means we applied them to _everything_ at
+            // that path; if we were handling an array, we'd apply each error to every element of
+            // that array
+            //
+            // you can guess what that might do: if you have a query returning some large number of
+            // errors and every one of those errors is applied to every index represented in the
+            // array of data that we're building for the response, you get an explosion of errors
+            // (and downstream of this function, an explosion of memory allocations when we clone
+            // each error in FlattenNode--worse, we add them to a vec and that vec will get resized
+            // when its capacity is hit, creating a significant memory burden that almost certainly
+            // leads to an OOMKill)
+            //
+            // the moral of the story is that we need to be very careful in this function when we
+            // apply wildcards for paths
+            let fallback_dir = {
+                // if we have a wildcard (@, Flatten)
+                let pos = current_dir
+                    .0
+                    .iter()
+                    .position(|e| matches!(e, json_ext::PathElement::Flatten(_)));
+                // then take the most immediate parent
+                match pos {
+                    Some(i) => Path(current_dir.0[..i].to_vec()),
+                    // otherwise, use the current_dir
+                    None => current_dir.clone(),
+                }
+            };
+
             let mut errors: Vec<Error> = vec![];
             for mut error in response.errors {
                 // the locations correspond to the subgraph query and cannot be linked to locations
@@ -380,16 +414,16 @@ impl FetchNode {
                                 }
                             }
                             _ => {
-                                error.path = Some(current_dir.clone());
+                                error.path = Some(fallback_dir.clone());
                                 errors.push(error)
                             }
                         }
                     } else {
-                        error.path = Some(current_dir.clone());
+                        error.path = Some(fallback_dir.clone());
                         errors.push(error);
                     }
                 } else {
-                    error.path = Some(current_dir.clone());
+                    error.path = Some(fallback_dir.clone());
                     errors.push(error);
                 }
             }
