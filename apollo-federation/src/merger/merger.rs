@@ -36,10 +36,10 @@ use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
 use crate::link::Link;
-use crate::link::cache_tag_spec_definition::CACHE_TAG_VERSIONS;
+use crate::link::LinkedElement;
+use crate::link::federation_spec_definition::FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
@@ -104,6 +104,11 @@ static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
         Identity::connect_identity(),
     ]
 });
+
+/// Federation directive names that are composed via `@join__directive` in the supergraph.
+/// Matches JS `directivesUsingJoinDirective`; add future directives here.
+static FEDERATION_DIRECTIVES_COMPOSED_VIA_JOIN: &[Name] =
+    &[FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC];
 
 /// In JS, this is encoded indirectly in `isGraphQLBuiltInDirective`. Regardless of whether
 /// the end user redefined these directives, we consider them built-in for merging.
@@ -355,26 +360,6 @@ impl Merger {
         let directives_merge_info = self.collect_core_directives_to_compose()?;
 
         self.validate_and_maybe_add_specs(&directives_merge_info)?;
-
-        // If any subgraph uses @cacheTag, add the supergraph-only cacheTag spec (marker) so
-        // gateways/routers know the supergraph uses cacheTag (per federation 2.12 / JS PR #3274).
-        let any_subgraph_uses_cache_tag = self.subgraphs.iter().any(|s| {
-            s.schema()
-                .cache_tag_directive_applications()
-                .map(|apps| !apps.is_empty())
-                .unwrap_or(false)
-        });
-        if any_subgraph_uses_cache_tag
-            && let Some(cache_tag_spec) = CACHE_TAG_VERSIONS.find(&Version { major: 0, minor: 1 })
-        {
-            self.link_spec_definition.apply_feature_to_schema(
-                &mut self.merged,
-                cache_tag_spec,
-                None,
-                cache_tag_spec.purpose(),
-                None,
-            )?;
-        }
 
         // Populate the graph enum with subgraph information and store the mapping
         self.subgraph_names_to_join_spec_name = self
@@ -980,14 +965,14 @@ impl Merger {
         if self
             .link_spec_definition
             .is_spec_type_name(&self.merged, name)
-            .unwrap_or(false)
+            .is_ok_and(|b| b)
         {
             return false;
         }
         if self
             .join_spec_definition
             .is_spec_type_name(&self.merged, name)
-            .unwrap_or(false)
+            .is_ok_and(|b| b)
         {
             return false;
         }
@@ -1710,11 +1695,11 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             if self
                 .link_spec_definition
                 .is_spec_directive_name(&self.merged, &directive_name)
-                .unwrap_or(false)
+                .is_ok_and(|b| b)
                 || self
                     .join_spec_definition
                     .is_spec_directive_name(&self.merged, &directive_name)
-                    .unwrap_or(false)
+                    .is_ok_and(|b| b)
             {
                 continue;
             }
@@ -2303,6 +2288,32 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         )
     }
 
+    /// Returns true if the directive (from the given link) is one that is composed via
+    /// @join__directive in the supergraph. Matches JS directivesUsingJoinDirective.
+    fn is_directive_composed_via_join_directive(
+        linked_element: LinkedElement,
+        directive_name: &Name,
+    ) -> bool {
+        let identity = &linked_element.link.url.identity;
+        let element_name: Option<Name> = linked_element
+            .import
+            .as_ref()
+            .map(|i| i.element.clone())
+            .or_else(|| {
+                directive_name
+                    .as_str()
+                    .split_once("__")
+                    .and_then(|(_, suffix)| Name::new(suffix).ok())
+            });
+        match &element_name {
+            Some(name) => {
+                *identity == Identity::federation_identity()
+                    && FEDERATION_DIRECTIVES_COMPOSED_VIA_JOIN.iter().any(|n| n == name)
+            }
+            None => false,
+        }
+    }
+
     /// This method gets called at various points during the merge to allow subgraph directive
     /// applications to be reflected (unapplied) in the supergraph, using the
     /// @join__directive(graphs, name, args) directive.
@@ -2363,13 +2374,11 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 {
                     should_include_as_join_directive =
                         self.should_use_join_directive_for_url(&url_for_directive.link.url);
-                    // Federation directives that are composed via @join__directive in the
-                    // supergraph (e.g. @cacheTag per federation 2.12 / JS PR #3274).
                     if !should_include_as_join_directive
-                        && url_for_directive.link.url.identity == Identity::federation_identity()
-                        && let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema)
-                        && let Ok(cache_tag_def) = fed_spec.cache_tag_directive_definition(schema)
-                        && directive.name == cache_tag_def.name
+                        && Self::is_directive_composed_via_join_directive(
+                            url_for_directive,
+                            &directive.name,
+                        )
                     {
                         should_include_as_join_directive = true;
                     }

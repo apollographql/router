@@ -29,7 +29,7 @@ use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::access_control::validate_no_access_control_on_interfaces;
-use crate::schema::validators::cache_tag::validate_cache_tag_directives_into;
+use crate::schema::validators::cache_tag::validate_cache_tag_directives;
 use crate::schema::validators::context::validate_context_directives;
 use crate::schema::validators::cost::validate_cost_directives;
 use crate::schema::validators::external::validate_external_directives;
@@ -141,8 +141,7 @@ impl FederationBlueprint {
         validate_cost_directives(schema, &mut error_collector)?;
         validate_list_size_directives(schema, &mut error_collector)?;
         validate_tag_directives(schema, &mut error_collector)?;
-        // PORT_NOTE: In JS this is the cacheTag validation called from FederationBlueprint#onValidation.
-        validate_cache_tag_directives_into(schema, &mut error_collector)?;
+        validate_cache_tag_directives(schema, &mut error_collector)?;
         validate_no_access_control_on_interfaces(schema, meta, &mut error_collector)?;
 
         error_collector.into_result()

@@ -900,7 +900,6 @@ impl FederationSpecDefinition {
         )
     }
 
-    /// @cacheTag is OBJECT and FIELD_DEFINITION only (no INTERFACE), per federation 2.12 (PR #3274).
     fn cache_tag_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,

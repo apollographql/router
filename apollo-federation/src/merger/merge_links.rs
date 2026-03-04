@@ -13,10 +13,13 @@ use crate::error::FederationError;
 use crate::link::Import;
 use crate::link::Link;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::cache_tag_spec_definition::CACHE_TAG_VERSIONS;
+use crate::link::federation_spec_definition::FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
+use crate::link::spec::Version;
 use crate::link::spec_definition::SPEC_REGISTRY;
 use crate::link::spec_definition::SpecDefinition;
 use crate::merger::merge::MergedDirectiveInfo;
@@ -274,6 +277,25 @@ impl Merger {
                 supergraph_core_directives[0].spec_in_supergraph.purpose(),
                 Some(imports),
             )?;
+
+            // When any subgraph uses @cacheTag (from federation), add the supergraph-only cacheTag
+            // spec (marker) so gateways/routers know the supergraph uses cacheTag.
+            if *supergraph_core_directives[0].spec_in_supergraph.identity()
+                == Identity::federation_identity()
+                && supergraph_core_directives
+                    .iter()
+                    .any(|d| d.name_in_feature == FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC)
+                && let Some(cache_tag_spec) =
+                    CACHE_TAG_VERSIONS.find(&Version { major: 0, minor: 1 })
+            {
+                self.link_spec_definition.apply_feature_to_schema(
+                    &mut self.merged,
+                    cache_tag_spec,
+                    None,
+                    cache_tag_spec.purpose(),
+                    None,
+                )?;
+            }
 
             let Some(links_metadata) = self.merged.metadata() else {
                 bail!("Missing links metadata in supergraph schema");
