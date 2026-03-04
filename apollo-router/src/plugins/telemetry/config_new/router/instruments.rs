@@ -242,3 +242,89 @@ where
         next
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+    use futures::stream;
+    use opentelemetry::metrics::MeterProvider;
+
+    use super::*;
+    use crate::metrics::FutureMetricsExt;
+
+    fn make_recording(histogram: Histogram<f64>) -> ResponseBodySizeRecording {
+        ResponseBodySizeRecording::new(histogram, vec![])
+    }
+
+    #[tokio::test]
+    async fn recording_stream_accumulates_bytes_across_chunks() {
+        async {
+            let meter = crate::metrics::meter_provider().meter("test");
+            let histogram = meter.f64_histogram("test.body.size").init();
+
+            let chunks: Vec<Result<Bytes, BoxError>> = vec![
+                Ok(Bytes::from_static(b"hello")),
+                Ok(Bytes::from_static(b" ")),
+                Ok(Bytes::from_static(b"world")),
+            ];
+            let inner = stream::iter(chunks);
+            let mut stream = ResponseBodySizeRecordingStream::new(inner, make_recording(histogram));
+
+            let mut collected = Vec::new();
+            while let Some(item) = stream.next().await {
+                collected.push(item.unwrap());
+            }
+            assert_eq!(collected.len(), 3);
+
+            assert_eq!(stream.recording.byte_count.load(Ordering::Relaxed), 11);
+            drop(stream);
+
+            assert_histogram_sum!("test.body.size", 11);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn recording_stream_records_zero_for_empty_stream() {
+        async {
+            let meter = crate::metrics::meter_provider().meter("test");
+            let histogram = meter.f64_histogram("test.body.size").init();
+
+            let chunks: Vec<Result<Bytes, BoxError>> = vec![];
+            let inner = stream::iter(chunks);
+            let stream = ResponseBodySizeRecordingStream::new(inner, make_recording(histogram));
+
+            let collected: Vec<_> = stream.collect().await;
+            assert!(collected.is_empty());
+
+            assert_histogram_sum!("test.body.size", 0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn recording_stream_skips_error_chunks_in_byte_count() {
+        async {
+            let meter = crate::metrics::meter_provider().meter("test");
+            let histogram = meter.f64_histogram("test.body.size").init();
+
+            let chunks: Vec<Result<Bytes, BoxError>> = vec![
+                Ok(Bytes::from_static(b"abc")),
+                Err("simulated error".into()),
+                Ok(Bytes::from_static(b"de")),
+            ];
+            let inner = stream::iter(chunks);
+            let mut stream = ResponseBodySizeRecordingStream::new(inner, make_recording(histogram));
+
+            while stream.next().await.is_some() {}
+            assert_eq!(stream.recording.byte_count.load(Ordering::Relaxed), 5);
+            drop(stream);
+
+            assert_histogram_sum!("test.body.size", 5);
+        }
+        .with_metrics()
+        .await;
+    }
+}
