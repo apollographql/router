@@ -33,6 +33,7 @@ use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
 use futures::Stream;
 use futures::future::join_all;
+use parking_lot::RwLock;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
 use tower::BoxError;
@@ -126,7 +127,7 @@ where
 //   is cloned frequently throughout the router, and we don't want to close the connections
 //   when each clone is dropped, only when the last instance is dropped.
 struct DropSafeRedisPool {
-    pool: Arc<RedisPool>,
+    pool: Arc<RwLock<Option<RedisPool>>>,
     caller: &'static str,
     heartbeat_abort_handle: AbortHandle,
     // Metrics collector handles its own abort and spawns a background task for gauge updates
@@ -143,8 +144,8 @@ impl DropSafeRedisPool {
 impl Deref for DropSafeRedisPool {
     type Target = RedisPool;
 
-    fn deref(&self) -> &Self::Target {
-        &self.pool
+    fn deref(&self) -> &Option<Self::Target> {
+        &self.pool.read()
     }
 }
 
