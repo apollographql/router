@@ -1706,7 +1706,7 @@ fn value_to_f64(value: &opentelemetry::Value) -> Option<f64> {
         opentelemetry::Value::String(s) => s.as_str().parse::<f64>().ok(),
         opentelemetry::Value::Bool(_) => None,
         opentelemetry::Value::Array(_) => None,
-        _ => None, // Handle future variants
+        _ => unreachable!("unexpected opentelemetry::Value variant"),
     }
 }
 
