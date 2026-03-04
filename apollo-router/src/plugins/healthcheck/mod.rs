@@ -627,6 +627,10 @@ mod test {
     // Verifies that the rejection counter is correctly reset between sampling windows,
     // allowing the router to go unready, recover, and go unready again in a second cycle.
     // This directly validates the swap(0, ...) atomic reset in the ticker loop.
+    //
+    // Uses unready=5s so that the DOWN checks always fall well within the recovery window,
+    // avoiding a race condition on slow CI environments (ARM, Windows) where a 2s wait could
+    // land right at the boundary of a 2s recovery and produce a non-deterministic result.
     #[tokio::test]
     async fn test_health_check_multiple_unready_cycles() {
         let router_addr = "127.0.0.1:8088";
@@ -634,7 +638,7 @@ mod test {
 
         let (axum_router_opt, pipeline_svc_opt, _test_harness) = get_axum_router(
             listen_addr,
-            include_str!("testdata/allowed_ten_short_recovery.router.yaml"),
+            include_str!("testdata/allowed_ten_five_second_recovery.router.yaml"),
             StatusCode::GATEWAY_TIMEOUT,
         )
         .await;
@@ -647,6 +651,7 @@ mod test {
         for _ in 0..20 {
             let _ = pipeline_svc.call_default().await.unwrap();
         }
+        // Wait for sampling tick (1s) + buffer; recovery takes 5s so we are safely inside it
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         let response = svc
@@ -663,8 +668,8 @@ mod test {
         )
         .await;
 
-        // Wait for recovery
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        // Wait for recovery (unready=5s + 1s buffer)
+        tokio::time::sleep(Duration::from_secs(6)).await;
 
         let response = svc
             .ready()
@@ -679,6 +684,7 @@ mod test {
         for _ in 0..20 {
             let _ = pipeline_svc.call_default().await.unwrap();
         }
+        // Wait for sampling tick (1s) + buffer; recovery takes 5s so we are safely inside it
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         let response = svc
