@@ -27,12 +27,8 @@ use strum::Display;
 use strum::EnumCount;
 use strum::EnumIter;
 
+use super::NoopInstrumentProvider;
 use crate::metrics::filter::FilterMeterProvider;
-
-/// Noop InstrumentProvider - all methods use the default trait implementations
-/// which return noop instruments.
-struct NoopInstrumentProvider;
-impl InstrumentProvider for NoopInstrumentProvider {}
 
 // This meter provider enables us to combine multiple meter providers. The reasons we need this are:
 // 1. Prometheus meters are special. To dispose a meter is to dispose the entire registry. This means we need to make a best effort to keep them around.

@@ -18,10 +18,7 @@ use opentelemetry::metrics::UpDownCounter;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use regex::Regex;
 
-/// Noop InstrumentProvider - all methods use the default trait implementations
-/// which return noop instruments.
-struct NoopInstrumentProvider;
-impl InstrumentProvider for NoopInstrumentProvider {}
+use super::NoopInstrumentProvider;
 
 /// Wrapper for different meter provider types
 #[derive(Clone)]
