@@ -1461,7 +1461,7 @@ impl Rhai {
         global_variables.insert("APOLLO_OPERATION_ID".into(), APOLLO_OPERATION_ID.into());
         global_variables.insert(
             "APOLLO_PERSISTED_QUERY_ID_KEY".into(),
-            PERSISTED_QUERY_ID_KEY.into(),
+            PERSISTED_QUERY_ID.into(),
         );
         // Demand Control Context Keys
         global_variables.insert(
