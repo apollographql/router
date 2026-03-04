@@ -138,10 +138,12 @@ fn validate_args_on_field(
     for err in format.expressions().filter_map(|expr| {
         expr.expression.if_named_else_path(
             |_named| {
-                Some(SingleFederationError::CacheTagInvalidFormat {
-                    message: format!("\"{}\"", expr.expression),
-                }
-                .into())
+                Some(
+                    SingleFederationError::CacheTagInvalidFormat {
+                        message: format!("\"{}\"", expr.expression),
+                    }
+                    .into(),
+                )
             },
             |path| match path.variable_reference::<String>() {
                 Some(var_ref) => {
@@ -214,11 +216,10 @@ fn validate_args_selection(
             let next_fields = type_def
                 .fields(schema.schema())?
                 .map(|field_pos| {
-                    let field_def = field_pos.get(schema.schema()).map_err(FederationError::from)?;
-                    Ok::<_, FederationError>((
-                        field_pos.field_name().clone(),
-                        &field_def.ty,
-                    ))
+                    let field_def = field_pos
+                        .get(schema.schema())
+                        .map_err(FederationError::from)?;
+                    Ok::<_, FederationError>((field_pos.field_name().clone(), &field_def.ty))
                 })
                 .collect::<Result<IndexMap<_, _>, _>>()?;
             validate_args_selection(schema, &next_fields, sel)?;
@@ -709,9 +710,7 @@ mod tests {
         "#;
         assert_eq!(
             build_for_errors(SCHEMA),
-            vec![
-                "cacheTag applied on types can only reference arguments in format using $key"
-            ]
+            vec!["cacheTag applied on types can only reference arguments in format using $key"]
         );
     }
 

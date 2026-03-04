@@ -2308,7 +2308,9 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         match &element_name {
             Some(name) => {
                 *identity == Identity::federation_identity()
-                    && FEDERATION_DIRECTIVES_COMPOSED_VIA_JOIN.iter().any(|n| n == name)
+                    && FEDERATION_DIRECTIVES_COMPOSED_VIA_JOIN
+                        .iter()
+                        .any(|n| n == name)
             }
             None => false,
         }

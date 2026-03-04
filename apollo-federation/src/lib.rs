@@ -328,6 +328,7 @@ mod test_supergraph {
     use pretty_assertions::assert_str_eq;
 
     use super::*;
+    use crate::subgraph::SubgraphError;
     use crate::subgraph::typestate;
 
     #[test]
@@ -361,7 +362,11 @@ mod test_supergraph {
     }
 
     #[track_caller]
-    fn build_and_validate(name: &str, url: &str, sdl: &str) -> Result<typestate::Subgraph<typestate::Expanded>, crate::subgraph::SubgraphError> {
+    fn build_and_validate(
+        name: &str,
+        url: &str,
+        sdl: &str,
+    ) -> Result<typestate::Subgraph<typestate::Expanded>, SubgraphError> {
         typestate::Subgraph::parse(name, url, sdl)?.expand_links()
     }
 
@@ -427,7 +432,9 @@ mod test_supergraph {
         let err = res.unwrap_err();
         let errors: Vec<String> = err.to_composition_errors().map(|e| e.to_string()).collect();
         assert!(
-            errors.iter().any(|m| m.contains("cacheTag") && m.contains("$key")),
+            errors
+                .iter()
+                .any(|m| m.contains("cacheTag") && m.contains("$key")),
             "expected cache tag validation error, got: {:?}",
             errors
         );
