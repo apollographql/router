@@ -970,6 +970,133 @@ In subgraph "Users", the description is:
             "supergraph should use description from Orders subgraph"
         );
     }
+
+    #[test]
+    fn hints_on_inconsistent_description_for_merged_type_three_subgraphs_determinism() {
+        // Three subgraphs define type Product with different descriptions (each count 1).
+        // The chosen description must be from the subgraph whose name is lexicographically first.
+        let catalog_subgraph = ServiceDefinition {
+            name: "Catalog",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Product in the catalog"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let inventory_subgraph = ServiceDefinition {
+            name: "Inventory",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Inventory product entity"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let reviews_subgraph = ServiceDefinition {
+            name: "Reviews",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Product for reviews"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let result =
+            compose_as_fed2_subgraphs(&[catalog_subgraph, inventory_subgraph, reviews_subgraph])
+                .unwrap();
+
+        // Lexicographically "Catalog" < "Inventory" < "Reviews", so supergraph uses Catalog's description.
+        let api_schema = result
+            .to_api_schema(Default::default())
+            .expect("api schema");
+        let product_type = api_schema
+            .schema()
+            .types
+            .get("Product")
+            .expect("Product type in schema");
+        let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
+        assert_eq!(
+            desc.trim(),
+            "Product in the catalog",
+            "supergraph should use description from Catalog subgraph (lexicographically first)"
+        );
+    }
+
+    #[test]
+    fn hints_on_inconsistent_description_for_merged_type_three_subgraphs_order_independent() {
+        // Same as above but pass subgraphs in different order. Result must still be "Catalog" description.
+        let catalog_subgraph = ServiceDefinition {
+            name: "Catalog",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Product in the catalog"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let inventory_subgraph = ServiceDefinition {
+            name: "Inventory",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Inventory product entity"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let reviews_subgraph = ServiceDefinition {
+            name: "Reviews",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Product for reviews"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        // Different input order; determinism should still choose Catalog.
+        let result =
+            compose_as_fed2_subgraphs(&[reviews_subgraph, catalog_subgraph, inventory_subgraph])
+                .unwrap();
+
+        let api_schema = result
+            .to_api_schema(Default::default())
+            .expect("api schema");
+        let product_type = api_schema
+            .schema()
+            .types
+            .get("Product")
+            .expect("Product type in schema");
+        let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
+        assert_eq!(
+            desc.trim(),
+            "Product in the catalog",
+            "supergraph description must be deterministic regardless of subgraph order"
+        );
+    }
 }
 
 mod override_directive_hints {

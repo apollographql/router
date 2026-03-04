@@ -2191,96 +2191,93 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         }
     }
 
-    pub(in crate::merger) fn merge_description<T>(
-        &mut self,
+    pub(in crate::merger) fn merge_description<'a, T>(
+        &'a mut self,
         sources: &Sources<T>,
         dest: &T,
     ) -> Result<(), FederationError>
     where
         T: HasDescription + Display,
     {
-        let mut descriptions: IndexMap<String, (usize, String)> = Default::default();
+        let mut descriptions: IndexMap<String, (usize, &'a str)> = Default::default();
         for (idx, source) in sources.iter() {
             let desc = source
                 .as_ref()
                 .and_then(|s| s.description(self.subgraphs[*idx].schema()))
-                .map(|d| d.trim().to_string())
-                .unwrap_or_default();
+                .map(|d| d.trim())
+                .unwrap_or("");
             if desc.is_empty() {
                 continue;
             }
             descriptions
-                .entry(desc)
+                .entry(desc.to_string())
                 .and_modify(|(count, _)| *count += 1)
-                .or_insert_with(|| (1, self.names[*idx].clone()));
+                .or_insert_with(|| (1, self.names[*idx].as_str()));
         }
         // we don't want to raise a hint if a description is ""
         descriptions.shift_remove("");
 
         if !descriptions.is_empty() {
-            if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
-                dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
-            } else {
-                // Find the description with the highest count
-                let max_count = descriptions
-                    .values()
-                    .map(|(count, _)| count)
-                    .max()
-                    .copied()
-                    .unwrap_or(0);
-                if let Some((description, _)) = descriptions
-                    .iter()
-                    .filter(|(_, (count, _))| *count == max_count)
-                    .min_by_key(|(_, (_, subgraph_name))| subgraph_name)
-                {
-                    dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
-                }
-                // TODO: Currently showing full descriptions in the hint
-                // messages, which is probably fine in some cases. However this
-                // might get less helpful if the description appears to differ
-                // by a very small amount (a space, a single character typo) and
-                // even more so the bigger the description is, and we could
-                // improve the experience here. For instance, we could print the
-                // supergraph description but then show other descriptions as
-                // diffs from that (using, say,
-                // https://www.npmjs.com/package/diff). And we could even switch
-                // between diff/non-diff modes based on the levenshtein
-                // distances between the description we found. That said, we
-                // should decide if we want to bother here: maybe we can leave
-                // it to studio so handle a better experience (as it can more UX
-                // wise).
-                let name = if T::is_schema_definition() {
-                    "The schema definition".to_string()
+            let (chosen_description, single) =
+                if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
+                    (Some(description.clone()), true)
                 } else {
-                    format!("Element \"{dest}\"")
+                    let chosen = descriptions.iter().max_by(|(_, a), (_, b)| {
+                        a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1).reverse())
+                    });
+                    (chosen.map(|(description, _)| description.clone()), false)
                 };
-                self.error_reporter.report_mismatch_hint::<T, T>(
-                    HintCode::InconsistentDescription,
-                    format!("{name} has inconsistent descriptions across subgraphs. "),
-                    dest,
-                    sources,
-                    |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
-                    |elem, idx| {
-                        elem.description(self.subgraphs[idx].schema())
-                            .map(|desc| desc.to_string())
-                    },
-                    |desc, subgraphs| {
-                        format!(
-                            "The supergraph will use description (from {}):\n{}",
-                            subgraphs.unwrap_or_else(|| "undefined".to_string()),
-                            Self::description_string(desc, "  ")
-                        )
-                    },
-                    |desc, subgraphs| {
-                        format!(
-                            "\nIn {}, the description is:\n{}",
-                            subgraphs,
-                            Self::description_string(desc, "  ")
-                        )
-                    },
-                    false,
-                    true,
-                );
+            drop(descriptions);
+            if let Some(chosen_description) = chosen_description {
+                dest.set_description(&mut self.merged, Some(Node::new_str(&chosen_description)))?;
+                if !single {
+                    // TODO: Currently showing full descriptions in the hint
+                    // messages, which is probably fine in some cases. However this
+                    // might get less helpful if the description appears to differ
+                    // by a very small amount (a space, a single character typo) and
+                    // even more so the bigger the description is, and we could
+                    // improve the experience here. For instance, we could print the
+                    // supergraph description but then show other descriptions as
+                    // diffs from that (using, say,
+                    // https://www.npmjs.com/package/diff). And we could even switch
+                    // between diff/non-diff modes based on the levenshtein
+                    // distances between the description we found. That said, we
+                    // should decide if we want to bother here: maybe we can leave
+                    // it to studio so handle a better experience (as it can more UX
+                    // wise).
+                    let name = if T::is_schema_definition() {
+                        "The schema definition".to_string()
+                    } else {
+                        format!("Element \"{dest}\"")
+                    };
+                    self.error_reporter.report_mismatch_hint::<T, T>(
+                        HintCode::InconsistentDescription,
+                        format!("{name} has inconsistent descriptions across subgraphs. "),
+                        dest,
+                        sources,
+                        |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
+                        |elem, idx| {
+                            elem.description(self.subgraphs[idx].schema())
+                                .map(|desc| desc.to_string())
+                        },
+                        |desc, subgraphs| {
+                            format!(
+                                "The supergraph will use description (from {}):\n{}",
+                                subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                                Self::description_string(desc, "  ")
+                            )
+                        },
+                        |desc, subgraphs| {
+                            format!(
+                                "\nIn {}, the description is:\n{}",
+                                subgraphs,
+                                Self::description_string(desc, "  ")
+                            )
+                        },
+                        false,
+                        true,
+                    );
+                }
             }
         }
         Ok(())
