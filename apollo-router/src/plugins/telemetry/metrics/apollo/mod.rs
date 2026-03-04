@@ -30,7 +30,8 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::error_handler::NamedMetricExporter;
+use crate::plugins::telemetry::metrics::NamedMetricExporter;
+use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
@@ -184,8 +185,13 @@ impl Config {
                 builder.build()?
             }
         };
-        let named_exporter = NamedMetricExporter::new(exporter, "apollo");
-        let named_realtime_exporter = NamedMetricExporter::new(realtime_exporter, "apollo");
+        // Wrap with overflow detection, then error prefixing
+        let named_exporter =
+            NamedMetricExporter::new(OverflowMetricExporter::new_push(exporter), "apollo");
+        let named_realtime_exporter = NamedMetricExporter::new(
+            OverflowMetricExporter::new_push(realtime_exporter),
+            "apollo",
+        );
 
         let default_reader = PeriodicReader::builder(named_exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
