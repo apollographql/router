@@ -341,54 +341,26 @@ mod test {
             .iter()
             .flat_map(|m| m.scope_metrics())
             .flat_map(|m| m.metrics())
-            .map(|m| m.name().to_string())
+            .map(|m| m.name())
             .collect();
 
         // Matches allow
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.test")
-        );
+        assert!(metric_names.contains(&"apollo.router.operations.test"));
 
-        assert!(metric_names.iter().any(|n| n == "apollo.router.operations"));
+        assert!(metric_names.contains(&"apollo.router.operations"));
 
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.graphos.cloud.test")
-        );
+        assert!(metric_names.contains(&"apollo.graphos.cloud.test"));
 
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.router.lifecycle.api_schema")
-        );
+        assert!(metric_names.contains(&"apollo.router.lifecycle.api_schema"));
 
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.connectors")
-        );
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.router.schema.connectors")
-        );
+        assert!(metric_names.contains(&"apollo.router.operations.connectors"));
+        assert!(metric_names.contains(&"apollo.router.schema.connectors"));
 
         // Mismatches allow
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.unknown.test")
-        );
+        assert!(!metric_names.contains(&"apollo.router.unknown.test"));
 
         // Matches deny
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.error")
-        );
+        assert!(!metric_names.contains(&"apollo.router.operations.error"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -461,31 +433,15 @@ mod test {
             .iter()
             .flat_map(|m| m.scope_metrics())
             .flat_map(|m| m.metrics())
-            .map(|m| m.name().to_string())
+            .map(|m| m.name())
             .collect();
 
-        assert!(!metric_names.iter().any(|n| n == "apollo.router.config"));
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.config.test")
-        );
-        assert!(!metric_names.iter().any(|n| n == "apollo.router.entities"));
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.entities.test")
-        );
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.connectors")
-        );
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.schema.connectors")
-        );
+        assert!(!metric_names.contains(&"apollo.router.config"));
+        assert!(!metric_names.contains(&"apollo.router.config.test"));
+        assert!(!metric_names.contains(&"apollo.router.entities"));
+        assert!(!metric_names.contains(&"apollo.router.entities.test"));
+        assert!(!metric_names.contains(&"apollo.router.operations.connectors"));
+        assert!(!metric_names.contains(&"apollo.router.schema.connectors"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -512,20 +468,12 @@ mod test {
             .iter()
             .flat_map(|m| m.scope_metrics())
             .flat_map(|m| m.metrics())
-            .map(|m| m.name().to_string())
+            .map(|m| m.name())
             .collect();
         // Matches
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.error")
-        );
+        assert!(metric_names.contains(&"apollo.router.operations.error"));
 
         // Mismatches
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.mismatch")
-        );
+        assert!(!metric_names.contains(&"apollo.router.operations.mismatch"));
     }
 }
