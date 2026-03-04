@@ -47,21 +47,14 @@ fn default_buckets() -> Vec<f64> {
     ]
 }
 
-/// Generate exponential histogram buckets.
-///
-/// Creates `count` buckets where each bucket boundary is `start * factor^i` for i in 0..count.
-/// This matches the behavior of prometheus::exponential_buckets.
-fn exponential_buckets(start: f64, factor: f64, count: usize) -> Vec<f64> {
-    (0..count).map(|i| start * factor.powi(i as i32)).collect()
-}
-
 /// Exponential buckets for Apollo realtime metrics.
 ///
 /// This aggregation uses the Apollo histogram format where a duration, x, in μs is
 /// counted in the bucket of index max(0, min(ceil(ln(x)/ln(1.1)), 383)).
 /// Returns buckets from ~1.4ms to ~5min.
 fn realtime_buckets() -> Vec<f64> {
-    exponential_buckets(0.001399084909, 1.1, 129)
+    prometheus::exponential_buckets(0.001399084909, 1.1, 129)
+        .expect("failed to generate exponential buckets")
 }
 
 impl MetricsConfigurator for Config {
