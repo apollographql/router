@@ -393,13 +393,13 @@ mod tests {
 
     #[test]
     fn no_overflow_when_attribute_is_false() {
-        let attrs = vec![KeyValue::new(OTEL_METRIC_OVERFLOW_KEY, false)];
+        let attrs = [KeyValue::new(OTEL_METRIC_OVERFLOW_KEY, false)];
         assert!(!has_overflow_attribute(attrs.iter()));
     }
 
     #[test]
     fn no_overflow_when_attribute_is_wrong_type() {
-        let attrs = vec![KeyValue::new(
+        let attrs = [KeyValue::new(
             OTEL_METRIC_OVERFLOW_KEY,
             Value::String("true".into()),
         )];
