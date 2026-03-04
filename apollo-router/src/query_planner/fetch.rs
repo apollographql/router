@@ -332,6 +332,14 @@ impl FetchNode {
         }
     }
 
+    /// Maps a subgraph's response into what can be merged in the overall supergraph response. It
+    /// does this by making sure both the data and errors from a subgraph's response can be plugged
+    /// into the right slots for the supergraph response, and it does that by a bit of path
+    /// handling and manipulation
+    ///
+    /// Importantly, it makes a decision about entity-less errors. When we have such an error, it's
+    /// unclear where it should be applied so we apply them to the most immediate parent of the
+    /// current_dir
     #[instrument(skip_all, level = "debug", name = "response_insert")]
     pub(crate) fn response_at_path<'a>(
         &'a self,
