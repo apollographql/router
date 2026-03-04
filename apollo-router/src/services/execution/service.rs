@@ -726,7 +726,7 @@ mod tests {
     }
 
     fn dummy_field_type() -> FieldType {
-        FieldType(schema::Type::Named(Name::new_unchecked("String".into())))
+        FieldType(schema::Type::Named(Name::new_unchecked("String")))
     }
 
     fn field(name: &str, sub: Option<Vec<Selection>>) -> Selection {
