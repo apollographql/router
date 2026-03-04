@@ -147,14 +147,6 @@ impl<T: PushMetricExporter> PushMetricExporter for NamedMetricExporter<T> {
     }
 }
 
-impl<T> NamedMetricExporter<T> {
-    /// Backward-compatible constructor for push exporters
-    #[allow(dead_code)]
-    pub(crate) fn new(inner: T, name: &'static str) -> Self {
-        Self::new_push(inner, name)
-    }
-}
-
 /// Implementation for pull-based readers (Prometheus)
 impl<T: MetricReader> MetricReader for NamedMetricExporter<T> {
     fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
