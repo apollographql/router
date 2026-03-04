@@ -68,7 +68,7 @@ pub(crate) mod test {
             } else {
                 let parsed_log: Vec<Value> = log
                     .lines()
-                    .filter_map(|line| {
+                    .map(|line| {
                         let mut line: serde_json::Value = serde_json::from_str(line).unwrap();
                         let fields = line
                             .as_object_mut()
@@ -83,7 +83,7 @@ pub(crate) mod test {
                         line.as_object_mut()
                             .unwrap()
                             .insert("message".to_string(), message);
-                        Some(line)
+                        line
                     })
                     .collect();
                 serde_json::json!(parsed_log)
