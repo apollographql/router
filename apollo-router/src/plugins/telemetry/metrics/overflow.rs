@@ -10,7 +10,6 @@ use std::sync::Weak;
 use std::time::Duration;
 
 use opentelemetry::Value;
-use opentelemetry::metrics::MeterProvider;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::Pipeline;
@@ -21,8 +20,6 @@ use opentelemetry_sdk::metrics::data::MetricData;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::reader::MetricReader;
-
-use crate::metrics::meter_provider;
 
 const OTEL_METRIC_OVERFLOW_KEY: &str = "otel.metric.overflow";
 const CARDINALITY_OVERFLOW_METRIC: &str = "apollo.router.telemetry.metrics.cardinality_overflow";
@@ -126,17 +123,15 @@ fn report_cardinality_overflow(metrics: &ResourceMetrics) {
                 continue;
             }
             if has_overflow_data_point(metric) {
-                let meter = meter_provider().meter("apollo/router");
-                let counter = meter
-                    .u64_counter(CARDINALITY_OVERFLOW_METRIC)
-                    .with_description("Counts metrics that have exceeded their cardinality limit")
-                    .build();
-                counter.add(
+                u64_counter_with_unit!(
+                    "apollo.router.telemetry.metrics.cardinality_overflow",
+                    "Counts metrics that have exceeded their cardinality limit",
+                    "count",
                     1,
-                    &[opentelemetry::KeyValue::new(
+                    [opentelemetry::KeyValue::new(
                         "metric.name",
                         metric.name().to_string(),
-                    )],
+                    )]
                 );
             }
         }
