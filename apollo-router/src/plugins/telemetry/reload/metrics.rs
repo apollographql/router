@@ -209,13 +209,15 @@ impl<'a> MetricsBuilder<'a> {
                 return None;
             }
             if instrument.kind() == InstrumentKind::Histogram {
-                Stream::builder()
-                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: boundaries.clone(),
-                        record_min_max: true,
-                    })
-                    .build()
-                    .ok()
+                Some(
+                    Stream::builder()
+                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                            boundaries: boundaries.clone(),
+                            record_min_max: true,
+                        })
+                        .build()
+                        .expect("Failed to create stream for default histogram bucket view"),
+                )
             } else {
                 None
             }

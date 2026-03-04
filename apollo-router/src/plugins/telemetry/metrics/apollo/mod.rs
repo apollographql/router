@@ -228,13 +228,15 @@ impl Config {
         let apollo_buckets = default_buckets();
         builder.with_view(MeterProviderType::Apollo, move |instrument: &Instrument| {
             if instrument.kind() == InstrumentKind::Histogram {
-                Stream::builder()
-                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: apollo_buckets.clone(),
-                        record_min_max: true,
-                    })
-                    .build()
-                    .ok()
+                Some(
+                    Stream::builder()
+                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                            boundaries: apollo_buckets.clone(),
+                            record_min_max: true,
+                        })
+                        .build()
+                        .expect("Failed to create stream for apollo metrics"),
+                )
             } else {
                 None
             }
@@ -250,13 +252,15 @@ impl Config {
             MeterProviderType::ApolloRealtime,
             move |instrument: &Instrument| {
                 if instrument.kind() == InstrumentKind::Histogram {
-                    Stream::builder()
-                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                            boundaries: realtime_histogram_buckets.clone(),
-                            record_min_max: true,
-                        })
-                        .build()
-                        .ok()
+                    Some(
+                        Stream::builder()
+                            .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                                boundaries: realtime_histogram_buckets.clone(),
+                                record_min_max: true,
+                            })
+                            .build()
+                            .expect("Failed to create stream for apollo realtime metrics"),
+                    )
                 } else {
                     None
                 }
