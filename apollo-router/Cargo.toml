@@ -101,6 +101,9 @@ fred = { version = "10.1.0", features = [
     "serde-json",
     "replicas"
 ] }
+# We don't use this dependency, but the "all" feature is required for fred's
+# "tcp-user-timeouts" feature to work: https://github.com/aembke/fred.rs/pull/369
+socket2 = { version = "0.5", features = ["all"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"
 hex.workspace = true
@@ -222,7 +225,6 @@ serde_json.workspace = true
 serde_regex = { version = "1.1.0" }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
-socket2 = { version = "0.5", features = ["all"] }
 static_assertions = "1.1.0"
 strum = { version = "0.27.0", features = ["derive"] }
 sys-info = "0.9.1"
