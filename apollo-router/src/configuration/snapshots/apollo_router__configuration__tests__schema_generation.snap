@@ -8534,7 +8534,7 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
-          "description": "The size hint of the body.\nThis is used as the Content-Length header has not yet been populated\nwhen selectors are evaluated",
+          "description": "The size hint of the body.\nIf compression is enabled, this will be the uncompressed size.\nIts not possible to get the compressed size in selector as the\nbody has not yet been compressed at the time on_response is called.",
           "properties": {
             "response_size_hint": {
               "description": "Extract response size hint in bytes",
