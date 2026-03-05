@@ -18,6 +18,7 @@
 //! - Dynamic attribute layer for request-scoped attributes
 //! - OpenTelemetry layer for distributed tracing
 //! - Format layer for structured logging (JSON or text based on TTY)
+//! - Rate limiting layer for OpenTelemetry internal log messages
 //! - Environment filter for log level control
 //!
 //! ## Reloading
@@ -55,6 +56,7 @@ use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
 use crate::plugins::telemetry::otel::PreSampledTracer;
+use crate::plugins::telemetry::reload::rate_limit::RateLimitLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
 
@@ -108,6 +110,8 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
                 .with(WarnLegacyMetricsLayer)
+                // Rate limit OpenTelemetry internal log messages to avoid log spam when things go wrong
+                .with(RateLimitLayer::for_opentelemetry())
                 .with(EnvFilter::try_new(log_level)?)
                 .try_init()?;
 
