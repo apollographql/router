@@ -13,7 +13,7 @@ Both attributes are added dynamically to router spans only when relevant (i.e., 
 
 A single counter is emitted when a subscription terminates:
 
-- **`apollo.router.operations.subscriptions.terminated`** (attributes: `reason`, `subgraph.service.name`, `client.name`): Incremented each time a subscription ends. The `reason` attribute indicates why (possible values: `server_close`, `subgraph_error`, `client_disconnect`, `heartbeat_delivery_failed`, `schema_reload`, `config_reload`). The `subgraph.service.name` and `client.name` attributes are populated if available.
+- **`apollo.router.operations.subscriptions.terminated`** (attributes: `reason`, `subgraph.service.name`, `client.name`): Incremented once per client connection when a subscription stream ends. The `reason` attribute indicates why (possible values: `server_close`, `subgraph_error`, `client_disconnect`, `heartbeat_delivery_failed`, `schema_reload`, `config_reload`). The `subgraph.service.name` and `client.name` attributes are populated if available. When deduplication is enabled, a single subgraph WebSocket closure produces one `terminated` event per deduplicated client sharing that connection (each with `reason=server_close`).
 
 The following counter is emitted when a subscription request is rejected:
 
@@ -21,6 +21,6 @@ The following counter is emitted when a subscription request is rejected:
 
 The following counter is emitted when a subgraph ends a subscription:
 
-- **`apollo.router.operations.subscriptions.ended.subgraph`** (attributes: `subgraph.service.name`): The subgraph closed the WebSocket connection, ending the subscription stream for all deduplicated clients.
+- **`apollo.router.operations.subscriptions.ended.subgraph`** (attributes: `subgraph.service.name`): Incremented once per subgraph WebSocket closure. Each deduplicated client sharing that connection will also emit a corresponding `apollo.router.operations.subscriptions.terminated` event with `reason=server_close`.
 
 By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8858
