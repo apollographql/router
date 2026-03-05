@@ -2,8 +2,6 @@ use std::collections::HashSet;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::Value;
@@ -13,6 +11,8 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use either::Either;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 use itertools::Itertools;
 use tracing::instrument;
 
@@ -1105,7 +1105,9 @@ pub fn upgrade_subgraphs_if_necessary(
 }
 
 /// Returns a set of object type names that have @interfaceObject applied in the given subgraph.
-fn interface_object_types(subgraph: &Subgraph<Expanded>) -> Result<IndexSet<Name>, FederationError> {
+fn interface_object_types(
+    subgraph: &Subgraph<Expanded>,
+) -> Result<IndexSet<Name>, FederationError> {
     let mut result = IndexSet::new();
     if let Some(interface_object_def) = subgraph
         .metadata()
@@ -1506,7 +1508,10 @@ mod tests {
         .expect("expands schema");
 
         // s2 is also a fed2 subgraph with @key on interface A.
-        let s2 = Subgraph::parse("s2", "", r#"
+        let s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/federation/v2.3", import: [ "@key"])
 
@@ -1519,7 +1524,8 @@ mod tests {
                 id: String
                 y: Int
             }
-        "#)
+        "#,
+        )
         .expect("parses schema")
         .expand_links()
         .expect("expands schema");
@@ -1600,7 +1606,10 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let s2 = Subgraph::parse("s2", "", r#"
+        let s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
             interface A @key(fields: "id") {
                 id: String
             }
@@ -1616,13 +1625,13 @@ mod tests {
             type XB implements B @key(fields: "id") {
                 id: String
             }
-        "#)
+        "#,
+        )
         .expect("parses schema")
         .expand_links()
         .expect("expands schema");
 
-        let errors =
-            inner_upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
+        let errors = inner_upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
         assert_eq!(errors.len(), 2);
         assert!(
             errors.iter().any(|e| e.to_string().contains(r#"type "A""#)),
@@ -1668,7 +1677,10 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let s3 = Subgraph::parse("s3", "", r#"
+        let s3 = Subgraph::parse(
+            "s3",
+            "",
+            r#"
             interface A @key(fields: "id") {
                 id: String
             }
@@ -1676,7 +1688,8 @@ mod tests {
             type X implements A @key(fields: "id") {
                 id: String
             }
-        "#)
+        "#,
+        )
         .expect("parses schema")
         .expand_links()
         .expect("expands schema");
@@ -1711,7 +1724,10 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let s2 = Subgraph::parse("s2", "", r#"
+        let s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
             interface A @key(fields: "id") {
                 id: String
             }
@@ -1719,12 +1735,16 @@ mod tests {
             type X implements A @key(fields: "id") {
                 id: String
             }
-        "#)
+        "#,
+        )
         .expect("parses schema")
         .expand_links()
         .expect("expands schema");
 
-        let s3 = Subgraph::parse("s3", "", r#"
+        let s3 = Subgraph::parse(
+            "s3",
+            "",
+            r#"
             interface A @key(fields: "id") {
                 id: String
             }
@@ -1732,7 +1752,8 @@ mod tests {
             type Y implements A @key(fields: "id") {
                 id: String
             }
-        "#)
+        "#,
+        )
         .expect("parses schema")
         .expand_links()
         .expect("expands schema");
