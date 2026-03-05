@@ -15,6 +15,7 @@ use tower_service::Service;
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::services::router;
@@ -81,7 +82,9 @@ impl MetricsConfigurator for Config {
             .with_registry(registry.clone())
             .build()?;
 
-        builder.with_reader(MeterProviderType::Public, exporter);
+        // Wrap with overflow detection to increment cardinality_overflow counter on pull
+        let reader = OverflowMetricExporter::new_pull(exporter);
+        builder.with_reader(MeterProviderType::Public, reader);
         builder.with_prometheus_registry(registry);
 
         Ok(())
