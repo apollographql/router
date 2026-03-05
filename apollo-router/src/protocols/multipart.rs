@@ -332,8 +332,9 @@ impl Stream for Multipart {
                                 && response.extensions.is_empty()
                             {
                                 self.is_terminated = true;
-                                self.end_reason =
-                                    Some(EndReason::Subscription(SubscriptionEndReason::ServerClose));
+                                self.end_reason = Some(EndReason::Subscription(
+                                    SubscriptionEndReason::ServerClose,
+                                ));
                                 return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
                             }
 
