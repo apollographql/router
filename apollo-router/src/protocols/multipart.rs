@@ -67,9 +67,9 @@ pub(crate) struct Multipart {
     /// The end reason determined during polling, written to the span on Drop.
     /// If `None` when dropped and `!is_terminated`, an abnormal reason is inferred.
     end_reason: Option<EndReason>,
-    /// The subgraph name for subscription streams, used in server_close and subgraph_error metrics.
+    /// The subgraph name for subscription streams, used in terminated metric attribution.
     subgraph_name: Option<String>,
-    /// The client name for subscription streams, used in client_disconnect and heartbeat_delivery_failed metrics.
+    /// The client name for subscription streams, used in terminated metric attribution.
     client_name: Option<String>,
 }
 
@@ -103,13 +103,13 @@ impl Multipart {
         }
     }
 
-    /// Set the subgraph name for server_close and subgraph_error metrics attribution.
+    /// Set the subgraph name for terminated metric attribution.
     pub(crate) fn with_subgraph_name(mut self, name: Option<String>) -> Self {
         self.subgraph_name = name;
         self
     }
 
-    /// Set the client name for client_disconnect and heartbeat_delivery_failed metrics attribution.
+    /// Set the client name for terminated metric attribution.
     pub(crate) fn with_client_name(mut self, name: Option<String>) -> Self {
         self.client_name = name;
         self
@@ -246,68 +246,23 @@ impl Drop for Multipart {
 }
 
 impl Multipart {
-    /// Emit a counter metric for subscription termination events that require observability.
+    /// Emit a counter metric for subscription termination events.
     fn emit_subscription_termination_metric(&self, reason: SubscriptionEndReason) {
-        match reason {
-            SubscriptionEndReason::ServerClose => {
-                let subgraph_name = self
-                    .subgraph_name
-                    .as_deref()
-                    .unwrap_or("unknown")
-                    .to_string();
-                u64_counter!(
-                    "apollo.router.operations.subscriptions.server_close",
-                    "Subscription terminated because the subgraph gracefully closed the stream",
-                    1,
-                    subgraph.service.name = subgraph_name
-                );
-            }
-            SubscriptionEndReason::SubgraphError => {
-                let subgraph_name = self
-                    .subgraph_name
-                    .as_deref()
-                    .unwrap_or("unknown")
-                    .to_string();
-                u64_counter!(
-                    "apollo.router.operations.subscriptions.subgraph_error",
-                    "Subscription terminated unexpectedly due to a subgraph error (e.g. process killed, network drop)",
-                    1,
-                    subgraph.service.name = subgraph_name
-                );
-            }
-            SubscriptionEndReason::ClientDisconnect => {
-                let client_name = self.client_name.as_deref().unwrap_or("unknown").to_string();
-                u64_counter!(
-                    "apollo.router.operations.subscriptions.client_disconnect",
-                    "Subscription terminated because the client disconnected",
-                    1,
-                    apollo.client.name = client_name
-                );
-            }
-            SubscriptionEndReason::HeartbeatDeliveryFailed => {
-                let client_name = self.client_name.as_deref().unwrap_or("unknown").to_string();
-                u64_counter!(
-                    "apollo.router.operations.subscriptions.heartbeat_delivery_failed",
-                    "Subscription terminated because a heartbeat could not be delivered to the client",
-                    1,
-                    apollo.client.name = client_name
-                );
-            }
-            SubscriptionEndReason::SchemaReload => {
-                u64_counter!(
-                    "apollo.router.operations.subscriptions.schema_reload",
-                    "Subscription terminated because the router schema was updated",
-                    1
-                );
-            }
-            SubscriptionEndReason::ConfigReload => {
-                u64_counter!(
-                    "apollo.router.operations.subscriptions.config_reload",
-                    "Subscription terminated because the router configuration was updated",
-                    1
-                );
-            }
-        }
+        let reason_str = reason.as_str().to_string();
+        let subgraph_name = self
+            .subgraph_name
+            .as_deref()
+            .unwrap_or_default()
+            .to_string();
+        let client_name = self.client_name.as_deref().unwrap_or_default().to_string();
+        u64_counter!(
+            "apollo.router.operations.subscriptions.terminated",
+            "Subscription terminated",
+            1,
+            reason = reason_str,
+            subgraph.service.name = subgraph_name,
+            client.name = client_name
+        );
     }
 }
 
@@ -377,9 +332,8 @@ impl Stream for Multipart {
                                 && response.extensions.is_empty()
                             {
                                 self.is_terminated = true;
-                                self.end_reason = Some(EndReason::Subscription(
-                                    SubscriptionEndReason::ServerClose,
-                                ));
+                                self.end_reason =
+                                    Some(EndReason::Subscription(SubscriptionEndReason::ServerClose));
                                 return Poll::Ready(Some(Ok(Bytes::from_static(&b"--\r\n"[..]))));
                             }
 
@@ -563,9 +517,11 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.server_close",
+                "apollo.router.operations.subscriptions.terminated",
                 1,
-                "subgraph.service.name" = "test_subgraph"
+                "reason" = "server_close",
+                "subgraph.service.name" = "test_subgraph",
+                "client.name" = ""
             );
         }
         .with_metrics()
@@ -610,9 +566,11 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.server_close",
+                "apollo.router.operations.subscriptions.terminated",
                 1,
-                "subgraph.service.name" = "test_subgraph"
+                "reason" = "server_close",
+                "subgraph.service.name" = "test_subgraph",
+                "client.name" = ""
             );
         }
         .with_metrics()
@@ -649,9 +607,11 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.server_close",
+                "apollo.router.operations.subscriptions.terminated",
                 1,
-                "subgraph.service.name" = "test_subgraph"
+                "reason" = "server_close",
+                "subgraph.service.name" = "test_subgraph",
+                "client.name" = ""
             );
         }
         .with_metrics()
@@ -707,9 +667,11 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.heartbeat_delivery_failed",
+                "apollo.router.operations.subscriptions.terminated",
                 1,
-                "apollo.client.name" = "test_client"
+                "reason" = "heartbeat_delivery_failed",
+                "subgraph.service.name" = "",
+                "client.name" = "test_client"
             );
         }
         .with_metrics()
@@ -756,9 +718,11 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.client_disconnect",
+                "apollo.router.operations.subscriptions.terminated",
                 1,
-                "apollo.client.name" = "test_client"
+                "reason" = "client_disconnect",
+                "subgraph.service.name" = "",
+                "client.name" = "test_client"
             );
         }
         .with_metrics()
@@ -804,7 +768,13 @@ mod tests {
                 ))
             );
 
-            assert_counter!("apollo.router.operations.subscriptions.schema_reload", 1);
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated",
+                1,
+                "reason" = "schema_reload",
+                "subgraph.service.name" = "",
+                "client.name" = ""
+            );
         }
         .with_metrics()
         .await;
@@ -850,7 +820,13 @@ mod tests {
                 ))
             );
 
-            assert_counter!("apollo.router.operations.subscriptions.config_reload", 1);
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated",
+                1,
+                "reason" = "config_reload",
+                "subgraph.service.name" = "",
+                "client.name" = ""
+            );
         }
         .with_metrics()
         .await;
@@ -1222,9 +1198,11 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.subgraph_error",
+                "apollo.router.operations.subscriptions.terminated",
                 1,
-                "subgraph.service.name" = "flaky_subgraph"
+                "reason" = "subgraph_error",
+                "subgraph.service.name" = "flaky_subgraph",
+                "client.name" = ""
             );
         }
         .with_metrics()
@@ -1271,9 +1249,11 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.subgraph_error",
+                "apollo.router.operations.subscriptions.terminated",
                 1,
-                "subgraph.service.name" = "error_subgraph"
+                "reason" = "subgraph_error",
+                "subgraph.service.name" = "error_subgraph",
+                "client.name" = ""
             );
         }
         .with_metrics()
@@ -1283,7 +1263,7 @@ mod tests {
     #[tokio::test]
     async fn test_server_close_metric_defaults_to_unknown_subgraph() {
         async {
-            // Test: server_close metric uses "unknown" when no subgraph name is set
+            // Test: terminated metric uses "" when no subgraph name is set
             let (_guard, _layer) = setup_tracing();
             let span = tracing::info_span!("test_span");
             let _span_guard = span.enter();
@@ -1298,9 +1278,11 @@ mod tests {
             drop(span);
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.server_close",
+                "apollo.router.operations.subscriptions.terminated",
                 1,
-                "subgraph.service.name" = "unknown"
+                "reason" = "server_close",
+                "subgraph.service.name" = "",
+                "client.name" = ""
             );
         }
         .with_metrics()
@@ -1310,7 +1292,7 @@ mod tests {
     #[tokio::test]
     async fn test_client_disconnect_metric_defaults_to_unknown_client() {
         async {
-            // Test: client_disconnect metric uses "unknown" when no client name is set
+            // Test: terminated metric uses "" when no client name is set
             let (_guard, _layer) = setup_tracing();
             let span = tracing::info_span!("test_span");
             let _span_guard = span.enter();
@@ -1331,9 +1313,11 @@ mod tests {
             drop(span);
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.client_disconnect",
+                "apollo.router.operations.subscriptions.terminated",
                 1,
-                "apollo.client.name" = "unknown"
+                "reason" = "client_disconnect",
+                "subgraph.service.name" = "",
+                "client.name" = ""
             );
         }
         .with_metrics()

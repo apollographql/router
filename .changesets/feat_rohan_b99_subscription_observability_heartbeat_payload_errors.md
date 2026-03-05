@@ -11,14 +11,9 @@ Both attributes are added dynamically to router spans only when relevant (i.e., 
 
 **Metrics:**
 
-The following counters are emitted when a subscription terminates:
+A single counter is emitted when a subscription terminates:
 
-- **`apollo.router.operations.subscriptions.server_close`** (attributes: `subgraph.service.name`): The subgraph gracefully closed the stream.
-- **`apollo.router.operations.subscriptions.subgraph_error`** (attributes: `subgraph.service.name`): The subscription terminated unexpectedly due to a subgraph error (e.g. process killed, network drop).
-- **`apollo.router.operations.subscriptions.client_disconnect`** (attributes: `apollo.client.name`): The client disconnected before the subscription ended.
-- **`apollo.router.operations.subscriptions.heartbeat_delivery_failed`** (attributes: `apollo.client.name`): A heartbeat could not be delivered to the client.
-- **`apollo.router.operations.subscriptions.schema_reload`**: The subscription was terminated because the router schema was updated.
-- **`apollo.router.operations.subscriptions.config_reload`**: The subscription was terminated because the router configuration was updated.
+- **`apollo.router.operations.subscriptions.terminated`** (attributes: `reason`, `subgraph.service.name`, `client.name`): Incremented each time a subscription ends. The `reason` attribute indicates why (possible values: `server_close`, `subgraph_error`, `client_disconnect`, `heartbeat_delivery_failed`, `schema_reload`, `config_reload`). The `subgraph.service.name` and `client.name` attributes are populated if available.
 
 The following counters are emitted when a subscription request is rejected:
 
