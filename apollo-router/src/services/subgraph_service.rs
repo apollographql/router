@@ -2338,8 +2338,9 @@ mod tests {
             assert!(err_str.starts_with("Websocket fetch failed from 'test': cannot connect websocket to subgraph: WebSocket upgrade failed. Status: 400 Bad Request; Headers: [\"content-type\": \"text/plain; charset=utf-8\"; \"content-length\": \"11\";"));
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.rejected.subgraph",
+                "apollo.router.operations.subscriptions.rejected",
                 1,
+                "reason" = "subgraph",
                 "subgraph.service.name" = "test"
             );
         }

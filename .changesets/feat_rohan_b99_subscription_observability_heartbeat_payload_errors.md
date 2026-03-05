@@ -15,10 +15,9 @@ A single counter is emitted when a subscription terminates:
 
 - **`apollo.router.operations.subscriptions.terminated`** (attributes: `reason`, `subgraph.service.name`, `client.name`): Incremented each time a subscription ends. The `reason` attribute indicates why (possible values: `server_close`, `subgraph_error`, `client_disconnect`, `heartbeat_delivery_failed`, `schema_reload`, `config_reload`). The `subgraph.service.name` and `client.name` attributes are populated if available.
 
-The following counters are emitted when a subscription request is rejected:
+The following counter is emitted when a subscription request is rejected:
 
-- **`apollo.router.operations.subscriptions.rejected.limit`**: A new subscription request was rejected because the router has reached its `max_opened_subscriptions` limit.
-- **`apollo.router.operations.subscriptions.rejected.subgraph`** (attributes: `subgraph.service.name`): A subscription request was rejected because the subgraph WebSocket connection failed (e.g. connection refused, protocol error, or failed subscription handshake).
+- **`apollo.router.operations.subscriptions.rejected`** (attributes: `reason`, `subgraph.service.name`): A subscription request was rejected. The `reason` attribute indicates why: `max_opened_subscriptions_limit_reached` (the router has reached its `max_opened_subscriptions` limit) or `subgraph` (the subgraph WebSocket connection failed, e.g. connection refused, protocol error, or failed subscription handshake). The `subgraph.service.name` attribute is populated when available, and defaults to an empty string otherwise.
 
 The following counter is emitted when a subgraph ends a subscription:
 

@@ -646,9 +646,10 @@ async fn subgraph_request(
 
 fn increment_subgraph_rejected_counter(service_name: &str) {
     u64_counter!(
-        "apollo.router.operations.subscriptions.rejected.subgraph",
-        "Number of subscription requests rejected by the subgraph",
+        "apollo.router.operations.subscriptions.rejected",
+        "Number of subscription requests rejected",
         1,
+        reason = "subgraph",
         subgraph.service.name = service_name.to_string()
     );
 }

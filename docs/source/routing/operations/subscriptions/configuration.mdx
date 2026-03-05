@@ -455,7 +455,7 @@ subscription:
 
 If a client attempts to execute a subscription on Apollo Router when it's already at `max_opened_subscriptions`, the router rejects the client's request with an error.
 
-Each rejected subscription increments the `apollo.router.operations.subscriptions.rejected.limit` counter metric, which you can use to monitor how often clients hit the limit.
+Each rejected subscription increments the `apollo.router.operations.subscriptions.rejected` counter metric (with `reason` attribute set to `max_opened_subscriptions_limit_reached`), which you can use to monitor how often clients hit the limit.
 
 ### Tracking causes of ending subscriptions
 
@@ -476,7 +476,7 @@ The `apollo.subscription.end_reason` attribute can have these values:
 
 Apollo Router emits counter metrics to track when subgraph WebSocket connections fail or close:
 
-- `apollo.router.operations.subscriptions.rejected.subgraph` (attribute: `subgraph.service.name`): Incremented when a subscription request is rejected because the subgraph WebSocket connection failed, such as a connection refusal, protocol error, or failed subscription handshake.
+- `apollo.router.operations.subscriptions.rejected` (attributes: `reason`, `subgraph.service.name`): Incremented when a subscription request is rejected. The `reason` attribute indicates why (`max_opened_subscriptions_limit_reached` or `subgraph`), and `subgraph.service.name` identifies the subgraph when applicable.
 - `apollo.router.operations.subscriptions.ended.subgraph` (attribute: `subgraph.service.name`): Incremented when a subgraph closes its WebSocket connection, ending the subscription stream for all deduplicated clients listening on that connection.
 
 #### Example: Monitor subscription health
@@ -485,5 +485,5 @@ Use the `apollo.subscription.end_reason` attribute and subgraph counter metrics 
 
 - Frequent `subgraph_error` values might indicate issues with your subgraph subscription sources closing unexpectedly.
 - The `server_close` value indicates healthy subscription lifecycles where the subgraph properly signals closure.
-- A high rate of `apollo.router.operations.subscriptions.rejected.subgraph` for a specific subgraph may indicate connectivity issues or misconfigured WebSocket endpoints.
+- A high rate of `apollo.router.operations.subscriptions.rejected` with `reason=subgraph` for a specific subgraph may indicate connectivity issues or misconfigured WebSocket endpoints.
 - The `apollo.router.operations.subscriptions.ended.subgraph` metric helps track how often subgraphs are closing connections, which can inform capacity planning and subgraph stability monitoring.

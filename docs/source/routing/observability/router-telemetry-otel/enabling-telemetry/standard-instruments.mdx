@@ -242,9 +242,9 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
 
 - `apollo.router.opened.subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated). This metric contains `graphql.operation.name` label to know exactly which subscription is still opened.
 - `apollo.router.skipped.event.count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
-- `apollo.router.operations.subscriptions.rejected.limit` - Number of subscription requests rejected because Apollo Router has reached its [`max_opened_subscriptions`](/router/executing-operations/subscription-support/#limiting-the-number-of-client-connections) limit.
-- `apollo.router.operations.subscriptions.rejected.subgraph` - Number of subscription requests rejected because the subgraph WebSocket connection failed (for example, connection refused, protocol error, or failed subscription handshake). Attributes:
-  - `subgraph.service.name`: The name of the subgraph that rejected the connection.
+- `apollo.router.operations.subscriptions.rejected` - Number of subscription requests rejected. Attributes:
+  - `reason`: The reason the subscription was rejected (`max_opened_subscriptions_limit_reached` or `subgraph`).
+  - `subgraph.service.name`: The name of the subgraph that rejected the connection (empty string if not applicable).
 - `apollo.router.operations.subscriptions.ended.subgraph` - Number of subscriptions ended by the subgraph closing the WebSocket connection, ending the subscription stream for all deduplicated clients listening on that connection. Attributes:
   - `subgraph.service.name`: The name of the subgraph that closed the connection.
 
