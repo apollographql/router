@@ -279,7 +279,8 @@ mod test {
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+    use opentelemetry_sdk::runtime;
 
     use crate::metrics::filter::FilterMeterProvider;
 
@@ -288,7 +289,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");
@@ -368,7 +369,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");
@@ -398,7 +399,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::public(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");
@@ -449,7 +450,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo_realtime(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");

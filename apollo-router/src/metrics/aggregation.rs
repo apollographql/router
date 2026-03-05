@@ -714,14 +714,15 @@ mod test {
     use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::PeriodicReader;
     use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::data::AggregatedMetrics;
     use opentelemetry_sdk::metrics::data::MetricData;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
+    use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
     use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::runtime;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
@@ -981,10 +982,13 @@ mod test {
         meter_provider: &AggregateMeterProvider,
         shutdown: &Arc<AtomicBool>,
     ) -> PeriodicReader<TestExporter> {
-        PeriodicReader::builder(TestExporter {
-            meter_provider: meter_provider.clone(),
-            shutdown: shutdown.clone(),
-        })
+        PeriodicReader::builder(
+            TestExporter {
+                meter_provider: meter_provider.clone(),
+                shutdown: shutdown.clone(),
+            },
+            runtime::Tokio,
+        )
         .with_interval(Duration::from_millis(10))
         .build()
     }
