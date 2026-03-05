@@ -41,11 +41,11 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
-use crate::plugins::telemetry::error_handler::NamedSpanExporter;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::tracing::NamedSpanExporter;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::datadog_exporter;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
@@ -190,7 +190,7 @@ impl TracingConfigurator for Config {
                 &span.name
             })
             .with(
-                &resource.get(&Key::new(SERVICE_NAME)),
+                &resource.get(&SERVICE_NAME.into()),
                 |builder, service_name| {
                     // Datadog exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
@@ -202,7 +202,7 @@ impl TracingConfigurator for Config {
             })
             .with_version(
                 resource
-                    .get(&Key::new(SERVICE_VERSION))
+                    .get(&SERVICE_VERSION.into())
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )

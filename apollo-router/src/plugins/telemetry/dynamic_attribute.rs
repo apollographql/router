@@ -22,6 +22,7 @@ use super::formatters::APOLLO_PRIVATE_PREFIX;
 use super::otel::OtelData;
 use super::otel::layer::str_to_span_kind;
 use super::otel::layer::str_to_status;
+use super::utils::upsert_attribute;
 use crate::plugins::telemetry::reload::otel::IsSampled;
 
 #[derive(Debug, Default)]
@@ -300,15 +301,6 @@ impl EventDynAttribute for ::tracing::Span {
                 ::tracing::error!("no Registry, this is a bug");
             }
         });
-    }
-}
-
-/// Replace existing attribute with same key, or add new one
-fn upsert_attribute(attributes: &mut Vec<KeyValue>, kv: KeyValue) {
-    if let Some(existing) = attributes.iter_mut().find(|a| a.key == kv.key) {
-        *existing = kv;
-    } else {
-        attributes.push(kv);
     }
 }
 

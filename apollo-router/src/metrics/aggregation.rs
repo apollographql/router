@@ -26,13 +26,10 @@ use parking_lot::Mutex;
 use strum::Display;
 use strum::EnumCount;
 use strum::EnumIter;
+use strum::IntoEnumIterator;
 
+use super::NoopInstrumentProvider;
 use crate::metrics::filter::FilterMeterProvider;
-
-/// Noop InstrumentProvider - all methods use the default trait implementations
-/// which return noop instruments.
-struct NoopInstrumentProvider;
-impl InstrumentProvider for NoopInstrumentProvider {}
 
 // This meter provider enables us to combine multiple meter providers. The reasons we need this are:
 // 1. Prometheus meters are special. To dispose a meter is to dispose the entire registry. This means we need to make a best effort to keep them around.
@@ -159,7 +156,7 @@ impl AggregateMeterProvider {
         // Clear observable registrations for this provider so new gauges will re-register
         inner
             .observable_registries
-            .clear_provider(meter_provider_type as usize);
+            .clear_provider(meter_provider_type);
 
         //Now update the meter provider
         let mut swap = (meter_provider, HashMap::new());
@@ -351,7 +348,7 @@ type ObservableCallback<T> = Arc<dyn Fn(&dyn AsyncInstrument<T>) + Send + Sync>;
 /// This registry provides proper lifecycle management:
 /// - Multiple callbacks can be registered per instrument_name (e.g., different caches
 ///   using the same gauge name but different attribute values)
-/// - One OTel instrument per (provider_index, instrument_name) is registered lazily
+/// - One OTel instrument per (meter_provider_type, instrument_name) is registered lazily
 /// - The consolidated callback invokes ALL registered user callbacks for that instrument
 /// - When a provider is replaced, its registrations are cleared so new gauges re-register
 struct ObservableCallbackRegistry<T: Send + Sync + 'static> {
@@ -359,8 +356,8 @@ struct ObservableCallbackRegistry<T: Send + Sync + 'static> {
     /// Multiple callbacks can exist for the same instrument name when different components
     /// (e.g., query planner cache, APQ cache) use the same gauge name with different attributes
     callbacks: Mutex<HashMap<String, Vec<ObservableCallback<T>>>>,
-    /// Tracks which (provider_index, instrument_name) pairs have been registered with OTel SDK
-    registered: Mutex<HashSet<(usize, String)>>,
+    /// Tracks which (meter_provider_type, instrument_name) pairs have been registered with OTel SDK
+    registered: Mutex<HashSet<(MeterProviderType, String)>>,
 }
 
 impl<T: Send + Sync + 'static> ObservableCallbackRegistry<T> {
@@ -393,24 +390,22 @@ impl<T: Send + Sync + 'static> ObservableCallbackRegistry<T> {
         }
     }
 
-    /// Check if an instrument has been registered with a specific provider
-    fn is_registered_for_provider(&self, provider_index: usize, instrument_name: &str) -> bool {
+    /// Register an instrument for a provider if not already registered.
+    /// Returns `true` if newly registered, `false` if already registered.
+    fn try_register_for_provider(
+        &self,
+        meter_provider_type: MeterProviderType,
+        instrument_name: String,
+    ) -> bool {
         self.registered
             .lock()
-            .contains(&(provider_index, instrument_name.to_string()))
-    }
-
-    /// Mark an instrument as registered with a specific provider
-    fn mark_registered_for_provider(&self, provider_index: usize, instrument_name: String) {
-        self.registered
-            .lock()
-            .insert((provider_index, instrument_name));
+            .insert((meter_provider_type, instrument_name))
     }
 
     /// Clear registrations for a specific provider (called when provider is replaced)
-    fn clear_provider_registrations(&self, provider_index: usize) {
+    fn clear_provider_registrations(&self, meter_provider_type: MeterProviderType) {
         let mut registered = self.registered.lock();
-        registered.retain(|(idx, _)| *idx != provider_index);
+        registered.retain(|(provider_type, _)| *provider_type != meter_provider_type);
     }
 
     /// Clear all callbacks (called during reload when services will be recreated)
@@ -452,19 +447,22 @@ impl SharedObservableRegistries {
     ///
     /// This is safe because when any provider is replaced, the entire service graph is
     /// recreated, so all gauges will be recreated and add fresh callbacks.
-    fn clear_provider(&self, provider_index: usize) {
+    fn clear_provider(&self, meter_provider_type: MeterProviderType) {
         // Clear registrations for this provider so new gauges will register with it
-        self.u64_gauge.clear_provider_registrations(provider_index);
-        self.i64_gauge.clear_provider_registrations(provider_index);
-        self.f64_gauge.clear_provider_registrations(provider_index);
+        self.u64_gauge
+            .clear_provider_registrations(meter_provider_type);
+        self.i64_gauge
+            .clear_provider_registrations(meter_provider_type);
+        self.f64_gauge
+            .clear_provider_registrations(meter_provider_type);
         self.u64_counter
-            .clear_provider_registrations(provider_index);
+            .clear_provider_registrations(meter_provider_type);
         self.f64_counter
-            .clear_provider_registrations(provider_index);
+            .clear_provider_registrations(meter_provider_type);
         self.i64_up_down_counter
-            .clear_provider_registrations(provider_index);
+            .clear_provider_registrations(meter_provider_type);
         self.f64_up_down_counter
-            .clear_provider_registrations(provider_index);
+            .clear_provider_registrations(meter_provider_type);
 
         // Clear all callbacks - services will be recreated and re-register them
         self.u64_gauge.clear_callbacks();
@@ -564,11 +562,11 @@ macro_rules! aggregate_observable_gauge_fn {
             }
 
             // Register with each delegate meter that hasn't been registered yet
-            for (provider_idx, meter) in self.meters.iter().enumerate() {
-                if self
+            for (meter, meter_provider_type) in self.meters.iter().zip(MeterProviderType::iter()) {
+                if !self
                     .registries
                     .$registry
-                    .is_registered_for_provider(provider_idx, &gauge_name)
+                    .try_register_for_provider(meter_provider_type, gauge_name.clone())
                 {
                     continue;
                 }
@@ -589,10 +587,6 @@ macro_rules! aggregate_observable_gauge_fn {
                 // Build registers the callback with OTel SDK
                 // The returned ObservableGauge is PhantomData, no need to store it
                 let _ = b.build();
-
-                self.registries
-                    .$registry
-                    .mark_registered_for_provider(provider_idx, gauge_name.clone());
             }
 
             ObservableGauge::new()
@@ -625,11 +619,11 @@ macro_rules! aggregate_observable_counter_fn {
             }
 
             // Register with each delegate meter that hasn't been registered yet
-            for (provider_idx, meter) in self.meters.iter().enumerate() {
-                if self
+            for (meter, meter_provider_type) in self.meters.iter().zip(MeterProviderType::iter()) {
+                if !self
                     .registries
                     .$registry
-                    .is_registered_for_provider(provider_idx, &instrument_name)
+                    .try_register_for_provider(meter_provider_type, instrument_name.clone())
                 {
                     continue;
                 }
@@ -650,10 +644,6 @@ macro_rules! aggregate_observable_counter_fn {
                 // Build registers the callback with OTel SDK
                 // The returned type is PhantomData, no need to store it
                 let _ = b.build();
-
-                self.registries
-                    .$registry
-                    .mark_registered_for_provider(provider_idx, instrument_name.clone());
             }
 
             $wrapper::new()

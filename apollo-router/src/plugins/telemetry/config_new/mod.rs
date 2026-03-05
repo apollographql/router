@@ -250,7 +250,7 @@ impl From<opentelemetry::Value> for AttributeValue {
             opentelemetry::Value::F64(v) => AttributeValue::F64(v),
             opentelemetry::Value::String(v) => AttributeValue::String(v.into()),
             opentelemetry::Value::Array(v) => AttributeValue::Array(v.into()),
-            _ => unreachable!("Invalid opentelemetry::Value"),
+            _ => unreachable!("unexpected opentelemetry::Value variant"),
         }
     }
 }

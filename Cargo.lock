@@ -436,7 +436,6 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "tonic",
- "tonic-build",
  "tonic-prost-build",
  "tower",
  "tower-http",
