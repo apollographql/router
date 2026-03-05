@@ -48,7 +48,7 @@ expression: body.extensions
                 "title": "Cache-Control header documentation"
               }
             ],
-            "message": "The subgraph returned a Cache-Control header containing no-store, so the data was not cached"
+            "message": "Either the request or the subgraph response contained a Cache-Control header with no-store, so the data was not cached"
           },
           {
             "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",
@@ -129,7 +129,7 @@ expression: body.extensions
                 "title": "Cache-Control header documentation"
               }
             ],
-            "message": "The subgraph returned a Cache-Control header containing no-store, so the data was not cached"
+            "message": "Either the request or the subgraph response contained a Cache-Control header with no-store, so the data was not cached"
           },
           {
             "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",

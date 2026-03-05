@@ -80,7 +80,7 @@ impl CacheKeyContext {
             self.warnings.push(Warning {
                 code: "CACHE_CONTROL_NO_STORE".to_string(),
                 links: vec![cache_control_mdn_docs.clone()],
-                message: "The subgraph returned a Cache-Control header containing no-store, so the data was not cached".to_string(),
+                message: "Either the request or the subgraph response contained a Cache-Control header with no-store, so the data was not cached".to_string(),
             });
         }
         // Not cached because private in cache-control header and no private_id found in the context
