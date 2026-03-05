@@ -637,76 +637,56 @@ mod test {
         }
     }
 
-    #[tokio::test]
-    async fn test_env_metrics() {
-        async {
-            let mut data = InstrumentData::default();
-            data.populate_cli_instrument();
-            let _metrics: Metrics = data.into();
-            assert_non_zero_metrics_snapshot!();
-        }
-        .with_metrics()
-        .await;
+    #[test]
+    fn test_env_metrics() {
+        let mut data = InstrumentData::default();
+        data.populate_cli_instrument();
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
     }
 
-    #[tokio::test]
-    async fn test_license_warn() {
-        async {
-            let mut data = InstrumentData::default();
-            data.populate_license_instrument(&LicenseState::LicensedWarn {
-                limits: Some(LicenseLimits::default()),
-            });
-            let _metrics: Metrics = data.into();
-            assert_non_zero_metrics_snapshot!();
-        }
-        .with_metrics()
-        .await;
+    #[test]
+    fn test_license_warn() {
+        let mut data = InstrumentData::default();
+        data.populate_license_instrument(&LicenseState::LicensedWarn {
+            limits: Some(LicenseLimits::default()),
+        });
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
     }
 
-    #[tokio::test]
-    async fn test_license_halt() {
-        async {
-            let mut data = InstrumentData::default();
-            data.populate_license_instrument(&LicenseState::LicensedHalt {
-                limits: Some(LicenseLimits::default()),
-            });
-            let _metrics: Metrics = data.into();
-            assert_non_zero_metrics_snapshot!();
-        }
-        .with_metrics()
-        .await;
+    #[test]
+    fn test_license_halt() {
+        let mut data = InstrumentData::default();
+        data.populate_license_instrument(&LicenseState::LicensedHalt {
+            limits: Some(LicenseLimits::default()),
+        });
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
     }
 
-    #[tokio::test]
-    async fn test_custom_plugin() {
-        async {
-            let mut configuration = crate::Configuration::default();
-            let mut custom_plugins = serde_json::Map::new();
-            custom_plugins.insert("name".to_string(), json!("test"));
-            configuration.plugins.plugins = Some(custom_plugins);
-            let mut data = InstrumentData::default();
-            data.populate_user_plugins_instrument(&configuration);
-            let _metrics: Metrics = data.into();
-            assert_non_zero_metrics_snapshot!();
-        }
-        .with_metrics()
-        .await;
+    #[test]
+    fn test_custom_plugin() {
+        let mut configuration = crate::Configuration::default();
+        let mut custom_plugins = serde_json::Map::new();
+        custom_plugins.insert("name".to_string(), json!("test"));
+        configuration.plugins.plugins = Some(custom_plugins);
+        let mut data = InstrumentData::default();
+        data.populate_user_plugins_instrument(&configuration);
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
     }
 
-    #[tokio::test]
-    async fn test_ignore_cloud_router_plugins() {
-        async {
-            let mut configuration = crate::Configuration::default();
-            let mut custom_plugins = serde_json::Map::new();
-            custom_plugins.insert("name".to_string(), json!("test"));
-            custom_plugins.insert("cloud_router.".to_string(), json!("test"));
-            configuration.plugins.plugins = Some(custom_plugins);
-            let mut data = InstrumentData::default();
-            data.populate_user_plugins_instrument(&configuration);
-            let _metrics: Metrics = data.into();
-            assert_non_zero_metrics_snapshot!();
-        }
-        .with_metrics()
-        .await;
+    #[test]
+    fn test_ignore_cloud_router_plugins() {
+        let mut configuration = crate::Configuration::default();
+        let mut custom_plugins = serde_json::Map::new();
+        custom_plugins.insert("name".to_string(), json!("test"));
+        custom_plugins.insert("cloud_router.".to_string(), json!("test"));
+        configuration.plugins.plugins = Some(custom_plugins);
+        let mut data = InstrumentData::default();
+        data.populate_user_plugins_instrument(&configuration);
+        let _metrics: Metrics = data.into();
+        assert_non_zero_metrics_snapshot!();
     }
 }
