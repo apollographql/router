@@ -227,7 +227,7 @@ impl TracingConfigurator for Config {
 
         let batch_processor =
             MeteredBatchSpanProcessor::builder(named_exporter, runtime::Tokio, "datadog")
-                .with_batch_config(self.batch_processor.clone())
+                .with_batch_config(self.batch_processor.clone().with_env_overrides())
                 .build()
                 .filtered();
 

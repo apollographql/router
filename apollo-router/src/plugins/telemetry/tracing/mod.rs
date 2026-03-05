@@ -151,6 +151,38 @@ fn max_concurrent_exports_default() -> usize {
     1
 }
 
+impl BatchProcessorConfig {
+    /// Apply OTEL_BSP_* environment variable overrides to this config.
+    /// This should be used for third-party exporters (OTLP, Datadog, Zipkin)
+    /// but NOT for Apollo exporters.
+    pub(crate) fn with_env_overrides(self) -> Self {
+        BatchProcessorConfig {
+            scheduled_delay: std::env::var("OTEL_BSP_SCHEDULE_DELAY")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(Duration::from_millis)
+                .unwrap_or(self.scheduled_delay),
+            max_queue_size: std::env::var("OTEL_BSP_MAX_QUEUE_SIZE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(self.max_queue_size),
+            max_export_batch_size: std::env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(self.max_export_batch_size),
+            max_export_timeout: std::env::var("OTEL_BSP_EXPORT_TIMEOUT")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(Duration::from_millis)
+                .unwrap_or(self.max_export_timeout),
+            max_concurrent_exports: std::env::var("OTEL_BSP_MAX_CONCURRENT_EXPORTS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(self.max_concurrent_exports),
+        }
+    }
+}
+
 impl From<BatchProcessorConfig> for BatchConfig {
     fn from(config: BatchProcessorConfig) -> Self {
         BatchConfigBuilder::default()
