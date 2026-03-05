@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use derivative::Derivative;
-use futures::future::BoxFuture;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Event;
@@ -252,10 +251,12 @@ impl ApolloOtlpExporter {
         }
     }
 
-    pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
-        let exporter = self.otlp_exporter.clone();
-        Box::pin(async move {
-            exporter.export(spans).await?;
+    pub(crate) fn export(
+        &self,
+        spans: Vec<SpanData>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+        async move {
+            self.otlp_exporter.export(spans).await?;
             // re-use the metric we already have in apollo_exporter but attach the protocol
             u64_counter!(
                 "apollo.router.telemetry.studio.reports",
@@ -265,7 +266,7 @@ impl ApolloOtlpExporter {
                 report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
             );
             Ok(())
-        })
+        }
     }
 
     pub(crate) fn shutdown(&mut self) -> OTelSdkResult {

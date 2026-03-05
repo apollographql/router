@@ -10,7 +10,6 @@ use std::time::SystemTimeError;
 use base64::Engine as _;
 use base64::prelude::BASE64_STANDARD;
 use derivative::Derivative;
-use futures::FutureExt;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
@@ -1268,28 +1267,28 @@ impl SpanExporter for Exporter {
         self.span_lru_size_instrument
             .update(self.spans_by_parent_id.lock().len() as u64);
 
-        if send_otlp && !otlp_trace_spans.is_empty() {
-            self.otlp_exporter
-                .as_ref()
-                .expect("expected an otel exporter")
-                .export(otlp_trace_spans.into_iter().flatten().collect())
-        } else if send_reports && !traces.is_empty() {
-            let mut report = telemetry::apollo::Report::default();
-            report += SingleReport::Traces(TracesReport { traces });
-            let exporter = self
-                .report_exporter
-                .as_ref()
-                .expect("expected an apollo exporter")
-                .clone();
-            async move {
+        async move {
+            if send_otlp && !otlp_trace_spans.is_empty() {
+                self.otlp_exporter
+                    .as_ref()
+                    .expect("expected an otel exporter")
+                    .export(otlp_trace_spans.into_iter().flatten().collect())
+                    .await
+            } else if send_reports && !traces.is_empty() {
+                let mut report = telemetry::apollo::Report::default();
+                report += SingleReport::Traces(TracesReport { traces });
+                let exporter = self
+                    .report_exporter
+                    .as_ref()
+                    .expect("expected an apollo exporter")
+                    .clone();
                 exporter
                     .submit_report(report)
                     .await
                     .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))
+            } else {
+                Ok(())
             }
-            .boxed()
-        } else {
-            async { Ok(()) }.boxed()
         }
     }
 
