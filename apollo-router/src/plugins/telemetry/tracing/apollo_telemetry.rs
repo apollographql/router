@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
-use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
 
@@ -351,7 +350,7 @@ pub(crate) struct Exporter {
     /// An externally updateable gauge for "apollo.router.exporter.span.lru.size".
     span_lru_size_instrument: LruSizeInstrument,
     #[derivative(Debug = "ignore")]
-    report_exporter: Option<Arc<ApolloExporter>>,
+    report_exporter: Option<ApolloExporter>,
     #[derivative(Debug = "ignore")]
     otlp_exporter: Option<ApolloOtlpExporter>,
     otlp_tracing_ratio: f64,
@@ -410,7 +409,7 @@ impl Exporter {
             span_cache: Mutex::new(span_cache),
             span_lru_size_instrument,
             report_exporter: if otlp_tracing_ratio < 1f64 {
-                Some(Arc::new(ApolloExporter::new(
+                Some(ApolloExporter::new(
                     endpoint,
                     &batch_processor_config.into(),
                     apollo_key,
@@ -418,7 +417,7 @@ impl Exporter {
                     schema_id,
                     router_id,
                     metrics_reference_mode,
-                )?))
+                )?)
             } else {
                 None
             },
@@ -539,12 +538,9 @@ impl SpanExporter for Exporter {
             } else if send_reports && !traces.is_empty() {
                 let mut report = telemetry::apollo::Report::default();
                 report += SingleReport::Traces(TracesReport { traces });
-                let exporter = self
-                    .report_exporter
+                self.report_exporter
                     .as_ref()
                     .expect("expected an apollo exporter")
-                    .clone();
-                exporter
                     .submit_report(report)
                     .await
                     .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))
