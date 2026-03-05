@@ -348,13 +348,13 @@ impl LightSpanData {
 /// [`Reporter`]: crate::plugins::telemetry::Reporter
 #[derive(Debug)]
 pub(crate) struct Exporter {
-    inner: Mutex<ExporterInner>,
+    inner: ExporterInner,
 }
 
 #[derive(Derivative)]
 #[derivative(Debug)]
 struct ExporterInner {
-    spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
+    spans_by_parent_id: Mutex<LruCache<SpanId, LruCache<usize, LightSpanData>>>,
     /// An externally updateable gauge for "apollo.router.exporter.span.lru.size".
     span_lru_size_instrument: LruSizeInstrument,
     #[derivative(Debug = "ignore")]
@@ -431,8 +431,8 @@ impl Exporter {
             LruSizeInstrument::new("apollo.router.exporter.span.lru.size");
 
         Ok(Self {
-            inner: Mutex::new(ExporterInner {
-                spans_by_parent_id: LruCache::new(buffer_size),
+            inner: ExporterInner {
+                spans_by_parent_id: Mutex::new(LruCache::new(buffer_size)),
                 span_lru_size_instrument,
                 report_exporter: if otlp_tracing_ratio < 1f64 {
                     Some(Arc::new(ApolloExporter::new(
@@ -481,14 +481,14 @@ impl Exporter {
                 } else {
                     None
                 },
-            }),
+            },
         })
     }
 }
 
 impl ExporterInner {
     fn extract_root_traces(
-        &mut self,
+        &self,
         span: &LightSpanData,
         child_nodes: Vec<TreeData>,
     ) -> Result<Vec<proto::reports::Trace>, Error> {
@@ -584,7 +584,7 @@ impl ExporterInner {
         Ok(results)
     }
 
-    fn extract_traces(&mut self, span: LightSpanData) -> Result<Vec<proto::reports::Trace>, Error> {
+    fn extract_traces(&self, span: LightSpanData) -> Result<Vec<proto::reports::Trace>, Error> {
         let mut results = vec![];
         for node in self.extract_data_from_spans(&span)? {
             if let TreeData::Request(trace) | TreeData::SubscriptionEvent(trace) = node {
@@ -596,9 +596,9 @@ impl ExporterInner {
 
     /// Collects the subtree for a trace by calling pop() on the LRU cache for
     /// all spans in the tree.
-    fn pop_spans_for_tree(&mut self, root_span: LightSpanData) -> Vec<LightSpanData> {
+    fn pop_spans_for_tree(&self, root_span: LightSpanData) -> Vec<LightSpanData> {
         let root_span_id = root_span.span_id;
-        let mut child_spans = match self.spans_by_parent_id.pop(&root_span_id) {
+        let mut child_spans = match self.spans_by_parent_id.lock().pop(&root_span_id) {
             Some(spans) => spans
                 .into_iter()
                 .flat_map(|(_, span)| self.pop_spans_for_tree(span))
@@ -614,12 +614,13 @@ impl ExporterInner {
     /// Iterates over all children and recursively collect the entire subtree.
     /// For a future iteration, consider using the same algorithm in `groupbytrace` processor, which
     /// groups based on trace ID instead of connecting recursively by parent ID.
-    fn group_by_trace(&mut self, span: LightSpanData) -> Vec<LightSpanData> {
+    fn group_by_trace(&self, span: LightSpanData) -> Vec<LightSpanData> {
         self.pop_spans_for_tree(span)
     }
 
-    fn extract_data_from_spans(&mut self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
-        let (mut child_nodes, errors) = match self.spans_by_parent_id.pop_entry(&span.span_id) {
+    fn extract_data_from_spans(&self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
+        let mut spans_by_parent_id = self.spans_by_parent_id.lock();
+        let (mut child_nodes, errors) = match spans_by_parent_id.pop_entry(&span.span_id) {
             Some((_, spans)) => spans
                 .into_iter()
                 .map(|(_, span)| {
@@ -1190,11 +1191,11 @@ impl SpanExporter for Exporter {
         &self,
         batch: Vec<SpanData>,
     ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        self.inner.lock().export_impl(batch)
+        self.inner.export_impl(batch)
     }
 
     fn shutdown(&mut self) -> OTelSdkResult {
-        self.inner.lock().shutdown_impl()
+        self.inner.shutdown_impl()
     }
 
     fn force_flush(&mut self) -> OTelSdkResult {
@@ -1208,7 +1209,7 @@ impl SpanExporter for Exporter {
 }
 
 impl ExporterInner {
-    fn export_impl(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+    fn export_impl(&self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
@@ -1269,13 +1270,13 @@ impl ExporterInner {
 
                 // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
                 // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
-                let len = self
-                    .spans_by_parent_id
+                let mut spans_by_parent_id = self.spans_by_parent_id.lock();
+                let len = spans_by_parent_id
                     .get_or_insert(span.parent_span_id, || {
                         LruCache::new(NonZeroUsize::new(50).unwrap())
                     })
                     .len();
-                self.spans_by_parent_id
+                spans_by_parent_id
                     .get_mut(&span.parent_span_id)
                     .expect("capacity of cache was zero")
                     .push(
@@ -1292,7 +1293,7 @@ impl ExporterInner {
         // Note this won't be correct anymore if there is any way outside of `.export()`
         // to affect the size of the cache.
         self.span_lru_size_instrument
-            .update(self.spans_by_parent_id.len() as u64);
+            .update(self.spans_by_parent_id.lock().len() as u64);
 
         if send_otlp && !otlp_trace_spans.is_empty() {
             self.otlp_exporter
