@@ -22,13 +22,13 @@ pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
 #[allow(unreachable_pub, dead_code)]
 pub(crate) mod datadog_exporter;
-pub(crate) mod metered_batch_processor;
 mod named;
 pub(crate) mod otlp;
 pub(crate) mod reload;
 pub(crate) mod zipkin;
 
 pub(crate) use named::NamedSpanExporter;
+pub(crate) use named::NamedTokioRuntime;
 
 #[derive(Debug)]
 struct ApolloFilterSpanProcessor<T: SpanProcessor> {

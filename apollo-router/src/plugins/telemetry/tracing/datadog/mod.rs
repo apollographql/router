@@ -18,9 +18,9 @@ use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanKind;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
-use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -45,10 +45,10 @@ use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
+use crate::plugins::telemetry::tracing::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::datadog_exporter;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
-use crate::plugins::telemetry::tracing::metered_batch_processor::MeteredBatchSpanProcessor;
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -226,8 +226,8 @@ impl TracingConfigurator for Config {
         let named_exporter = NamedSpanExporter::new(wrapper, "datadog");
 
         let batch_processor =
-            MeteredBatchSpanProcessor::builder(named_exporter, runtime::Tokio, "datadog")
-                .with_batch_config(self.batch_processor.clone().with_env_overrides())
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("datadog"))
+                .with_batch_config(self.batch_processor.clone().with_env_overrides().into())
                 .build()
                 .filtered();
 

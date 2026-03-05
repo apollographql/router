@@ -1,5 +1,5 @@
 //! Tracing configuration for apollo telemetry.
-use opentelemetry_sdk::runtime;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -11,8 +11,8 @@ use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::span_factory::SpanMode;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
+use crate::plugins::telemetry::tracing::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
-use crate::plugins::telemetry::tracing::metered_batch_processor::MeteredBatchSpanProcessor;
 
 impl TracingConfigurator for Config {
     fn config(conf: &Conf) -> &Self {
@@ -51,8 +51,8 @@ impl TracingConfigurator for Config {
             .build()?;
         let named_exporter = NamedSpanExporter::new(exporter, "apollo");
         builder.with_span_processor(
-            MeteredBatchSpanProcessor::builder(named_exporter, runtime::Tokio, "apollo")
-                .with_batch_config(self.tracing.batch_processor.clone())
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("apollo"))
+                .with_batch_config(self.tracing.batch_processor.clone().into())
                 .build(),
         );
         Ok(())

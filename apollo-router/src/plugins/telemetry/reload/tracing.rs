@@ -20,13 +20,8 @@
 //! context formats (W3C Trace Context, Jaeger, Zipkin, Datadog, AWS X-Ray). This allows the router
 //! to interoperate with services using different tracing systems.
 
-use std::time::Duration;
-
-use futures::Stream;
-use futures::stream::unfold;
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry_sdk::runtime::Runtime;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::trace::SpanProcessor;
 use tower::BoxError;
@@ -145,20 +140,4 @@ pub(crate) trait TracingConfigurator {
     fn config(conf: &Conf) -> &Self;
     fn is_enabled(&self) -> bool;
     fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError>;
-}
-
-/// Creates an interval stream that emits () at regular intervals.
-///
-/// Used by the metered batch span processor to trigger periodic flushes.
-pub(crate) fn to_interval_stream<T: Runtime>(
-    runtime: T,
-    interval: Duration,
-) -> impl Stream<Item = ()> {
-    unfold((), move |_| {
-        let runtime_cloned = runtime.clone();
-        async move {
-            runtime_cloned.delay(interval).await;
-            Some(((), ()))
-        }
-    })
 }
