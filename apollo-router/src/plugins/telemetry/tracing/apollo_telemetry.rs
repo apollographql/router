@@ -547,10 +547,10 @@ impl SpanExporter for Exporter {
         }
     }
 
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown_with_timeout(&mut self, timeout: std::time::Duration) -> OTelSdkResult {
         // Currently only handled in the OTLP case.
         if let Some(exporter) = &mut self.otlp_exporter {
-            exporter.shutdown()
+            exporter.shutdown_with_timeout(timeout)
         } else {
             Ok(())
         }
