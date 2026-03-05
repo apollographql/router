@@ -589,7 +589,8 @@ impl Exporter {
     /// all spans in the tree.
     fn pop_spans_for_tree(&self, root_span: LightSpanData) -> Vec<LightSpanData> {
         let root_span_id = root_span.span_id;
-        let mut child_spans = match self.spans_by_parent_id.lock().pop(&root_span_id) {
+        let child_spans = self.spans_by_parent_id.lock().pop(&root_span_id);
+        let mut child_spans = match child_spans {
             Some(spans) => spans
                 .into_iter()
                 .flat_map(|(_, span)| self.pop_spans_for_tree(span))
@@ -610,8 +611,8 @@ impl Exporter {
     }
 
     fn extract_data_from_spans(&self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
-        let mut spans_by_parent_id = self.spans_by_parent_id.lock();
-        let (mut child_nodes, errors) = match spans_by_parent_id.pop_entry(&span.span_id) {
+        let entry = self.spans_by_parent_id.lock().pop_entry(&span.span_id);
+        let (mut child_nodes, errors) = match entry {
             Some((_, spans)) => spans
                 .into_iter()
                 .map(|(_, span)| {
