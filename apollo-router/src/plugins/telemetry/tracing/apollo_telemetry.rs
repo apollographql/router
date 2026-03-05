@@ -453,10 +453,7 @@ impl Exporter {
 
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
-    fn export(
-        &self,
-        batch: Vec<SpanData>,
-    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
@@ -468,85 +465,85 @@ impl SpanExporter for Exporter {
             && rand::rng().random_range(0.0..1.0) < self.otlp_tracing_ratio;
         let send_reports = self.report_exporter.is_some() && !send_otlp;
 
-        let mut span_cache = self.span_cache.lock();
-        for span in batch {
-            if span.name == SUBSCRIPTION_EVENT_SPAN_NAME
-                || span
-                    .attributes
-                    .iter()
-                    .any(|kv| kv.key == APOLLO_PRIVATE_REQUEST)
-            {
-                let root_span: LightSpanData = LightSpanData::from_span_data(
-                    span,
-                    &self.include_attr_names,
-                    &self.include_attr_event_names,
-                );
-                if send_otlp {
-                    let grouped_trace_spans = span_cache.group_by_trace(root_span);
-                    if let Some(trace) = self
-                        .otlp_exporter
-                        .as_ref()
-                        .expect("otlp exporter required")
-                        .prepare_for_export(grouped_trace_spans)
-                    {
-                        otlp_trace_spans.push(trace);
-                    }
-                } else if send_reports {
-                    match span_cache.extract_traces(root_span) {
-                        Ok(extracted_traces) => {
-                            for mut trace in extracted_traces {
-                                let mut operation_signature = Default::default();
-                                std::mem::swap(&mut trace.signature, &mut operation_signature);
-                                if !operation_signature.is_empty() {
-                                    traces.push((operation_signature, trace));
+        {
+            let mut span_cache = self.span_cache.lock();
+            for span in batch {
+                if span.name == SUBSCRIPTION_EVENT_SPAN_NAME
+                    || span
+                        .attributes
+                        .iter()
+                        .any(|kv| kv.key == APOLLO_PRIVATE_REQUEST)
+                {
+                    let root_span: LightSpanData = LightSpanData::from_span_data(
+                        span,
+                        &self.include_attr_names,
+                        &self.include_attr_event_names,
+                    );
+                    if send_otlp {
+                        let grouped_trace_spans = span_cache.group_by_trace(root_span);
+                        if let Some(trace) = self
+                            .otlp_exporter
+                            .as_ref()
+                            .expect("otlp exporter required")
+                            .prepare_for_export(grouped_trace_spans)
+                        {
+                            otlp_trace_spans.push(trace);
+                        }
+                    } else if send_reports {
+                        match span_cache.extract_traces(root_span) {
+                            Ok(extracted_traces) => {
+                                for mut trace in extracted_traces {
+                                    let mut operation_signature = Default::default();
+                                    std::mem::swap(&mut trace.signature, &mut operation_signature);
+                                    if !operation_signature.is_empty() {
+                                        traces.push((operation_signature, trace));
+                                    }
                                 }
                             }
-                        }
-                        Err(Error::MultipleErrors(errors)) => {
-                            tracing::error!(
-                                "failed to construct trace: {}, skipping",
-                                Error::MultipleErrors(errors)
-                            );
-                        }
-                        Err(error) => {
-                            tracing::error!("failed to construct trace: {}, skipping", error);
+                            Err(Error::MultipleErrors(errors)) => {
+                                tracing::error!(
+                                    "failed to construct trace: {}, skipping",
+                                    Error::MultipleErrors(errors)
+                                );
+                            }
+                            Err(error) => {
+                                tracing::error!("failed to construct trace: {}, skipping", error);
+                            }
                         }
                     }
+                } else if span.parent_span_id != SpanId::INVALID {
+                    // Not a root span, we may need it later so stash it.
+                    span_cache.insert(LightSpanData::from_span_data(
+                        span,
+                        &self.include_attr_names,
+                        &self.include_attr_event_names,
+                    ));
                 }
-            } else if span.parent_span_id != SpanId::INVALID {
-                // Not a root span, we may need it later so stash it.
-                span_cache.insert(LightSpanData::from_span_data(
-                    span,
-                    &self.include_attr_names,
-                    &self.include_attr_event_names,
-                ));
             }
+
+            // Note this won't be correct anymore if there is any way outside of `.export()`
+            // to affect the size of the cache.
+            self.span_lru_size_instrument
+                .update(span_cache.len() as u64);
         }
 
-        // Note this won't be correct anymore if there is any way outside of `.export()`
-        // to affect the size of the cache.
-        self.span_lru_size_instrument
-            .update(span_cache.len() as u64);
-
-        async move {
-            if send_otlp && !otlp_trace_spans.is_empty() {
-                self.otlp_exporter
-                    .as_ref()
-                    .expect("expected an otel exporter")
-                    .export(otlp_trace_spans.into_iter().flatten().collect())
-                    .await
-            } else if send_reports && !traces.is_empty() {
-                let mut report = telemetry::apollo::Report::default();
-                report += SingleReport::Traces(TracesReport { traces });
-                self.report_exporter
-                    .as_ref()
-                    .expect("expected an apollo exporter")
-                    .submit_report(report)
-                    .await
-                    .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))
-            } else {
-                Ok(())
-            }
+        if send_otlp && !otlp_trace_spans.is_empty() {
+            self.otlp_exporter
+                .as_ref()
+                .expect("expected an otel exporter")
+                .export(otlp_trace_spans.into_iter().flatten().collect())
+                .await
+        } else if send_reports && !traces.is_empty() {
+            let mut report = telemetry::apollo::Report::default();
+            report += SingleReport::Traces(TracesReport { traces });
+            self.report_exporter
+                .as_ref()
+                .expect("expected an apollo exporter")
+                .submit_report(report)
+                .await
+                .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))
+        } else {
+            Ok(())
         }
     }
 

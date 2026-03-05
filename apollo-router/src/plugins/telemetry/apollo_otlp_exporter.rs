@@ -251,22 +251,17 @@ impl ApolloOtlpExporter {
 }
 
 impl SpanExporter for ApolloOtlpExporter {
-    fn export(
-        &self,
-        batch: Vec<SpanData>,
-    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        async move {
-            self.otlp_exporter.export(batch).await?;
-            // re-use the metric we already have in apollo_exporter but attach the protocol
-            u64_counter!(
-                "apollo.router.telemetry.studio.reports",
-                "The number of reports submitted to Studio by the Router",
-                1,
-                report.type = ROUTER_REPORT_TYPE_TRACES,
-                report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
-            );
-            Ok(())
-        }
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        self.otlp_exporter.export(batch).await?;
+        // re-use the metric we already have in apollo_exporter but attach the protocol
+        u64_counter!(
+            "apollo.router.telemetry.studio.reports",
+            "The number of reports submitted to Studio by the Router",
+            1,
+            report.type = ROUTER_REPORT_TYPE_TRACES,
+            report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
+        );
+        Ok(())
     }
 
     fn shutdown_with_timeout(&mut self, timeout: std::time::Duration) -> OTelSdkResult {
