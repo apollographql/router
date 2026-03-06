@@ -30,11 +30,14 @@ impl TracingConfigurator for super::super::otlp::Config {
     }
 
     fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
-        let exporter = self.build_span_exporter()?;
+        // Apply env var overrides to the config
+        let config = self.clone().with_tracing_env_overrides()?;
+
+        let exporter = config.build_span_exporter()?;
         let named_exporter = NamedSpanExporter::new(exporter, "otlp");
         let batch_span_processor =
             BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("otlp"))
-                .with_batch_config(self.batch_processor.clone().with_env_overrides().into())
+                .with_batch_config(config.batch_processor.clone().with_env_overrides().into())
                 .build()
                 .filtered();
 

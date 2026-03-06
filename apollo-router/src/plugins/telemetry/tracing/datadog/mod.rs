@@ -67,6 +67,10 @@ fn default_resource_mappings() -> HashMap<String, String> {
 const ENV_KEY: Key = Key::from_static_str("env");
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
 
+const DD_TRACE_AGENT_URL: &str = "DD_TRACE_AGENT_URL";
+const DD_AGENT_HOST: &str = "DD_AGENT_HOST";
+const DD_TRACE_AGENT_PORT: &str = "DD_TRACE_AGENT_PORT";
+
 #[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "DatadogConfig")]
@@ -118,6 +122,35 @@ fn default_true() -> bool {
     true
 }
 
+impl Config {
+    /// Apply environment variable overrides for the endpoint.
+    /// Supports `DD_TRACE_AGENT_URL`, or `DD_AGENT_HOST` + `DD_TRACE_AGENT_PORT`.
+    fn endpoint_with_env_override(&self) -> Result<Uri, BoxError> {
+        // DD_TRACE_AGENT_URL takes precedence
+        if let Ok(url) = std::env::var(DD_TRACE_AGENT_URL) {
+            return url.parse::<Uri>().map_err(|e| {
+                format!("invalid URI in {}: '{}': {}", DD_TRACE_AGENT_URL, url, e).into()
+            });
+        }
+
+        // Fall back to DD_AGENT_HOST + DD_TRACE_AGENT_PORT
+        if let Ok(host) = std::env::var(DD_AGENT_HOST) {
+            let port = std::env::var(DD_TRACE_AGENT_PORT).unwrap_or_else(|_| "8126".to_string());
+            let url = format!("http://{}:{}", host, port);
+            return url.parse::<Uri>().map_err(|e| {
+                format!(
+                    "invalid URI from {} and {}: '{}': {}",
+                    DD_AGENT_HOST, DD_TRACE_AGENT_PORT, url, e
+                )
+                .into()
+            });
+        }
+
+        // Fall back to config
+        Ok(self.endpoint.to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT)))
+    }
+}
+
 impl TracingConfigurator for Config {
     fn config(conf: &Conf) -> &Self {
         &conf.exporters.tracing.datadog
@@ -142,9 +175,7 @@ impl TracingConfigurator for Config {
         });
 
         let fixed_span_names = self.fixed_span_names;
-        let endpoint = &self
-            .endpoint
-            .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT));
+        let endpoint = self.endpoint_with_env_override()?;
 
         let exporter = datadog_exporter::new_pipeline()
             .with_agent_endpoint(endpoint.to_string().trim_end_matches('/'))
