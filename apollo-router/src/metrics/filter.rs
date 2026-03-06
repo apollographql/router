@@ -16,8 +16,8 @@ use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use regex::Regex;
 
 use super::NoopInstrumentProvider;
