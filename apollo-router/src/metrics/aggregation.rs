@@ -71,6 +71,23 @@ pub(crate) struct Inner {
     observable_registries: Arc<SharedObservableRegistries>,
 }
 
+// HACK(@goto-bus-stop): see https://github.com/apollographql/router/pull/8976
+// _in tests_, we store the AggregateMeterProvider in a thread local.
+// During Drop, the otel meter providers may log using `tracing`. This also uses a thread local.
+// When the thread exits, such locals are dropped in unspecified order: `tracing` may be dropped
+// _before_ the AggregateMeterProvider. In that case, otel would try to log and `tracing` may
+// panic internally.
+//
+// This implementation works around that issue by manually dropping the otel meter providers while
+// _disabling_ tracing logs altogether.
+impl Drop for Inner {
+    fn drop(&mut self) {
+        tracing::subscriber::with_default(tracing::subscriber::NoSubscriber, || {
+            self.providers.clear();
+        });
+    }
+}
+
 impl Default for Inner {
     fn default() -> Self {
         Inner {
