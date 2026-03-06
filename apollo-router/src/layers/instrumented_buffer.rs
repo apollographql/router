@@ -1,15 +1,19 @@
-use crate::metrics::{NoopGuard, UpDownCounterGuard};
-use pin_project_lite::pin_project;
 use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::task::{Context, Poll};
-use tower::{BoxError, Layer};
-use tower_service::Service;
+use std::task::Context;
+use std::task::Poll;
 
+use pin_project_lite::pin_project;
+use tower::BoxError;
+use tower::Layer;
 use tower::buffer::Buffer;
 use tower::buffer::future::ResponseFuture;
+use tower_service::Service;
+
+use crate::metrics::NoopGuard;
+use crate::metrics::UpDownCounterGuard;
 
 // ─── Outer wrapper: increments when poll_ready reserves a permit ─────────────
 
