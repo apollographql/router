@@ -420,7 +420,7 @@ impl PluginPrivate for ResponseCache {
                 })
                 .service(CacheService {
                     service: ServiceBuilder::new()
-                        .buffered()
+                        .buffered("response_cache", &[("subgraph.name", name.as_str())])
                         .service(service)
                         .boxed_clone(),
                     entity_type: self.entity_type.clone(),

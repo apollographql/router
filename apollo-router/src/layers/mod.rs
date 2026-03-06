@@ -5,7 +5,6 @@ use std::ops::ControlFlow;
 
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::buffer::BufferLayer;
 use tower::layer::util::Stack;
 use tower_service::Service;
 use tracing::Span;
@@ -16,6 +15,8 @@ use crate::Context;
 use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::instrument::InstrumentLayer;
+use crate::layers::instrumented_buffer::InstrumentedBufferLayer;
+use crate::layers::instrumented_load_shed::InstrumentedLoadShedLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
@@ -23,6 +24,8 @@ use crate::services::supergraph;
 
 pub mod async_checkpoint;
 pub mod instrument;
+pub mod instrumented_buffer;
+pub mod instrumented_load_shed;
 pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
 pub mod sync_checkpoint;
@@ -173,7 +176,17 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///             .service(service);
     /// # }
     /// ```
-    fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>>;
+    fn buffered<Request>(
+        self,
+        name: impl Into<String>,
+        extra: &[(&str, &str)],
+    ) -> ServiceBuilder<Stack<InstrumentedBufferLayer<Request>, L>>;
+
+    fn load_shed_instrument(
+        self,
+        name: impl Into<String>,
+        extra: &[(&str, &str)],
+    ) -> ServiceBuilder<Stack<InstrumentedLoadShedLayer, L>>;
 
     /// Place a span around the request.
     ///
@@ -331,8 +344,33 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         ServiceBuilder::layer(self, layer)
     }
 
-    fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>> {
-        self.buffer(DEFAULT_BUFFER_SIZE)
+    fn buffered<Request>(
+        self,
+        name: impl Into<String>,
+        extra: &[(&str, &str)],
+    ) -> ServiceBuilder<Stack<InstrumentedBufferLayer<Request>, L>> {
+        self.layer(InstrumentedBufferLayer::new(
+            name.into(),
+            extra
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            DEFAULT_BUFFER_SIZE,
+        ))
+    }
+
+    fn load_shed_instrument(
+        self,
+        name: impl Into<String>,
+        extra: &[(&str, &str)],
+    ) -> ServiceBuilder<Stack<InstrumentedLoadShedLayer, L>> {
+        self.layer(InstrumentedLoadShedLayer::new(
+            name.into(),
+            extra
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        ))
     }
 }
 

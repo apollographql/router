@@ -81,7 +81,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
-            .buffered()
+            .buffered("file_uploads_plugin_router", &[])
             .service(service)
             .boxed()
     }
@@ -106,7 +106,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
-            .buffered()
+            .buffered("file_uploads_plugin_supergraph", &[])
             .service(service)
             .boxed()
     }
@@ -147,7 +147,10 @@ impl PluginPrivate for FileUploadsPlugin {
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
-            .buffered()
+            .buffered(
+                "file_uploads_plugin_subgraph",
+                &[("subgraph.name", _subgraph_name)],
+            )
             .service(service)
             .boxed()
     }

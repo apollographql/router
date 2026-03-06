@@ -16,7 +16,6 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::buffer::Buffer;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
@@ -32,6 +31,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::instrumented_buffer::InstrumentedBuffer;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
@@ -589,7 +589,7 @@ impl PluggableSupergraphServiceBuilder {
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
             ))
-            .buffered()
+            .buffered("supergraph_service", &[])
             .service(execution_service_factory.create())
             .boxed_clone();
 
@@ -603,7 +603,9 @@ impl PluggableSupergraphServiceBuilder {
         let supergraph_service =
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
-        let sb = Buffer::new(
+        let sb = InstrumentedBuffer::new(
+            "supergraph_service_builder",
+            vec![],
             ServiceBuilder::new()
                 .layer(content_negotiation::SupergraphLayer::default())
                 .service(
@@ -633,7 +635,7 @@ pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
-    sb: Buffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
+    sb: InstrumentedBuffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
 }
 
 pub(crate) trait HasPlugins {

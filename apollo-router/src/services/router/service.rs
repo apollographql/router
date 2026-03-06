@@ -29,7 +29,6 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::buffer::Buffer;
 use tower_service::Service;
 use tracing::Instrument;
 
@@ -49,6 +48,7 @@ use crate::graphql;
 use crate::http_ext;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::instrumented_buffer::InstrumentedBuffer;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -114,8 +114,10 @@ impl RouterService {
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
     ) -> Self {
-        let supergraph_service: supergraph::BoxCloneService =
-            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
+        let supergraph_service: supergraph::BoxCloneService = ServiceBuilder::new()
+            .buffered("router_service", &[])
+            .service(sgb)
+            .boxed_clone();
 
         RouterService {
             apq_layer: Arc::new(apq_layer),
@@ -819,7 +821,7 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-    sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
+    sb: InstrumentedBuffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
     pipeline_handle: Arc<PipelineHandle>,
     /// The configuration used to create this router, stored for hot reload previous config extraction
     pub(crate) configuration: Arc<Configuration>,
@@ -898,7 +900,9 @@ impl RouterCreator {
         ));
 
         // NOTE: This is the start of the router pipeline (router_service)
-        let sb = Buffer::new(
+        let sb = InstrumentedBuffer::new(
+            "router_creator",
+            vec![],
             ServiceBuilder::new()
                 .layer(static_page.clone())
                 .service(

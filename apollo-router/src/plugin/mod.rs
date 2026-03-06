@@ -41,12 +41,11 @@ use serde_json::Value;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
-use tower::buffer::Buffer;
-use tower::buffer::future::ResponseFuture;
 
 use crate::ListenAddr;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::instrumented_buffer::{InstrumentedBuffer, ResponseFutureGuard};
 use crate::plugins::subscription::notification::Notify;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
@@ -910,13 +909,18 @@ macro_rules! register_private_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
-    service: Buffer<router::Request, <router::BoxService as Service<router::Request>>::Future>,
+    service: InstrumentedBuffer<
+        router::Request,
+        <router::BoxService as Service<router::Request>>::Future,
+    >,
 }
 
 impl Handler {
     pub(crate) fn new(service: router::BoxService) -> Self {
         Self {
-            service: ServiceBuilder::new().buffered().service(service),
+            service: ServiceBuilder::new()
+                .buffered("handler", &[])
+                .service(service),
         }
     }
 }
@@ -924,7 +928,7 @@ impl Handler {
 impl Service<router::Request> for Handler {
     type Response = router::Response;
     type Error = BoxError;
-    type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
+    type Future = ResponseFutureGuard<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)

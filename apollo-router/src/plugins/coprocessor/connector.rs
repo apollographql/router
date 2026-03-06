@@ -157,6 +157,7 @@ impl ConnectorStage {
             })
         });
 
+        let metrics_service_name = service_name.clone();
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
@@ -215,7 +216,10 @@ impl ConnectorStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered()
+            .buffered(
+                "coprocessor_connector",
+                &[("service.name", metrics_service_name.as_str())],
+            )
             .service(service)
             .boxed()
     }

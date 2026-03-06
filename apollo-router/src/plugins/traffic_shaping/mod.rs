@@ -281,7 +281,10 @@ impl PluginPrivate for TrafficShaping {
                     }
                 },
             )
-            .load_shed()
+            .load_shed_instrument(
+                "traffic_shaping_router",
+                &[("shed.layer", "optional_timeout")],
+            )
             .layer(TimeoutLayer::new(
                 self.config
                     .router
@@ -305,7 +308,10 @@ impl PluginPrivate for TrafficShaping {
                     }
                 },
             )
-            .load_shed()
+            .load_shed_instrument(
+                "traffic_shaping_router",
+                &[("shed.layer", "optional_concurrency")],
+            )
             .option_layer(self.config.router.as_ref().and_then(|router| {
                 router
                     .concurrency_limit
@@ -328,7 +334,10 @@ impl PluginPrivate for TrafficShaping {
                     }
                 },
             )
-            .load_shed()
+            .load_shed_instrument(
+                "traffic_shaping_router",
+                &[("shed.layer", "optional_rate_limit")],
+            )
             .option_layer(self.config.router.as_ref().and_then(|router| {
                 router
                     .global_rate_limit
@@ -393,7 +402,10 @@ impl PluginPrivate for TrafficShaping {
                         }
                     },
                 )
-                .load_shed()
+                .load_shed_instrument("traffic_shaping_subgraph", &[
+                    ("shed.layer", "optional_timeout"),
+                    ("subgraph.name", name),
+                ])
                 .layer(TimeoutLayer::new(
                     config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
                 ))
@@ -412,7 +424,7 @@ impl PluginPrivate for TrafficShaping {
                     }
                     req
                 })
-                .buffered()
+                .buffered("traffic_shaping_subgraph", &[("subgraph.name", name)])
                 .service(service)
                 .boxed()
         } else {
@@ -472,7 +484,13 @@ impl PluginPrivate for TrafficShaping {
                         }
                     },
                 )
-                .load_shed()
+                .load_shed_instrument(
+                    "traffic_shaping_subgraph",
+                    &[
+                        ("shed.layer", "optional_rate_limit"),
+                        ("source_name", source_name.as_str()),
+                    ],
+                )
                 .layer(TimeoutLayer::new(
                     config.timeout.unwrap_or(DEFAULT_TIMEOUT),
                 ))
@@ -485,7 +503,7 @@ impl PluginPrivate for TrafficShaping {
                     }
                     req
                 })
-                .buffered()
+                .buffered("traffic_shaping_connector", &[("source_name", source_name.as_str())])
                 .service(service)
                 .boxed()
         } else {

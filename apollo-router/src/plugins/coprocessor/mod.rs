@@ -724,7 +724,7 @@ impl RouterStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
+            .buffered("coprocessor_router", &[]) // XXX: Added during backpressure fixing
             .service(service)
             .boxed()
     }
@@ -804,6 +804,7 @@ impl SubgraphStage {
             })
         });
 
+        let metrics_service_name = service_name.clone();
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
@@ -856,7 +857,10 @@ impl SubgraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
+            .buffered(
+                "coprocessor_subgraph",
+                &[("service.name", metrics_service_name.as_str())],
+            ) // XXX: Added during backpressure fixing
             .service(service)
             .boxed()
     }
