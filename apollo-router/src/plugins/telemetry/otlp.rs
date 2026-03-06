@@ -50,7 +50,7 @@ pub(crate) struct Config {
 
 impl Config {
     /// Apply OTEL_EXPORTER_OTLP_* environment variable overrides for traces.
-    /// Traces-specific env vars (OTEL_EXPORTER_OTLP_TRACES_*) take precedence.
+    /// Env vars take precedence over config values.
     pub(crate) fn with_tracing_env_overrides(self) -> Result<Self, BoxError> {
         let endpoint = std::env::var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
             .ok()
@@ -71,7 +71,7 @@ impl Config {
     }
 
     /// Apply OTEL_EXPORTER_OTLP_* environment variable overrides for metrics.
-    /// Metrics-specific env vars (OTEL_EXPORTER_OTLP_METRICS_*) take precedence.
+    /// Env vars take precedence over config values.
     pub(crate) fn with_metrics_env_overrides(self) -> Result<Self, BoxError> {
         let endpoint = std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
             .ok()
@@ -96,15 +96,14 @@ impl Config {
         general_var: &str,
         default: Protocol,
     ) -> Result<Protocol, BoxError> {
-        let var_name = if std::env::var(specific_var).is_ok() {
-            specific_var
-        } else if std::env::var(general_var).is_ok() {
-            general_var
+        let (var_name, value) = if let Ok(v) = std::env::var(specific_var) {
+            (specific_var, v)
+        } else if let Ok(v) = std::env::var(general_var) {
+            (general_var, v)
         } else {
             return Ok(default);
         };
 
-        let value = std::env::var(var_name).unwrap();
         match value.to_lowercase().as_str() {
             "grpc" => Ok(Protocol::Grpc),
             "http/protobuf" | "http" => Ok(Protocol::Http),
