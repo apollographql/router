@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
+use std::time::Duration;
 
 use derive_more::From;
 use opentelemetry::InstrumentationScope;
@@ -22,6 +23,7 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
+use opentelemetry_sdk::error::OTelSdkResult;
 use parking_lot::Mutex;
 use strum::Display;
 use strum::EnumCount;
@@ -206,14 +208,14 @@ impl AggregateMeterProvider {
         drop(guard);
 
         let Some(inner) = old else { return Ok(()) };
-        for provider in &inner.providers {
+        for (provider, _) in &inner.providers {
             provider.shutdown_with_timeout(timeout)?;
         }
         Ok(())
     }
 
     /// Shutdown MUST be called from a blocking thread.
-    pub(crate) fn shutdown(&self) -> OtelSdkResult {
+    pub(crate) fn shutdown(&self) -> OTelSdkResult {
         self.shutdown_with_timeout(Duration::from_secs(5))
     }
 

@@ -125,7 +125,7 @@ impl FilterMeterProvider {
         }
     }
 
-    pub(crate) fn shutdown(&self) -> OtelSdkResult {
+    pub(crate) fn shutdown(&self) -> OTelSdkResult {
         self.shutdown_with_timeout(Duration::from_secs(5))
     }
 }
