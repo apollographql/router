@@ -6,18 +6,7 @@ expression: errors
   {
     "message": "inventory error",
     "path": [
-      "topProducts",
-      0
-    ],
-    "extensions": {
-      "service": "inventory"
-    }
-  },
-  {
-    "message": "inventory error",
-    "path": [
-      "topProducts",
-      1
+      "topProducts"
     ],
     "extensions": {
       "service": "inventory"
