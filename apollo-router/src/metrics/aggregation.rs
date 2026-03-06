@@ -71,6 +71,22 @@ pub(crate) struct Inner {
     observable_registries: Arc<SharedObservableRegistries>,
 }
 
+impl Default for Inner {
+    fn default() -> Self {
+        Inner {
+            // Initialize with noop providers to avoid OTel SDK errors during startup.
+            // Real providers are set via AggregateMeterProvider::set() during configuration.
+            providers: (0..MeterProviderType::COUNT)
+                .map(|_| (FilterMeterProvider::noop(), HashMap::new()))
+                .collect(),
+            registered_instruments: Vec::new(),
+            observable_registries: Arc::new(SharedObservableRegistries::new(
+                MeterProviderType::COUNT,
+            )),
+        }
+    }
+}
+
 // HACK(@goto-bus-stop): see https://github.com/apollographql/router/pull/8976
 // _in tests_, we store the AggregateMeterProvider in a thread local.
 // During Drop, the otel meter providers may log using `tracing`. This also uses a thread local.
@@ -86,22 +102,6 @@ impl Drop for Inner {
         tracing::subscriber::with_default(noop, || {
             self.providers.clear();
         });
-    }
-}
-
-impl Default for Inner {
-    fn default() -> Self {
-        Inner {
-            // Initialize with noop providers to avoid OTel SDK errors during startup.
-            // Real providers are set via AggregateMeterProvider::set() during configuration.
-            providers: (0..MeterProviderType::COUNT)
-                .map(|_| (FilterMeterProvider::noop(), HashMap::new()))
-                .collect(),
-            registered_instruments: Vec::new(),
-            observable_registries: Arc::new(SharedObservableRegistries::new(
-                MeterProviderType::COUNT,
-            )),
-        }
     }
 }
 
