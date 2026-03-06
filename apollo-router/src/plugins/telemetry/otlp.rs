@@ -48,6 +48,74 @@ pub(crate) struct Config {
     pub(crate) temporality: Temporality,
 }
 
+impl Config {
+    /// Apply OTEL_EXPORTER_OTLP_* environment variable overrides for traces.
+    /// Env vars take precedence over config values.
+    pub(crate) fn with_tracing_env_overrides(self) -> Result<Self, BoxError> {
+        let endpoint = std::env::var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+            .ok()
+            .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok())
+            .or(self.endpoint);
+
+        let protocol = Self::parse_protocol_env(
+            "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+            "OTEL_EXPORTER_OTLP_PROTOCOL",
+            self.protocol,
+        )?;
+
+        Ok(Config {
+            endpoint,
+            protocol,
+            ..self
+        })
+    }
+
+    /// Apply OTEL_EXPORTER_OTLP_* environment variable overrides for metrics.
+    /// Env vars take precedence over config values.
+    pub(crate) fn with_metrics_env_overrides(self) -> Result<Self, BoxError> {
+        let endpoint = std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+            .ok()
+            .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok())
+            .or(self.endpoint);
+
+        let protocol = Self::parse_protocol_env(
+            "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+            "OTEL_EXPORTER_OTLP_PROTOCOL",
+            self.protocol,
+        )?;
+
+        Ok(Config {
+            endpoint,
+            protocol,
+            ..self
+        })
+    }
+
+    fn parse_protocol_env(
+        specific_var: &str,
+        general_var: &str,
+        default: Protocol,
+    ) -> Result<Protocol, BoxError> {
+        let (var_name, value) = if let Ok(v) = std::env::var(specific_var) {
+            (specific_var, v)
+        } else if let Ok(v) = std::env::var(general_var) {
+            (general_var, v)
+        } else {
+            return Ok(default);
+        };
+
+        match value.to_lowercase().as_str() {
+            "grpc" => Ok(Protocol::Grpc),
+            "http/protobuf" | "http" => Ok(Protocol::Http),
+            _ => Err(format!(
+                "invalid value '{}' for {}, expected 'grpc' or 'http/protobuf'",
+                value, var_name
+            )
+            .into()),
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum TelemetryDataKind {
     Traces,

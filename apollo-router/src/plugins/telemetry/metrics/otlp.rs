@@ -24,7 +24,10 @@ impl MetricsConfigurator for super::super::otlp::Config {
     }
 
     fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
-        let exporter = self.build_metric_exporter()?;
+        // Apply env var overrides to the config
+        let config = self.clone().with_metrics_env_overrides()?;
+
+        let exporter = config.build_metric_exporter()?;
 
         // Wrap with overflow detection, then error prefixing
         let named_exporter =
@@ -32,7 +35,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
         builder.with_reader(
             MeterProviderType::Public,
             PeriodicReader::builder(named_exporter, runtime::Tokio)
-                .with_interval(self.batch_processor.scheduled_delay)
+                .with_interval(config.batch_processor.scheduled_delay)
                 .build(),
         );
 
