@@ -38,18 +38,6 @@ impl OtelMeterProvider for MeterProviderInner {
     }
 }
 
-impl MeterProviderInner {
-    /// Shutdown the underlying SDK meter provider.
-    /// This should be called before dropping to prevent OTel SDK's Drop from
-    /// emitting tracing events, which can panic if tracing's thread locals
-    /// have already been destroyed during thread exit.
-    pub(crate) fn shutdown(&self) {
-        if let MeterProviderInner::Sdk(p) = self {
-            let _ = p.shutdown();
-        }
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct FilterMeterProvider {
     delegate: MeterProviderInner,
@@ -126,13 +114,6 @@ impl FilterMeterProvider {
             MeterProviderInner::Sdk(p) => p.force_flush(),
             MeterProviderInner::Noop => Ok(()),
         }
-    }
-
-    /// Shutdown the underlying meter provider.
-    /// This should be called before dropping to prevent OTel SDK's Drop from
-    /// emitting tracing events during thread local destruction.
-    pub(crate) fn shutdown(&self) {
-        self.delegate.shutdown();
     }
 }
 

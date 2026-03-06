@@ -87,17 +87,6 @@ impl Default for Inner {
     }
 }
 
-impl Drop for Inner {
-    fn drop(&mut self) {
-        // Explicitly shutdown all meter providers to prevent OTel SDK's Drop
-        // from emitting tracing events, which can panic if tracing's thread
-        // locals have already been destroyed during thread exit.
-        for (provider, _) in &self.providers {
-            provider.shutdown();
-        }
-    }
-}
-
 /// Fields are never used directly but strong references here
 /// keep weak references elsewhere upgradable.
 #[derive(From)]
