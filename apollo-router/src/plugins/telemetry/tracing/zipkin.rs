@@ -1,18 +1,4 @@
-//! Configuration for Zipkin tracing.
-//!
-//! # Deprecation Notice
-//!
-//! The native Zipkin exporter is deprecated and will be removed in the next major release
-//! of the Router. Zipkin supports OTLP ingestion, and OpenTelemetry is deprecating native
-//! Zipkin exporters in favor of OTLP. Users should migrate to the OTLP exporter instead.
-//!
-//! # Known Limitations
-//!
-//! The upstream `opentelemetry-zipkin` crate (v0.31) does not currently support setting
-//! the service name on the Zipkin `localEndpoint`. This means traces exported to Zipkin
-//! will not have a service name associated with them.
-//!
-//! See: <https://github.com/open-telemetry/opentelemetry-rust/issues/381>
+//! Configuration for zipkin tracing.
 use std::sync::LazyLock;
 
 use http::Uri;
@@ -82,9 +68,6 @@ impl TracingConfigurator for Config {
     fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
         let endpoint = self.endpoint_with_env_override()?;
-        // TODO: The upstream opentelemetry-zipkin crate (v0.31) removed support for setting
-        // service_name on the localEndpoint. Track upstream fix or implement workaround.
-        // See: https://github.com/open-telemetry/opentelemetry-rust/issues/381
         let exporter = ZipkinExporter::builder()
             .with_collector_endpoint(endpoint.to_string())
             .build()?;
