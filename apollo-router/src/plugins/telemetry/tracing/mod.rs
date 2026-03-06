@@ -199,7 +199,11 @@ impl BatchProcessorConfig {
     fn parse_usize_env(var: &str, default: usize) -> Result<usize, BoxError> {
         match std::env::var(var) {
             Ok(value) => value.parse::<usize>().map_err(|e| {
-                format!("invalid value '{}' for {}, expected integer: {}", value, var, e).into()
+                format!(
+                    "invalid value '{}' for {}, expected integer: {}",
+                    value, var, e
+                )
+                .into()
             }),
             Err(_) => Ok(default),
         }

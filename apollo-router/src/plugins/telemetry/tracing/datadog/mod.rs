@@ -147,7 +147,9 @@ impl Config {
         }
 
         // Fall back to config
-        Ok(self.endpoint.to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT)))
+        Ok(self
+            .endpoint
+            .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT)))
     }
 }
 
