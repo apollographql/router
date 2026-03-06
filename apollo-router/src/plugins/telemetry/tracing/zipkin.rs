@@ -75,7 +75,7 @@ impl TracingConfigurator for Config {
         let named_exporter = NamedSpanExporter::new(exporter, "zipkin");
         builder.with_span_processor(
             BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("zipkin"))
-                .with_batch_config(self.batch_processor.clone().with_env_overrides().into())
+                .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
                 .build()
                 .filtered(),
         );

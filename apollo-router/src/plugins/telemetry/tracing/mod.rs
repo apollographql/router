@@ -12,6 +12,7 @@ use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::BoxError;
 
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
@@ -158,30 +159,49 @@ impl BatchProcessorConfig {
     /// Apply OTEL_BSP_* environment variable overrides to this config.
     /// This should be used for third-party exporters (OTLP, Datadog, Zipkin)
     /// but NOT for Apollo exporters.
-    pub(crate) fn with_env_overrides(self) -> Self {
-        BatchProcessorConfig {
-            scheduled_delay: std::env::var("OTEL_BSP_SCHEDULE_DELAY")
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .map(Duration::from_millis)
-                .unwrap_or(self.scheduled_delay),
-            max_queue_size: std::env::var("OTEL_BSP_MAX_QUEUE_SIZE")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(self.max_queue_size),
-            max_export_batch_size: std::env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(self.max_export_batch_size),
-            max_export_timeout: std::env::var("OTEL_BSP_EXPORT_TIMEOUT")
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .map(Duration::from_millis)
-                .unwrap_or(self.max_export_timeout),
-            max_concurrent_exports: std::env::var("OTEL_BSP_MAX_CONCURRENT_EXPORTS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(self.max_concurrent_exports),
+    pub(crate) fn with_env_overrides(self) -> Result<Self, BoxError> {
+        Ok(BatchProcessorConfig {
+            scheduled_delay: Self::parse_duration_env(
+                "OTEL_BSP_SCHEDULE_DELAY",
+                self.scheduled_delay,
+            )?,
+            max_queue_size: Self::parse_usize_env("OTEL_BSP_MAX_QUEUE_SIZE", self.max_queue_size)?,
+            max_export_batch_size: Self::parse_usize_env(
+                "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+                self.max_export_batch_size,
+            )?,
+            max_export_timeout: Self::parse_duration_env(
+                "OTEL_BSP_EXPORT_TIMEOUT",
+                self.max_export_timeout,
+            )?,
+            max_concurrent_exports: Self::parse_usize_env(
+                "OTEL_BSP_MAX_CONCURRENT_EXPORTS",
+                self.max_concurrent_exports,
+            )?,
+        })
+    }
+
+    fn parse_duration_env(var: &str, default: Duration) -> Result<Duration, BoxError> {
+        match std::env::var(var) {
+            Ok(value) => {
+                let millis = value.parse::<u64>().map_err(|e| {
+                    format!(
+                        "invalid value '{}' for {}, expected milliseconds: {}",
+                        value, var, e
+                    )
+                })?;
+                Ok(Duration::from_millis(millis))
+            }
+            Err(_) => Ok(default),
+        }
+    }
+
+    fn parse_usize_env(var: &str, default: usize) -> Result<usize, BoxError> {
+        match std::env::var(var) {
+            Ok(value) => value.parse::<usize>().map_err(|e| {
+                format!("invalid value '{}' for {}, expected integer: {}", value, var, e).into()
+            }),
+            Err(_) => Ok(default),
         }
     }
 }
