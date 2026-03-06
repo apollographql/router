@@ -82,7 +82,8 @@ pub(crate) struct Inner {
 // _disabling_ tracing logs altogether.
 impl Drop for Inner {
     fn drop(&mut self) {
-        tracing::subscriber::with_default(tracing::subscriber::NoSubscriber, || {
+        let noop = tracing::subscriber::NoSubscriber::new();
+        tracing::subscriber::with_default(noop, || {
             self.providers.clear();
         });
     }
