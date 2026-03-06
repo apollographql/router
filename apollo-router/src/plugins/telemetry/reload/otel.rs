@@ -27,6 +27,7 @@
 //! entire subscriber stack, which would require restarting the application.
 
 use std::io::IsTerminal;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use once_cell::sync::OnceCell;
@@ -111,7 +112,10 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
                 .with(fmt_layer)
                 .with(WarnLegacyMetricsLayer)
                 // Rate limit OpenTelemetry internal log messages to avoid log spam when things go wrong
-                .with(RateLimitLayer::for_opentelemetry())
+                .with(RateLimitLayer::new(
+                    "opentelemetry",
+                    Duration::from_secs(10),
+                ))
                 .with(EnvFilter::try_new(log_level)?)
                 .try_init()?;
 

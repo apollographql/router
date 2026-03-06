@@ -49,47 +49,34 @@ impl RateLimitLayer {
         }
     }
 
-    /// Create a rate limiting layer for OpenTelemetry internal logs with default settings.
-    pub(crate) fn for_opentelemetry() -> Self {
-        Self::new("opentelemetry", Duration::from_secs(10))
-    }
-
     /// Returns the total number of suppressed messages across all callsites.
     #[cfg(test)]
     fn suppressed_count(&self) -> u64 {
         self.states.iter().map(|e| e.suppressed_count).sum()
     }
 
-    /// Check if a message should be rate limited.
+    /// Check if a message should be allowed through.
     ///
-    /// Returns `true` if the message should be suppressed (rate limited).
-    fn should_suppress(&self, callsite: Identifier) -> bool {
+    /// Returns `true` if the message should be logged, `false` if rate limited.
+    fn is_allowed(&self, callsite: Identifier) -> bool {
         let now = Instant::now();
 
         let mut entry = self.states.entry(callsite.clone()).or_default();
         let state = entry.value_mut();
 
-        // Check if we should allow this message through
-        let should_allow = match state.last_logged {
-            None => {
-                // First message from this callsite, always allow
-                true
-            }
-            Some(last) => {
-                // Allow if enough time has passed since last logged message
-                now.duration_since(last) >= self.threshold
-            }
+        let allowed = match state.last_logged {
+            None => true, // First message from this callsite
+            Some(last) => now.duration_since(last) >= self.threshold,
         };
 
-        if should_allow {
+        if allowed {
             state.last_logged = Some(now);
             state.suppressed_count = 0;
-            false // Don't suppress
         } else {
-            // Within time window, suppress this message
             state.suppressed_count += 1;
-            true // Suppress
         }
+
+        allowed
     }
 }
 
@@ -111,7 +98,7 @@ where
             return true;
         }
 
-        !self.should_suppress(metadata.callsite())
+        self.is_allowed(metadata.callsite())
     }
 }
 
@@ -326,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_suppression_count_tracked() {
-        // Test should_suppress directly to verify counting
+        // Test is_allowed directly to verify counting
         let rate_limiter = RateLimitLayer::new("opentelemetry", Duration::from_millis(100));
 
         // Create a fake callsite identifier for testing
@@ -343,13 +330,13 @@ mod tests {
 
         let callsite = TEST_META.callsite();
 
-        // First call should not suppress
-        assert!(!rate_limiter.should_suppress(callsite.clone()));
+        // First call should be allowed
+        assert!(rate_limiter.is_allowed(callsite.clone()));
         assert_eq!(rate_limiter.suppressed_count(), 0);
 
-        // Subsequent calls within threshold should suppress
+        // Subsequent calls within threshold should be suppressed
         for i in 1..=9 {
-            assert!(rate_limiter.should_suppress(callsite.clone()));
+            assert!(!rate_limiter.is_allowed(callsite.clone()));
             assert_eq!(rate_limiter.suppressed_count(), i);
         }
     }
