@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use buildstructor::buildstructor;
 use opentelemetry::InstrumentationScope;
@@ -16,6 +17,7 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::error::OTelSdkResult;
 use regex::Regex;
 
 use super::NoopInstrumentProvider;
@@ -109,11 +111,22 @@ impl FilterMeterProvider {
     }
 
     #[cfg(test)]
-    pub(crate) fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+    pub(crate) fn force_flush(&self) -> OTelSdkResult {
         match &self.delegate {
             MeterProviderInner::Sdk(p) => p.force_flush(),
             MeterProviderInner::Noop => Ok(()),
         }
+    }
+
+    pub(crate) fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        match &self.delegate {
+            MeterProviderInner::Sdk(p) => p.shutdown_with_timeout(timeout),
+            MeterProviderInner::Noop => Ok(()),
+        }
+    }
+
+    pub(crate) fn shutdown(&self) -> OtelSdkResult {
+        self.shutdown_with_timeout(Duration::from_secs(5))
     }
 }
 

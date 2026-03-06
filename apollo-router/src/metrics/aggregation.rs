@@ -96,6 +96,9 @@ impl Default for Inner {
 //
 // This implementation works around that issue by manually dropping the otel meter providers while
 // _disabling_ tracing logs altogether.
+//
+// This assumes that in _normal_ router operation, we always call `shutdown()` explicitly, else we
+// would lose trace events.
 impl Drop for Inner {
     fn drop(&mut self) {
         let noop = tracing::subscriber::NoSubscriber::new();
@@ -191,7 +194,7 @@ impl AggregateMeterProvider {
     }
 
     /// Shutdown MUST be called from a blocking thread.
-    pub(crate) fn shutdown(&self) {
+    pub(crate) fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
         // Make sure that we don't deadlock by dropping the mutex guard before actual shutdown happens
         // This means that if we have any misbehaving code that tries to access the meter provider during shutdown, e.g. for export metrics
         // then we don't get stuck on the mutex.
@@ -201,7 +204,17 @@ impl AggregateMeterProvider {
         let mut guard = self.inner.lock();
         let old = guard.take();
         drop(guard);
-        drop(old);
+
+        let Some(inner) = old else { return Ok(()) };
+        for provider in &inner.providers {
+            provider.shutdown_with_timeout(timeout)?;
+        }
+        Ok(())
+    }
+
+    /// Shutdown MUST be called from a blocking thread.
+    pub(crate) fn shutdown(&self) -> OtelSdkResult {
+        self.shutdown_with_timeout(Duration::from_secs(5))
     }
 
     /// Create a registered instrument. This enables caching at callsites and invalidation at the meter provider via weak reference.
