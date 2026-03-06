@@ -30,6 +30,7 @@ use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
 use prometheus::Registry;
+use tokio::task::block_in_place;
 use tokio::task::spawn_blocking;
 use tracing_subscriber::Layer;
 
@@ -200,7 +201,8 @@ impl Activation {
 
             // Install the new provider globally. The old provider is returned and must be
             // dropped in a blocking task to avoid deadlocking the async runtime during shutdown.
-            spawn_blocking(move || opentelemetry::global::set_tracer_provider(tracer_provider));
+            // block_in_place is used to ensure that no tasks after this point use the old tracer provider.
+            block_in_place(move || opentelemetry::global::set_tracer_provider(tracer_provider));
         }
     }
 
