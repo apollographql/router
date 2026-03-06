@@ -950,7 +950,7 @@ mod test {
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
-        meter_provider.shutdown();
+        meter_provider.shutdown().unwrap();
 
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(shutdown.load(std::sync::atomic::Ordering::SeqCst));

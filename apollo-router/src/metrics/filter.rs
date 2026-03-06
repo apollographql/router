@@ -124,10 +124,6 @@ impl FilterMeterProvider {
             MeterProviderInner::Noop => Ok(()),
         }
     }
-
-    pub(crate) fn shutdown(&self) -> OTelSdkResult {
-        self.shutdown_with_timeout(Duration::from_secs(5))
-    }
 }
 
 struct FilteredInstrumentProvider {

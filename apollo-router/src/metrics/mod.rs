@@ -1742,10 +1742,7 @@ pub(crate) trait FutureMetricsExt<T> {
                 // We want to eagerly create the meter provider, the reason is that this will be shared among subtasks that use `with_current_meter_provider`.
                 let _ = meter_provider_internal();
                 let result = self.await;
-                let _ = tokio::task::spawn_blocking(|| {
-                    meter_provider_internal().shutdown();
-                })
-                .await;
+                let _ = tokio::task::spawn_blocking(|| meter_provider_internal().shutdown()).await;
                 result
             }
             .boxed_local(),
