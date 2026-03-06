@@ -33,7 +33,6 @@ use tower::ServiceExt;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
-use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
@@ -106,15 +105,9 @@ impl<'a> Builder<'a> {
             );
             builder.configure_views(MeterProviderType::Public);
 
-            let (prometheus_registry, mut meter_providers, _) = builder.build();
+            let (prometheus_registry, meter_providers, _) = builder.build();
             self.activation
                 .with_prometheus_registry(prometheus_registry);
-
-            // If no exporters are configured, we still need to set a noop provider
-            // to replace any previously configured provider during hot reload.
-            meter_providers
-                .entry(MeterProviderType::Public)
-                .or_insert_with(FilterMeterProvider::noop);
 
             self.activation.add_meter_providers(meter_providers);
         }

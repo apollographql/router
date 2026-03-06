@@ -198,11 +198,11 @@ macro_rules! filter_observable_instrument_fn {
                 (_, _) => false,
             };
 
-            // For filtered observable instruments, return noop immediately.
+            // For filtered observable instruments, route through the noop meter.
             // This avoids registering callbacks with the SDK which would log
             // errors about views not producing measures in OTel 0.31+.
             if is_filtered {
-                return $wrapper::new();
+                return self.noop.$name(builder.name.clone()).build();
             }
 
             // Extract builder fields before consuming callbacks

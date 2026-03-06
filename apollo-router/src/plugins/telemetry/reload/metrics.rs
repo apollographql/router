@@ -76,11 +76,12 @@ impl<'a> MetricsBuilder<'a> {
             self.prometheus_registry,
             self.meter_provider_builders
                 .into_iter()
-                // Only include providers that have readers configured.
-                // Providers with only views but no readers would cause OTel SDK to emit
-                // errors when observable instruments are registered.
-                .filter(|(k, _)| self.providers_with_readers.contains(k))
                 .map(|(k, v)| {
+                    // Providers without readers get a noop to avoid OTel SDK errors
+                    // when observable instruments are registered.
+                    if !self.providers_with_readers.contains(&k) {
+                        return (k, FilterMeterProvider::noop());
+                    }
                     (
                         k,
                         match k {
