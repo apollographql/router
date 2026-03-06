@@ -9,7 +9,6 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
-use crate::bail;
 use crate::connectors::ConnectSpec;
 use crate::connectors::SelectionTrie;
 use crate::connectors::StringTemplate;
@@ -17,7 +16,6 @@ use crate::connectors::spec::connect_spec_from_schema;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::federation_spec_definition::CacheTagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::FederationSchema;
@@ -34,7 +32,18 @@ pub(crate) fn validate_cache_tag_directives(
     schema: &FederationSchema,
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
-    let applications = schema.cache_tag_directive_applications()?;
+    validate_cache_tag_directives_impl(schema, errors).map_err(FederationError::from)
+}
+
+fn validate_cache_tag_directives_impl(
+    schema: &FederationSchema,
+    errors: &mut MultipleFederationErrors,
+) -> Result<(), SingleFederationError> {
+    let applications = schema.cache_tag_directive_applications().map_err(|e| {
+        SingleFederationError::InvalidGraphQL {
+            message: e.to_string(),
+        }
+    })?;
     for application in applications {
         match application {
             Ok(cache_tag_directive) => match &cache_tag_directive.target {
@@ -52,7 +61,11 @@ pub(crate) fn validate_cache_tag_directives(
                         &cache_tag_directive.arguments,
                     )?;
                 }
-                _ => bail!("Unexpected directive target"),
+                _ => {
+                    return Err(SingleFederationError::InvalidGraphQL {
+                        message: "Unexpected directive target".to_string(),
+                    });
+                }
             },
             Err(error) => errors.push(error),
         }
@@ -65,8 +78,13 @@ fn validate_application_on_field(
     errors: &mut MultipleFederationErrors,
     field: &ObjectFieldDefinitionPosition,
     args: &CacheTagDirectiveArguments,
-) -> Result<(), FederationError> {
-    let _field_def = field.get(schema.schema())?;
+) -> Result<(), SingleFederationError> {
+    let _field_def =
+        field
+            .get(schema.schema())
+            .map_err(|e| SingleFederationError::InvalidGraphQL {
+                message: e.to_string(),
+            })?;
 
     // validate it's on a root field
     if !schema.is_root_type(&field.type_name) {
@@ -90,17 +108,34 @@ fn validate_application_on_object_type(
     errors: &mut MultipleFederationErrors,
     type_pos: &ObjectTypeDefinitionPosition,
     args: &CacheTagDirectiveArguments,
-) -> Result<(), FederationError> {
+) -> Result<(), SingleFederationError> {
     // validate the type is a resolvable entity
-    let fed_spec = get_federation_spec_definition_from_subgraph(schema)?;
-    let key_directive_def = fed_spec.key_directive_definition(schema)?;
-    let type_def = type_pos.get(schema.schema())?;
+    let fed_spec = get_federation_spec_definition_from_subgraph(schema).map_err(|e| {
+        SingleFederationError::InvalidGraphQL {
+            message: e.to_string(),
+        }
+    })?;
+    let key_directive_def = fed_spec.key_directive_definition(schema).map_err(|e| {
+        SingleFederationError::InvalidGraphQL {
+            message: e.to_string(),
+        }
+    })?;
+    let type_def =
+        type_pos
+            .get(schema.schema())
+            .map_err(|e| SingleFederationError::InvalidGraphQL {
+                message: e.to_string(),
+            })?;
     let is_resolvable = type_def
         .directives
         .get_all(&key_directive_def.name)
         .map(|directive_app| {
-            let key_args = fed_spec.key_directive_arguments(directive_app)?;
-            Ok::<_, FederationError>(key_args.resolvable)
+            let key_args = fed_spec
+                .key_directive_arguments(directive_app)
+                .map_err(|e| SingleFederationError::InvalidGraphQL {
+                    message: e.to_string(),
+                })?;
+            Ok::<_, SingleFederationError>(key_args.resolvable)
         })
         .process_results(|mut iter| iter.any(|x| x))?;
     if !is_resolvable {
@@ -120,8 +155,13 @@ fn validate_args_on_field(
     errors: &mut MultipleFederationErrors,
     field: &ObjectFieldDefinitionPosition,
     args: &CacheTagDirectiveArguments,
-) -> Result<(), FederationError> {
-    let field_def = field.get(schema.schema())?;
+) -> Result<(), SingleFederationError> {
+    let field_def =
+        field
+            .get(schema.schema())
+            .map_err(|e| SingleFederationError::InvalidGraphQL {
+                message: e.to_string(),
+            })?;
     let connect_spec = connect_spec_from_schema(schema.schema()).unwrap_or(DEFAULT_CONNECT_SPEC);
     let format = match StringTemplate::parse_with_spec(args.format, connect_spec) {
         Ok(format) => format,
@@ -160,7 +200,9 @@ fn validate_args_on_field(
                         .iter()
                         .map(|arg| (arg.name.clone(), arg.ty.as_ref()))
                         .collect::<IndexMap<Name, &Type>>();
-                    validate_args_selection(schema, &fields, &var_ref.selection).err()
+                    validate_args_selection(schema, &fields, &var_ref.selection)
+                        .err()
+                        .map(Into::into)
                 }
                 None => None,
             },
@@ -176,74 +218,74 @@ fn validate_args_selection(
     schema: &FederationSchema,
     fields: &IndexMap<Name, &Type>,
     selection: &SelectionTrie,
-) -> Result<(), FederationError> {
+) -> Result<(), SingleFederationError> {
     // Check the format selection is just a single selection. The `StringTemplate` allows multiple
     // selections like `{$args { a b }}`, but cache tags don't support that.
     let num_selections = selection.iter().count();
     if num_selections != 1 {
-        return Err(FederationError::from(
-            SingleFederationError::CacheTagInvalidFormat {
-                message: format!(
-                    "invalid path element at \"{selection}\", which is not a single selection"
-                ),
-            },
-        ));
+        return Err(SingleFederationError::CacheTagInvalidFormat {
+            message: format!(
+                "invalid path element at \"{selection}\", which is not a single selection"
+            ),
+        });
     }
     for (key, sel) in selection.iter() {
-        let name = Name::new(key).map_err(|_| {
-            FederationError::from(SingleFederationError::CacheTagInvalidFormat {
-                message: format!("invalid field selection name \"{key}\""),
-            })
+        let name = Name::new(key).map_err(|_| SingleFederationError::CacheTagInvalidFormat {
+            message: format!("invalid field selection name \"{key}\""),
         })?;
-        let field = fields.get(&name).ok_or_else(|| {
-            FederationError::from(SingleFederationError::CacheTagInvalidFormat {
-                message: format!("unknown field \"{name}\""),
-            })
-        })?;
+        let field =
+            fields
+                .get(&name)
+                .ok_or_else(|| SingleFederationError::CacheTagInvalidFormat {
+                    message: format!("unknown field \"{name}\""),
+                })?;
 
         let type_name = field.inner_named_type();
-        let type_def = schema.get_type(type_name.clone())?;
+        let type_def = schema.get_type(type_name.clone()).map_err(|e| {
+            SingleFederationError::InvalidGraphQL {
+                message: e.to_string(),
+            }
+        })?;
         if !sel.is_leaf() {
             let type_def = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_def).map_err(
-                |_| {
-                    FederationError::from(SingleFederationError::CacheTagInvalidFormat {
-                        message: format!(
-                            "invalid path element \"{name}\", which is not an object or interface type"
-                        ),
-                    })
+                |_| SingleFederationError::CacheTagInvalidFormat {
+                    message: format!(
+                        "invalid path element \"{name}\", which is not an object or interface type"
+                    ),
                 },
             )?;
             let next_fields = type_def
-                .fields(schema.schema())?
+                .fields(schema.schema())
+                .map_err(|e| SingleFederationError::InvalidGraphQL {
+                    message: e.to_string(),
+                })?
                 .map(|field_pos| {
-                    let field_def = field_pos
-                        .get(schema.schema())
-                        .map_err(FederationError::from)?;
-                    Ok::<_, FederationError>((field_pos.field_name().clone(), &field_def.ty))
+                    let field_def = field_pos.get(schema.schema()).map_err(|e| {
+                        SingleFederationError::InvalidGraphQL {
+                            message: e.to_string(),
+                        }
+                    })?;
+                    Ok::<_, SingleFederationError>((field_pos.field_name().clone(), &field_def.ty))
                 })
                 .collect::<Result<IndexMap<_, _>, _>>()?;
             validate_args_selection(schema, &next_fields, sel)?;
         } else {
             // A leaf field must not be a list.
             if field.is_list() {
-                return Err(FederationError::from(
-                    SingleFederationError::CacheTagInvalidFormat {
-                        message: format!("invalid path ending at \"{name}\", which is a list type"),
-                    },
-                ));
+                return Err(SingleFederationError::CacheTagInvalidFormat {
+                    message: format!("invalid path ending at \"{name}\", which is a list type"),
+                });
             }
             // A leaf field should have a scalar type.
             if !matches!(
                 &type_def,
                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
             ) {
-                return Err(FederationError::from(
-                    SingleFederationError::CacheTagInvalidFormat {
-                        message: format!(
-                            "invalid path ending at \"{name}\", which is not a scalar type or an enum"
-                        ),
-                    },
-                ));
+                return Err(SingleFederationError::CacheTagInvalidFormat {
+                    message: format!(
+                        "invalid path ending at \"{name}\", which is not a scalar type or an enum"
+                    ),
+                });
             }
         }
     }
@@ -255,8 +297,13 @@ fn validate_args_on_object_type(
     errors: &mut MultipleFederationErrors,
     type_pos: &ObjectTypeDefinitionPosition,
     args: &CacheTagDirectiveArguments,
-) -> Result<(), FederationError> {
-    let _type_def = type_pos.get(schema.schema())?;
+) -> Result<(), SingleFederationError> {
+    let _type_def =
+        type_pos
+            .get(schema.schema())
+            .map_err(|e| SingleFederationError::InvalidGraphQL {
+                message: e.to_string(),
+            })?;
     let connect_spec = connect_spec_from_schema(schema.schema()).unwrap_or(DEFAULT_CONNECT_SPEC);
     let format = match StringTemplate::parse_with_spec(args.format, connect_spec) {
         Ok(format) => format,
@@ -298,7 +345,7 @@ fn validate_args_on_object_type(
                     let mut selection_set = SelectionSet::new(type_pos.type_name.clone());
                     match build_selection_set(&mut selection_set, schema, &var_ref.selection) {
                         Ok(_) => Some(Ok(selection_set)),
-                        Err(err) => Some(Err(err)),
+                        Err(err) => Some(Err(err.into())),
                     }
                 }
                 None => None,
@@ -344,22 +391,41 @@ fn validate_args_on_object_type(
 fn get_entity_key_field_sets(
     schema: &FederationSchema,
     type_pos: &ObjectTypeDefinitionPosition,
-) -> Result<Vec<executable::FieldSet>, FederationError> {
-    let fed_spec = get_federation_spec_definition_from_subgraph(schema)?;
-    let key_directive_def = fed_spec.key_directive_definition(schema)?;
-    let type_def = type_pos.get(schema.schema())?;
+) -> Result<Vec<executable::FieldSet>, SingleFederationError> {
+    let fed_spec = get_federation_spec_definition_from_subgraph(schema).map_err(|e| {
+        SingleFederationError::InvalidGraphQL {
+            message: e.to_string(),
+        }
+    })?;
+    let key_directive_def = fed_spec.key_directive_definition(schema).map_err(|e| {
+        SingleFederationError::InvalidGraphQL {
+            message: e.to_string(),
+        }
+    })?;
+    let type_def =
+        type_pos
+            .get(schema.schema())
+            .map_err(|e| SingleFederationError::InvalidGraphQL {
+                message: e.to_string(),
+            })?;
     type_def
         .directives
         .get_all(&key_directive_def.name)
         .map(|directive_app| {
-            let key_args = fed_spec.key_directive_arguments(directive_app)?;
+            let key_args = fed_spec
+                .key_directive_arguments(directive_app)
+                .map_err(|e| SingleFederationError::InvalidGraphQL {
+                    message: e.to_string(),
+                })?;
             executable::FieldSet::parse(
                 Valid::assume_valid_ref(schema.schema()),
                 type_pos.type_name.clone(),
                 key_args.fields,
                 "field_set",
             )
-            .map_err(|err| internal_error!("cannot parse field set for entity keys: {err}"))
+            .map_err(|err| SingleFederationError::InvalidGraphQL {
+                message: format!("cannot parse field set for entity keys: {err}"),
+            })
         })
         .process_results(|iter| iter.collect())
 }
@@ -369,72 +435,58 @@ fn build_selection_set(
     selection_set: &mut SelectionSet,
     schema: &FederationSchema,
     selection: &SelectionTrie,
-) -> Result<(), FederationError> {
+) -> Result<(), SingleFederationError> {
     // Check the format selection is just a single selection. The `StringTemplate` allows multiple
     // selections like `{$key { a b }}`, but cache tags don't support that.
     let num_selections = selection.iter().count();
     if num_selections != 1 {
-        return Err(FederationError::from(
-            SingleFederationError::CacheTagInvalidFormat {
-                message: format!(
-                    "invalid path element at \"{selection}\", which is not a single selection"
-                ),
-            },
-        ));
+        return Err(SingleFederationError::CacheTagInvalidFormat {
+            message: format!(
+                "invalid path element at \"{selection}\", which is not a single selection"
+            ),
+        });
     }
     for (key, sel) in selection.iter() {
-        let name = Name::new(key).map_err(|_| {
-            FederationError::from(SingleFederationError::CacheTagInvalidFormat {
-                message: format!("invalid field selection name \"{key}\""),
-            })
+        let name = Name::new(key).map_err(|_| SingleFederationError::CacheTagInvalidFormat {
+            message: format!("invalid field selection name \"{key}\""),
         })?;
         let mut new_field = selection_set
             .new_field(schema.schema(), name.clone())
-            .map_err(|_| {
-                FederationError::from(SingleFederationError::CacheTagInvalidFormat {
-                    message: format!("cannot create selection set with \"{key}\""),
-                })
+            .map_err(|_| SingleFederationError::CacheTagInvalidFormat {
+                message: format!("cannot create selection set with \"{key}\""),
             })?;
         let new_field_type_def = schema
             .get_type(new_field.ty().inner_named_type().clone())
-            .map_err(|_| {
-                FederationError::from(SingleFederationError::CacheTagInvalidFormat {
-                    message: format!("invalid field selection name \"{key}\""),
-                })
+            .map_err(|e| SingleFederationError::InvalidGraphQL {
+                message: e.to_string(),
             })?;
 
         if !sel.is_leaf() {
             ObjectOrInterfaceTypeDefinitionPosition::try_from(new_field_type_def).map_err(
-                |_| {
-                    FederationError::from(SingleFederationError::CacheTagInvalidFormat {
-                        message: format!(
-                            "invalid path element \"{name}\", which is not an object or interface type"
-                        ),
-                    })
+                |_| SingleFederationError::CacheTagInvalidFormat {
+                    message: format!(
+                        "invalid path element \"{name}\", which is not an object or interface type"
+                    ),
                 },
             )?;
             build_selection_set(&mut new_field.selection_set, schema, sel)?;
         } else {
             // A leaf field must not be a list.
             if new_field.ty().is_list() {
-                return Err(FederationError::from(
-                    SingleFederationError::CacheTagInvalidFormat {
-                        message: format!("invalid path ending at \"{name}\", which is a list type"),
-                    },
-                ));
+                return Err(SingleFederationError::CacheTagInvalidFormat {
+                    message: format!("invalid path ending at \"{name}\", which is a list type"),
+                });
             }
             // A leaf field should have a scalar type.
             if !matches!(
                 &new_field_type_def,
                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
             ) {
-                return Err(FederationError::from(
-                    SingleFederationError::CacheTagInvalidFormat {
-                        message: format!(
-                            "invalid path ending at \"{name}\", which is not a scalar type or an enum"
-                        ),
-                    },
-                ));
+                return Err(SingleFederationError::CacheTagInvalidFormat {
+                    message: format!(
+                        "invalid path ending at \"{name}\", which is not a scalar type or an enum"
+                    ),
+                });
             }
         }
         selection_set.push(new_field);

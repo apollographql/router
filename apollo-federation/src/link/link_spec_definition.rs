@@ -362,8 +362,6 @@ impl SpecDefinition for LinkSpecDefinition {
             &self.create_definition_argument_specifications(),
             true,
             &[DirectiveLocation::Schema],
-            false,
-            None,
             None,
         ))]
     }

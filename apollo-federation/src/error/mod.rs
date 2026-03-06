@@ -834,7 +834,7 @@ pub enum SingleFederationError {
     #[error("cacheTag format is invalid: {message}")]
     CacheTagInvalidFormat { message: String },
     #[error(
-        "error on field \"{field_name}\" on type \"{type_name}\": cacheTag can only apply on root fields"
+        "error on field \"{field_name}\" on type \"{type_name}\": cacheTag can only apply on root fields or entity types"
     )]
     CacheTagAppliedToNonRootField { type_name: Name, field_name: Name },
     #[error("cacheTag applied on root fields can only reference arguments in format using $args")]
@@ -2432,18 +2432,18 @@ static CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD: LazyLock<ErrorCodeDefini
         )
     });
 
-static CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY: LazyLock<ErrorCodeDefinition> =
-    LazyLock::new(|| {
+static CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
         ErrorCodeDefinition::new(
             "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY".to_owned(),
-            "@cacheTag on entity types can only reference key fields using $key in format."
-                .to_owned(),
+            "cacheTag applied on types can only reference arguments in format using $key, and each referenced field must be a member of every @key field set.".to_owned(),
             Some(ErrorCodeMetadata {
                 added_in: "2.12.0",
                 replaces: &[],
             }),
         )
-    });
+    },
+);
 
 static CACHE_TAG_ENTITY_NOT_RESOLVABLE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(

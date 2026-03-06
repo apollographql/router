@@ -23,6 +23,7 @@ use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
+use crate::link::cache_tag_spec_definition::CACHE_TAG_VERSIONS;
 use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
 use crate::link::policy_spec_definition::POLICY_VERSIONS;
@@ -36,6 +37,7 @@ use crate::link::tag_spec_definition::TAG_VERSIONS;
 use crate::schema::FederationSchema;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveCompositionOptions;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
@@ -732,8 +734,6 @@ impl FederationSpecDefinition {
             ],
             true,
             &[DirectiveLocation::Object, DirectiveLocation::Interface],
-            false,
-            None,
             None,
         )
     }
@@ -770,8 +770,6 @@ impl FederationSpecDefinition {
             &[Self::fields_argument_specification()],
             false,
             &[DirectiveLocation::FieldDefinition],
-            false,
-            None,
             None,
         )
     }
@@ -782,8 +780,6 @@ impl FederationSpecDefinition {
             &[Self::fields_argument_specification()],
             false,
             &[DirectiveLocation::FieldDefinition],
-            false,
-            None,
             None,
         )
     }
@@ -804,8 +800,6 @@ impl FederationSpecDefinition {
                 DirectiveLocation::Object,
                 DirectiveLocation::FieldDefinition,
             ],
-            false,
-            None,
             None,
         )
     }
@@ -816,8 +810,6 @@ impl FederationSpecDefinition {
             &[],
             false,
             &[DirectiveLocation::Object, DirectiveLocation::Interface],
-            false,
-            None,
             None,
         )
     }
@@ -831,8 +823,6 @@ impl FederationSpecDefinition {
                 DirectiveLocation::Object,
                 DirectiveLocation::FieldDefinition,
             ],
-            false,
-            None,
             None,
         )
     }
@@ -861,8 +851,6 @@ impl FederationSpecDefinition {
             &args,
             false,
             &[DirectiveLocation::FieldDefinition],
-            false,
-            None,
             None,
         )
     }
@@ -882,8 +870,6 @@ impl FederationSpecDefinition {
             }],
             true,
             &[DirectiveLocation::Schema],
-            false,
-            None,
             None,
         )
     }
@@ -894,8 +880,6 @@ impl FederationSpecDefinition {
             &[],
             false,
             &[DirectiveLocation::Object],
-            false,
-            None,
             None,
         )
     }
@@ -916,9 +900,13 @@ impl FederationSpecDefinition {
                 DirectiveLocation::Object,
                 DirectiveLocation::FieldDefinition,
             ],
-            false,
-            None,
-            None,
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|v| {
+                    CACHE_TAG_VERSIONS.get_dyn_minimum_required_version(v)
+                },
+                static_argument_transform: None,
+                use_join_directive: true,
+            }),
         )
     }
 }
