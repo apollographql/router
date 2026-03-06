@@ -76,6 +76,7 @@ use std::sync::OnceLock;
 
 #[cfg(test)]
 use futures::FutureExt;
+use opentelemetry::metrics::InstrumentProvider;
 
 use crate::metrics::aggregation::AggregateMeterProvider;
 
@@ -153,6 +154,14 @@ impl<I, T> NoopGuard<I, T> {
         }
     }
 }
+
+/// Noop InstrumentProvider - all methods use the default trait implementations
+/// which return noop instruments.
+// This can be replaced with NoopMeterProvider once the changes in
+// https://github.com/open-telemetry/opentelemetry-rust/pull/3111
+// are released.
+struct NoopInstrumentProvider;
+impl InstrumentProvider for NoopInstrumentProvider {}
 
 #[cfg(test)]
 pub(crate) mod test_utils {
@@ -726,9 +735,9 @@ pub(crate) mod test_utils {
                     Array::I64(v) => v.into(),
                     Array::F64(v) => v.into(),
                     Array::String(v) => v.iter().map(|v| v.to_string()).collect::<Vec<_>>().into(),
-                    _ => serde_json::Value::Null,
+                    _ => unreachable!("unexpected opentelemetry::Array variant"),
                 },
-                _ => serde_json::Value::Null,
+                _ => unreachable!("unexpected opentelemetry::Value variant"),
             }
         }
     }

@@ -18,10 +18,7 @@ use opentelemetry::metrics::UpDownCounter;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use regex::Regex;
 
-/// Noop InstrumentProvider - all methods use the default trait implementations
-/// which return noop instruments.
-struct NoopInstrumentProvider;
-impl InstrumentProvider for NoopInstrumentProvider {}
+use super::NoopInstrumentProvider;
 
 /// Wrapper for different meter provider types
 #[derive(Clone)]
@@ -282,7 +279,8 @@ mod test {
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+    use opentelemetry_sdk::runtime;
 
     use crate::metrics::filter::FilterMeterProvider;
 
@@ -291,7 +289,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");
@@ -344,54 +342,26 @@ mod test {
             .iter()
             .flat_map(|m| m.scope_metrics())
             .flat_map(|m| m.metrics())
-            .map(|m| m.name().to_string())
+            .map(|m| m.name())
             .collect();
 
         // Matches allow
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.test")
-        );
+        assert!(metric_names.contains(&"apollo.router.operations.test"));
 
-        assert!(metric_names.iter().any(|n| n == "apollo.router.operations"));
+        assert!(metric_names.contains(&"apollo.router.operations"));
 
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.graphos.cloud.test")
-        );
+        assert!(metric_names.contains(&"apollo.graphos.cloud.test"));
 
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.router.lifecycle.api_schema")
-        );
+        assert!(metric_names.contains(&"apollo.router.lifecycle.api_schema"));
 
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.connectors")
-        );
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.router.schema.connectors")
-        );
+        assert!(metric_names.contains(&"apollo.router.operations.connectors"));
+        assert!(metric_names.contains(&"apollo.router.schema.connectors"));
 
         // Mismatches allow
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.unknown.test")
-        );
+        assert!(!metric_names.contains(&"apollo.router.unknown.test"));
 
         // Matches deny
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.error")
-        );
+        assert!(!metric_names.contains(&"apollo.router.operations.error"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -399,7 +369,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");
@@ -429,7 +399,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::public(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");
@@ -464,31 +434,15 @@ mod test {
             .iter()
             .flat_map(|m| m.scope_metrics())
             .flat_map(|m| m.metrics())
-            .map(|m| m.name().to_string())
+            .map(|m| m.name())
             .collect();
 
-        assert!(!metric_names.iter().any(|n| n == "apollo.router.config"));
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.config.test")
-        );
-        assert!(!metric_names.iter().any(|n| n == "apollo.router.entities"));
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.entities.test")
-        );
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.connectors")
-        );
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.schema.connectors")
-        );
+        assert!(!metric_names.contains(&"apollo.router.config"));
+        assert!(!metric_names.contains(&"apollo.router.config.test"));
+        assert!(!metric_names.contains(&"apollo.router.entities"));
+        assert!(!metric_names.contains(&"apollo.router.entities.test"));
+        assert!(!metric_names.contains(&"apollo.router.operations.connectors"));
+        assert!(!metric_names.contains(&"apollo.router.schema.connectors"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -496,7 +450,7 @@ mod test {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo_realtime(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
         let filtered = meter_provider.meter("filtered");
@@ -515,20 +469,12 @@ mod test {
             .iter()
             .flat_map(|m| m.scope_metrics())
             .flat_map(|m| m.metrics())
-            .map(|m| m.name().to_string())
+            .map(|m| m.name())
             .collect();
         // Matches
-        assert!(
-            metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.error")
-        );
+        assert!(metric_names.contains(&"apollo.router.operations.error"));
 
         // Mismatches
-        assert!(
-            !metric_names
-                .iter()
-                .any(|n| n == "apollo.router.operations.mismatch")
-        );
+        assert!(!metric_names.contains(&"apollo.router.operations.mismatch"));
     }
 }

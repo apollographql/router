@@ -18,7 +18,6 @@ use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanKind;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
-use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
@@ -41,11 +40,12 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
-use crate::plugins::telemetry::error_handler::NamedSpanExporter;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::tracing::NamedSpanExporter;
+use crate::plugins::telemetry::tracing::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::datadog_exporter;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
@@ -66,6 +66,10 @@ fn default_resource_mappings() -> HashMap<String, String> {
 
 const ENV_KEY: Key = Key::from_static_str("env");
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
+
+const DD_TRACE_AGENT_URL: &str = "DD_TRACE_AGENT_URL";
+const DD_AGENT_HOST: &str = "DD_AGENT_HOST";
+const DD_TRACE_AGENT_PORT: &str = "DD_TRACE_AGENT_PORT";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -118,6 +122,37 @@ fn default_true() -> bool {
     true
 }
 
+impl Config {
+    /// Apply environment variable overrides for the endpoint.
+    /// Supports `DD_TRACE_AGENT_URL`, or `DD_AGENT_HOST` + `DD_TRACE_AGENT_PORT`.
+    fn endpoint_with_env_override(&self) -> Result<Uri, BoxError> {
+        // DD_TRACE_AGENT_URL takes precedence
+        if let Ok(url) = std::env::var(DD_TRACE_AGENT_URL) {
+            return url.parse::<Uri>().map_err(|e| {
+                format!("invalid URI in {}: '{}': {}", DD_TRACE_AGENT_URL, url, e).into()
+            });
+        }
+
+        // Fall back to DD_AGENT_HOST + DD_TRACE_AGENT_PORT
+        if let Ok(host) = std::env::var(DD_AGENT_HOST) {
+            let port = std::env::var(DD_TRACE_AGENT_PORT).unwrap_or_else(|_| "8126".to_string());
+            let url = format!("http://{}:{}", host, port);
+            return url.parse::<Uri>().map_err(|e| {
+                format!(
+                    "invalid URI from {} and {}: '{}': {}",
+                    DD_AGENT_HOST, DD_TRACE_AGENT_PORT, url, e
+                )
+                .into()
+            });
+        }
+
+        // Fall back to config
+        Ok(self
+            .endpoint
+            .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT)))
+    }
+}
+
 impl TracingConfigurator for Config {
     fn config(conf: &Conf) -> &Self {
         &conf.exporters.tracing.datadog
@@ -142,9 +177,7 @@ impl TracingConfigurator for Config {
         });
 
         let fixed_span_names = self.fixed_span_names;
-        let endpoint = &self
-            .endpoint
-            .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT));
+        let endpoint = self.endpoint_with_env_override()?;
 
         let exporter = datadog_exporter::new_pipeline()
             .with_agent_endpoint(endpoint.to_string().trim_end_matches('/'))
@@ -190,7 +223,7 @@ impl TracingConfigurator for Config {
                 &span.name
             })
             .with(
-                &resource.get(&Key::new(SERVICE_NAME)),
+                &resource.get(&SERVICE_NAME.into()),
                 |builder, service_name| {
                     // Datadog exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
@@ -202,7 +235,7 @@ impl TracingConfigurator for Config {
             })
             .with_version(
                 resource
-                    .get(&Key::new(SERVICE_VERSION))
+                    .get(&SERVICE_VERSION.into())
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
@@ -225,10 +258,11 @@ impl TracingConfigurator for Config {
         };
         let named_exporter = NamedSpanExporter::new(wrapper, "datadog");
 
-        let batch_processor = BatchSpanProcessor::builder(named_exporter, runtime::Tokio)
-            .with_batch_config(self.batch_processor.clone().into())
-            .build()
-            .filtered();
+        let batch_processor =
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("datadog"))
+                .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
+                .build()
+                .filtered();
 
         if builder
             .tracing_common()

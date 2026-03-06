@@ -655,7 +655,7 @@ impl From<opentelemetry::Array> for AttributeArray {
             opentelemetry::Array::String(v) => {
                 AttributeArray::String(v.into_iter().map(|v| v.into()).collect())
             }
-            _ => AttributeArray::String(vec![]), // Handle future variants
+            _ => unreachable!("unexpected opentelemetry::Array variant"),
         }
     }
 }

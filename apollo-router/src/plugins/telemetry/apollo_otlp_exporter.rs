@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
 use derivative::Derivative;
-use futures::future::BoxFuture;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Event;
@@ -44,15 +41,12 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
-#[derive(Derivative, Clone)]
+#[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct ApolloOtlpExporter {
-    batch_config: BatchProcessorConfig,
-    endpoint: Url,
-    apollo_key: String,
     instrumentation_scope: InstrumentationScope,
     #[derivative(Debug = "ignore")]
-    otlp_exporter: Arc<opentelemetry_otlp::SpanExporter>,
+    otlp_exporter: opentelemetry_otlp::SpanExporter,
     errors_configuration: ErrorsConfiguration,
 }
 
@@ -109,9 +103,6 @@ impl ApolloOtlpExporter {
         );
 
         Ok(Self {
-            endpoint: endpoint.clone(),
-            batch_config: batch_config.clone(),
-            apollo_key: apollo_key.to_string(),
             instrumentation_scope: InstrumentationScope::builder(GLOBAL_TRACER_NAME)
                 .with_version(format!(
                     "{}@{}",
@@ -119,7 +110,7 @@ impl ApolloOtlpExporter {
                     std::env!("CARGO_PKG_VERSION")
                 ))
                 .build(),
-            otlp_exporter: Arc::new(otlp_exporter),
+            otlp_exporter,
             errors_configuration: errors_configuration.clone(),
         })
     }
@@ -257,26 +248,23 @@ impl ApolloOtlpExporter {
             dropped_attributes_count: span.droppped_attribute_count,
         }
     }
+}
 
-    pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
-        let exporter = self.otlp_exporter.clone();
-        Box::pin(async move {
-            exporter.export(spans).await?;
-            // re-use the metric we already have in apollo_exporter but attach the protocol
-            u64_counter!(
-                "apollo.router.telemetry.studio.reports",
-                "The number of reports submitted to Studio by the Router",
-                1,
-                report.type = ROUTER_REPORT_TYPE_TRACES,
-                report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
-            );
-            Ok(())
-        })
+impl SpanExporter for ApolloOtlpExporter {
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        self.otlp_exporter.export(batch).await?;
+        // re-use the metric we already have in apollo_exporter but attach the protocol
+        u64_counter!(
+            "apollo.router.telemetry.studio.reports",
+            "The number of reports submitted to Studio by the Router",
+            1,
+            report.type = ROUTER_REPORT_TYPE_TRACES,
+            report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
+        );
+        Ok(())
     }
 
-    pub(crate) fn shutdown(&mut self) -> OTelSdkResult {
-        // Can't call shutdown on Arc, need to get inner reference
-        // Note: In OTel 0.31, shutdown is typically called on drop
-        Ok(())
+    fn shutdown_with_timeout(&mut self, timeout: std::time::Duration) -> OTelSdkResult {
+        self.otlp_exporter.shutdown_with_timeout(timeout)
     }
 }

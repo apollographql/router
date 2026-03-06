@@ -6,7 +6,8 @@ use tower::BoxError;
 
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::error_handler::NamedMetricExporter;
+use crate::plugins::telemetry::metrics::NamedMetricExporter;
+use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
@@ -23,13 +24,18 @@ impl MetricsConfigurator for super::super::otlp::Config {
     }
 
     fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
-        let exporter = self.build_metric_exporter()?;
+        // Apply env var overrides to the config
+        let config = self.clone().with_metrics_env_overrides()?;
 
-        let named_exporter = NamedMetricExporter::new(exporter, "otlp");
+        let exporter = config.build_metric_exporter()?;
+
+        // Wrap with overflow detection, then error prefixing
+        let named_exporter =
+            NamedMetricExporter::new(OverflowMetricExporter::new_push(exporter), "otlp");
         builder.with_reader(
             MeterProviderType::Public,
             PeriodicReader::builder(named_exporter, runtime::Tokio)
-                .with_interval(self.batch_processor.scheduled_delay)
+                .with_interval(config.batch_processor.scheduled_delay)
                 .build(),
         );
 

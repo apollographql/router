@@ -12,6 +12,7 @@ use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::BoxError;
 
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
@@ -22,9 +23,13 @@ pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
 #[allow(unreachable_pub, dead_code)]
 pub(crate) mod datadog_exporter;
+mod named;
 pub(crate) mod otlp;
 pub(crate) mod reload;
 pub(crate) mod zipkin;
+
+pub(crate) use named::NamedSpanExporter;
+pub(crate) use named::NamedTokioRuntime;
 
 #[derive(Debug)]
 struct ApolloFilterSpanProcessor<T: SpanProcessor> {
@@ -148,6 +153,61 @@ pub(crate) fn max_export_timeout_default() -> Duration {
 
 fn max_concurrent_exports_default() -> usize {
     1
+}
+
+impl BatchProcessorConfig {
+    /// Apply OTEL_BSP_* environment variable overrides to this config.
+    /// This should be used for third-party exporters (OTLP, Datadog, Zipkin)
+    /// but NOT for Apollo exporters.
+    pub(crate) fn with_env_overrides(self) -> Result<Self, BoxError> {
+        Ok(BatchProcessorConfig {
+            scheduled_delay: Self::parse_duration_env(
+                "OTEL_BSP_SCHEDULE_DELAY",
+                self.scheduled_delay,
+            )?,
+            max_queue_size: Self::parse_usize_env("OTEL_BSP_MAX_QUEUE_SIZE", self.max_queue_size)?,
+            max_export_batch_size: Self::parse_usize_env(
+                "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+                self.max_export_batch_size,
+            )?,
+            max_export_timeout: Self::parse_duration_env(
+                "OTEL_BSP_EXPORT_TIMEOUT",
+                self.max_export_timeout,
+            )?,
+            max_concurrent_exports: Self::parse_usize_env(
+                "OTEL_BSP_MAX_CONCURRENT_EXPORTS",
+                self.max_concurrent_exports,
+            )?,
+        })
+    }
+
+    fn parse_duration_env(var: &str, default: Duration) -> Result<Duration, BoxError> {
+        match std::env::var(var) {
+            Ok(value) => {
+                let millis = value.parse::<u64>().map_err(|e| {
+                    format!(
+                        "invalid value '{}' for {}, expected milliseconds: {}",
+                        value, var, e
+                    )
+                })?;
+                Ok(Duration::from_millis(millis))
+            }
+            Err(_) => Ok(default),
+        }
+    }
+
+    fn parse_usize_env(var: &str, default: usize) -> Result<usize, BoxError> {
+        match std::env::var(var) {
+            Ok(value) => value.parse::<usize>().map_err(|e| {
+                format!(
+                    "invalid value '{}' for {}, expected integer: {}",
+                    value, var, e
+                )
+                .into()
+            }),
+            Err(_) => Ok(default),
+        }
+    }
 }
 
 impl From<BatchProcessorConfig> for BatchConfig {

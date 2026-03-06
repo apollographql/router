@@ -182,7 +182,7 @@ where
                         }
                         _ => {
                             // If otel adds more types, we should add support
-                            unreachable!("Unhandled value type")
+                            unreachable!("unexpected opentelemetry::Value variant")
                         }
                     }
                 }

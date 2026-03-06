@@ -34,9 +34,9 @@ impl Hash for InternValue<'_> {
                         }
                     }
                     opentelemetry::Array::String(x) => x.hash(state),
-                    _ => {}
+                    _ => unreachable!("unexpected opentelemetry::Array variant"),
                 },
-                _ => {}
+                _ => unreachable!("unexpected opentelemetry::Value variant"),
             },
         }
     }
@@ -110,9 +110,9 @@ impl InternValue<'_> {
                     opentelemetry::Array::String(x) => {
                         Self::write_generic_array(payload, reusable_buffer, x)
                     }
-                    _ => Self::write_empty_array(payload),
+                    _ => unreachable!("unexpected opentelemetry::Array variant"),
                 },
-                _ => rmp::encode::write_str(payload, ""),
+                _ => unreachable!("unexpected opentelemetry::Value variant"),
             },
         }
     }

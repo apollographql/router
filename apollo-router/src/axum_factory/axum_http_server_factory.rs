@@ -30,6 +30,7 @@ use serde_json::json;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
@@ -354,20 +355,28 @@ where
         .br(true)
         .gzip(true)
         .deflate(true);
-    let mut main_route = main_router::<RF>(configuration)
-        .layer(decompression)
-        .layer(middleware::from_fn_with_state(
-            (license.clone(), Instant::now(), Arc::new(AtomicU64::new(0))),
-            license_handler,
-        ))
-        .layer(Extension(service_factory))
-        .layer(cors)
-        // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
-        // Adding layers after telemetry will cause us to lose metrics and spans.
-        .layer(
-            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license, span_mode }),
-        )
-        .layer(middleware::from_fn(metrics_handler));
+
+    let mut main_route = main_router::<RF>(configuration).layer(
+        ServiceBuilder::new()
+            // Telemetry layers MUST be first. This means that they will be hit first during execution of the pipeline
+            // Adding layers before telemetry will cause us to lose metrics and spans.
+            .layer(middleware::from_fn(metrics_handler))
+            .layer(
+                TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan {
+                    license: license.clone(),
+                    span_mode,
+                }),
+            )
+            // CORS layer must be before any layer that can short-circuit with an error response, else
+            // browser clients will not be able to view the error response body.
+            .layer(cors)
+            .layer(Extension(service_factory))
+            .layer(middleware::from_fn_with_state(
+                (license, Instant::now(), Arc::new(AtomicU64::new(0))),
+                license_handler,
+            ))
+            .layer(decompression),
+    );
 
     if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
         main_route = main_endpoint_layer(main_route);
