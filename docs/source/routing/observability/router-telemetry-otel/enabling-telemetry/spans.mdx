@@ -71,7 +71,7 @@ telemetry:
 You can also have [conditions](/router/configuration/telemetry/instrumentation/conditions) on custom attributes using [selectors](/router/configuration/telemetry/instrumentation/selectors). You can only have conditions on a selector at the same execution level.
 Example you can't have a condition on `response_header` if you want to set an attribute from `request_header`.
 
-Conditions and the `static` selector are supported for the `router`, `supergraph`, `subgraph`, and `connector` services. They are **not** supported for `http_client` span attributes. See [`http_client` span attributes](#http_client-span-attributes) for details.
+Conditions and the `static` selector are supported for the `router`, `supergraph`, `subgraph`, and `connector` services. They are not supported for `http_client` span attributes. For details, see [`http_client` span attributes](#http_client-span-attributes).
 
 ```yaml title="desc.router.yaml"
 telemetry:
@@ -274,7 +274,7 @@ The `http_client` span is created for each HTTP request to a subgraph or REST se
 
 <Note>
 
-`http_client` span attributes only support the `request_header` and `response_header` selectors. Conditions and the `static` selector are **not** supported. Attempting to use them causes a router startup failure with an error similar to:
+`http_client` span attributes support the `request_header` and `response_header` selectors. Use these selectors to configure your attributes. Attempting to use conditions or the `static` selector causes a router startup failure with an error similar to:
 
 ```
 could not create router: failed to parse attribute '...': unknown field '...', there are no fields
