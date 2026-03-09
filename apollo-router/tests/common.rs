@@ -1506,9 +1506,11 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
-        let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(3) {
+            // Drain stdout to prevent backpressure and ensure router exits
+            self.read_logs();
+            let router = self.router.as_mut().expect("router must have been started");
             match router.try_wait() {
                 Ok(Some(_)) => {
                     self.router = None;
