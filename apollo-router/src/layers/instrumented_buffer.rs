@@ -1,3 +1,5 @@
+//! Instrumented buffer layer for the router, which wraps tower's Buffer layer and provides metrics about the buffer state.
+
 use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -17,9 +19,12 @@ use crate::metrics::UpDownCounterGuard;
 
 // ─── Outer wrapper: increments when poll_ready reserves a permit ─────────────
 
+/// Instrumented buffer layer for the router, which wraps tower's Buffer layer and provides metrics about the buffer state.
 pub struct InstrumentedBuffer<Req, F> {
-    pub inner: Buffer<Req, F>,
-    pub gauge: BufferGauge,
+    /// The inner buffer layer, which wraps the actual service and is responsible for buffering requests.
+    inner: Buffer<Req, F>,
+    /// Shared gauge for tracking the buffer state, including reserved permits and tasks in the buffer.
+    gauge: BufferGauge,
     /// Tracks whether `poll_ready` has reserved a permit that hasn't
     /// been consumed by `call` yet.  Used to avoid double-counting
     /// and to decrement on drop.
@@ -30,6 +35,7 @@ impl<Req, F> InstrumentedBuffer<Req, F>
 where
     F: 'static,
 {
+    /// Creates a new instrumented buffer layer with the given name, extra attributes, service, and buffer bound.
     pub fn new<S>(
         name: impl Into<String>,
         extra: Vec<(String, String)>,
@@ -43,7 +49,7 @@ where
         Req: Send + 'static,
     {
         let attrs = attrs(name.into(), extra);
-        let gauge = BufferGauge::new(attrs, tracing::Span::current());
+        let gauge = BufferGauge::new(attrs);
 
         // Wrap the inner service so it decrements on worker dequeue
         let gauged_inner = GaugedInner {
@@ -130,7 +136,7 @@ where
 
 impl<Req, F> Drop for InstrumentedBuffer<Req, F> {
     fn drop(&mut self) {
-        if let Some(_) = self.permit_reservation.take() {
+        if self.permit_reservation.take().is_some() {
             self.gauge.dropped();
         }
     }
@@ -138,13 +144,19 @@ impl<Req, F> Drop for InstrumentedBuffer<Req, F> {
 
 // ─── Gauge Prepare Guard ─────────────────────────────────────────────────────
 
+/// Gauge reservation guard for the buffer.
 #[derive(Debug)]
+#[allow(dead_code)]
 struct BufferGaugeReservationGuard(UpDownCounterGuard<i64>);
 
+/// Gauge permit guard for the buffer.
 #[derive(Debug)]
+#[allow(dead_code)]
 struct BufferGaugePermitGuard(UpDownCounterGuard<i64>);
 
+/// Gauge processing guard for the buffer worker.
 #[derive(Debug)]
+#[allow(dead_code)]
 struct BufferGaugeProcessingGuard(UpDownCounterGuard<i64>);
 
 // ─── Inner wrapper: decrements when the worker dequeues and calls ────────────
@@ -187,21 +199,21 @@ where
 
 // ─── Layer ───────────────────────────────────────────────────────────────────
 
+/// Instrumented buffer layer for the router, which wraps tower's Buffer layer and provides metrics about the buffer state.
 pub struct InstrumentedBufferLayer<Request> {
     bound: usize,
     name: String,
     extra: Vec<(String, String)>,
-    span: tracing::Span,
     _p: PhantomData<fn(Request)>,
 }
 
 impl<Request> InstrumentedBufferLayer<Request> {
+    /// Creates a new instrumented buffer layer with the given name, extra attributes, and buffer bound.
     pub fn new(name: impl Into<String>, extra: Vec<(String, String)>, bound: usize) -> Self {
         Self {
             bound,
             name: name.into(),
             extra,
-            span: tracing::Span::current(),
             _p: PhantomData,
         }
     }
@@ -237,7 +249,6 @@ impl<Request> Clone for InstrumentedBufferLayer<Request> {
             bound: self.bound,
             name: self.name.clone(),
             extra: self.extra.clone(),
-            span: self.span.clone(),
             _p: PhantomData,
         }
     }
@@ -254,15 +265,16 @@ impl<Request> fmt::Debug for InstrumentedBufferLayer<Request> {
 
 // ─── Shared gauge ────────────────────────────────────────────────────────────
 
+/// Shared gauge for tracking the buffer state, including reserved permits and tasks in the buffer.
 #[derive(Debug, Clone)]
 pub struct BufferGauge {
     attrs: Vec<opentelemetry::KeyValue>,
-    span: tracing::Span,
 }
 
 impl BufferGauge {
-    pub fn new(attrs: Vec<opentelemetry::KeyValue>, span: tracing::Span) -> Self {
-        Self { attrs, span }
+    /// Creates a new buffer gauge with the given attributes.
+    pub fn new(attrs: Vec<opentelemetry::KeyValue>) -> Self {
+        Self { attrs }
     }
 
     fn reserve(&self) -> BufferGaugeReservationGuard {

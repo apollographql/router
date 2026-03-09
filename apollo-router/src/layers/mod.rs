@@ -182,6 +182,7 @@ pub trait ServiceBuilderExt<L>: Sized {
         extra: &[(&str, &str)],
     ) -> ServiceBuilder<Stack<InstrumentedBufferLayer<Request>, L>>;
 
+    /// Adds an instrumented load shedder to the service stack.
     fn load_shed_instrument(
         self,
         name: impl Into<String>,
@@ -352,7 +353,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         self.layer(InstrumentedBufferLayer::new(
             name.into(),
             extra
-                .into_iter()
+                .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             DEFAULT_BUFFER_SIZE,
@@ -367,7 +368,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         self.layer(InstrumentedLoadShedLayer::new(
             name.into(),
             extra
-                .into_iter()
+                .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
         ))

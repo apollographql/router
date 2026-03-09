@@ -1,3 +1,5 @@
+//! A [`Layer`] to wrap services in [`LoadShed`] middleware with instrumentation.
+
 use std::fmt;
 use std::pin::Pin;
 use std::task::Context;
@@ -10,9 +12,7 @@ use tower::Layer;
 use tower::load_shed::error::Overloaded;
 use tower_service::Service;
 
-/// A [`Layer`] to wrap services in [`LoadShedService`] middleware.
-///
-/// [`Layer`]: crate::Layer
+/// An instrumented [`Layer`] that wraps services in [`LoadShed`] middleware.
 #[derive(Clone)]
 pub struct InstrumentedLoadShedLayer {
     name: String,
@@ -20,6 +20,7 @@ pub struct InstrumentedLoadShedLayer {
 }
 
 impl InstrumentedLoadShedLayer {
+    /// Creates a new [`InstrumentedLoadShedLayer`] with the given name and extra attributes.
     pub fn new(name: impl Into<String>, extra: Vec<(String, String)>) -> Self {
         Self {
             name: name.into(),
@@ -45,8 +46,6 @@ impl fmt::Debug for InstrumentedLoadShedLayer {
 // Service
 
 /// A [`Service`] that sheds load when the inner service isn't ready.
-///
-/// [`Service`]: crate::Service
 #[derive(Debug)]
 pub struct LoadShed<S> {
     attrs: Vec<opentelemetry::KeyValue>,
