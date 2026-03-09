@@ -143,7 +143,7 @@
       matchManagers: ['cargo'],
       matchPackageNames: ['/^rhai$/'],
       automerge: false,
-      prBodyNotes: [":warning: make sure to add a `feature` changeset to alert users of the upgrade!"]
+      prBodyNotes: ["> [!IMPORTANT]\n> Rhai updates can cause breaking changes for users. Make sure to add a `feature` changeset to alert users of the upgrade!"]
     },
   ],
 }
