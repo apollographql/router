@@ -1505,7 +1505,11 @@ async fn no_store_from_request() {
     insta::assert_json_snapshot!(response);
 
     // Verify that `no-store` prevented any writes to the cache store
-    assert_eq!(mock_store.len(), 0, "no-store should not have written anything to the cache");
+    assert_eq!(
+        mock_store.len(),
+        0,
+        "no-store should not have written anything to the cache"
+    );
 
     // Phase 2: Without subgraph mocks and without `no-store`, the request fails because nothing was
     // stored in Phase 1 — proving that `no-store` prevented caching.
