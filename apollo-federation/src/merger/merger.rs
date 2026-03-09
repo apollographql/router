@@ -2191,15 +2191,15 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         }
     }
 
-    pub(in crate::merger) fn merge_description<'a, T>(
-        &'a mut self,
+    pub(in crate::merger) fn merge_description<T>(
+        &mut self,
         sources: &Sources<T>,
         dest: &T,
     ) -> Result<(), FederationError>
     where
         T: HasDescription + Display,
     {
-        let mut descriptions: IndexMap<String, (usize, &'a str)> = Default::default();
+        let mut descriptions: IndexMap<&str, (usize, &str)> = Default::default();
         for (idx, source) in sources.iter() {
             let desc = source
                 .as_ref()
@@ -2210,7 +2210,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 continue;
             }
             descriptions
-                .entry(desc.to_string())
+                .entry(desc)
                 .and_modify(|(count, _)| *count += 1)
                 .or_insert_with(|| (1, self.names[*idx].as_str()));
         }
@@ -2220,12 +2220,19 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         if !descriptions.is_empty() {
             let (chosen_description, single) =
                 if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
-                    (Some(description.clone()), true)
+                    (Some((*description).to_string()), true)
                 } else {
-                    let chosen = descriptions.iter().max_by(|(_, a), (_, b)| {
-                        a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1).reverse())
-                    });
-                    (chosen.map(|(description, _)| description.clone()), false)
+                    let chosen =
+                        descriptions
+                            .iter()
+                            .max_by(|(description_a, a), (description_b, b)| {
+                                a.0.cmp(&b.0)
+                                    .then_with(|| description_a.cmp(description_b).reverse())
+                            });
+                    (
+                        chosen.map(|(description, _)| (*description).to_string()),
+                        false,
+                    )
                 };
             drop(descriptions);
             if let Some(chosen_description) = chosen_description {

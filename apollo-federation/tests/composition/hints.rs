@@ -907,7 +907,7 @@ In subgraph "Subgraph1", the description is:
     #[test]
     fn hints_on_inconsistent_description_for_merged_type_order() {
         // Two subgraphs define type Order with different descriptions.
-        // The chosen description is from the subgraph whose name is lexicographically first.
+        // The chosen description is lexicographically first by description text.
         let orders_subgraph = ServiceDefinition {
             name: "Orders",
             type_defs: r#"
@@ -954,7 +954,7 @@ In subgraph "Users", the description is:
   """"#,
         );
 
-        // Supergraph should have chosen "Orders" description (lexicographically first)
+        // Supergraph should have chosen the lexicographically first description text.
         let api_schema = result
             .to_api_schema(Default::default())
             .expect("api schema");
@@ -967,14 +967,14 @@ In subgraph "Users", the description is:
         assert_eq!(
             desc.trim(),
             "Reference type to order entity in ONE GRAPH",
-            "supergraph should use description from Orders subgraph"
+            "supergraph should use lexicographically first description text"
         );
     }
 
     #[test]
     fn hints_on_inconsistent_description_for_merged_type_three_subgraphs_determinism() {
         // Three subgraphs define type Product with different descriptions (each count 1).
-        // The chosen description must be from the subgraph whose name is lexicographically first.
+        // The chosen description must be lexicographically first by description text.
         let catalog_subgraph = ServiceDefinition {
             name: "Catalog",
             type_defs: r#"
@@ -1018,7 +1018,8 @@ In subgraph "Users", the description is:
             compose_as_fed2_subgraphs(&[catalog_subgraph, inventory_subgraph, reviews_subgraph])
                 .unwrap();
 
-        // Lexicographically "Catalog" < "Inventory" < "Reviews", so supergraph uses Catalog's description.
+        // Lexicographically by description text:
+        // "Inventory product entity" < "Product for reviews" < "Product in the catalog".
         let api_schema = result
             .to_api_schema(Default::default())
             .expect("api schema");
@@ -1030,14 +1031,15 @@ In subgraph "Users", the description is:
         let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
             desc.trim(),
-            "Product in the catalog",
-            "supergraph should use description from Catalog subgraph (lexicographically first)"
+            "Inventory product entity",
+            "supergraph should use lexicographically first description text"
         );
     }
 
     #[test]
     fn hints_on_inconsistent_description_for_merged_type_three_subgraphs_order_independent() {
-        // Same as above but pass subgraphs in different order. Result must still be "Catalog" description.
+        // Same as above but pass subgraphs in different order.
+        // Result must still be the same lexicographically first description text.
         let catalog_subgraph = ServiceDefinition {
             name: "Catalog",
             type_defs: r#"
@@ -1077,7 +1079,7 @@ In subgraph "Users", the description is:
             "#,
         };
 
-        // Different input order; determinism should still choose Catalog.
+        // Different input order; determinism should still choose the same description.
         let result =
             compose_as_fed2_subgraphs(&[reviews_subgraph, catalog_subgraph, inventory_subgraph])
                 .unwrap();
@@ -1093,7 +1095,7 @@ In subgraph "Users", the description is:
         let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
             desc.trim(),
-            "Product in the catalog",
+            "Inventory product entity",
             "supergraph description must be deterministic regardless of subgraph order"
         );
     }
