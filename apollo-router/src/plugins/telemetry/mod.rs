@@ -86,7 +86,6 @@ use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::graphql;
 use crate::graphql::ResponseVisitor;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
@@ -427,13 +426,13 @@ impl PluginPrivate for Telemetry {
                     .headers()
                     .get(&config_checkpoint.apollo.library_name_header)
                     .and_then(|v| v.to_str().ok())
-                    .map_or(true, is_valid_client_library_value);
+                    .is_none_or(is_valid_client_library_value);
                 let library_version_valid = req
                     .router_request
                     .headers()
                     .get(&config_checkpoint.apollo.library_version_header)
                     .and_then(|v| v.to_str().ok())
-                    .map_or(true, is_valid_client_library_value);
+                    .is_none_or(is_valid_client_library_value);
                 if !library_name_valid || !library_version_valid {
                     Ok(ControlFlow::Break(
                         router::Response::error_builder()
