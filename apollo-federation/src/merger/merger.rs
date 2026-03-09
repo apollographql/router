@@ -1,4 +1,3 @@
-use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -37,7 +36,6 @@ use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
 use crate::link::Link;
-use crate::link::LinkedElement;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
@@ -166,7 +164,7 @@ pub(crate) struct Merger {
     /// Directives that are composed via `@join__directive` in the supergraph. Populated by
     /// `validate_and_maybe_add_specs` from composition spec `use_join_directive`. Matches JS
     /// `directivesUsingJoinDirective` (federation PR #3274).
-    pub(in crate::merger) directives_using_join_directive: HashSet<(Identity, Name)>,
+    pub(in crate::merger) directives_using_join_directive: HashSet<Name>,
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
     pub(in crate::merger) latest_federation_version_used: Version,
     pub(in crate::merger) applied_directives_to_merge: AppliedDirectivesToMerge,
@@ -2199,9 +2197,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     where
         T: HasDescription + Display,
     {
-        // Map each description to (count, lexicographically first subgraph name).
-        // When counts are equal, we pick the description from the subgraph whose name is first.
-        let descriptions: IndexMap<String, (usize, String)> = sources
+        let descriptions: IndexMap<String, usize> = sources
             .iter()
             .filter_map(|(idx, source)| {
                 let desc = source
@@ -2209,21 +2205,10 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     .and_then(|s| s.description(self.subgraphs[*idx].schema()))
                     .map(|d| d.trim().to_string())
                     .unwrap_or_default();
-                if desc.is_empty() {
-                    None
-                } else {
-                    Some((desc, self.names[*idx].clone()))
-                }
+                if desc.is_empty() { None } else { Some(desc) }
             })
-            .fold(Default::default(), |mut acc, (desc, subgraph_name)| {
-                acc.entry(desc)
-                    .and_modify(|(count, first_name)| {
-                        *count += 1;
-                        if subgraph_name < *first_name {
-                            *first_name = subgraph_name.clone();
-                        }
-                    })
-                    .or_insert((1, subgraph_name));
+            .fold(Default::default(), |mut acc, desc| {
+                acc.entry(desc).and_modify(|count| *count += 1).or_insert(1);
                 acc
             });
 
@@ -2231,11 +2216,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
                 dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
             } else {
-                // Highest count wins; on tie, use description from subgraph with lexicographically first name
                 if let Some((description, _)) =
-                    first_max_by_key(descriptions.iter(), |(_, (count, subgraph_name))| {
-                        (*count, Reverse(subgraph_name.clone()))
-                    })
+                    first_max_by_key(descriptions.iter(), |(_, count)| *count)
                 {
                     dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
                 }
@@ -2297,41 +2279,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         )
     }
 
-    /// Returns true if the directive (from the given link) is one that is composed via
-    /// @join__directive in the supergraph. Uses `directives_using_join_directive` (matches JS
-    /// directivesUsingJoinDirective).
-    fn is_directive_composed_via_join_directive(
-        &self,
-        linked_element: LinkedElement,
-        directive_name: &Name,
-    ) -> bool {
-        let identity = linked_element.link.url.identity.clone();
-        let element_name: Option<Name> = linked_element
-            .import
-            .as_ref()
-            .map(|i| i.element.clone())
-            .or_else(|| {
-                directive_name
-                    .as_str()
-                    .split_once("__")
-                    .and_then(|(_, suffix)| Name::new(suffix).ok())
-            });
-        element_name.as_ref().is_some_and(|name| {
-            self.directives_using_join_directive
-                .contains(&(identity, name.clone()))
-        })
-    }
-
-    /// Returns true if this @link imports any directive that is composed via @join__directive.
-    /// Used to decide which link directives to persist in the supergraph. Uses
-    /// `directives_using_join_directive` (matches JS directivesUsingJoinDirective).
-    fn link_imports_directive_using_join(&self, link: &Link) -> bool {
-        link.imports.iter().any(|i| {
-            self.directives_using_join_directive
-                .contains(&(link.url.identity.clone(), i.element.clone()))
-        })
-    }
-
     /// This method gets called at various points during the merge to allow subgraph directive
     /// applications to be reflected (unapplied) in the supergraph, using the
     /// @join__directive(graphs, name, args) directive.
@@ -2381,13 +2328,10 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         should_include_as_join_directive =
                             self.should_use_join_directive_for_url(&link.url);
 
-                        // Persist link when the spec uses @join__directive: either the link URL is
-                        // in join_directive_identities (e.g. connect) or the link imports a
-                        // directive that uses join (e.g. federation with @cacheTag). Matches JS
-                        // directivesUsingJoinDirective / joinDirectiveFeatureDefinitionsByIdentity.
-                        if (should_include_as_join_directive
-                            && self.join_directive_identities.contains(&link.url.identity))
-                            || self.link_imports_directive_using_join(&link)
+                        // Persist link when the spec uses @join__directive and the feature
+                        // identity is one of the known join-directive feature definitions.
+                        if should_include_as_join_directive
+                            && self.join_directive_identities.contains(&link.url.identity)
                         {
                             links_to_persist.push((link.url.clone(), directive.as_ref().clone()));
                         }
@@ -2398,10 +2342,9 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     should_include_as_join_directive =
                         self.should_use_join_directive_for_url(&url_for_directive.link.url);
                     if !should_include_as_join_directive
-                        && self.is_directive_composed_via_join_directive(
-                            url_for_directive,
-                            &directive.name,
-                        )
+                        && self
+                            .directives_using_join_directive
+                            .contains(&directive.name)
                     {
                         should_include_as_join_directive = true;
                     }

@@ -149,26 +149,6 @@ impl Merger {
         &mut self,
         directives_merge_info: &[CoreDirectiveInSubgraphs],
     ) -> Result<(), FederationError> {
-        // Populate directives_using_join_directive from composition specs (matches JS
-        // directivesUsingJoinDirective, federation PR #3274).
-        self.directives_using_join_directive.clear();
-        for subgraph_core_directive in directives_merge_info {
-            if !subgraph_core_directive.composition_spec.use_join_directive {
-                continue;
-            }
-            let Some(spec_in_supergraph) =
-                (subgraph_core_directive
-                    .composition_spec
-                    .supergraph_specification)(&self.latest_federation_version_used)
-            else {
-                continue;
-            };
-            self.directives_using_join_directive.insert((
-                spec_in_supergraph.identity().clone(),
-                subgraph_core_directive.name.clone(),
-            ));
-        }
-
         let mut supergraph_info_by_identity: HashMap<Identity, Vec<CoreDirectiveInSupergraph>> =
             HashMap::new();
 
@@ -255,6 +235,11 @@ impl Merger {
                     "Spec {} directives disagree on version for supergraph",
                     spec_in_supergraph.url()
                 )
+            }
+
+            if subgraph_core_directive.composition_spec.use_join_directive {
+                self.directives_using_join_directive
+                    .insert(name_in_supergraph.clone());
             }
         }
 
