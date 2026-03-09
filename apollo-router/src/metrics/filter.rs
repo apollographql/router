@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use buildstructor::buildstructor;
 use opentelemetry::InstrumentationScope;
@@ -15,6 +16,7 @@ use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use regex::Regex;
 
@@ -34,18 +36,6 @@ impl OtelMeterProvider for MeterProviderInner {
         match self {
             MeterProviderInner::Sdk(p) => p.meter_with_scope(scope),
             MeterProviderInner::Noop => Meter::new(Arc::new(NoopInstrumentProvider)),
-        }
-    }
-}
-
-impl MeterProviderInner {
-    /// Shutdown the underlying SDK meter provider.
-    /// This should be called before dropping to prevent OTel SDK's Drop from
-    /// emitting tracing events, which can panic if tracing's thread locals
-    /// have already been destroyed during thread exit.
-    pub(crate) fn shutdown(&self) {
-        if let MeterProviderInner::Sdk(p) = self {
-            let _ = p.shutdown();
         }
     }
 }
@@ -121,18 +111,18 @@ impl FilterMeterProvider {
     }
 
     #[cfg(test)]
-    pub(crate) fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+    pub(crate) fn force_flush(&self) -> OTelSdkResult {
         match &self.delegate {
             MeterProviderInner::Sdk(p) => p.force_flush(),
             MeterProviderInner::Noop => Ok(()),
         }
     }
 
-    /// Shutdown the underlying meter provider.
-    /// This should be called before dropping to prevent OTel SDK's Drop from
-    /// emitting tracing events during thread local destruction.
-    pub(crate) fn shutdown(&self) {
-        self.delegate.shutdown();
+    pub(crate) fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        match &self.delegate {
+            MeterProviderInner::Sdk(p) => p.shutdown_with_timeout(timeout),
+            MeterProviderInner::Noop => Ok(()),
+        }
     }
 }
 

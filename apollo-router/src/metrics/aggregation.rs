@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
+use std::time::Duration;
 
 use derive_more::From;
 use opentelemetry::InstrumentationScope;
@@ -22,10 +23,13 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
+use opentelemetry_sdk::error::OTelSdkError;
+use opentelemetry_sdk::error::OTelSdkResult;
 use parking_lot::Mutex;
 use strum::Display;
 use strum::EnumCount;
 use strum::EnumIter;
+use strum::FromRepr;
 use strum::IntoEnumIterator;
 
 use super::NoopInstrumentProvider;
@@ -39,7 +43,7 @@ use crate::metrics::filter::FilterMeterProvider;
 // `Meters are identified by name, version, and schema_url fields. When more than one Meter of the same name, version, and schema_url is created, it is unspecified whether or under which conditions the same or different Meter instances are returned. It is a user error to create Meters with different attributes but the same identity.`
 
 #[derive(
-    Hash, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, EnumCount, EnumIter, Display,
+    Hash, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, EnumCount, EnumIter, Display, FromRepr,
 )]
 #[repr(u8)]
 pub(crate) enum MeterProviderType {
@@ -87,14 +91,24 @@ impl Default for Inner {
     }
 }
 
+// HACK(@goto-bus-stop): see https://github.com/apollographql/router/pull/8976
+// _in tests_, we store the AggregateMeterProvider in a thread local.
+// During Drop, the otel meter providers may log using `tracing`. This also uses a thread local.
+// When the thread exits, such locals are dropped in unspecified order: `tracing` may be dropped
+// _before_ the AggregateMeterProvider. In that case, otel would try to log and `tracing` may
+// panic internally.
+//
+// This implementation works around that issue by manually dropping the otel meter providers while
+// _disabling_ tracing logs altogether.
+//
+// This assumes that in _normal_ router operation, we always call `shutdown()` explicitly, else we
+// would lose trace events.
 impl Drop for Inner {
     fn drop(&mut self) {
-        // Explicitly shutdown all meter providers to prevent OTel SDK's Drop
-        // from emitting tracing events, which can panic if tracing's thread
-        // locals have already been destroyed during thread exit.
-        for (provider, _) in &self.providers {
-            provider.shutdown();
-        }
+        let noop = tracing::subscriber::NoSubscriber::new();
+        tracing::subscriber::with_default(noop, || {
+            self.providers.clear();
+        });
     }
 }
 
@@ -184,7 +198,24 @@ impl AggregateMeterProvider {
     }
 
     /// Shutdown MUST be called from a blocking thread.
-    pub(crate) fn shutdown(&self) {
+    pub(crate) fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        /// Prefix internal failure error message with "[providername]".
+        /// Returns the original error if it is not an internal failure or if the index is invalid.
+        fn tag_error_with_provider_type(err: OTelSdkError, index: usize) -> OTelSdkError {
+            let OTelSdkError::InternalFailure(message) = &err else {
+                return err;
+            };
+
+            let Ok(ty) = u8::try_from(index) else {
+                return err;
+            };
+            let Some(ty) = MeterProviderType::from_repr(ty) else {
+                return err;
+            };
+
+            OTelSdkError::InternalFailure(format!("[{ty}] {message}"))
+        }
+
         // Make sure that we don't deadlock by dropping the mutex guard before actual shutdown happens
         // This means that if we have any misbehaving code that tries to access the meter provider during shutdown, e.g. for export metrics
         // then we don't get stuck on the mutex.
@@ -194,7 +225,48 @@ impl AggregateMeterProvider {
         let mut guard = self.inner.lock();
         let old = guard.take();
         drop(guard);
-        drop(old);
+
+        let Some(inner) = old else { return Ok(()) };
+
+        let mut result = Ok(());
+        for (index, (provider, _)) in inner.providers.iter().enumerate() {
+            let Err(err) = provider.shutdown_with_timeout(timeout) else {
+                continue;
+            };
+
+            let err = tag_error_with_provider_type(err, index);
+
+            // Report errors as, in order of precedence:
+            // - combined internal failures tagged with provider type
+            // - or timeout if one of them timed out
+            // - or AlreadyShutdown if one of them was already shut down
+            // - or nothing
+            // "Less important" errors get silenced in favour of the "more important" ones. Scare
+            // quotes due to inherent subjectivity.
+            result = match (result, err) {
+                // Report all stacking internal failures
+                (
+                    Err(OTelSdkError::InternalFailure(old_error)),
+                    OTelSdkError::InternalFailure(new_error),
+                ) => Err(OTelSdkError::InternalFailure(format!(
+                    "{old_error}\n{new_error}"
+                ))),
+                // If we already had an internal failure, keep that
+                (result @ Err(OTelSdkError::InternalFailure(_)), _) => result,
+                // If we now encountered an internal failure, keep the new error
+                (_, err @ OTelSdkError::InternalFailure(_)) => Err(err),
+                // If we already had an error, keep that
+                (result @ Err(_), _) => result,
+                // If we did not yet have an error, stash the new error
+                (Ok(_), err) => Err(err),
+            };
+        }
+        Ok(())
+    }
+
+    /// Shutdown MUST be called from a blocking thread.
+    pub(crate) fn shutdown(&self) -> OTelSdkResult {
+        self.shutdown_with_timeout(Duration::from_secs(5))
     }
 
     /// Create a registered instrument. This enables caching at callsites and invalidation at the meter provider via weak reference.
@@ -928,7 +1000,7 @@ mod test {
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
-        meter_provider.shutdown();
+        meter_provider.shutdown().unwrap();
 
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(shutdown.load(std::sync::atomic::Ordering::SeqCst));

@@ -460,7 +460,9 @@ impl Executable {
                 opentelemetry::global::set_tracer_provider(
                     opentelemetry_sdk::trace::SdkTracerProvider::default(),
                 );
-                meter_provider_internal().shutdown();
+                if let Err(error) = meter_provider_internal().shutdown() {
+                    tracing::error!(%error, "Failed to shut down OTel meter provider cleanly");
+                }
             })
             .await?;
         }
