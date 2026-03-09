@@ -32,10 +32,10 @@ pub(crate) fn validate_cache_tag_directives(
     schema: &FederationSchema,
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
-    validate_cache_tag_directives_impl(schema, errors).map_err(FederationError::from)
+    validate_cache_tag_directives_inner(schema, errors).map_err(FederationError::from)
 }
 
-fn validate_cache_tag_directives_impl(
+fn validate_cache_tag_directives_inner(
     schema: &FederationSchema,
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), SingleFederationError> {

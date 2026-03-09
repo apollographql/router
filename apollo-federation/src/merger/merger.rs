@@ -2331,7 +2331,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         // Persist link when the spec uses @join__directive and the feature
                         // identity is one of the known join-directive feature definitions.
                         if should_include_as_join_directive
-                            && self.join_directive_identities.contains(&link.url.identity)
+                            && SPEC_REGISTRY.get_definition(&link.url).is_some()
                         {
                             links_to_persist.push((link.url.clone(), directive.as_ref().clone()));
                         }
