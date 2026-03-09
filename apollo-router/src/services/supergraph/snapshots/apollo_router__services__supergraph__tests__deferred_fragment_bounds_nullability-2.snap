@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/services/supergraph/tests.rs
-assertion_line: 800
 expression: stream.next_response().await.unwrap()
 ---
 {
@@ -20,8 +19,7 @@ expression: stream.next_response().await.unwrap()
           "path": [
             "currentUser",
             "activeOrganization",
-            "suborga",
-            0
+            "suborga"
           ],
           "extensions": {
             "code": "FETCH_ERROR",
@@ -57,8 +55,7 @@ expression: stream.next_response().await.unwrap()
           "path": [
             "currentUser",
             "activeOrganization",
-            "suborga",
-            1
+            "suborga"
           ],
           "extensions": {
             "code": "FETCH_ERROR",
@@ -94,8 +91,7 @@ expression: stream.next_response().await.unwrap()
           "path": [
             "currentUser",
             "activeOrganization",
-            "suborga",
-            2
+            "suborga"
           ],
           "extensions": {
             "code": "FETCH_ERROR",
