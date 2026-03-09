@@ -23,11 +23,13 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
+use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::error::OTelSdkResult;
 use parking_lot::Mutex;
 use strum::Display;
 use strum::EnumCount;
 use strum::EnumIter;
+use strum::FromRepr;
 use strum::IntoEnumIterator;
 
 use super::NoopInstrumentProvider;
@@ -41,7 +43,7 @@ use crate::metrics::filter::FilterMeterProvider;
 // `Meters are identified by name, version, and schema_url fields. When more than one Meter of the same name, version, and schema_url is created, it is unspecified whether or under which conditions the same or different Meter instances are returned. It is a user error to create Meters with different attributes but the same identity.`
 
 #[derive(
-    Hash, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, EnumCount, EnumIter, Display,
+    Hash, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, EnumCount, EnumIter, Display, FromRepr,
 )]
 #[repr(u8)]
 pub(crate) enum MeterProviderType {
@@ -197,6 +199,23 @@ impl AggregateMeterProvider {
 
     /// Shutdown MUST be called from a blocking thread.
     pub(crate) fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        /// Prefix internal failure error message with "[providername]".
+        /// Returns the original error if it is not an internal failure or if the index is invalid.
+        fn tag_error_with_provider_type(err: OTelSdkError, index: usize) -> OTelSdkError {
+            let OTelSdkError::InternalFailure(message) = &err else {
+                return err;
+            };
+
+            let Ok(ty) = u8::try_from(index) else {
+                return err;
+            };
+            let Some(ty) = MeterProviderType::from_repr(ty) else {
+                return err;
+            };
+
+            OTelSdkError::InternalFailure(format!("[{ty}] {message}"))
+        }
+
         // Make sure that we don't deadlock by dropping the mutex guard before actual shutdown happens
         // This means that if we have any misbehaving code that tries to access the meter provider during shutdown, e.g. for export metrics
         // then we don't get stuck on the mutex.
@@ -208,8 +227,39 @@ impl AggregateMeterProvider {
         drop(guard);
 
         let Some(inner) = old else { return Ok(()) };
-        for (provider, _) in &inner.providers {
-            provider.shutdown_with_timeout(timeout)?;
+
+        let mut result = Ok(());
+        for (index, (provider, _)) in inner.providers.iter().enumerate() {
+            let Err(err) = provider.shutdown_with_timeout(timeout) else {
+                continue;
+            };
+
+            let err = tag_error_with_provider_type(err, index);
+
+            // Report errors as, in order of precedence:
+            // - combined internal failures tagged with provider type
+            // - or timeout if one of them timed out
+            // - or AlreadyShutdown if one of them was already shut down
+            // - or nothing
+            // "Less important" errors get silenced in favour of the "more important" ones. Scare
+            // quotes due to inherent subjectivity.
+            result = match (result, err) {
+                // Report all stacking internal failures
+                (
+                    Err(OTelSdkError::InternalFailure(old_error)),
+                    OTelSdkError::InternalFailure(new_error),
+                ) => Err(OTelSdkError::InternalFailure(format!(
+                    "{old_error}\n{new_error}"
+                ))),
+                // If we already had an internal failure, keep that
+                (result @ Err(OTelSdkError::InternalFailure(_)), _) => result,
+                // If we now encountered an internal failure, keep the new error
+                (_, err @ OTelSdkError::InternalFailure(_)) => Err(err),
+                // If we already had an error, keep that
+                (result @ Err(_), _) => result,
+                // If we did not yet have an error, stash the new error
+                (Ok(_), err) => Err(err),
+            };
         }
         Ok(())
     }
