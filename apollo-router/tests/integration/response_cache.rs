@@ -44,6 +44,22 @@ async fn redis_client() -> Result<Client, BoxError> {
     Ok(client)
 }
 
+fn redact_cache_debug_query_hash(key: &str) -> String {
+    let marker = ":hash:";
+    let data_marker = ":data:";
+
+    let Some(hash_marker_idx) = key.find(marker) else {
+        return key.to_string();
+    };
+    let hash_start = hash_marker_idx + marker.len();
+    let Some(data_idx) = key[hash_start..].find(data_marker) else {
+        return key.to_string();
+    };
+    let hash_end = hash_start + data_idx;
+
+    format!("{}[query-hash]{}", &key[..hash_start], &key[hash_end..])
+}
+
 fn base_config() -> Value {
     json!({
         "include_subgraph_errors": {
@@ -887,6 +903,9 @@ async fn complex_entity_key_response_cache() {
     let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name":"Item"}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
     assert_eq!(body.data, Some(expectation));
     insta::assert_json_snapshot!(body.extensions, {
+        ".apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 }
@@ -977,6 +996,9 @@ async fn test_cache_keys_nullable_data() {
     let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name": null}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
     assert_eq!(body.data, Some(expectation));
     insta::assert_json_snapshot!(body.extensions, {
+        ".apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 }
@@ -1180,6 +1202,9 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         .unwrap();
 
     insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
@@ -1241,6 +1266,9 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         .await
         .unwrap();
     insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
@@ -1424,6 +1452,9 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
         .await
         .unwrap();
     insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
@@ -1484,6 +1515,9 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
         .await
         .unwrap();
     insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 

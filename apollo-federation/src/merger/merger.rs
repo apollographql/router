@@ -2197,29 +2197,36 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     where
         T: HasDescription + Display,
     {
-        let descriptions: IndexMap<String, usize> = sources
+        let mut descriptions: IndexMap<String, usize> = sources
             .iter()
-            .filter_map(|(idx, source)| {
-                let desc = source
+            .map(|(idx, source)| {
+                source
                     .as_ref()
                     .and_then(|s| s.description(self.subgraphs[*idx].schema()))
                     .map(|d| d.trim().to_string())
-                    .unwrap_or_default();
-                if desc.is_empty() { None } else { Some(desc) }
+                    .unwrap_or_default()
             })
             .fold(Default::default(), |mut acc, desc| {
-                acc.entry(desc).and_modify(|count| *count += 1).or_insert(1);
+                if !desc.is_empty() {
+                    *acc.entry(desc).or_insert(0) += 1;
+                }
                 acc
             });
+        // we don't want to raise a hint if a description is ""
+        descriptions.shift_remove("");
 
         if !descriptions.is_empty() {
             if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
                 dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
             } else {
-                if let Some((description, _)) =
-                    first_max_by_key(descriptions.iter(), |(_, count)| *count)
+                // Find the description with the highest count
+                if let Some((idx, _)) =
+                    first_max_by_key(descriptions.iter().enumerate(), |(_, (_, counts))| *counts)
                 {
-                    dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
+                    // Get the description at the found index
+                    if let Some((description, _)) = descriptions.iter().nth(idx) {
+                        dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
+                    }
                 }
                 // TODO: Currently showing full descriptions in the hint
                 // messages, which is probably fine in some cases. However this
