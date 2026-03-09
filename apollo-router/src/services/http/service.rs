@@ -213,7 +213,7 @@ impl HttpClientService {
 
         let http_client =
             hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                .pool_idle_timeout(None)
                 .http2_only(http2 == Http2Config::Http2Only)
                 .build(connector);
 
@@ -221,7 +221,7 @@ impl HttpClientService {
         let unix_client = {
             let unix_client_inner =
                 hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                    .pool_idle_timeout(None)
                     .http2_only(http2 == Http2Config::Http2Only)
                     .build(UnixConnector);
 
