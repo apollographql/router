@@ -88,6 +88,79 @@ pub mod internal_lsp_api {
     pub use crate::subgraph::schema_diff_expanded_from_initial;
 }
 
+/// Internal API for the apollo-composition crate.
+pub mod internal_composition_api {
+    use std::ops::Range;
+
+    use apollo_compiler::parser::LineColumn;
+
+    use super::*;
+    use crate::error::MultipleFederationErrors;
+    use crate::schema::validators::cache_tag;
+    use crate::subgraph::typestate;
+
+    #[derive(Clone, Debug)]
+    pub struct Message {
+        code: String,
+        message: String,
+        locations: Vec<Range<LineColumn>>,
+    }
+
+    impl Message {
+        pub fn code(&self) -> &str {
+            &self.code
+        }
+
+        pub fn message(&self) -> &str {
+            &self.message
+        }
+
+        pub fn locations(&self) -> &[Range<LineColumn>] {
+            &self.locations
+        }
+    }
+
+    #[derive(Default)]
+    pub struct ValidationResult {
+        /// If `errors` is empty, validation was successful.
+        pub errors: Vec<Message>,
+    }
+
+    /// Validates `@cacheTag` directives in the original (unexpanded) subgraph schema.
+    /// * name: Subgraph name
+    /// * url: Subgraph URL
+    /// * sdl: Subgraph schema
+    /// * Returns a `ValidationResult` if validation finished (either successfully or with
+    ///   validation errors).
+    /// * Or, a `FederationError` if validation stopped due to an internal error.
+    pub fn validate_cache_tag_directives(
+        name: &str,
+        url: &str,
+        sdl: &str,
+    ) -> Result<ValidationResult, FederationError> {
+        let subgraph =
+            typestate::Subgraph::parse(name, url, sdl).map_err(|e| e.into_federation_error())?;
+        let subgraph = subgraph
+            .expand_links()
+            .map_err(|e| e.into_federation_error())?;
+
+        let mut errors = MultipleFederationErrors::new();
+        cache_tag::validate_cache_tag_directives(subgraph.schema(), &mut errors)?;
+
+        Ok(ValidationResult {
+            errors: errors
+                .errors
+                .into_iter()
+                .map(|error| Message {
+                    code: error.code_string(),
+                    message: error.to_string(),
+                    locations: Vec::new(),
+                })
+                .collect(),
+        })
+    }
+}
+
 pub(crate) type SupergraphSpecs = (
     &'static LinkSpecDefinition,
     &'static JoinSpecDefinition,
