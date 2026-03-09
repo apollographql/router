@@ -2,6 +2,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::atomic::AtomicU64;
@@ -85,6 +86,7 @@ use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::graphql;
 use crate::graphql::ResponseVisitor;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
@@ -367,6 +369,7 @@ impl PluginPrivate for Telemetry {
         let supergraph_schema_id = self.supergraph_schema_id.clone();
         let config_later = self.config.clone();
         let config_request = self.config.clone();
+        let config_checkpoint = self.config.clone();
         let span_mode = config.instrumentation.spans.mode;
         let use_legacy_request_span =
             matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
@@ -418,6 +421,30 @@ impl PluginPrivate for Telemetry {
                     span_mode.create_router(&request.router_request)
                 })
             }))
+            .checkpoint(move |req: router::Request| {
+                let library_name_valid = req
+                    .router_request
+                    .headers()
+                    .get(&config_checkpoint.apollo.library_name_header)
+                    .and_then(|v| v.to_str().ok())
+                    .map_or(true, is_valid_client_library_value);
+                let library_version_valid = req
+                    .router_request
+                    .headers()
+                    .get(&config_checkpoint.apollo.library_version_header)
+                    .and_then(|v| v.to_str().ok())
+                    .map_or(true, is_valid_client_library_value);
+                if !library_name_valid || !library_version_valid {
+                    Ok(ControlFlow::Break(
+                        router::Response::error_builder()
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .context(req.context)
+                            .build()?,
+                    ))
+                } else {
+                    Ok(ControlFlow::Continue(req))
+                }
+            })
             .map_future_with_request_data(
                 move |request: &router::Request| {
                     let _ = request.context.insert(
@@ -1587,24 +1614,20 @@ impl Telemetry {
                                 context: StatsContext {
                                     result: "".to_string(),
                                     client_name: context
-                                        .get::<_, String>(CLIENT_NAME)
+                                        .get(CLIENT_NAME)
                                         .unwrap_or_default()
-                                        .filter(|v| is_valid_client_metadata_value(v))
                                         .unwrap_or_default(),
                                     client_version: context
-                                        .get::<_, String>(CLIENT_VERSION)
+                                        .get(CLIENT_VERSION)
                                         .unwrap_or_default()
-                                        .filter(|v| is_valid_client_metadata_value(v))
                                         .unwrap_or_default(),
                                     client_library_name: context
-                                        .get::<_, String>(CLIENT_LIBRARY_NAME)
+                                        .get(CLIENT_LIBRARY_NAME)
                                         .unwrap_or_default()
-                                        .filter(|v| is_valid_client_metadata_value(v))
                                         .unwrap_or_default(),
                                     client_library_version: context
-                                        .get::<_, String>(CLIENT_LIBRARY_VERSION)
+                                        .get(CLIENT_LIBRARY_VERSION)
                                         .unwrap_or_default()
-                                        .filter(|v| is_valid_client_metadata_value(v))
                                         .unwrap_or_default(),
                                     operation_type: operation_kind
                                         .as_apollo_operation_type()
@@ -1832,12 +1855,12 @@ impl Telemetry {
     }
 }
 
-// Regex for allowed values for client and library names and versions
-static VALID_CLIENT_METADATA_VALUE_REGEX: LazyLock<Regex> =
+// Regex for allowed values for client library names and versions
+static VALID_CLIENT_LIBRARY_VALUE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[ a-zA-Z0-9.@/_\-]{1,60}$").unwrap());
 
-fn is_valid_client_metadata_value(value: &str) -> bool {
-    VALID_CLIENT_METADATA_VALUE_REGEX.is_match(value)
+pub(crate) fn is_valid_client_library_value(value: &str) -> bool {
+    VALID_CLIENT_LIBRARY_VALUE_REGEX.is_match(value)
 }
 
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
