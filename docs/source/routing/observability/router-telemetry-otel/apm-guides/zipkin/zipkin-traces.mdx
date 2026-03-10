@@ -70,6 +70,7 @@ telemetry:
   exporters:
     tracing:
       zipkin:
+        enabled: true
         batch_processor:
           max_export_batch_size: 512
           max_concurrent_exports: 1
