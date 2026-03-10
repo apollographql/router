@@ -16,6 +16,7 @@ import Cors from '../../../shared/config/cors.mdx';
 import Csrf from '../../../shared/config/csrf.mdx';
 import DemandCtrl from '../../../shared/config/demand_control.mdx';
 import ExperimentalChaos from '../../../shared/config/experimental_chaos.mdx';
+import ExperimentalHoistOrphan from '../../../shared/config/experimental_hoist_orphan_errors.mdx';
 import ExperimentalType from '../../../shared/config/experimental_type_conditioned_fetching.mdx';
 import FleetDetector from '../../../shared/config/fleet_detector.mdx';
 import ForbidMut from '../../../shared/config/forbid_mutations.mdx';
@@ -134,11 +135,50 @@ Learn more in [Demand Control](/router/executing-operations/demand-control)
 
 ---
 
-<ExperimentalChaos /> 
+<ExperimentalChaos />
 
 ---
 
-<ExperimentalType /> 
+<ExperimentalHoistOrphan />
+
+<ExperimentalFeatureBadge />
+
+When entity resolution in a subgraph returns errors that apply to multiple entities in a list, the router's default behavior propagates each error to every matching entity path. For subgraphs that return a large number of entity errors, this can cause a multiplicative increase in the size of the error array returned to clients.
+
+The `experimental_hoist_orphan_errors` option changes this behavior on a per-subgraph basis. When enabled, the router attaches each orphaned subgraph error to a single parent path instead of duplicating it across every entity path. This significantly reduces the number of errors in the response.
+
+<Caution>
+
+This option is **not GraphQL spec-compliant**. It changes how errors are associated with paths in the response compared to the behavior described in the [GraphQL specification](https://spec.graphql.org/). Enable it only for subgraphs where the reduction in error volume outweighs strict spec compliance.
+
+</Caution>
+
+To enable the feature for a specific subgraph:
+
+```yaml title="router.yaml"
+experimental_hoist_orphan_errors:
+  subgraphs:
+    my_subgraph: true
+```
+
+To enable the feature for all subgraphs:
+
+```yaml title="router.yaml"
+experimental_hoist_orphan_errors:
+  all: true
+```
+
+The `all` and `subgraphs` options are mutually exclusive. If both are specified, subgraph-specific settings take precedence.
+
+<Note>
+
+This feature reduces the number of propagated errors but does not impose a hard cap on the total error count. If a subgraph returns an extremely large number of errors, the router still processes all of them. For subgraphs that may produce unbounded error volumes, consider additional mitigation strategies at the subgraph level.
+
+</Note>
+
+---
+
+<ExperimentalType />
 
 ---
 
