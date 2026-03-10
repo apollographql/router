@@ -115,7 +115,7 @@ The HTTP client service also executes multiple times. Each execution represents 
 
 <Note>
 
-The `http_client` service only supports the `request_header` and `response_header` selectors. Unlike other services, conditions and the `static` selector are **not** supported. If you attempt to configure them, your router fails to start.
+The `http_client` service supports the `request_header` and `response_header` selectors. Conditions and the `static` selector are currently unavailable for this service. If you attempt to configure them, your router fails to start.
 
 </Note>
 
