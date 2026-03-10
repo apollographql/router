@@ -16,7 +16,7 @@ For general tracing configuration, refer to [Router Tracing Configuration](/rout
 
 ## OTLP configuration (recommended)
 
-Zipkin supports OTLP ingestion via [zipkin-otel](https://github.com/openzipkin-contrib/zipkin-otel), and OpenTelemetry is [deprecating the native Zipkin exporters](https://opentelemetry.io/blog/2025/deprecating-zipkin-exporters/) in favor of OTLP. Using the OTLP exporter is the recommended approach:
+Zipkin supports OTLP ingestion via [zipkin-otel](https://github.com/openzipkin-contrib/zipkin-otel), and OpenTelemetry is [deprecating the native Zipkin exporters](https://opentelemetry.io/blog/2025/deprecating-zipkin-exporters/) in favor of OTLP. Using the OTLP exporter is recommended:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -28,18 +28,17 @@ telemetry:
         protocol: http
 ```
 
-This sends traces to Zipkin using the OTLP protocol, which properly includes the service name and other resource attributes.
+This sends traces to Zipkin using the OTLP protocol.
 
 See [OTLP configuration](/router/configuration/telemetry/exporters/tracing/otlp#configuration) for more details on settings.
 
 ## Zipkin native configuration
 
 <Caution>
-
-The native Zipkin exporter is deprecated and will be removed in the next major version of Router. Zipkin supports OTLP ingestion, and OpenTelemetry is [deprecating native Zipkin exporters](https://opentelemetry.io/blog/2025/deprecating-zipkin-exporters/) in favor of OTLP. Use [OTLP configuration](#otlp-configuration-recommended) instead.
-
-Additionally, the upstream `opentelemetry-zipkin` does not currently support setting the service name on the Zipkin native exports.
-
+    The native Zipkin exporter is deprecated and will be removed in the next major version of Router. Zipkin supports OTLP ingestion, and OpenTelemetry is [deprecating native Zipkin exporters](https://opentelemetry.io/blog/2025/deprecating-zipkin-exporters/) in favor of OTLP. Use [OTLP configuration](#otlp-configuration-recommended) instead.
+</Caution>
+<Caution>
+    Zipkin native exporter does not currently support setting the service name on the Zipkin native exports.
 </Caution>
 
 You can configure the router to export tracing data to Zipkin using the native Zipkin exporter:
