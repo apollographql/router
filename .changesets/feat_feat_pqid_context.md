@@ -1,4 +1,4 @@
-### feat: add persisted query ID context key and update related functiona… ([PR #8959](https://github.com/apollographql/router/pull/8959))
+### feat: add persisted query ID context key ([PR #8959](https://github.com/apollographql/router/pull/8959))
 
 feat: add persisted query ID context key and update related functionality as requested by in https://apollographql.atlassian.net/browse/TSH-22140
 
