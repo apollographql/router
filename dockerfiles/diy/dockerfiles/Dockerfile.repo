@@ -18,7 +18,7 @@ RUN rustup component add rustfmt
 COPY . .
 
 # Build the router
-RUN cargo build --release -p apollo-router
+RUN cargo build --locked --release -p apollo-router
 
 # Make directories for config and schema
 RUN mkdir -p /dist/config && \
