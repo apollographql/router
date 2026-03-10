@@ -775,11 +775,6 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
         create_expected_schema_reload_payload(),
     ];
 
-    // Wait for subscription events to arrive before triggering reload.
-    // The mock server sends 2 events at 10ms intervals, so 50ms is enough
-    // to ensure they're buffered in the stream before we reload.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
     // try to reload the config file
     router.replace_schema_string("createdAt", "created");
 
@@ -878,9 +873,6 @@ async fn test_subscription_ws_passthrough_dedup() -> Result<(), BoxError> {
         "Subscription request failed with status: {}",
         response_bis.status()
     );
-
-    // Wait briefly for subscription metrics to be recorded
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     let metrics = router.get_metrics_response().await?.text().await?;
     let sum_metric_counts = |regex: &Regex| {
