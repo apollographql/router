@@ -30,7 +30,7 @@ pub(crate) struct CacheControl {
     #[serde(skip_serializing_if = "is_false", default)]
     proxy_revalidate: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    no_store: bool,
+    pub(super) no_store: bool,
     #[serde(skip_serializing_if = "is_false", default)]
     private: bool,
     #[serde(skip_serializing_if = "is_false", default)]
@@ -383,7 +383,11 @@ impl CacheControl {
 
         // FIXME: we don't honor stale-while-revalidate yet
         // !expired || self.stale_while_revalidate
-        !expired && !self.no_store
+        !expired && !self.no_cache
+    }
+
+    pub(crate) fn is_no_cache(&self) -> bool {
+        self.no_cache
     }
 
     pub(crate) fn is_no_store(&self) -> bool {
@@ -471,6 +475,25 @@ mod tests {
         let merged = first.merge_inner(&second, now.into());
         assert!(merged.no_store);
         assert!(!merged.public);
+        assert!(merged.can_use());
+    }
+
+    #[test]
+    fn merge_nocache() {
+        let now = now_epoch_seconds();
+
+        let first = CacheControl {
+            no_cache: true,
+            ..Default::default()
+        };
+
+        let second = CacheControl {
+            no_cache: false,
+            ..Default::default()
+        };
+
+        let merged = first.merge_inner(&second, now.into());
+        assert!(merged.no_cache);
         assert!(!merged.can_use());
     }
 

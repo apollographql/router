@@ -23,8 +23,6 @@ git-fetch-with-cli = true
 # rustsec advisory exemptions
 ignore = [
     "RUSTSEC-2023-0071",
-    "RUSTSEC-2024-0376", # we do not use tonic::transport::Server
-    "RUSTSEC-2024-0421", # we only resolve trusted subgraphs
 
     # The following crates are unmaintained
     "RUSTSEC-2024-0320", # TODO replace the `yaml-rust` crate with a maintained equivalent

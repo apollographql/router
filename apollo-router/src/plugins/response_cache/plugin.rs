@@ -51,6 +51,7 @@ use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::Error;
@@ -382,11 +383,22 @@ impl PluginPrivate for ResponseCache {
         let debug = self.debug;
         ServiceBuilder::new()
             .map_response(move |mut response: supergraph::Response| {
-                if let Some(cache_control) = response
+                if let Some(mut cache_control) = response
                     .context
                     .extensions()
                     .with_lock(|lock| lock.get::<CacheControl>().cloned())
                 {
+                    // If the response contains GraphQL errors, force Cache-Control: no-store to prevent
+                    // intermediate caches (CDNs, reverse proxies) from caching partial or error responses.
+                    let has_errors = response
+                        .context
+                        .get_json_value(CONTAINS_GRAPHQL_ERROR)
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if has_errors {
+                        cache_control = CacheControl::no_store();
+                    }
+
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
@@ -767,6 +779,7 @@ impl CacheService {
                 .headers()
                 .get(CACHE_DEBUG_HEADER_NAME)
                 == Some(&HeaderValue::from_static("true")));
+
         // Check if the request is part of a batch. If it is, completely bypass response caching since it
         // will break any request batches which this request is part of.
         // This check is what enables Batching and response caching to work together, so be very careful
@@ -774,8 +787,15 @@ impl CacheService {
         if request.is_part_of_batch() {
             return self.service.call(request).await;
         }
-        // Don't use cache at all if no-store is set in cache-control header
-        if request
+
+        // [RFC 9111](https://datatracker.ietf.org/doc/html/rfc9111):
+        //  * no-store: allows serving response from cache, but prohibits storing response in cache
+        //  * no-cache: prohibits serving response from cache, but allows storing response in cache
+        //
+        // NB: no-cache actually prohibits serving response from cache _without revalidation_, but
+        //  in the router this is the same thing
+
+        let cache_control = if request
             .subgraph_request
             .headers()
             .contains_key(&CACHE_CONTROL)
@@ -797,12 +817,19 @@ impl CacheService {
                         .build());
                 }
             };
-            if !cache_control.should_store() {
+
+            // Don't use cache at all if both no-store and no-cache are set in cache-control header
+            if cache_control.is_no_cache() && cache_control.is_no_store() {
                 let mut resp = self.service.call(request).await?;
                 cache_control.to_headers(resp.response.headers_mut())?;
                 return Ok(resp);
             }
-        }
+
+            Some(cache_control)
+        } else {
+            None
+        };
+
         let private_id = self.get_private_id(&request.context);
         // Knowing if there's a private_id or not will differentiate the hash because for a same query it can be both public and private depending if we have private_id set or not
         let private_query_key = PrivateQueryKey {
@@ -834,6 +861,7 @@ impl CacheService {
                 is_known_private,
                 private_id,
                 private_query_key,
+                cache_control,
             )
             .await
         } else {
@@ -843,6 +871,7 @@ impl CacheService {
                 is_known_private,
                 private_id,
                 private_query_key,
+                cache_control,
             )
             .await
         }
@@ -901,6 +930,7 @@ impl CacheService {
         is_known_private: bool,
         private_id: Option<String>,
         private_query_key: PrivateQueryKey,
+        request_cache_control: Option<CacheControl>,
     ) -> Result<subgraph::Response, BoxError> {
         // Skip cache entirely if this is a root fields operation that isn't a query
         if request.operation_kind != OperationKind::Query {
@@ -918,6 +948,7 @@ impl CacheService {
             request,
             self.supergraph_schema.clone(),
             &self.subgraph_enums,
+            request_cache_control.as_ref(),
         )
         .instrument(tracing::info_span!(
             "response_cache.lookup",
@@ -957,7 +988,8 @@ impl CacheService {
 
                 let response = self.service.call(request).await?;
 
-                let cache_control = response.subgraph_cache_control(self.subgraph_ttl.into())?;
+                let mut cache_control =
+                    response.subgraph_cache_control(self.subgraph_ttl.into())?;
 
                 // Support cache tags coming from subgraph response extensions
                 if let Some(Value::Array(cache_tags)) =
@@ -976,8 +1008,6 @@ impl CacheService {
                     cache_control.clone(),
                 );
 
-                let mut should_store = true;
-
                 if cache_control.private() {
                     // we did not know in advance that this was a query with a private scope, so we update the cache key
                     if !is_known_private {
@@ -992,12 +1022,11 @@ impl CacheService {
                             root_cache_key = format!("{root_cache_key}:{s}");
                         }
                     }
+                }
 
-                    if private_id.is_none() {
-                        // the response has a private scope but we don't have a way to differentiate
-                        // users, so we do not store the response in cache
-                        should_store = false;
-                    }
+                // if the request had no_store on it, propagate that to this cache control
+                if let Some(request_cache_control) = request_cache_control {
+                    cache_control.no_store |= request_cache_control.no_store;
                 }
 
                 if self.debug {
@@ -1021,7 +1050,11 @@ impl CacheService {
                     add_cache_key_to_context(&response.context, cache_key_context)?;
                 }
 
-                if should_store && cache_control.should_store() {
+                // the response has a private scope but we don't have a way to differentiate
+                // users, so we do not store the response in cache
+                let unstorable_private_response = cache_control.private() && private_id.is_none();
+
+                if !unstorable_private_response && cache_control.should_store() {
                     cache_store_root_from_response(
                         storage,
                         self.subgraph_ttl,
@@ -1046,6 +1079,7 @@ impl CacheService {
         is_known_private: bool,
         private_id: Option<String>,
         private_query_key: PrivateQueryKey,
+        request_cache_control: Option<CacheControl>,
     ) -> Result<subgraph::Response, BoxError> {
         match cache_lookup_entities(
             self.name.clone(),
@@ -1056,6 +1090,7 @@ impl CacheService {
             private_id.as_deref(),
             request,
             self.debug,
+            request_cache_control.as_ref(),
         )
         .instrument(tracing::info_span!(
             "response_cache.lookup",
@@ -1150,6 +1185,11 @@ impl CacheService {
                     cache_control = cache_control.merge(&control_from_cached);
                 }
 
+                // if the request had no_store on it, propagate that to this cache control
+                if let Some(request_cache_control) = request_cache_control {
+                    cache_control.no_store |= request_cache_control.no_store;
+                }
+
                 if !is_known_private && cache_control.private() {
                     self.private_queries
                         .write()
@@ -1197,6 +1237,7 @@ async fn cache_lookup_root(
     mut request: subgraph::Request,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
+    cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String, Vec<String>)>, BoxError> {
     let invalidation_cache_keys =
         get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?;
@@ -1216,6 +1257,12 @@ async fn cache_lookup_root(
     invalidation_keys.extend(invalidation_cache_keys);
 
     Span::current().record("cache.key", key.clone());
+
+    if cache_control.is_some_and(|c| c.is_no_cache()) {
+        // skip cache lookup if no-cache is set - we have no means of revalidating entries without
+        // just performing the query, so there's no benefit to hitting the cache
+        return Ok(ControlFlow::Continue((request, key, invalidation_keys)));
+    }
 
     match cache.fetch(&key, &request.subgraph_name).await {
         Ok(value) => {
@@ -1427,6 +1474,7 @@ fn get_invalidation_root_keys_from_schema(
     root.result.into_inner()
 }
 
+#[derive(Default)]
 struct ResponseCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
 
 #[allow(clippy::too_many_arguments)]
@@ -1439,6 +1487,7 @@ async fn cache_lookup_entities(
     private_id: Option<&str>,
     mut request: subgraph::Request,
     debug: bool,
+    cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, ResponseCacheResults)>, BoxError> {
     let cache_metadata = extract_cache_keys(
         &name,
@@ -1465,6 +1514,15 @@ async fn cache_lookup_entities(
                 .collect(),
         )),
     );
+
+    if cache_control.is_some_and(|c| c.is_no_cache()) {
+        // skip cache lookup if no-cache is set - we have no means of revalidating entries without
+        // just performing the query, so there's no benefit to hitting the cache
+        return Ok(ControlFlow::Continue((
+            request,
+            ResponseCacheResults::default(),
+        )));
+    }
 
     let cache_result: Vec<Option<CacheEntry>> = match cache_result {
         Ok(res) => res
