@@ -159,6 +159,34 @@ pub(crate) struct MetricView {
 }
 
 impl MetricView {
+    /// Creates a default view for a named instrument with histogram aggregation.
+    pub(crate) fn default_histogram(name: String, boundaries: Vec<f64>) -> Self {
+        Self {
+            name,
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: Some(MetricAggregation::Histogram {
+                buckets: boundaries,
+            }),
+            allowed_attribute_keys: None,
+        }
+    }
+
+    /// Merges user-provided overrides into this view configuration.
+    /// User-specified (`Some`) fields take precedence; unspecified (`None`) fields
+    /// retain the values from `self`.
+    pub(crate) fn merge(self, user: Self) -> Self {
+        Self {
+            name: self.name,
+            rename: user.rename.or(self.rename),
+            description: user.description.or(self.description),
+            unit: user.unit.or(self.unit),
+            aggregation: user.aggregation.or(self.aggregation),
+            allowed_attribute_keys: user.allowed_attribute_keys.or(self.allowed_attribute_keys),
+        }
+    }
+
     /// Converts this MetricView into a view function for OTel SDK 0.31+
     pub(crate) fn into_view_fn(
         self,
@@ -948,5 +976,142 @@ mod tests {
         assert_eq!(view.description, Some("Custom description".to_string()));
         assert_eq!(view.unit, Some("s".to_string()));
         assert!(view.aggregation.is_some());
+    }
+
+    #[test]
+    fn test_default_histogram_creates_view_with_buckets() {
+        let boundaries = vec![0.1, 0.5, 1.0, 5.0];
+        let view = MetricView::default_histogram("my.metric".to_string(), boundaries.clone());
+
+        assert_eq!(view.name, "my.metric");
+        assert_eq!(view.rename, None);
+        assert_eq!(view.description, None);
+        assert_eq!(view.unit, None);
+        assert_eq!(
+            view.aggregation,
+            Some(MetricAggregation::Histogram {
+                buckets: boundaries
+            })
+        );
+        assert_eq!(view.allowed_attribute_keys, None);
+    }
+
+    #[test]
+    fn test_merge_user_overrides_all_fields() {
+        let default =
+            MetricView::default_histogram("my.histogram".to_string(), vec![0.1, 0.5, 1.0]);
+        let user = MetricView {
+            name: "my.histogram".to_string(),
+            rename: Some("renamed.histogram".to_string()),
+            description: Some("User description".to_string()),
+            unit: Some("ms".to_string()),
+            aggregation: Some(MetricAggregation::Histogram {
+                buckets: vec![1.0, 5.0, 10.0],
+            }),
+            allowed_attribute_keys: Some(HashSet::from(["key1".to_string()])),
+        };
+
+        let merged = default.merge(user);
+        assert_eq!(merged.name, "my.histogram");
+        assert_eq!(merged.rename, Some("renamed.histogram".to_string()));
+        assert_eq!(merged.description, Some("User description".to_string()));
+        assert_eq!(merged.unit, Some("ms".to_string()));
+        assert_eq!(
+            merged.aggregation,
+            Some(MetricAggregation::Histogram {
+                buckets: vec![1.0, 5.0, 10.0]
+            })
+        );
+        assert_eq!(
+            merged.allowed_attribute_keys,
+            Some(HashSet::from(["key1".to_string()]))
+        );
+    }
+
+    #[test]
+    fn test_merge_user_specifies_nothing_preserves_defaults() {
+        let default_buckets = vec![0.1, 0.5, 1.0];
+        let default =
+            MetricView::default_histogram("my.histogram".to_string(), default_buckets.clone());
+        let user = MetricView {
+            name: "my.histogram".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: None,
+            allowed_attribute_keys: None,
+        };
+
+        let merged = default.merge(user);
+        assert_eq!(merged.name, "my.histogram");
+        assert_eq!(merged.rename, None);
+        assert_eq!(merged.description, None);
+        assert_eq!(merged.unit, None);
+        assert_eq!(
+            merged.aggregation,
+            Some(MetricAggregation::Histogram {
+                buckets: default_buckets
+            }),
+            "default histogram aggregation should be preserved when user specifies none"
+        );
+        assert_eq!(merged.allowed_attribute_keys, None);
+    }
+
+    #[test]
+    fn test_merge_partial_override_preserves_default_aggregation() {
+        let default_buckets = vec![0.001, 0.005, 0.015, 0.05, 0.1];
+        let default = MetricView::default_histogram(
+            "http.server.request.duration".to_string(),
+            default_buckets.clone(),
+        );
+        let user = MetricView {
+            name: "http.server.request.duration".to_string(),
+            rename: None,
+            description: Some("Custom description".to_string()),
+            unit: None,
+            aggregation: None,
+            allowed_attribute_keys: Some(HashSet::from([
+                "http.method".to_string(),
+                "http.status_code".to_string(),
+            ])),
+        };
+
+        let merged = default.merge(user);
+        assert_eq!(
+            merged.aggregation,
+            Some(MetricAggregation::Histogram {
+                buckets: default_buckets
+            }),
+            "default histogram buckets should be inherited when user doesn't specify aggregation"
+        );
+        assert_eq!(merged.description, Some("Custom description".to_string()));
+        assert_eq!(
+            merged.allowed_attribute_keys,
+            Some(HashSet::from([
+                "http.method".to_string(),
+                "http.status_code".to_string(),
+            ]))
+        );
+    }
+
+    #[test]
+    fn test_merge_user_drop_overrides_default_histogram() {
+        let default =
+            MetricView::default_histogram("noisy.metric".to_string(), vec![0.1, 0.5, 1.0]);
+        let user = MetricView {
+            name: "noisy.metric".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: Some(MetricAggregation::Drop),
+            allowed_attribute_keys: None,
+        };
+
+        let merged = default.merge(user);
+        assert_eq!(
+            merged.aggregation,
+            Some(MetricAggregation::Drop),
+            "user Drop aggregation should override default histogram"
+        );
     }
 }

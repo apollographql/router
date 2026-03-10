@@ -38,6 +38,7 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
 
 /// Trait for metric exporters to contribute to meter provider construction
@@ -192,20 +193,28 @@ impl<'a> MetricsBuilder<'a> {
     }
 
     pub(crate) fn configure_views(&mut self, meter_provider_type: MeterProviderType) {
-        // Collect names of instruments with custom views - these should NOT get default buckets
-        // because their custom views will handle aggregation (avoiding duplicate metrics)
-        let custom_view_names: HashSet<String> = self
+        let boundaries = self.metrics_common().buckets.clone();
+        let user_views: HashMap<String, MetricView> = self
             .metrics_common()
             .views
-            .iter()
-            .map(|v| v.name.clone())
+            .clone()
+            .into_iter()
+            .map(|v| (v.name.clone(), v))
             .collect();
+        let user_view_names: HashSet<String> = user_views.keys().cloned().collect();
 
-        // Register default histogram bucket view for all histograms WITHOUT custom views
-        let boundaries = self.metrics_common().buckets.clone();
+        // Merge each user-configured view with default histogram aggregation.
+        // This ensures user views inherit default buckets when no custom aggregation
+        // is specified, while still allowing user overrides for any field.
+        for (name, user_view) in user_views {
+            let default_view = MetricView::default_histogram(name, boundaries.clone());
+            let merged = default_view.merge(user_view);
+            self.with_view(meter_provider_type, merged.into_view_fn());
+        }
+
+        // Apply default histogram buckets to all histograms without user-configured views
         self.with_view(meter_provider_type, move |instrument: &Instrument| {
-            // Skip instruments with custom views - they'll be handled below
-            if custom_view_names.contains(instrument.name()) {
+            if user_view_names.contains(instrument.name()) {
                 return None;
             }
             if instrument.kind() == InstrumentKind::Histogram {
@@ -222,10 +231,5 @@ impl<'a> MetricsBuilder<'a> {
                 None
             }
         });
-
-        // Register custom views from configuration
-        for metric_view in self.metrics_common().views.clone() {
-            self.with_view(meter_provider_type, metric_view.into_view_fn());
-        }
     }
 }
