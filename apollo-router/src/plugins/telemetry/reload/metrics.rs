@@ -38,6 +38,7 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
 
 /// Trait for metric exporters to contribute to meter provider construction
@@ -193,40 +194,38 @@ impl<'a> MetricsBuilder<'a> {
     }
 
     pub(crate) fn configure_views(&mut self, meter_provider_type: MeterProviderType) {
-        // Collect names of instruments with custom views - these should NOT get default buckets
-        // because their custom views will handle aggregation (avoiding duplicate metrics)
-        let custom_view_names: HashSet<String> = self
+        let boundaries = self.metrics_common().buckets.clone();
+
+        // Pre-merge user views with default histogram aggregation
+        let merged_views: HashMap<String, MetricView> = self
             .metrics_common()
             .views
-            .iter()
-            .map(|v| v.name.clone())
+            .clone()
+            .into_iter()
+            .map(|v| {
+                let name = v.name.clone();
+                let default_view = MetricView::default_histogram(name.clone(), boundaries.clone());
+                (name, default_view.merge(v))
+            })
             .collect();
 
-        // Register default histogram bucket view for all histograms WITHOUT custom views
-        let boundaries = self.metrics_common().buckets.clone();
+        // Single view that handles both user-configured and default histogram views
         self.with_view(meter_provider_type, move |instrument: &Instrument| {
-            // Skip instruments with custom views - they'll be handled below
-            if custom_view_names.contains(instrument.name()) {
-                return None;
-            }
-            if instrument.kind() == InstrumentKind::Histogram {
-                Some(
-                    Stream::builder()
-                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                            boundaries: boundaries.clone(),
-                            record_min_max: true,
-                        })
-                        .build()
-                        .expect("Failed to create stream for default histogram bucket view"),
-                )
-            } else {
-                None
-            }
+            merged_views
+                .get(instrument.name())
+                .cloned()
+                .map(|view| view.into_stream())
+                .or_else(|| {
+                    (instrument.kind() == InstrumentKind::Histogram).then(|| {
+                        Stream::builder()
+                            .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                                boundaries: boundaries.clone(),
+                                record_min_max: true,
+                            })
+                            .build()
+                            .expect("Failed to create stream for default histogram bucket view")
+                    })
+                })
         });
-
-        // Register custom views from configuration
-        for metric_view in self.metrics_common().views.clone() {
-            self.with_view(meter_provider_type, metric_view.into_view_fn());
-        }
     }
 }
