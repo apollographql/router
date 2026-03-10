@@ -315,10 +315,19 @@ impl PlanNode {
                                         Err(e) => (Value::default(), vec![e]),
                                     };
 
-                                // When a subgraph returns an unexpected response (ie not a body with
-                                // at least one of errors or data), the errors surfaced by the router
-                                // include an @ in the path. This indicates the error should be applied
-                                // to all elements in the array.
+                                // When a subgraph fetch that is nested under a Flatten node returns a Request Error
+                                // (see https://spec.graphql.org/September2025/#sec-Errors.Request-Errors),
+                                // the router surfaces this as an Execution Error with a non-compliant "@" in the path.
+                                // This "@", the flatten element, means that the execution error should actually apply to all the elements in a response array.
+                                // A subgraph can also respond with execution errors--if the path
+                                // is valid, the path in the error would not have an "@" element, so it is
+                                // not affected by this loop.
+                                // If the subgraph returns execution errors with an _invalid_ path,
+                                // the subgraph fetch response handling code has _also_ turned this
+                                // into an execution error with an "@" element. Essentially, the
+                                // error with an invalid path first got turned into a path-less Request Error,
+                                // and then that Request Error got turned into an Execution Error
+                                // with an "@" element.
                                 errors = Vec::default();
                                 for err in raw_errors {
                                     if let Some(err_path) = err.path.as_ref()
