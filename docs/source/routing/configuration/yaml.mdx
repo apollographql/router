@@ -149,14 +149,14 @@ The `experimental_hoist_orphan_errors` option changes this behavior on a per-sub
 
 <Caution>
 
-This option is **not GraphQL spec-compliant**. It changes how errors are associated with paths in the response compared to the behavior described in the [GraphQL specification](https://spec.graphql.org/). Enable it only for subgraphs where the reduction in error volume outweighs strict spec compliance.
+This option is **not GraphQL spec-compliant**. It changes how errors are associated with paths in the response compared to the behavior described in the [GraphQL specification](https://spec.graphql.org/). Enable it only for your subgraphs where the reduction in error volume outweighs strict spec compliance.
 
 </Caution>
 
-To enable the feature for a specific subgraph:
+Enable the feature for a specific subgraph:
 
 ```yaml title="router.yaml"
-experimental_hoist_orphan_errors:
+`experimental_hoist_orphan_errors`:
   subgraphs:
     my_subgraph: true
 ```
@@ -172,7 +172,7 @@ The `all` and `subgraphs` options are mutually exclusive. If both are specified,
 
 <Note>
 
-This feature reduces the number of propagated errors but does not impose a hard cap on the total error count. If a subgraph returns an extremely large number of errors, the router still processes all of them. For subgraphs that may produce unbounded error volumes, consider additional mitigation strategies at the subgraph level.
+This feature reduces the number of propagated errors but does not impose a hard cap on the total error count. If your subgraph returns an extremely large number of errors, the router still processes all of them. For subgraphs that may produce unbounded error volumes, consider additional mitigation strategies at your subgraph level.
 
 </Note>
 
