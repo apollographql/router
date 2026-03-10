@@ -1,6 +1,5 @@
 ### feat: add persisted query ID context key ([PR #8959](https://github.com/apollographql/router/pull/8959))
 
-feat: add persisted query ID context key and update related functionality as requested by in https://apollographql.atlassian.net/browse/TSH-22140
 
 - Introduced a new context key for persisted query ID in the Apollo Router.
 - Updated the PersistedQueryLayer to store the persisted query ID in the request context.
