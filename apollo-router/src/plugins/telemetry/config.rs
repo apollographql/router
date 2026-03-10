@@ -187,44 +187,46 @@ impl MetricView {
         }
     }
 
+    /// Builds a Stream from this view configuration.
+    /// Use this when you've already matched the instrument by name.
+    pub(crate) fn into_stream(self) -> Stream {
+        let mut stream = Stream::builder();
+        if let Some(new_name) = self.rename {
+            stream = stream.with_name(new_name);
+        }
+        if let Some(desc) = self.description {
+            stream = stream.with_description(desc);
+        }
+        if let Some(u) = self.unit {
+            stream = stream.with_unit(u);
+        }
+        if let Some(agg) = self.aggregation {
+            let aggregation = match agg {
+                MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
+                    boundaries: buckets,
+                    record_min_max: true,
+                },
+                MetricAggregation::Drop => Aggregation::Drop,
+            };
+            stream = stream.with_aggregation(aggregation);
+        }
+        if let Some(keys) = self.allowed_attribute_keys {
+            stream = stream.with_allowed_attribute_keys(keys.into_iter().map(Key::new));
+        }
+        stream.build().expect("Failed to build metric view")
+    }
+
     /// Converts this MetricView into a view function for OTel SDK 0.31+
     pub(crate) fn into_view_fn(
         self,
     ) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
-        let name = self.name;
-        let rename = self.rename;
-        let description = self.description;
-        let unit = self.unit;
-        let aggregation = self.aggregation.map(|agg| match agg {
-            MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
-                boundaries: buckets,
-                record_min_max: true,
-            },
-            MetricAggregation::Drop => Aggregation::Drop,
-        });
-        let allowed_attribute_keys = self.allowed_attribute_keys;
-
+        let name = self.name.clone();
+        let view = self;
         move |instrument: &Instrument| {
             if instrument.name() != name {
                 return None;
             }
-            let mut stream = Stream::builder();
-            if let Some(ref new_name) = rename {
-                stream = stream.with_name(new_name.clone());
-            }
-            if let Some(ref desc) = description {
-                stream = stream.with_description(desc.clone());
-            }
-            if let Some(ref u) = unit {
-                stream = stream.with_unit(u.clone());
-            }
-            if let Some(ref agg) = aggregation {
-                stream = stream.with_aggregation(agg.clone());
-            }
-            if let Some(ref keys) = allowed_attribute_keys {
-                stream = stream.with_allowed_attribute_keys(keys.iter().cloned().map(Key::new));
-            }
-            Some(stream.build().expect("Failed to build metric view"))
+            Some(view.clone().into_stream())
         }
     }
 }
@@ -874,7 +876,6 @@ impl Conf {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
@@ -882,6 +883,8 @@ mod tests {
     use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
     use opentelemetry_sdk::runtime;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn test_attribute_value_from_json() {
@@ -1130,17 +1133,13 @@ mod tests {
         for resource_metrics in metrics {
             for scope_metrics in resource_metrics.scope_metrics() {
                 for metric in scope_metrics.metrics() {
-                    if metric.name() == metric_name {
-                        match metric.data() {
-                            opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(data) => {
-                                if let MetricData::Histogram(histogram) = data {
-                                    if let Some(dp) = histogram.data_points().next() {
-                                        return Some(dp.bounds().collect());
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
+                    if metric.name() == metric_name
+                        && let opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(
+                            MetricData::Histogram(histogram),
+                        ) = metric.data()
+                        && let Some(dp) = histogram.data_points().next()
+                    {
+                        return Some(dp.bounds().collect());
                     }
                 }
             }

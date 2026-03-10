@@ -194,42 +194,37 @@ impl<'a> MetricsBuilder<'a> {
 
     pub(crate) fn configure_views(&mut self, meter_provider_type: MeterProviderType) {
         let boundaries = self.metrics_common().buckets.clone();
-        let user_views: HashMap<String, MetricView> = self
+
+        // Pre-merge user views with default histogram aggregation
+        let merged_views: HashMap<String, MetricView> = self
             .metrics_common()
             .views
             .clone()
             .into_iter()
-            .map(|v| (v.name.clone(), v))
+            .map(|v| {
+                let name = v.name.clone();
+                let default_view = MetricView::default_histogram(name.clone(), boundaries.clone());
+                (name, default_view.merge(v))
+            })
             .collect();
-        let user_view_names: HashSet<String> = user_views.keys().cloned().collect();
 
-        // Merge each user-configured view with default histogram aggregation.
-        // This ensures user views inherit default buckets when no custom aggregation
-        // is specified, while still allowing user overrides for any field.
-        for (name, user_view) in user_views {
-            let default_view = MetricView::default_histogram(name, boundaries.clone());
-            let merged = default_view.merge(user_view);
-            self.with_view(meter_provider_type, merged.into_view_fn());
-        }
-
-        // Apply default histogram buckets to all histograms without user-configured views
+        // Single view that handles both user-configured and default histogram views
         self.with_view(meter_provider_type, move |instrument: &Instrument| {
-            if user_view_names.contains(instrument.name()) {
-                return None;
-            }
-            if instrument.kind() == InstrumentKind::Histogram {
-                Some(
-                    Stream::builder()
-                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                            boundaries: boundaries.clone(),
-                            record_min_max: true,
-                        })
-                        .build()
-                        .expect("Failed to create stream for default histogram bucket view"),
-                )
-            } else {
-                None
-            }
+            merged_views
+                .get(instrument.name())
+                .cloned()
+                .map(|view| view.into_stream())
+                .or_else(|| {
+                    (instrument.kind() == InstrumentKind::Histogram).then(|| {
+                        Stream::builder()
+                            .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                                boundaries: boundaries.clone(),
+                                record_min_max: true,
+                            })
+                            .build()
+                            .expect("Failed to create stream for default histogram bucket view")
+                    })
+                })
         });
     }
 }
