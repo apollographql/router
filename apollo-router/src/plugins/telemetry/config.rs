@@ -873,9 +873,15 @@ impl Conf {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
 
     use super::*;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::data::MetricData;
+    use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+    use opentelemetry_sdk::runtime;
+    use serde_json::json;
 
     #[test]
     fn test_attribute_value_from_json() {
@@ -1112,6 +1118,198 @@ mod tests {
             merged.aggregation,
             Some(MetricAggregation::Drop),
             "user Drop aggregation should override default histogram"
+        );
+    }
+
+    /// Helper to extract histogram bounds from exported metrics
+    fn get_histogram_bounds(
+        exporter: &InMemoryMetricExporter,
+        metric_name: &str,
+    ) -> Option<Vec<f64>> {
+        let metrics = exporter.get_finished_metrics().ok()?;
+        for resource_metrics in metrics {
+            for scope_metrics in resource_metrics.scope_metrics() {
+                for metric in scope_metrics.metrics() {
+                    if metric.name() == metric_name {
+                        match metric.data() {
+                            opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(data) => {
+                                if let MetricData::Histogram(histogram) = data {
+                                    if let Some(dp) = histogram.data_points().next() {
+                                        return Some(dp.bounds().collect());
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Helper to check if a metric exists in exported metrics
+    fn metric_exists(exporter: &InMemoryMetricExporter, metric_name: &str) -> bool {
+        let Ok(metrics) = exporter.get_finished_metrics() else {
+            return false;
+        };
+        metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == metric_name)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_user_custom_buckets_are_applied() {
+        let exporter = InMemoryMetricExporter::default();
+        let custom_buckets = vec![0.005, 0.05, 0.5, 5.0];
+
+        // Create a view with custom histogram buckets
+        let view = MetricView {
+            name: "test.histogram".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: Some(MetricAggregation::Histogram {
+                buckets: custom_buckets.clone(),
+            }),
+            allowed_attribute_keys: None,
+        };
+
+        let meter_provider = MeterProviderBuilder::default()
+            .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+            .with_view(view.into_view_fn())
+            .build();
+
+        // Record a histogram value
+        let meter = meter_provider.meter("test");
+        let histogram = meter.f64_histogram("test.histogram").build();
+        histogram.record(0.1, &[]);
+
+        meter_provider.force_flush().unwrap();
+
+        let bounds =
+            get_histogram_bounds(&exporter, "test.histogram").expect("histogram should exist");
+        assert_eq!(
+            bounds, custom_buckets,
+            "histogram should use user-specified custom buckets"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_merged_view_inherits_default_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let default_buckets = vec![0.001, 0.01, 0.1, 1.0, 10.0];
+
+        // Create a default view with histogram buckets
+        let default_view =
+            MetricView::default_histogram("test.histogram".to_string(), default_buckets.clone());
+
+        // User view specifies only description, not aggregation
+        let user_view = MetricView {
+            name: "test.histogram".to_string(),
+            rename: None,
+            description: Some("Custom description".to_string()),
+            unit: None,
+            aggregation: None, // No aggregation specified - should inherit defaults
+            allowed_attribute_keys: None,
+        };
+
+        // Merge views - user view should inherit default buckets
+        let merged = default_view.merge(user_view);
+
+        let meter_provider = MeterProviderBuilder::default()
+            .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+            .with_view(merged.into_view_fn())
+            .build();
+
+        let meter = meter_provider.meter("test");
+        let histogram = meter.f64_histogram("test.histogram").build();
+        histogram.record(0.05, &[]);
+
+        meter_provider.force_flush().unwrap();
+
+        let bounds =
+            get_histogram_bounds(&exporter, "test.histogram").expect("histogram should exist");
+        assert_eq!(
+            bounds, default_buckets,
+            "merged view should inherit default buckets when user doesn't specify aggregation"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_drop_aggregation_suppresses_metric() {
+        let exporter = InMemoryMetricExporter::default();
+
+        // Create a view with Drop aggregation
+        let view = MetricView {
+            name: "dropped.histogram".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: Some(MetricAggregation::Drop),
+            allowed_attribute_keys: None,
+        };
+
+        let meter_provider = MeterProviderBuilder::default()
+            .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+            .with_view(view.into_view_fn())
+            .build();
+
+        let meter = meter_provider.meter("test");
+        let histogram = meter.f64_histogram("dropped.histogram").build();
+        histogram.record(1.0, &[]);
+
+        meter_provider.force_flush().unwrap();
+
+        assert!(
+            !metric_exists(&exporter, "dropped.histogram"),
+            "metric with Drop aggregation should not be exported"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_user_buckets_override_merged_defaults() {
+        let exporter = InMemoryMetricExporter::default();
+        let default_buckets = vec![0.001, 0.01, 0.1, 1.0, 10.0];
+        let user_buckets = vec![1.0, 5.0, 10.0, 50.0];
+
+        // Create a default view with histogram buckets
+        let default_view =
+            MetricView::default_histogram("test.histogram".to_string(), default_buckets);
+
+        // User view specifies custom aggregation - should override defaults
+        let user_view = MetricView {
+            name: "test.histogram".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: Some(MetricAggregation::Histogram {
+                buckets: user_buckets.clone(),
+            }),
+            allowed_attribute_keys: None,
+        };
+
+        // Merge views - user aggregation should take precedence
+        let merged = default_view.merge(user_view);
+
+        let meter_provider = MeterProviderBuilder::default()
+            .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+            .with_view(merged.into_view_fn())
+            .build();
+
+        let meter = meter_provider.meter("test");
+        let histogram = meter.f64_histogram("test.histogram").build();
+        histogram.record(2.5, &[]);
+
+        meter_provider.force_flush().unwrap();
+
+        let bounds =
+            get_histogram_bounds(&exporter, "test.histogram").expect("histogram should exist");
+        assert_eq!(
+            bounds, user_buckets,
+            "user-specified buckets should override default buckets in merged view"
         );
     }
 }
