@@ -833,10 +833,100 @@ mod tests {
             "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         ];
 
+<<<<<<< HEAD
         for hash in valid_hashes {
             let result = super::Opt::validate_oci_reference(hash);
             assert!(result.is_ok(), "Hash '{}' should be valid", hash);
             assert_eq!(result.unwrap(), hash);
+=======
+        use super::super::Executable;
+        use super::super::Opt;
+        use crate::router::SchemaSource;
+
+        #[tokio::test]
+        async fn test_conflicting_supergraph_file_and_graph_artifact_reference() {
+            // Test that --supergraph and --graph-artifact-reference cannot be used together
+            let temp_dir = tempfile::tempdir().unwrap();
+            let supergraph_path = temp_dir.path().join("supergraph.graphql");
+            std::fs::File::create(&supergraph_path).unwrap();
+
+            let schema = Some(SchemaSource::File {
+                path: supergraph_path,
+                watch: false,
+            });
+
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: Some("test-key".to_string()),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            // Provide an explicit minimal config to avoid default Configuration parsing issues
+            use crate::router::ConfigurationSource;
+            let supergraph = crate::configuration::Supergraph::builder().build();
+            let config = ConfigurationSource::Static(Box::new(crate::Configuration {
+                supergraph,
+                health_check: Default::default(),
+                sandbox: Default::default(),
+                homepage: Default::default(),
+                server: Default::default(),
+                cors: Default::default(),
+                tls: Default::default(),
+                apq: Default::default(),
+                persisted_queries: Default::default(),
+                limits: Default::default(),
+                experimental_chaos: Default::default(),
+                batching: Default::default(),
+                experimental_type_conditioned_fetching: false,
+                experimental_hoist_orphan_errors: Default::default(),
+                plugins: Default::default(),
+                apollo_plugins: Default::default(),
+                notify: Default::default(),
+                uplink: None,
+                validated_yaml: None,
+                raw_yaml: None,
+            }));
+
+            let result = Executable::inner_start(
+                None,
+                schema,
+                Some(config),
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            assert!(result.is_err(), "Should fail with conflicting options");
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
+            );
+            assert!(
+                error_msg.contains("--supergraph")
+                    || error_msg.contains("--graph-artifact-reference"),
+                "Error should mention the conflicting options"
+            );
+>>>>>>> 810241ea (feat(orphan-hoist-config): adds config for hoisting orphaned errors (#8998))
         }
     }
 
@@ -875,6 +965,7 @@ mod tests {
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
         ];
 
+<<<<<<< HEAD
         for reference in invalid_references {
             let result = super::Opt::validate_oci_reference(reference);
             assert!(
@@ -882,6 +973,68 @@ mod tests {
                 "Reference '{}' should be invalid",
                 reference
             );
+=======
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: Some(vec![Url::parse("https://example.com/schema.graphql").unwrap()]),
+                command: None,
+                apollo_key: Some("test-key".to_string()),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            // Provide an explicit minimal config to avoid default Configuration parsing issues
+            use crate::router::ConfigurationSource;
+            let supergraph = crate::configuration::Supergraph::builder().build();
+            let config = ConfigurationSource::Static(Box::new(crate::Configuration {
+                supergraph,
+                health_check: Default::default(),
+                sandbox: Default::default(),
+                homepage: Default::default(),
+                server: Default::default(),
+                cors: Default::default(),
+                tls: Default::default(),
+                apq: Default::default(),
+                persisted_queries: Default::default(),
+                limits: Default::default(),
+                experimental_chaos: Default::default(),
+                batching: Default::default(),
+                experimental_type_conditioned_fetching: false,
+                experimental_hoist_orphan_errors: Default::default(),
+                plugins: Default::default(),
+                apollo_plugins: Default::default(),
+                notify: Default::default(),
+                uplink: None,
+                validated_yaml: None,
+                raw_yaml: None,
+            }));
+
+            let result = Executable::inner_start(
+                None,
+                schema,
+                Some(config),
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            assert!(result.is_err(), "Should fail with conflicting options");
+>>>>>>> 810241ea (feat(orphan-hoist-config): adds config for hoisting orphaned errors (#8998))
             let error_msg = result.unwrap_err().to_string();
             assert!(
                 error_msg.contains("invalid graph artifact reference"),
