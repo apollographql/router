@@ -1660,6 +1660,38 @@ impl IntegrationTest {
         s
     }
 
+    #[allow(dead_code)]
+    pub async fn assert_redis_cache_contains_key_matching(&self, pattern: &str) {
+        let url = self.redis_url().expect("no redis urls");
+        let config = RedisConfig::from_url(&url).unwrap();
+        let client = RedisClient::new(config, None, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await.unwrap();
+
+        let keys = self
+            .scan(&client)
+            .await
+            .expect("couldn't get keys from redis");
+        let redis_namespace = &self.redis_namespace;
+
+        let matching_key = keys.iter().find(|key| {
+            let unnamespaced = key.replace(&format!("{redis_namespace}:"), "");
+            unnamespaced.contains(pattern)
+        });
+
+        if matching_key.is_none() {
+            println!("keys in namespace:");
+            for key in &keys {
+                let unnamespaced = key.replace(&format!("{redis_namespace}:"), "");
+                println!("\t{unnamespaced}");
+            }
+            panic!("no key matching pattern '{pattern}' found in Redis cache");
+        }
+
+        client.quit().await.unwrap();
+        let _ = connection_task.await;
+    }
+
     /// Return the first URL in `self.redis_urls`.
     ///
     /// This `Vec` will have been populated by the config provided to `IntegrationTest` upon
