@@ -1,7 +1,7 @@
-### Fix: Proper handling of licenses in a warning state
+### Enforce feature restrictions for warning-state licenses
 
-We allowed licenses in a warning state to bypass enforcement because we weren't returning an error, only the limits. This was happening, I think, because there's middleware handling expired licenses but not licenses in a warning state. So, we assumed that there'd be same kind of handling for licenses in a warning state. Alas, there's not.
+The router now enforces license restrictions even when a license is in a warning state. Previously, warning-state licenses could bypass enforcement for restricted features.
 
-We now error out if there are restricted features in use.
+If your deployment uses restricted features, the router returns an error instead of continuing to run.
 
-By [@aaronarinder](https://github.com/aaronarinder) in https://github.com/apollographql/router/pull/8768
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8768
