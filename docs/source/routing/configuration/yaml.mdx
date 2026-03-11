@@ -155,26 +155,39 @@ This option is not GraphQL spec-compliant. It changes how errors are associated 
 </Caution>
 
 
-Enable the feature for a specific subgraph:
-
-```yaml title="router.yaml"
-`experimental_hoist_orphan_errors`:
-  subgraphs:
-    my_subgraph: true
-```
-
-To enable the feature for all subgraphs:
+To target a specific subgraph:
 
 ```yaml title="router.yaml"
 experimental_hoist_orphan_errors:
-  all: true
+  subgraphs:
+    my_subgraph:
+      enabled: true
 ```
 
-The `all` and `subgraphs` options are mutually exclusive. If both are specified, subgraph-specific settings take precedence.
+To target all subgraphs:
+
+```yaml title="router.yaml"
+experimental_hoist_orphan_errors:
+  all:
+    enabled: true
+```
+
+To target all subgraphs except one:
+
+```yaml title="router.yaml"
+experimental_hoist_orphan_errors:
+  all:
+    enabled: true
+  subgraphs:
+    noisy_one:
+      enabled: false
+```
+
+Per-subgraph settings override `all`.
 
 <Note>
 
-This feature reduces the number of propagated errors but does not impose a hard cap on the total error count. If your subgraph returns an extremely large number of errors, the router still processes all of them. For subgraphs that may produce unbounded error volumes, consider additional mitigation strategies at your subgraph level.
+This feature reduces the number of propagated errors but does not impose a hard cap on the total error count. If a subgraph returns an extremely large number of errors, the router still processes all of them. For subgraphs that may produce unbounded error volumes, consider additional mitigation strategies at the subgraph level.
 
 </Note>
 
