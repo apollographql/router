@@ -621,7 +621,6 @@ impl SchemaUpgrader {
         let mut candidates: IndexSet<ObjectFieldDefinitionPosition> = IndexSet::default();
         for obj_field_pos in targets.object_fields.iter() {
             let field = obj_field_pos.get(schema.schema())?;
-            // let field = obj_field_pos.make_mut(schema.schema_mut())?;
             let return_type = field.ty.inner_named_type();
             if schema
                 .try_get_type(return_type.clone())
@@ -632,9 +631,8 @@ impl SchemaUpgrader {
         }
 
         for candidate in candidates {
-            let field = candidate.make_mut(schema.schema_mut())?;
-            let field = field.make_mut();
-            field
+            candidate.make_mut(schema.schema_mut())?
+                .make_mut()
                 .directives
                 .retain(|d| d.name != provides_directive.as_str());
         }
