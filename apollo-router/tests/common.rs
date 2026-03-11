@@ -755,6 +755,12 @@ impl IntegrationTest {
     pub async fn start(&mut self) {
         let mut router = Command::new(&self.router_location);
 
+        // Prevent ambient OTEL exporter environment variables (e.g. set by CI infrastructure for
+        // build-level observability) from leaking into the router subprocess.  The router refuses
+        // to start when those variables are present, which would cause every integration test that
+        // spawns a router subprocess to fail in such environments.
+        apollo_router::Executable::remove_forbidden_otel_env_vars(&mut router);
+
         let mut needs_supergraph_cli_arg = true;
         let non_file_startup_env = &[
             "APOLLO_ROUTER_SUPERGRAPH_PATH",

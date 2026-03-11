@@ -762,6 +762,21 @@ impl Executable {
         }
         Ok(())
     }
+
+    /// Removes forbidden OTEL environment variables from a [`std::process::Command`] before
+    /// spawning it, so that integration test subprocesses are isolated from any ambient OTEL
+    /// configuration present in the test runner's environment.
+    ///
+    /// The same variables are checked at router startup; if any are present the router refuses to
+    /// start.  Integration tests that launch the router as a subprocess inherit the parent process
+    /// environment, so any OTEL exporter vars set by CI infrastructure (e.g. for build-level
+    /// observability) would cause every such test to fail.  Call this helper when building the
+    /// `Command` that spawns the router to prevent that class of interference.
+    pub fn remove_forbidden_otel_env_vars(command: &mut tokio::process::Command) {
+        for var in FORBIDDEN_OTEL_VARS {
+            command.env_remove(var);
+        }
+    }
 }
 
 fn graph_os() -> bool {
