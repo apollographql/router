@@ -5481,6 +5481,18 @@ expression: "&schema"
         }
       ]
     },
+    "HoistOrphanErrors": {
+      "additionalProperties": false,
+      "description": "Per-subgraph configuration for hoisting orphan errors.\n\n\"Orphan errors\" are errors from entity fetches that lack a valid `_entities` path.\nWhen hoisting is enabled, these errors are assigned to the nearest non-array\nancestor in the response path, preventing them from being duplicated across\nevery element in an array.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable hoisting of orphan errors for this subgraph.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "Homepage": {
       "additionalProperties": false,
       "description": "Configuration options pertaining to the home page.",
@@ -9476,6 +9488,31 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphHoistOrphanErrorsConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HoistOrphanErrors"
+            }
+          ],
+          "default": {
+            "enabled": false
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HoistOrphanErrors"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphInvalidationConfig": {
       "additionalProperties": false,
       "properties": {
@@ -12064,6 +12101,20 @@ expression: "&schema"
     },
     "experimental_diagnostics": {
       "$ref": "#/definitions/Config5"
+    },
+    "experimental_hoist_orphan_errors": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/SubgraphHoistOrphanErrorsConfiguration"
+        }
+      ],
+      "default": {
+        "all": {
+          "enabled": false
+        },
+        "subgraphs": {}
+      },
+      "description": "When enabled for specific subgraphs, orphan errors (those without a valid\n`_entities` path) are assigned to the nearest non-array ancestor in the\nresponse path, preventing them from being duplicated across every array\nelement."
     },
     "experimental_type_conditioned_fetching": {
       "default": false,
