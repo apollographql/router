@@ -31,7 +31,6 @@ use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::DirectiveDefinitionPosition;
-use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::access_control::validate_no_access_control_on_interfaces;
 use crate::schema::validators::context::validate_context_directives;
 use crate::schema::validators::cost::validate_cost_directives;
@@ -115,12 +114,11 @@ impl FederationBlueprint {
         Ok(())
     }
 
-    pub(crate) fn on_validation(
-        schema: &ValidFederationSchema,
-        meta: &SubgraphMetadata,
-    ) -> Result<(), FederationError> {
-        // TODO metadata should be read from schema directly
+    pub(crate) fn on_validation(schema: &ValidFederationSchema) -> Result<(), FederationError> {
         let mut error_collector = MultipleFederationErrors { errors: Vec::new() };
+        let Some(meta) = schema.subgraph_metadata() else {
+            bail!("ValidFederationSchema should contain subgraph metadata");
+        };
 
         // We skip the rest of validation for fed1 schemas because there is a number of validations that is stricter than what fed 1
         // accepted, and some of those issues are fixed by `SchemaUpgrader`. So insofar as any fed 1 schma is ultimately converted

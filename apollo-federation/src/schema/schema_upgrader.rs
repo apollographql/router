@@ -11,7 +11,8 @@ use apollo_compiler::validation::Valid;
 use either::Either;
 use indexmap::IndexSet;
 use itertools::Itertools;
-use tracing::{instrument, trace};
+use tracing::instrument;
+use tracing::trace;
 
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
@@ -174,21 +175,12 @@ impl SchemaUpgrader {
         // We need to update the orphan extension types accordingly.
         let filtered_orphan_extension_types =
             Self::filter_orphan_extension_types(upgrade_metadata.orphan_extension_types, schema);
-        // subgraph
-        //     .state
-        //     .update_orphan_extension_types(filtered_orphan_extension_types);
-        trace!("upgrade_inner: complete");
+        subgraph
+            .state
+            .update_orphan_extension_types(filtered_orphan_extension_types);
 
-        // TODO fix validations so we don't need to copy this stuff over
-        // Ok(subgraph)
-        let upgraded_subgraph =
-            // These errors will be wrapped as SubgraphErrors in `Self::upgrade`
-            Subgraph::new(subgraph.name.as_str(), subgraph.url.as_str(), subgraph.schema().schema.clone(), filtered_orphan_extension_types)
-                .map_err(|e| e.into_federation_error())?
-                .assume_expanded()
-                .map_err(|err| err.into_federation_error())?
-                .assume_upgraded();
-        Ok(upgraded_subgraph)
+        trace!("upgrade_inner: complete");
+        Ok(subgraph)
     }
 
     /// Compute a new `orphan_extension_types` with only types that still have an extension in the upgraded schema.
@@ -353,7 +345,9 @@ impl SchemaUpgrader {
         }
         for (pos, directive) in to_delete {
             pos.remove_directive(schema, &directive);
-        upgrade_metadata.metadata.remove_external_field(&FieldDefinitionPosition::Interface(pos));
+            upgrade_metadata
+                .metadata
+                .remove_external_field(&FieldDefinitionPosition::Interface(pos));
         }
     }
 

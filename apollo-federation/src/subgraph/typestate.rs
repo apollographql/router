@@ -312,17 +312,16 @@ impl Subgraph<Initial> {
     fn expand_links_internal(self, validate: bool) -> Result<Subgraph<Expanded>, FederationError> {
         let schema = expand_schema(self.state.schema)?;
         let orphan_extension_types = self.state.orphan_extension_types;
-        trace!("expand_links: compute_subgraph_metadata");
-        let metadata = compute_subgraph_metadata(&schema)?.ok_or_else(|| {
-            internal_error!(
+        let schema = if validate {
+            validate_subgraph_schema(schema)?
+        } else {
+            schema.assume_valid()?
+        };
+        let Some(metadata) = schema.subgraph_metadata().cloned() else {
+            bail!(
                 "Unable to detect federation version used in subgraph '{}'",
                 self.name
             )
-        })?;
-        let schema = if validate {
-            validate_subgraph_schema(schema, &metadata)?
-        } else {
-            schema.assume_valid()?
         };
 
         Ok(Subgraph {
@@ -466,7 +465,7 @@ impl Subgraph<Expanded> {
                 Expanded {
                     schema,
                     orphan_extension_types,
-                    mut metadata,
+                    metadata: _,
                 },
         } = self;
         let mut schema: FederationSchema = schema.into();
@@ -474,10 +473,14 @@ impl Subgraph<Expanded> {
             schema
                 .get_type(current_name.clone())?
                 .rename(&mut schema, new_name.clone())?;
-            // Update metadata to reflect the type rename
-            metadata.update_type_references(current_name, new_name);
         }
-        let schema = validate_subgraph_schema(schema, &metadata)?;
+        let schema = validate_subgraph_schema(schema)?;
+        let Some(metadata) = schema.subgraph_metadata().cloned() else {
+            bail!(
+                "Unable to detect federation version used in subgraph '{}'",
+                name
+            )
+        };
         Ok(Subgraph {
             name,
             url,
@@ -520,7 +523,6 @@ impl Subgraph<Expanded> {
 /// Shared by Subgraph<Initial> and Subgraph<Upgraded>
 fn validate_subgraph_schema(
     schema: FederationSchema,
-    metadata: &SubgraphMetadata,
 ) -> Result<ValidFederationSchema, FederationError> {
     let schema = schema.validate_or_return_self().map_err(|(schema, err)| {
         // Specialize GraphQL validation errors.
@@ -533,7 +535,7 @@ fn validate_subgraph_schema(
         MultipleFederationErrors::from_iter(iter)
     })?;
 
-    FederationBlueprint::on_validation(&schema, metadata)?;
+    FederationBlueprint::on_validation(&schema)?;
     Ok(schema)
 }
 
@@ -574,8 +576,17 @@ impl Subgraph<Upgraded> {
             "Subgraph<Upgraded>: validate_subgraph_schema for `{}`",
             self.name
         );
-        let schema = validate_subgraph_schema(self.state.schema, &self.state.metadata)
+        let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
+        let Some(metadata) = schema.subgraph_metadata().cloned() else {
+            return Err(SubgraphError::new_without_locations(
+                self.name.clone(),
+                internal_error!(
+                    "Unable to detect federation version used in subgraph '{}'",
+                    self.name
+                ),
+            ));
+        };
 
         Ok(Subgraph {
             name: self.name,
@@ -583,7 +594,7 @@ impl Subgraph<Upgraded> {
             state: Validated {
                 schema,
                 orphan_extension_types: self.state.orphan_extension_types,
-                metadata: self.state.metadata,
+                metadata,
             },
         })
     }
