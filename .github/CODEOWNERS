@@ -1,5 +1,3 @@
-/docs/ @apollographql/docs
-/.changesets/ @apollographql/docs
 /apollo-federation/ @apollographql/fed-core @apollographql/rust-platform
 /apollo-federation/src/connectors @apollographql/graph-dev
 /apollo-router/ @apollographql/router-core
