@@ -428,6 +428,7 @@ pub(crate) mod test_utils {
             false
         }
 
+        #[must_use]
         pub(crate) fn metric_exists(
             &self,
             name: &str,

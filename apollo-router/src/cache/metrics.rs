@@ -10,6 +10,7 @@ use opentelemetry::metrics::MeterProvider;
 use tokio::task::AbortHandle;
 
 use super::redis::ACTIVE_CLIENT_COUNT;
+use crate::metrics::FutureMetricsExt;
 use crate::metrics::meter_provider;
 
 /// Weighted sum data for calculating averages
@@ -116,6 +117,7 @@ impl RedisGauges {
 /// with the correct meter provider (after Telemetry.activate() has run).
 pub(crate) struct RedisMetricsCollector {
     /// None until activate() is called
+    /// TODO(@goto-bus-stop): actually this should maybe be a Once?
     abort_handle: parking_lot::Mutex<Option<AbortHandle>>,
     pool: Arc<RedisPool>,
     caller: &'static str,
@@ -156,18 +158,21 @@ impl RedisMetricsCollector {
         let caller = self.caller;
         let metrics_interval = self.metrics_interval;
 
-        let handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(metrics_interval);
-            let gauges = RedisGauges::new();
+        let handle = tokio::spawn(
+            async move {
+                let mut interval = tokio::time::interval(metrics_interval);
+                let gauges = RedisGauges::new();
 
-            loop {
-                interval.tick().await;
+                loop {
+                    interval.tick().await;
 
-                let metrics = Self::collect_client_metrics(&pool);
-                gauges.record(&metrics, caller);
-                Self::emit_counter_metrics(&metrics, caller);
+                    let metrics = Self::collect_client_metrics(&pool);
+                    gauges.record(&metrics, caller);
+                    Self::emit_counter_metrics(&metrics, caller);
+                }
             }
-        });
+            .with_current_meter_provider(),
+        );
 
         *self.abort_handle.lock() = Some(handle.abort_handle());
     }
@@ -225,6 +230,10 @@ impl RedisMetricsCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::redis::RedisCacheStorage;
+    use crate::cache::redis::RedisKey;
+    use crate::cache::redis::RedisValue;
+    use crate::metrics::test_utils::MetricType;
 
     #[test]
     fn test_weighted_sum_average() {
@@ -279,5 +288,76 @@ mod tests {
 
         assert_eq!(ws.total_samples, 5); // unchanged
         assert_eq!(ws.weighted_sum, 50); // unchanged
+    }
+
+    #[tokio::test]
+    async fn test_redis_storage_with_mocks() {
+        async {
+            let simple_map = Arc::new(fred::mocks::SimpleMap::new());
+            let storage = RedisCacheStorage::from_mocks(simple_map.clone())
+                .await
+                .expect("Failed to create Redis storage with mocks");
+            storage.activate();
+
+            #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+            struct TestValue {
+                data: String,
+            }
+
+            impl crate::cache::storage::ValueType for TestValue {
+                fn estimated_size(&self) -> Option<usize> {
+                    Some(self.data.len())
+                }
+            }
+
+            let test_key = RedisKey("test_key".to_string());
+            let test_value = RedisValue(TestValue {
+                data: "test_value".to_string(),
+            });
+
+            // Perform Redis operations
+            storage
+                .insert(test_key.clone(), test_value.clone(), None)
+                .await;
+            let retrieved: Result<RedisValue<TestValue>, _> = storage.get(test_key.clone()).await;
+
+            // Verify the mock actually worked
+            assert!(retrieved.is_ok(), "Should have retrieved value from mock");
+            assert_eq!(retrieved.unwrap().0.data, "test_value");
+
+            // Verify Redis connection metrics are emitted.
+            // Since this metric is based on a global AtomicU64, it's not unique across tests - so
+            // we can only reliably check for metric existence, rather than a specific value.
+            assert!(crate::metrics::collect_metrics().metric_exists(
+                "apollo.router.cache.redis.clients",
+                MetricType::Gauge,
+                &[],
+            ));
+
+            // Pause to ensure that queue length is zero
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            // Verify Redis gauge metrics are available (observables are created immediately)
+            assert_gauge!(
+                "apollo.router.cache.redis.command_queue_length",
+                0.0,
+                kind = "test"
+            );
+
+            // Verify Redis average metrics are available (may be 0 initially)
+            assert_gauge!(
+                "experimental.apollo.router.cache.redis.latency_avg",
+                0.0,
+                kind = "test"
+            );
+
+            assert_gauge!(
+                "experimental.apollo.router.cache.redis.network_latency_avg",
+                0.0,
+                kind = "test"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }
