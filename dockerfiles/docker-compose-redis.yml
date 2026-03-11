@@ -1,96 +1,36 @@
-version: '2'
 services:
-  redis-node-0:
-    image: docker.io/bitnami/redis-cluster:8.2
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - redis-cluster_data-0:/bitnami/redis/data
-    environment:
-      - 'REDIS_PASSWORD=router'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
+  # Standalone Valkey for non-clustered tests (redis://127.0.0.1:6379)
+  valkey-standalone:
+    image: valkey/valkey:8.0
     ports:
-      - 6379:6379
+      - "6379:6379"
 
-  redis-node-1:
-    image: docker.io/bitnami/redis-cluster:8.2
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - redis-cluster_data-1:/bitnami/redis/data
-    environment:
-      - 'REDIS_PASSWORD=router'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
+  # All 6 cluster nodes run in a single container so they share the same loopback (127.0.0.1).
+  # Gossip works because 127.0.0.1:700X resolves correctly within the shared network namespace,
+  # and the host reaches them via the port mappings below.
+  # (redis-cluster://127.0.0.1:7000)
+  valkey-cluster:
+    image: valkey/valkey:8.0
     ports:
-      - 6380:6379
-
-  redis-node-2:
-    image: docker.io/bitnami/redis-cluster:8.2
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - redis-cluster_data-2:/bitnami/redis/data
-    environment:
-      - 'REDIS_PASSWORD=router'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
-    ports:
-      - 6381:6379
-
-  redis-node-3:
-    image: docker.io/bitnami/redis-cluster:8.2
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - redis-cluster_data-3:/bitnami/redis/data
-    environment:
-      - 'REDIS_PASSWORD=router'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
-    ports:
-      - 6382:6379
-
-  redis-node-4:
-    image: docker.io/bitnami/redis-cluster:8.2
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - redis-cluster_data-4:/bitnami/redis/data
-    environment:
-      - 'REDIS_PASSWORD=router'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
-    ports:
-      - 6383:6379
-
-  redis-node-5:
-    image: docker.io/bitnami/redis-cluster:8.2
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - redis-cluster_data-5:/bitnami/redis/data
-    depends_on:
-      - redis-node-0
-      - redis-node-1
-      - redis-node-2
-      - redis-node-3
-      - redis-node-4
-    environment:
-      - 'REDIS_PASSWORD=router'
-      - 'REDISCLI_AUTH=router'
-      - 'REDIS_CLUSTER_REPLICAS=1'
-      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
-      - 'REDIS_CLUSTER_CREATOR=yes'
-    ports:
-      - 6384:6379
-
-volumes:
-  redis-cluster_data-0:
-    driver: local
-  redis-cluster_data-1:
-    driver: local
-  redis-cluster_data-2:
-    driver: local
-  redis-cluster_data-3:
-    driver: local
-  redis-cluster_data-4:
-    driver: local
-  redis-cluster_data-5:
-    driver: local
+      - "7000:7000"
+      - "7001:7001"
+      - "7002:7002"
+      - "7003:7003"
+      - "7004:7004"
+      - "7005:7005"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        valkey-server --port 7000 --cluster-enabled yes --cluster-config-file /data/nodes-0.conf --cluster-node-timeout 5000 --daemonize yes
+        valkey-server --port 7001 --cluster-enabled yes --cluster-config-file /data/nodes-1.conf --cluster-node-timeout 5000 --daemonize yes
+        valkey-server --port 7002 --cluster-enabled yes --cluster-config-file /data/nodes-2.conf --cluster-node-timeout 5000 --daemonize yes
+        valkey-server --port 7003 --cluster-enabled yes --cluster-config-file /data/nodes-3.conf --cluster-node-timeout 5000 --daemonize yes
+        valkey-server --port 7004 --cluster-enabled yes --cluster-config-file /data/nodes-4.conf --cluster-node-timeout 5000 --daemonize yes
+        valkey-server --port 7005 --cluster-enabled yes --cluster-config-file /data/nodes-5.conf --cluster-node-timeout 5000 --daemonize yes
+        sleep 2
+        valkey-cli --cluster create \
+          127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002 \
+          127.0.0.1:7003 127.0.0.1:7004 127.0.0.1:7005 \
+          --cluster-replicas 1 --cluster-yes
+        tail -f /dev/null
