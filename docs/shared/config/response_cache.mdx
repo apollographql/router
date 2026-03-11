@@ -6,6 +6,7 @@
 response_cache:
   enabled: false
   debug: false
+  send_cache_control_header: true # set to false to suppress Cache-Control header on client responses
   private_queries_buffer_size: 2048
   invalidation:
     listen: 127.0.0.1:4000
