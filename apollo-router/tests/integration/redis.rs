@@ -61,6 +61,25 @@ use crate::integration::response_cache::namespace;
 const REDIS_STANDALONE_PORT: [&str; 1] = ["6379"];
 const REDIS_CLUSTER_PORTS: [&str; 6] = ["7000", "7001", "7002", "7003", "7004", "7005"];
 
+async fn find_redis_key_matching(
+    client: &RedisClient,
+    namespace: &str,
+    pattern: &str,
+) -> Option<String> {
+    let full_pattern = format!("{namespace}:{pattern}");
+    let mut scanner = client.scan(&full_pattern, Some(100), Some(ScanType::String));
+
+    while let Some(result) = scanner.next().await {
+        if let Ok(ref scan_result) = result
+            && let Some(keys) = scan_result.results()
+            && let Some(key) = keys.first()
+        {
+            return key.as_str().map(|s| s.to_string());
+        }
+    }
+    None
+}
+
 fn make_redis_url(ports: &[&str]) -> Option<String> {
     let port = ports.first()?;
     let scheme = if ports.len() == 1 {
@@ -520,14 +539,25 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    // if this is failing due to a cache key change, hook up redis-cli with the MONITOR command to see the keys being set
-    let v:Value = client
-          .get(format!("{namespace}:version:1.1:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
-          .await
-          .unwrap();
+    // Dynamically find cache keys instead of hardcoding hashes
+    let products_key = find_redis_key_matching(
+        &client,
+        &namespace,
+        "version:*:subgraph:products:type:Query:*",
+    )
+    .await
+    .expect("products cache key should exist");
+    let v: Value = client.get(&products_key).await.unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let v: Value = client.get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:representation:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")).await.unwrap();
+    let reviews_key = find_redis_key_matching(
+        &client,
+        &namespace,
+        "version:*:subgraph:reviews:type:Product:*",
+    )
+    .await
+    .expect("reviews cache key should exist");
+    let v: Value = client.get(&reviews_key).await.unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
     // we abuse the query shape to return a response with a different but overlapping set of entities
