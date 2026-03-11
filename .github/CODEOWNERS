@@ -1,4 +1,3 @@
-/docs/ @apollographql/docs
 /apollo-federation/ @apollographql/orchestration-language
 /apollo-router/ @apollographql/graphos
 /apollo-router/src/plugins/connectors @apollographql/orchestration-language
