@@ -1,8 +1,12 @@
-### Add `experimental_hoist_orphan_errors` configuration for controlling orphan error path assignment
+### Add `experimental_hoist_orphan_errors` to control orphan error path assignment
 
-Adds a new `experimental_hoist_orphan_errors` configuration that controls how entity-less ("orphan") errors from subgraphs are assigned paths in the response. When enabled for a subgraph, orphan errors are assigned to the nearest non-array ancestor in the response path, preventing them from being duplicated across every element in an array. This can be enabled globally via `all` or per-subgraph via the `subgraphs` map. Per-subgraph settings override `all`.
+The GraphQL specification requires that errors include a `path` pointing to the most specific field where the error occurred. When a subgraph returns entity errors without valid paths, the router's default behavior is its closest attempt at spec compliance: it assigns each error to every matching entity path in the response. This is the correct behavior when subgraphs respond correctly.
 
-Here's an example when targeting a specific subgraph, `my_subgraph`:
+However, when a subgraph returns a large number of entity errors without valid paths — for example, 2000 errors for 2000 expected entities — this causes a multiplicative explosion in the error array that can lead to significant memory pressure and out-of-memory kills. The root cause is the subgraph: a spec-compliant subgraph includes correct paths on its entity errors, and fixing the subgraph is the right long-term solution.
+
+The new `experimental_hoist_orphan_errors` configuration provides an important mitigation while you work toward that fix. When enabled, the router assigns each orphaned error to the nearest non-array ancestor path instead of duplicating it across every entity. This trades spec-precise path assignment for substantially reduced error volume in the response — a conscious trade-off, not a strict improvement.
+
+To target a specific subgraph:
 
 ```yaml
 experimental_hoist_orphan_errors:
@@ -11,7 +15,7 @@ experimental_hoist_orphan_errors:
       enabled: true
 ```
 
-An example when targeting all subgraphs:
+To target all subgraphs:
 
 ```yaml
 experimental_hoist_orphan_errors:
@@ -19,7 +23,7 @@ experimental_hoist_orphan_errors:
     enabled: true
 ```
 
-And an example enabling for all subgraphs except one:
+To target all subgraphs except one:
 
 ```yaml
 experimental_hoist_orphan_errors:
@@ -30,7 +34,10 @@ experimental_hoist_orphan_errors:
       enabled: false
 ```
 
-Using this feature should only happen if you know you have subgraphs that don't respond with the correct paths when making entity calls. If you're unsure, you probably don't need this!
+Per-subgraph settings override `all`. Note that this feature reduces the number of propagated errors but doesn't impose a hard cap — if your subgraph returns an extremely large number of errors, the router still processes all of them.
 
+You'll likely know if you need this. Use it sparingly, and enable it only if you're affected and have been advised to do so. The behavior of this option is expected to change in a future release.
+
+For full configuration reference and additional examples, see the [`experimental_hoist_orphan_errors` documentation](https://www.apollographql.com/docs/graphos/routing/configuration/yaml#experimental_hoist_orphan_errors).
 
 By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8998
