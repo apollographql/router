@@ -201,14 +201,16 @@ impl HttpClientService {
 
         let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
-            .https_or_http()
-            .enable_http1();
+            .https_or_http();
 
         let http2 = client_config.experimental_http2.unwrap_or_default();
-        let connector = if http2 != Http2Config::Disable {
-            builder.enable_http2().wrap_connector(http_connector)
-        } else {
-            builder.wrap_connector(http_connector)
+        let connector = match http2 {
+            Http2Config::Enable => builder
+                .enable_http1()
+                .enable_http2()
+                .wrap_connector(http_connector),
+            Http2Config::Disable => builder.enable_http1().wrap_connector(http_connector),
+            Http2Config::Http2Only => builder.enable_http2().wrap_connector(http_connector),
         };
 
         let http_client =
