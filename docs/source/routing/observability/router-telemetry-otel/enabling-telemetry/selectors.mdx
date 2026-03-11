@@ -113,6 +113,12 @@ The subgraph service executes multiple times during query execution, with each e
 
 The HTTP client service also executes multiple times. Each execution represents an HTTP request to a single subgraph or REST service. This service executes after any Rhai scripts that modify subgraph requests, so these selectors can observe headers added by scripts.
 
+<Note>
+
+The `http_client` service supports the `request_header` and `response_header` selectors. Conditions and the `static` selector are currently unavailable for this service. If you attempt to configure them, your router fails to start.
+
+</Note>
+
 | Selector           | Defaultable | Values | Description                   |
 |--------------------|-------------|--------|-------------------------------|
 | `request_header`   | Yes         |        | The name of a request header  |
