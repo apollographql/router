@@ -143,14 +143,14 @@ Learn more in [Demand Control](/router/executing-operations/demand-control)
 
 <ExperimentalFeatureBadge />
 
-When entity resolution in a subgraph returns errors that apply to multiple entities in a list, the router's default behavior propagates each error to every matching entity path. For subgraphs that return a large number of entity errors, this can cause a multiplicative increase in the size of the error array returned to clients.
+When the entity-resolution process for a subgraph returns errors that apply to multiple entities in a list, the router defaults to propagating each error to every matching entity path. That results in a multiplicative increase in the size of the returned error array.
 
-The `experimental_hoist_orphan_errors` option changes this behavior on a per-subgraph basis. When enabled, the router attaches each orphaned subgraph error to a single parent path instead of duplicating it across every entity path. This significantly reduces the number of errors in the response.
+The `experimental_hoist_orphan_errors` option changes that behavior on a per-subgraph basis. When enabled, the router attaches each orphaned subgraph error to a single parent path instead of duplicating the error across every entity path, which can significantly reduce the number of errors in the response.
 
 <Caution>
 
 
-This option is not GraphQL spec-compliant. It changes how errors are associated with paths in the response compared to the behavior described in the [GraphQL specification](https://spec.graphql.org/). Use this feature for your subgraphs only when the reduction in error volume outweighs strict spec compliance.
+The `experimental_hoist_orphan_errors` option isn't compliant with the GraphQL spec. The option changes how errors are associated with paths in the response, compared to the behavior described in the [GraphQL specification](https://spec.graphql.org/). Only use the feature for your subgraphs when the reduction in error volume is more desirable than strict compliance.
 
 </Caution>
 
@@ -187,7 +187,7 @@ Per-subgraph settings override `all`.
 
 <Note>
 
-This feature reduces the number of propagated errors but does not impose a hard cap on the total error count. If a subgraph returns an extremely large number of errors, the router still processes all of them. For subgraphs that may produce unbounded error volumes, consider additional mitigation strategies at the subgraph level.
+Although the `experimental_hoist_orphan_errors` option can reduce the number of propagated errors, the option doesn't limit the total number of errors. If a subgraph returns a large number of errors, the router still processes all of them. For subgraphs that are likely to produce an unbounded number of errors, consider additional mitigation strategies at the subgraph level.
 
 </Note>
 
