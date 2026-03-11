@@ -4114,15 +4114,10 @@ async fn setup_send_cache_control_test() -> (Storage, ResponseCache, serde_json:
         .collect(),
     );
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-    let response_cache = ResponseCache::for_test(
-        storage.clone(),
-        subgraphs_conf,
-        valid_schema,
-        true,
-        drop_tx,
-    )
-    .await
-    .unwrap();
+    let response_cache =
+        ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema, true, drop_tx)
+            .await
+            .unwrap();
 
     (storage, response_cache, subgraphs)
 }

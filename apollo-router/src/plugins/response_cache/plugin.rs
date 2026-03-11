@@ -4154,5 +4154,4 @@ mod tests {
         .unwrap();
         assert!(!config.send_cache_control_header);
     }
-
 }
