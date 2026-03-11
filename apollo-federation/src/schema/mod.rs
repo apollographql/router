@@ -83,9 +83,7 @@ pub(crate) fn compute_subgraph_metadata(
     Ok(
         if let Ok(federation_spec_definition) = get_federation_spec_definition_from_subgraph(schema)
         {
-            let metadata = SubgraphMetadata::new(schema, federation_spec_definition)?;
-            println!("COMPUTED SUBGRAPH METADATA: {metadata:?}");
-            Some(metadata)
+            Some(SubgraphMetadata::new(schema, federation_spec_definition)?)
         } else {
             None
         },
@@ -263,7 +261,6 @@ impl FederationSchema {
                 return Err((self, e.errors.into()));
             }
         };
-        println!("validated graphql schema");
         ValidFederationSchema::new_assume_valid(FederationSchema { schema, ..self })
     }
 
@@ -1294,14 +1291,11 @@ impl ValidFederationSchema {
         // can temporarily create a `&Valid<FederationSchema>` to compute subgraph metadata, drop
         // that reference to populate the metadata, and finally move the finished FederationSchema into
         // the ValidFederationSchema instance.
-        println!("assuming valid schema ref");
         let valid_schema = Valid::assume_valid_ref(&schema);
-        println!("computing subgraph metadata");
         let subgraph_metadata = match compute_subgraph_metadata(valid_schema) {
             Ok(metadata) => metadata.map(Box::new),
             Err(err) => return Err((schema, err)),
         };
-        println!("updating subgraph metadata");
         schema.subgraph_metadata = subgraph_metadata;
 
         let schema = Arc::new(Valid::assume_valid(schema));

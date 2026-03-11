@@ -1076,7 +1076,7 @@ mod tests {
             .expect("Expected 2 elements");
 
         insta::assert_snapshot!(
-            s1.schema().schema().to_string(), @r###"
+            s1.schema_string(), @r###"
         schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
           query: Query
         }
@@ -1183,7 +1183,7 @@ mod tests {
             .expect("Expected 1 element");
 
         insta::assert_snapshot!(
-            s.schema().schema().to_string(),
+            s.schema_string(),
             r#"
             schema
                 FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED
@@ -1248,9 +1248,7 @@ mod tests {
             .expect("Expected 2 elements");
 
         let s1 = s1.expect_right("to be upgraded");
-        println!("S1:\n\n{}\n\n", s1.schema().schema);
         let s2 = s2.expect_right("to be upgraded");
-        println!("S2:\n\n{}\n\n", s2.schema().schema);
         let type_a_in_s1 = s1
             .schema()
             .schema()
@@ -1413,7 +1411,7 @@ mod tests {
 
         // fed 1 schemas are auto upgraded to fed v2.4
         insta::assert_snapshot!(
-            subgraph.schema().schema(),
+            subgraph.schema_string(),
             @r###"
         schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
           query: Query
@@ -1594,7 +1592,7 @@ mod tests {
             .try_into()
             .expect("single graph");
         insta::assert_snapshot!(
-            s1.schema().schema(),
+            s1.schema_string(),
             @r###"
                 schema @linkX(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
                   query: Query
@@ -1662,9 +1660,70 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        // TODO should this keep core? rename it?
-        let upgraded = upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
-        println!("{}", upgraded[0].schema().schema);
+        // @core is not applied on the schema so it is treated as regular custom directive
+        let [upgraded] = upgrade_subgraphs_if_necessary(vec![subgraph1])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("single subgraph was upgraded");
+        insta::assert_snapshot!(
+            upgraded.schema_string(),
+            @r###"
+                schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+                  query: Query
+                }
+
+                directive @core(feature: String!) repeatable on SCHEMA
+
+                directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+                directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+
+                directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                directive @extends on OBJECT | INTERFACE
+
+                directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+                directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+                directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                directive @override(from: String!) on FIELD_DEFINITION
+
+                directive @composeDirective(name: String) repeatable on SCHEMA
+
+                directive @interfaceObject on OBJECT
+
+                type Query {
+                  test: Int!
+                  _service: _Service!
+                }
+
+                type _Service {
+                  sdl: String
+                }
+
+                scalar _Any
+
+                scalar federation__FieldSet
+
+                enum link__Purpose {
+                  """
+                  `SECURITY` features provide metadata necessary to securely resolve fields.
+                  """
+                  SECURITY
+                  """
+                  `EXECUTION` features provide metadata necessary for operation execution.
+                  """
+                  EXECUTION
+                }
+
+                scalar link__Import
+            "###);
     }
 
     #[test]
@@ -1695,7 +1754,7 @@ mod tests {
             .expect("single subgraph was upgraded");
         // keeps user provided @link and adds federation directive aliased to link1
         insta::assert_snapshot!(
-            upgraded.schema().schema(),
+            upgraded.schema_string(),
             @r###"
                 schema @link1(url: "https://specs.apollo.dev/link/v1.0", as: "link1") @link1(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
                   query: Query
@@ -1819,8 +1878,6 @@ mod tests {
 
         // Type T should still be in the expanded schema
         assert!(subgraph1.schema().schema.get_object("T").is_some());
-
-        println!("{}", subgraph1.schema().schema());
         insta::assert_snapshot!(
             subgraph1.schema_string(),
             @r###"
@@ -2070,7 +2127,7 @@ scalar _FieldSet
             .expand_links()
             .expect("expanded");
         insta::assert_snapshot!(
-            s1.schema().schema().to_string(),
+            s1.schema_string(),
             @r###"
                 """
                 Directs the executor to skip this field or fragment when the `if`'argument is true.
@@ -2157,7 +2214,7 @@ scalar _FieldSet
             .try_into()
             .expect("single subgraph upgraded");
         insta::assert_snapshot!(
-            upgraded.schema().schema().to_string(),
+            upgraded.schema_string(),
             @r###"
                 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
                   query: Query

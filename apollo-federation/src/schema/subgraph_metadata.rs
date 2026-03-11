@@ -46,9 +46,7 @@ impl SubgraphMetadata {
         schema: &FederationSchema,
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<Self, FederationError> {
-        println!("computing metadata for schema {}", schema.schema);
         let external_metadata = ExternalMetadata::new(schema, federation_spec_definition)?;
-        println!("collecting fields used by context directive");
         let context_fields = Self::collect_fields_used_by_context_directive(schema)?;
         let interface_constraint_fields =
             Self::collect_fields_used_to_satisfy_interface_constraints(schema)?;
@@ -377,15 +375,15 @@ impl SubgraphMetadata {
 #[derive(Debug, Clone)]
 pub(crate) struct ExternalMetadata {
     /// All fields with an `@external` directive.
-    pub(crate) external_fields: IndexSet<FieldDefinitionPosition>,
+    external_fields: IndexSet<FieldDefinitionPosition>,
     /// Fields with an `@external` directive that can't actually be external due to also being
     /// referenced in a `@key` directive.
-    pub(crate) fake_external_fields: IndexSet<FieldDefinitionPosition>,
+    fake_external_fields: IndexSet<FieldDefinitionPosition>,
     /// Fields that are external because their parent type has an `@external` directive.
-    pub(crate) fields_on_external_types: IndexSet<FieldDefinitionPosition>,
+    fields_on_external_types: IndexSet<FieldDefinitionPosition>,
     /// Fields which are not necessarily external on their source interface but have an implementation
     /// which does mark that field as external.
-    pub(crate) fields_with_external_implementation: IndexSet<FieldDefinitionPosition>,
+    fields_with_external_implementation: IndexSet<FieldDefinitionPosition>,
 }
 
 impl ExternalMetadata {
@@ -393,16 +391,9 @@ impl ExternalMetadata {
         schema: &FederationSchema,
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<Self, FederationError> {
-        println!("\tcomputing external metadata");
         let external_fields = Self::collect_external_fields(federation_spec_definition, schema)?;
-        for pos in &external_fields {
-            println!("\t\texternal field {pos:?}");
-        }
         let fake_external_fields =
             Self::collect_fake_externals(federation_spec_definition, schema)?;
-        for pos in &fake_external_fields {
-            println!("\t\tfake external field {pos}");
-        }
         // We do not collect @external on types for Fed 1 schemas since those will be discarded by
         // the schema upgrader. The schema upgrader, through calls to `is_external()`, relies on the
         // populated `fields_on_external_types` set to inform when @shareable should be

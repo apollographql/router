@@ -13,8 +13,6 @@ pub(crate) fn validate_external_directives(
     metadata: &SubgraphMetadata,
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
-    println!("{}", schema.schema);
-    println!("validating external directives using metadata: {metadata:?}");
     validate_no_external_on_interface_fields(schema, metadata, errors)?;
     validate_all_external_fields_used(schema, metadata, errors)?;
     Ok(())
