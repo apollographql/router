@@ -10,6 +10,7 @@ use opentelemetry::metrics::MeterProvider;
 use tokio::task::AbortHandle;
 
 use super::redis::ACTIVE_CLIENT_COUNT;
+use crate::metrics::FutureMetricsExt;
 use crate::metrics::meter_provider;
 
 /// Weighted sum data for calculating averages
@@ -157,18 +158,21 @@ impl RedisMetricsCollector {
         let caller = self.caller;
         let metrics_interval = self.metrics_interval;
 
-        let handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(metrics_interval);
-            let gauges = RedisGauges::new();
+        let handle = tokio::spawn(
+            async move {
+                let mut interval = tokio::time::interval(metrics_interval);
+                let gauges = RedisGauges::new();
 
-            loop {
-                interval.tick().await;
+                loop {
+                    interval.tick().await;
 
-                let metrics = Self::collect_client_metrics(&pool);
-                gauges.record(&metrics, caller);
-                Self::emit_counter_metrics(&metrics, caller);
+                    let metrics = Self::collect_client_metrics(&pool);
+                    gauges.record(&metrics, caller);
+                    Self::emit_counter_metrics(&metrics, caller);
+                }
             }
-        });
+            .with_current_meter_provider(),
+        );
 
         *self.abort_handle.lock() = Some(handle.abort_handle());
     }
@@ -225,13 +229,12 @@ impl RedisMetricsCollector {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::cache::redis::RedisCacheStorage;
-    use crate::metrics::test_utils::MetricType;
     use crate::cache::redis::RedisKey;
     use crate::cache::redis::RedisValue;
     use crate::metrics::FutureMetricsExt as _;
-
-    use super::*;
+    use crate::metrics::test_utils::MetricType;
 
     #[test]
     fn test_weighted_sum_average() {
