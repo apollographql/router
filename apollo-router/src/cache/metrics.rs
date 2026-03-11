@@ -233,7 +233,6 @@ mod tests {
     use crate::cache::redis::RedisCacheStorage;
     use crate::cache::redis::RedisKey;
     use crate::cache::redis::RedisValue;
-    use crate::metrics::FutureMetricsExt as _;
     use crate::metrics::test_utils::MetricType;
 
     #[test]
