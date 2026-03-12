@@ -110,41 +110,6 @@ pub(crate) trait SpecDefinition {
         Ok(Some(link.type_name_in_schema(name_in_spec)))
     }
 
-    fn federation_directive_name_in_schema(
-        &self,
-        schema: &FederationSchema,
-        name_in_spec: &Name,
-    ) -> Result<Option<Name>, FederationError> {
-        if schema.is_fed_2() {
-            self.directive_name_in_schema(schema, name_in_spec)
-        } else {
-            Ok(Some(name_in_spec.clone()))
-        }
-    }
-
-    fn legacy_directive_definition<'schema>(
-        &self,
-        schema: &'schema FederationSchema,
-        name_in_spec: &Name,
-    ) -> Result<Option<&'schema Node<DirectiveDefinition>>, FederationError> {
-        match self.federation_directive_name_in_schema(schema, name_in_spec)? {
-            Some(name) => schema
-                .schema()
-                .directive_definitions
-                .get(&name)
-                .ok_or_else(|| {
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Unexpectedly could not find spec directive \"@{name}\" in schema"
-                        ),
-                    }
-                    .into()
-                })
-                .map(Some),
-            None => Ok(None),
-        }
-    }
-
     fn directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
