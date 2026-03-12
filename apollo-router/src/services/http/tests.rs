@@ -568,6 +568,7 @@ mod tls {
 
 mod h2c_cleartext {
     use super::*;
+    use crate::configuration::shared::Client;
 
     // Starts a local server that responds with a default GraphQL response over plain HTTP.
     async fn emulate_h2c_server(listener: TcpListener) {
@@ -601,17 +602,11 @@ mod h2c_cleartext {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_h2c_server(listener));
 
-        let subgraph_service = HttpClientService::new(
-            "test",
-            rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("read native TLS root certificates")
-                .with_no_client_auth(),
-            crate::configuration::shared::Client::builder()
-                .experimental_http2(Http2Config::Http2Only)
-                .build(),
-        )
-        .expect("can create a HttpService");
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .build();
+        let subgraph_service =
+            HttpClientService::from_client_config(client_config).expect("can create a HttpService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = send_request(
@@ -620,6 +615,7 @@ mod h2c_cleartext {
             r#"{"query":"{ me { name username } }"#,
         )
         .await;
+
         assert!(response.http_response.status().is_success());
         assert_response_body(response, r#"{"data":null}"#).await;
     }

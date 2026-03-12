@@ -273,6 +273,19 @@ pub(crate) fn generate_tls_client_config(
     })
 }
 
+#[cfg(test)]
+impl HttpClientService {
+    pub(crate) fn from_client_config(
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        // No TLS config - provide empty root store
+        let tls_root_store = RootCertStore::empty();
+        let tls_client_config = generate_tls_client_config(tls_root_store, None)?;
+
+        HttpClientService::new("test".to_string(), tls_client_config, client_config)
+    }
+}
+
 impl tower::Service<HttpRequest> for HttpClientService {
     type Response = HttpResponse;
     type Error = BoxError;
