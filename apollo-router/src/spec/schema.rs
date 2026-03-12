@@ -31,6 +31,8 @@ use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::plugins::connectors::configuration::apply_config;
 use crate::query_planner::OperationKind;
+#[cfg(unix)]
+use crate::services::parse_unix_socket_url;
 use crate::uplink::schema::SchemaState;
 
 /// A GraphQL schema.
@@ -124,7 +126,6 @@ impl Schema {
                         return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
                     }
                     #[cfg(unix)]
-                    // there is no standard for unix socket URLs apparently
                     // WARN: this allows for both relative paths, unix://relative/path.sock, and
                     // absolute paths, unix:///absolute/path.sock, and we _could_ add validation to
                     // make sure that the path is absolute, but since this is out in the wild, we
@@ -138,8 +139,10 @@ impl Schema {
                         // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
                         // It hides the socket path in a hex encoded authority that the unix socket connector will
                         // know how to decode
-                        // TODO: support optional paths, ROUTER-1589
-                        hyperlocal::Uri::new(url_path, "/").into()
+                        //
+                        // supports an optional `path` query parameter for HTTP path, eg: unix:///tmp/socket.sock?path=/api/v1
+                        let (socket_path, http_path) = parse_unix_socket_url(url_path);
+                        hyperlocal::Uri::new(socket_path, http_path).into()
                     } else {
                         Uri::from_str(url)
                             .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
@@ -647,6 +650,82 @@ mod tests {
         );
 
         assert_eq!(schema.subgraphs.get("test"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn routing_urls_unix_socket_with_path() {
+        let schema_str = r#"
+        schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
+            query: Query
+        }
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        scalar link__Import
+        scalar join__FieldSet
+
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
+
+        enum join__Graph {
+            WITH_PATH @join__graph(name: "with_path", url: "unix:///tmp/subgraph.sock?path=/graphql/v1")
+            WITHOUT_PATH @join__graph(name: "without_path", url: "unix:///tmp/other.sock")
+            HTTP @join__graph(name: "http", url: "http://localhost:4001/graphql")
+        }
+
+        type Query
+          @join__type(graph: WITH_PATH)
+          @join__type(graph: WITHOUT_PATH)
+          @join__type(graph: HTTP)
+        {
+          a: String
+          b: String
+          c: String
+        }
+        "#;
+
+        let schema = Schema::parse(schema_str, &Default::default()).unwrap();
+        // all three subgraphs should be present: with_path, without_path, and http
+        assert_eq!(schema.subgraphs.len(), 3);
+
+        // for with_path, we're using the `/graph/v1` path as part of the socket
+        let expected_with_path: Uri =
+            hyperlocal::Uri::new("/tmp/subgraph.sock", "/graphql/v1").into();
+
+        // so, with_path better have the path
+        assert_eq!(
+            schema.subgraphs.get("with_path"),
+            Some(&expected_with_path),
+            "unix socket with ?path= should encode the HTTP path"
+        );
+
+        // the default path (`/`) should be used for without_path
+        let expected_without_path: Uri = hyperlocal::Uri::new("/tmp/other.sock", "/").into();
+
+        assert_eq!(
+            schema.subgraphs.get("without_path"),
+            Some(&expected_without_path),
+            "unix socket without ?path= should default to '/'"
+        );
+
+        // finally, the `http` subgraph is a sanity check that we're parsing http paths correctly
+        // still
+        assert_eq!(
+            schema
+                .subgraphs
+                .get("http")
+                .map(|s| s.to_string())
+                .as_deref(),
+            Some("http://localhost:4001/graphql"),
+            "HTTP URLs should be unaffected"
+        );
     }
 
     #[test]
