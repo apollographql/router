@@ -100,6 +100,7 @@ use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphIn
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
+use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::trace_id;
@@ -552,13 +553,18 @@ impl PluginPrivate for Telemetry {
                         if let Some(http_server_response_body_size) =
                             &custom_instruments.http_server_response_body_size
                         {
-                            let inner = http_server_response_body_size.inner.lock();
-                            if !inner.updated
-                                && let Some(histogram) = &inner.histogram
-                            {
+                            let CustomHistogramInner {
+                                histogram,
+                                attributes,
+                                ..
+                            } = &*http_server_response_body_size.inner.lock();
+                            // Clone the histogram (which uses an Arc internally) and store
+                            // in ResponseBodySizeRecording so that we can later record the
+                            // final byte count after the body stream is fully sent.
+                            if let Some(histogram) = &histogram {
                                 let recording = ResponseBodySizeRecording::new(
                                     histogram.clone(),
-                                    inner.attributes.clone(),
+                                    attributes.clone(),
                                 );
                                 ctx.extensions().with_lock(|lock| lock.insert(recording));
                             }
