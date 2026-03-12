@@ -19,7 +19,6 @@ use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use tokio::time::Instant;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -200,8 +199,7 @@ impl PluginPrivate for HealthCheck {
         let my_ready = ready.clone();
 
         let ticker = tokio::spawn(async move {
-            let start = Instant::now() + my_sampling_interval;
-            let mut sampling_interval = tokio::time::interval_at(start, my_sampling_interval);
+            let mut sampling_interval = tokio::time::interval(my_sampling_interval);
             sampling_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
             loop {
@@ -572,6 +570,10 @@ mod test {
 
     // Verifies that after exceeding the rejection threshold the router reports DOWN,
     // and that it automatically returns to UP once the recovery interval has elapsed.
+    //
+    // Uses unready=5s so the DOWN check at 2s always falls well within the recovery window,
+    // regardless of when the sampling tick fires after switching to tokio::time::interval
+    // (which fires the first tick immediately on first poll, during setup).
     #[tokio::test]
     async fn test_health_check_recovery_after_unready() {
         let router_addr = "127.0.0.1:8088";
@@ -579,7 +581,7 @@ mod test {
 
         let (axum_router_opt, pipeline_svc_opt, _test_harness) = get_axum_router(
             listen_addr,
-            include_str!("testdata/allowed_ten_short_recovery.router.yaml"),
+            include_str!("testdata/allowed_ten_five_second_recovery.router.yaml"),
             StatusCode::GATEWAY_TIMEOUT,
         )
         .await;
@@ -590,7 +592,8 @@ mod test {
             let _ = pipeline_svc.call_default().await.unwrap();
         }
 
-        // Wait for the sampling interval to evaluate the count (sampling=1s + 1s buffer)
+        // Wait for the sampling tick to evaluate the count (sampling=1s + 1s buffer).
+        // Recovery takes 5s, so 2s is safely inside the window even if the tick fires at t=0.
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         let mut axum_router = axum_router_opt.expect("endpoint must exist").into_router();
@@ -611,8 +614,8 @@ mod test {
         )
         .await;
 
-        // Wait for the recovery interval to elapse (unready=2s + 1s buffer)
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        // Wait for the recovery interval to elapse (unready=5s + 2s buffer)
+        tokio::time::sleep(Duration::from_secs(7)).await;
 
         // Should be UP again
         let response = svc
@@ -738,6 +741,9 @@ mod test {
     }
 
     // Verifies the boundary condition: `allowed + 1` rejections MUST trigger unready.
+    //
+    // Uses unready=5s so the DOWN check at 2s is safely inside the recovery window regardless
+    // of when the sampling tick fires (first tick fires immediately on first poll with interval()).
     #[tokio::test]
     async fn test_health_check_one_above_rejection_threshold_goes_down() {
         let router_addr = "127.0.0.1:8088";
@@ -745,7 +751,7 @@ mod test {
 
         let (axum_router_opt, pipeline_svc_opt, _test_harness) = get_axum_router(
             listen_addr,
-            include_str!("testdata/allowed_ten_short_recovery.router.yaml"),
+            include_str!("testdata/allowed_ten_five_second_recovery.router.yaml"),
             StatusCode::GATEWAY_TIMEOUT,
         )
         .await;
