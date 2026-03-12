@@ -1,0 +1,15 @@
+<Caution>
+
+The following OpenTelemetry (OTEL) environment variables will override router's built-in telemetry configuration:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
+- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+- `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
+
+In Apollo Router v2.12.0 and earlier, these variables will override router's telemetry settings and may cause traces or metrics to be sent to an unintended destination.
+
+<br/><br/>
+
+In Apollo Router v2.13.0 and later, your router will not start if any of these variables are set. Remove them from your environment before launching.
+
+</Caution>
