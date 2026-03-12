@@ -278,14 +278,12 @@ impl FederationBlueprint {
     ) -> Result<(), FederationError> {
         if schema.is_fed_2() || has_federation_spec_link(schema.schema()) {
             if schema.metadata().is_none() {
+                // no metadata means there is @link applied but we don't have its definition
                 LinkSpecDefinition::latest().add_to_schema(schema, None)?;
-                // Now collect information about applied @link directives.
-                schema.collect_links_metadata()?;
             }
             Self::complete_fed_2_subgraph_schema(schema)
         } else {
-            Self::complete_fed_1_subgraph_schema(schema)?;
-            schema.collect_links_metadata()
+            Self::complete_fed_1_subgraph_schema(schema)
         }
     }
 

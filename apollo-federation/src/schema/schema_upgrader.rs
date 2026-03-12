@@ -631,7 +631,8 @@ impl SchemaUpgrader {
         }
 
         for candidate in candidates {
-            candidate.make_mut(schema.schema_mut())?
+            candidate
+                .make_mut(schema.schema_mut())?
                 .make_mut()
                 .directives
                 .retain(|d| d.name != provides_directive.as_str());
