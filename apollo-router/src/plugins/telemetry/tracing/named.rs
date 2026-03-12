@@ -112,12 +112,23 @@ impl RuntimeChannel for NamedTokioRuntime {
 #[derive(Debug)]
 pub(crate) struct NamedSender<T> {
     name: &'static str,
+    channel_full_message: String,
+    channel_closed_message: String,
     sender: tokio::sync::mpsc::Sender<T>,
 }
 
 impl<T: Send> NamedSender<T> {
     fn new(name: &'static str, sender: tokio::sync::mpsc::Sender<T>) -> Self {
-        Self { name, sender }
+        Self {
+            name,
+            channel_full_message: format!(
+                "cannot send message to batch processor '{name}' as the channel is full"
+            ),
+            channel_closed_message: format!(
+                "cannot send message to batch processor '{name}' as the channel is closed"
+            ),
+            sender,
+        }
     }
 }
 
@@ -139,8 +150,12 @@ impl<T: Send> TrySend for NamedSender<T> {
             );
 
             match err {
-                tokio::sync::mpsc::error::TrySendError::Full(_) => TrySendError::ChannelFull,
-                tokio::sync::mpsc::error::TrySendError::Closed(_) => TrySendError::ChannelClosed,
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    TrySendError::Other(self.channel_full_message.as_str().into())
+                }
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    TrySendError::Other(self.channel_closed_message.as_str().into())
+                }
             }
         })
     }
