@@ -276,11 +276,12 @@ impl FederationBlueprint {
     pub(crate) fn complete_subgraph_schema(
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        if schema.is_fed_2() || has_federation_spec_link(schema.schema()) {
-            if schema.metadata().is_none() {
-                // no metadata means there is @link applied but we don't have its definition
-                LinkSpecDefinition::latest().add_to_schema(schema, None)?;
-            }
+        if schema.is_fed_2() {
+            // subgraph metadata was already computed which means we have @link with fed spec and its definition
+            Self::complete_fed_2_subgraph_schema(schema)
+        } else if has_federation_spec_link(schema.schema()) {
+            // we have @link with fed spec but we don't have @link directive definition
+            LinkSpecDefinition::latest().add_to_schema(schema, None)?;
             Self::complete_fed_2_subgraph_schema(schema)
         } else {
             Self::complete_fed_1_subgraph_schema(schema)
@@ -323,12 +324,10 @@ impl FederationBlueprint {
             }
         }
 
-        if errors.errors.len() > 1 {
-            Err(FederationError::MultipleFederationErrors(errors))
-        } else if let Some(error) = errors.errors.pop() {
-            Err(FederationError::SingleFederationError(error))
-        } else {
-            Self::expand_known_features(schema)
+        match errors.errors.as_slice() {
+            [] => Self::expand_known_features(schema),
+            [error] => Err(FederationError::SingleFederationError(error.clone())),
+            _ => Err(FederationError::MultipleFederationErrors(errors)),
         }
     }
 

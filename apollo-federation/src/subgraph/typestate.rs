@@ -925,7 +925,14 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
 
     // if `@link` is applied on schema make sure we have a directive definition
     trace!("expand_schema: on missing directive definitions");
-    for directive in schema.schema().schema_definition.directives.clone() {
+    if let Some(directive) = schema
+        .schema()
+        .schema_definition
+        .directives
+        .iter()
+        .find(|d| d.name == DEFAULT_LINK_NAME)
+        .cloned()
+    {
         // only try to add it if there is no directive definition for it
         if schema.get_directive_definition(&directive.name).is_none() {
             FederationBlueprint::on_missing_directive_definition(&mut schema, &directive)?;
