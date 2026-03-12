@@ -571,22 +571,27 @@ mod h2c_cleartext {
 
     // Starts a local server that responds with a default GraphQL response over plain HTTP.
     async fn emulate_h2c_server(listener: TcpListener) {
-        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            Ok(http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .status(StatusCode::OK)
-                .body(
-                    serde_json::to_string(&Response {
-                        data: Some(Value::default()),
-                        ..Response::default()
-                    })
-                    .expect("always valid")
-                    .into(),
-                )
-                .unwrap())
+        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            let response_builder =
+                http::Response::builder().header(CONTENT_TYPE, APPLICATION_JSON.essence_str());
+
+            let response = if request.version() == Version::HTTP_2 {
+                let response_body = serde_json::to_string(&Response {
+                    data: Some(Value::default()),
+                    ..Response::default()
+                });
+                response_builder
+                    .status(StatusCode::OK)
+                    .body(response_body.unwrap().into())
+            } else {
+                response_builder
+                    .status(StatusCode::HTTP_VERSION_NOT_SUPPORTED)
+                    .body(Body::empty())
+            };
+
+            Ok(response.unwrap())
         }
 
-        // XXX(@goto-bus-stop): ideally this server would *only* support HTTP 2 and not HTTP 1
         serve(listener, handle).await.unwrap();
     }
 
@@ -615,6 +620,7 @@ mod h2c_cleartext {
             r#"{"query":"{ me { name username } }"#,
         )
         .await;
+        assert!(response.http_response.status().is_success());
         assert_response_body(response, r#"{"data":null}"#).await;
     }
 }
