@@ -793,6 +793,105 @@ async fn test_coprocessor_unix_domain_socket() -> Result<(), tower::BoxError> {
     Ok(())
 }
 
+/// Verify that unix:// URLs with a `?path=` query parameter deliver requests
+/// to the correct HTTP path on the coprocessor. The UDS server rejects any
+/// request that arrives on a path other than the expected one with a 500,
+/// so the router query itself will fail if the path isn't forwarded correctly.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_unix_domain_socket_with_path() -> Result<(), tower::BoxError> {
+    use std::path::PathBuf;
+
+    use hyper_util::rt::TokioExecutor;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::UnixListener;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("coprocessor.sock");
+    let _ = std::fs::remove_file(&sock_path);
+
+    // the path we append to the filepath socket
+    let expected_path = "/api/v1/coprocessor";
+
+    let uds = UnixListener::bind(&sock_path).expect("bind uds");
+    let expected_path_owned = expected_path.to_string();
+
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = uds.accept().await.expect("accept");
+            let io = TokioIo::new(stream);
+            let expected = expected_path_owned.clone();
+            let svc =
+                hyper::service::service_fn(move |req: http::Request<hyper::body::Incoming>| {
+                    let expected = expected.clone();
+                    async move {
+                        // this checks whether we're actually making requests to /api/v1/coprocessor
+                        if req.uri().path() != expected {
+                            return Ok::<_, std::convert::Infallible>(
+                                http::Response::builder()
+                                    // returning 500s if we're not
+                                    .status(500)
+                                    .header(
+                                        http::header::CONTENT_TYPE,
+                                        mime::APPLICATION_JSON.essence_str(),
+                                    )
+                                    .body(axum::body::Body::from(format!(
+                                        r#"{{"error":"path mismatch: expected '{}', got '{}'"}}"#,
+                                        expected,
+                                        req.uri().path()
+                                    )))
+                                    .unwrap(),
+                            );
+                        }
+
+                        let bytes = http_body_util::BodyExt::collect(req.into_body())
+                            .await
+                            .unwrap()
+                            .to_bytes();
+                        Ok::<_, std::convert::Infallible>(
+                            http::Response::builder()
+                                .status(200)
+                                .header(
+                                    http::header::CONTENT_TYPE,
+                                    mime::APPLICATION_JSON.essence_str(),
+                                )
+                                .body(axum::body::Body::from(bytes))
+                                .unwrap(),
+                        )
+                    }
+                });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("uds server error: {err}");
+            }
+        }
+    });
+
+    let uds_url = format!("unix://{}?path={}", sock_path.display(), expected_path);
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(include_str!("fixtures/coprocessor.router.yaml").replace("<replace>", &uds_url))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    // if we get a 200 it's because we've hit the target path; see above for how this works, but
+    // any path _not_ explicitly the one we've set (/api/v1/coprocessor) will return a 500
+    assert_eq!(response.status(), 200);
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[cfg(unix)]
 async fn test_coprocessor_per_stage_unix_socket_urls() -> Result<(), tower::BoxError> {
