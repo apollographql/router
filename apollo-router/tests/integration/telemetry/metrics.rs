@@ -580,25 +580,24 @@ async fn test_metric_rename_on_reload() {
 async fn test_response_body_size_records_compressed_size_with_gzip() {
     let mut router = IntegrationTest::builder()
         .config(PROMETHEUS_RESPONSE_BODY_SIZE_CONFIG)
+        .reqwest_client(reqwest::Client::builder().gzip(false).build().unwrap())
         .build()
         .await;
 
     router.start().await;
     router.assert_started().await;
 
-    // reqwest will automatically decompress the response if the content encoding is gzip
-    // so we use brotli instead
     let query = Query::builder()
         .body(json!({"query":"{ topProducts { name reviews { id body author { name } } } }"}))
-        .header("accept-encoding", "br")
+        .header("accept-encoding", "gzip")
         .build();
 
     let (_, response) = router.execute_query(query).await;
     let content_encoding = response.headers().get("content-encoding").unwrap().to_str();
-    assert_eq!(content_encoding.unwrap(), "br");
+    assert_eq!(content_encoding.unwrap(), "gzip");
 
     let response_body_size = response.bytes().await.unwrap().len();
-    assert_eq!(response_body_size, 77);
+    assert_eq!(response_body_size, 103);
 
     router
         .assert_metrics_contains(
@@ -608,7 +607,7 @@ async fn test_response_body_size_records_compressed_size_with_gzip() {
         .await;
     router
         .assert_metrics_contains(
-            r#"http_server_response_body_size_bytes_sum{<any>} 77"#,
+            r#"http_server_response_body_size_bytes_sum{<any>} 103"#,
             None,
         )
         .await;
