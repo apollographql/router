@@ -237,6 +237,13 @@ coprocessor:
   url: unix:///tmp/coprocessor.sock
 ```
 
+Because `.sock` is not required as a file extension, the router cannot determine if a path is appended to the base URL. Specify a custom HTTP path using the `path` query parameter:
+
+```yaml title="router.yaml"
+coprocessor:
+  url: unix:///tmp/coprocessor.sock?path=/api/v1
+```
+
 UDS also supports HTTP/2:
 
 ```yaml title="router.yaml"
