@@ -30,6 +30,12 @@ For a more detailed look at production deployment workflows for the full supergr
 
 </Note>
 
+<Note>
+
+If your organization uses a transparent or egress proxy (such as Zscaler or Netskope), [add your proxy's root CA certificate to your container image](/graphos/routing/self-hosted/containerization/proxy-certificates). Without it, the router can't establish TLS connections to Apollo Uplink, resulting in certificate validation errors or "invalid license" failures.
+
+</Note>
+
 ## Kubernetes
 
 ### Apollo GraphOS Operator
