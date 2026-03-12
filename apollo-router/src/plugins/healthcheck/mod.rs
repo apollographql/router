@@ -211,6 +211,7 @@ impl PluginPrivate for HealthCheck {
                 if rejected_count > allowed {
                     my_ready.store(false, Ordering::SeqCst);
                     tokio::time::sleep(my_recovery_interval).await;
+                    my_rejected.store(0, Ordering::Relaxed);
                     my_ready.store(true, Ordering::SeqCst);
                 }
             }
@@ -557,15 +558,15 @@ mod test {
         expected_json: &str,
     ) {
         assert_eq!(expected_status, response.status());
-        let j: serde_json::Value = serde_json::from_slice(
+        let body_json: serde_json::Value = serde_json::from_slice(
             &crate::services::router::body::into_bytes(response)
                 .await
-                .expect("body"),
+                .expect("response body should be readable"),
         )
-        .expect("json");
+        .expect("response body should be parseable as JSON");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(expected_json).unwrap(),
-            j
+            body_json
         );
     }
 
