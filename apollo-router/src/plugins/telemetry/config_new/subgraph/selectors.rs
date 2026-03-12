@@ -2222,9 +2222,7 @@ mod test {
 
         // Test that context_id: false returns None
         let selector_disabled = SubgraphSelector::ContextId { context_id: false };
-        let request = SubgraphRequest::fake_builder()
-            .context(context)
-            .build();
+        let request = SubgraphRequest::fake_builder().context(context).build();
         assert!(selector_disabled.on_request(&request).is_none());
     }
 }

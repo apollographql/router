@@ -1261,10 +1261,7 @@ mod test {
 
         // Test that context_id: false returns None
         let selector_disabled = SupergraphSelector::ContextId { context_id: false };
-        let request = SupergraphRequest::fake_builder()
-            .context(context)
-            .build()
-            .unwrap();
+        let request = SupergraphRequest::fake_builder().context(context).build().unwrap();
         assert!(selector_disabled.on_request(&request).is_none());
     }
 }
