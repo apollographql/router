@@ -318,7 +318,7 @@ impl PluginPrivate for TrafficShaping {
                     let response: Result<RouterResponse, BoxError> = future.await;
                     if matches!(response, Err(ref err) if err.is::<Overloaded>()) {
                         Ok(RouterResponse::error_builder()
-                            .status_code(StatusCode::TOO_MANY_REQUESTS)
+                            .status_code(StatusCode::SERVICE_UNAVAILABLE)
                             .error(rate_limit_error())
                             .context(ctx)
                             .build()
@@ -382,7 +382,7 @@ impl PluginPrivate for TrafficShaping {
                                 Err(err) if err.is::<Overloaded>() => {
                                     // TODO add metrics
                                     Ok(SubgraphResponse::error_builder()
-                                        .status_code(StatusCode::TOO_MANY_REQUESTS)
+                                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
                                         .subgraph_name(subgraph_name)
                                         .error(rate_limit_error())
                                         .context(ctx)
@@ -1055,7 +1055,7 @@ mod test {
             .await
             .expect("it responded");
 
-        assert_eq!(StatusCode::TOO_MANY_REQUESTS, response.response.status());
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
 
         tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -1186,7 +1186,7 @@ mod test {
             .call(RouterRequest::fake_builder().build().unwrap())
             .await
             .unwrap();
-        assert_eq!(StatusCode::TOO_MANY_REQUESTS, response.response.status());
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
         let j: serde_json::Value = serde_json::from_slice(
             &router::body::into_bytes(response.response)
                 .await
@@ -1284,7 +1284,7 @@ mod test {
         let mut results = tasks.join_all().await.into_iter();
 
         let response = results.next().unwrap().unwrap().response;
-        assert_eq!(StatusCode::TOO_MANY_REQUESTS, response.status());
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.status());
 
         let response = results.next().unwrap().unwrap().response;
         assert_eq!(StatusCode::GATEWAY_TIMEOUT, response.status());
