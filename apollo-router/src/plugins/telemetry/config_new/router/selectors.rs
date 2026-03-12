@@ -1098,7 +1098,10 @@ mod test {
 
         // Test that context_id: false returns None
         let selector_disabled = RouterSelector::ContextId { context_id: false };
-        let request = RouterRequest::fake_builder().context(context).build().unwrap();
+        let request = RouterRequest::fake_builder()
+            .context(context)
+            .build()
+            .unwrap();
         assert!(selector_disabled.on_request(&request).is_none());
     }
 }
