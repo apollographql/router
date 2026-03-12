@@ -800,15 +800,19 @@ impl SchemaUpgrader {
         let mut to_delete: Vec<(FieldDefinitionPosition, Node<Directive>)> = vec![];
 
         applications
-            .iter()
-            .try_for_each(|application| -> Result<(), FederationError> {
-                if let Ok(application) = application
-                    && let Ok(target) =
-                        FieldDefinitionPosition::try_from(application.target.clone())
-                    && upgrade_metadata
-                        .metadata
-                        .external_metadata()
-                        .is_external(&target)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter_map(|application| {
+                FieldDefinitionPosition::try_from(application.target.clone())
+                    .ok()
+                    .map(|target| (target, app))
+            })
+            .filter(|(target, _)| {
+                upgrade_metadata
+                    .metadata
+                    .external_metadata()
+                    .is_external(&target)
+            })
                 {
                     let used_in_other_definitions = self.subgraphs.iter().fallible_any(
                         |(name, subgraph)| -> Result<bool, FederationError> {
