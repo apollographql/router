@@ -275,6 +275,15 @@ Unix socket paths should be absolute (starting with `/`). The URL format is `uni
 
 </Note>
 
+Because `.sock` is not required as a file extension, the router cannot determine if a path is appended to the base URL. Specify a custom HTTP path using the `path` query parameter:
+
+```yaml
+override_subgraph_url:
+  my_subgraph: "unix:///tmp/subgraph.sock?path=/graphql/v1"
+```
+
+This configuration also applies to subgraph URLs defined in your supergraph schema (using the `url` argument of the `@join__graph` directive).
+
 However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
 
 ```yaml

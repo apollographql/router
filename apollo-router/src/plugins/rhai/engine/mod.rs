@@ -41,6 +41,7 @@ use super::router;
 use super::subgraph;
 use super::supergraph;
 use crate::configuration::expansion;
+use crate::context::PERSISTED_QUERY_ID;
 use crate::http_ext;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEY;
@@ -1458,6 +1459,10 @@ impl Rhai {
             response_cache::plugin::CONTEXT_CACHE_KEY.into(),
         );
         global_variables.insert("APOLLO_OPERATION_ID".into(), APOLLO_OPERATION_ID.into());
+        global_variables.insert(
+            "APOLLO_PERSISTED_QUERY_ID_KEY".into(),
+            PERSISTED_QUERY_ID.into(),
+        );
         // Demand Control Context Keys
         global_variables.insert(
             "APOLLO_COST_ESTIMATED_KEY".into(),
