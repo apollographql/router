@@ -926,6 +926,8 @@ mod test {
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
     use crate::plugins::telemetry::otel;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
     use crate::services::subgraph::SubgraphRequestId;
 
     #[test]
@@ -2199,28 +2201,16 @@ mod test {
         let expected_id: opentelemetry::Value = context.id.clone().into();
 
         // Test on_request
-        assert_eq!(
-            selector
-                .on_request(
-                    &crate::services::SubgraphRequest::fake_builder()
-                        .context(context.clone())
-                        .build(),
-                )
-                .unwrap(),
-            expected_id
-        );
+        let request = SubgraphRequest::fake_builder()
+            .context(context.clone())
+            .build();
+        assert_eq!(selector.on_request(&request).unwrap(), expected_id);
 
         // Test on_response
-        assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::SubgraphResponse::fake_builder()
-                        .context(context.clone())
-                        .build(),
-                )
-                .unwrap(),
-            expected_id
-        );
+        let response = SubgraphResponse::fake_builder()
+            .context(context.clone())
+            .build();
+        assert_eq!(selector.on_response(&response).unwrap(), expected_id);
 
         // Test on_error
         assert_eq!(
@@ -2232,14 +2222,9 @@ mod test {
 
         // Test that context_id: false returns None
         let selector_disabled = SubgraphSelector::ContextId { context_id: false };
-        assert!(
-            selector_disabled
-                .on_request(
-                    &crate::services::SubgraphRequest::fake_builder()
-                        .context(context)
-                        .build(),
-                )
-                .is_none()
-        );
+        let request = SubgraphRequest::fake_builder()
+            .context(context)
+            .build();
+        assert!(selector_disabled.on_request(&request).is_none());
     }
 }

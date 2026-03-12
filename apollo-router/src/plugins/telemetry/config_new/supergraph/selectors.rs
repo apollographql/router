@@ -693,6 +693,8 @@ mod test {
     use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
     use crate::plugins::telemetry::otel;
     use crate::services::FIRST_EVENT_CONTEXT_KEY;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
     use crate::spec::operation_limits::OperationLimits;
 
     #[test]
@@ -1228,30 +1230,18 @@ mod test {
         let expected_id: opentelemetry::Value = context.id.clone().into();
 
         // Test on_request
-        assert_eq!(
-            selector
-                .on_request(
-                    &crate::services::SupergraphRequest::fake_builder()
-                        .context(context.clone())
-                        .build()
-                        .unwrap(),
-                )
-                .unwrap(),
-            expected_id
-        );
+        let request = SupergraphRequest::fake_builder()
+            .context(context.clone())
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_request(&request).unwrap(), expected_id);
 
         // Test on_response
-        assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::SupergraphResponse::fake_builder()
-                        .context(context.clone())
-                        .build()
-                        .unwrap(),
-                )
-                .unwrap(),
-            expected_id
-        );
+        let response = SupergraphResponse::fake_builder()
+            .context(context.clone())
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_response(&response).unwrap(), expected_id);
 
         // Test on_response_event
         assert_eq!(
@@ -1271,15 +1261,10 @@ mod test {
 
         // Test that context_id: false returns None
         let selector_disabled = SupergraphSelector::ContextId { context_id: false };
-        assert!(
-            selector_disabled
-                .on_request(
-                    &crate::services::SupergraphRequest::fake_builder()
-                        .context(context)
-                        .build()
-                        .unwrap(),
-                )
-                .is_none()
-        );
+        let request = SupergraphRequest::fake_builder()
+            .context(context)
+            .build()
+            .unwrap();
+        assert!(selector_disabled.on_request(&request).is_none());
     }
 }

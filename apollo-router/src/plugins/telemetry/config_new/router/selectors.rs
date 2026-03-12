@@ -544,6 +544,8 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::otel;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::RouterRequest;
+    use crate::services::RouterResponse;
 
     #[test]
     fn router_static() {
@@ -1073,30 +1075,18 @@ mod test {
         let expected_id: opentelemetry::Value = context.id.clone().into();
 
         // Test on_request
-        assert_eq!(
-            selector
-                .on_request(
-                    &crate::services::RouterRequest::fake_builder()
-                        .context(context.clone())
-                        .build()
-                        .unwrap(),
-                )
-                .unwrap(),
-            expected_id
-        );
+        let request = RouterRequest::fake_builder()
+            .context(context.clone())
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_request(&request).unwrap(), expected_id);
 
         // Test on_response
-        assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::RouterResponse::fake_builder()
-                        .context(context.clone())
-                        .build()
-                        .unwrap(),
-                )
-                .unwrap(),
-            expected_id
-        );
+        let response = RouterResponse::fake_builder()
+            .context(context.clone())
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_response(&response).unwrap(), expected_id);
 
         // Test on_error
         assert_eq!(
@@ -1108,15 +1098,10 @@ mod test {
 
         // Test that context_id: false returns None
         let selector_disabled = RouterSelector::ContextId { context_id: false };
-        assert!(
-            selector_disabled
-                .on_request(
-                    &crate::services::RouterRequest::fake_builder()
-                        .context(context)
-                        .build()
-                        .unwrap(),
-                )
-                .is_none()
-        );
+        let request = RouterRequest::fake_builder()
+            .context(context)
+            .build()
+            .unwrap();
+        assert!(selector_disabled.on_request(&request).is_none());
     }
 }
