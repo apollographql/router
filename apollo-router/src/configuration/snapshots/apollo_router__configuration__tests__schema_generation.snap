@@ -903,7 +903,7 @@ expression: "&schema"
     },
     "Client": {
       "additionalProperties": false,
-      "description": "HTTP client configuration for coprocessors.",
+      "description": "HTTP client configuration",
       "properties": {
         "dns_resolution_strategy": {
           "anyOf": [
@@ -926,6 +926,14 @@ expression: "&schema"
             }
           ],
           "description": "Use HTTP/2 to communicate with the coprocessor."
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         }
       },
       "type": "object"
@@ -2612,6 +2620,14 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         },
         "timeout": {
           "default": null,
@@ -10594,6 +10610,14 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         },
         "timeout": {
           "default": null,

@@ -83,7 +83,7 @@ fn fed1_preserves_federation_directive_descriptions() {
         .expect("directive definition");
     assert_snapshot!(key_directive, @r#"
         " This is a custom description of the key directive "
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+        directive @key(fields: federation__FieldSet!) on OBJECT
     "#);
 }
 
