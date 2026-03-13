@@ -3513,15 +3513,27 @@ mod tests {
         let valid_response = json!({
             "data": {"test": "modified"}
         });
-        let result =
-            handle_graphql_response(original.clone(), Some(valid_response), true, true).unwrap();
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(valid_response),
+            true,
+            true,
+            &BodyConf::All(true),
+        )
+        .unwrap();
         assert_eq!(result.data, Some(json!({"test": "modified"})));
 
         // Invalid GraphQL response should return error when validation enabled
         let invalid_response = json!({
             "invalid": "structure"
         });
-        let result = handle_graphql_response(original.clone(), Some(invalid_response), true, true);
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(invalid_response),
+            true,
+            true,
+            &BodyConf::All(true),
+        );
         assert!(result.is_err());
     }
 
@@ -3535,8 +3547,14 @@ mod tests {
         let valid_response = json!({
             "data": {"test": "modified"}
         });
-        let result =
-            handle_graphql_response(original.clone(), Some(valid_response), false, true).unwrap();
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(valid_response),
+            false,
+            true,
+            &BodyConf::All(true),
+        )
+        .unwrap();
         assert_eq!(result.data, Some(json!({"test": "modified"})));
 
         // Invalid GraphQL response should return original when validation disabled
@@ -3544,8 +3562,14 @@ mod tests {
         let invalid_response = json!({
             "errors": "this should be an array not a string"
         });
-        let result =
-            handle_graphql_response(original.clone(), Some(invalid_response), false, true).unwrap();
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(invalid_response),
+            false,
+            true,
+            &BodyConf::All(true),
+        )
+        .unwrap();
         // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
         // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
         assert_eq!(result.data, Some(json!({"test": "original"})));
@@ -3559,8 +3583,14 @@ mod tests {
 
         // Empty response violates GraphQL spec (must have data or errors) but should pass serde deserialization
         let empty_response = json!({});
-        let result =
-            handle_graphql_response(original.clone(), Some(empty_response), false, true).unwrap();
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(empty_response),
+            false,
+            true,
+            &BodyConf::All(true),
+        )
+        .unwrap();
 
         // With validation disabled, empty response deserializes successfully via serde
         // (all fields are optional with defaults), resulting in a response with no data/errors
@@ -3576,7 +3606,13 @@ mod tests {
 
         // Empty response should fail strict GraphQL validation
         let empty_response = json!({});
-        let result = handle_graphql_response(original.clone(), Some(empty_response), true, true);
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(empty_response),
+            true,
+            true,
+            &BodyConf::All(true),
+        );
 
         // With validation enabled, should return error due to invalid GraphQL response structure
         assert!(result.is_err());
@@ -4583,25 +4619,194 @@ mod tests {
     fn test_conditional_validation_logic() {
         // Invalid incoming + validation enabled = validation bypassed (succeeds with invalid copro response)
         assert!(
-            handle_graphql_response(invalid_response(), Some(invalid_copro_body()), true, false)
-                .is_ok()
+            handle_graphql_response(
+                invalid_response(),
+                Some(invalid_copro_body()),
+                true,
+                false,
+                &BodyConf::All(true)
+            )
+            .is_ok()
         );
 
         // Valid incoming + validation enabled + invalid copro response = validation applied (fails)
         assert!(
-            handle_graphql_response(valid_response(), Some(invalid_copro_body()), true, true)
-                .is_err()
+            handle_graphql_response(
+                valid_response(),
+                Some(invalid_copro_body()),
+                true,
+                true,
+                &BodyConf::All(true)
+            )
+            .is_err()
         );
 
         // Valid incoming + validation enabled + valid copro response = validation applied (succeeds)
         assert!(
-            handle_graphql_response(valid_response(), Some(valid_copro_body()), true, true).is_ok()
+            handle_graphql_response(
+                valid_response(),
+                Some(valid_copro_body()),
+                true,
+                true,
+                &BodyConf::All(true)
+            )
+            .is_ok()
         );
 
         // Validation disabled = always bypassed (succeeds regardless)
         assert!(
-            handle_graphql_response(valid_response(), Some(invalid_copro_body()), false, true)
-                .is_ok()
+            handle_graphql_response(
+                valid_response(),
+                Some(invalid_copro_body()),
+                false,
+                true,
+                &BodyConf::All(true)
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_selective_body_field_merging() {
+        use crate::plugins::coprocessor::BodyFieldsConf;
+
+        // Original response with data, errors, and extensions
+        let original = graphql::Response::builder()
+            .data(json!({"original": "data"}))
+            .error(Error::builder().message("original error").build())
+            .extension("original_ext", json!("original_value"))
+            .build();
+
+        // Test 1: Send only data, coprocessor modifies data
+        // Errors and extensions should be preserved from original
+        let selective_data = BodyConf::Selective(BodyFieldsConf {
+            data: true,
+            errors: false,
+            extensions: false,
+        });
+
+        let copro_response = json!({
+            "data": {"modified": "data"},
+            "errors": [], // Coprocessor might return empty errors
+            "extensions": {} // Coprocessor might return empty extensions
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_data,
+        )
+        .unwrap();
+
+        // Data should be modified from coprocessor
+        assert_eq!(result.data, Some(json!({"modified": "data"})));
+        // Errors should be preserved from original (not empty from copro)
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "original error");
+        // Extensions should be preserved from original (not empty from copro)
+        assert_eq!(
+            result.extensions.get("original_ext"),
+            Some(&json!("original_value"))
+        );
+
+        // Test 2: Send only errors, coprocessor modifies errors
+        // Data and extensions should be preserved from original
+        let selective_errors = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: true,
+            extensions: false,
+        });
+
+        let copro_response = json!({
+            "data": null, // Coprocessor might return null data
+            "errors": [{"message": "modified error"}]
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_errors,
+        )
+        .unwrap();
+
+        // Data should be preserved from original
+        assert_eq!(result.data, Some(json!({"original": "data"})));
+        // Errors should be modified from coprocessor
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "modified error");
+        // Extensions should be preserved from original
+        assert_eq!(
+            result.extensions.get("original_ext"),
+            Some(&json!("original_value"))
+        );
+
+        // Test 3: Send only extensions, coprocessor modifies extensions
+        // Data and errors should be preserved from original
+        let selective_extensions = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: false,
+            extensions: true,
+        });
+
+        let copro_response = json!({
+            "extensions": {"modified_ext": "modified_value"}
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_extensions,
+        )
+        .unwrap();
+
+        // Data should be preserved from original
+        assert_eq!(result.data, Some(json!({"original": "data"})));
+        // Errors should be preserved from original
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "original error");
+        // Extensions should be modified from coprocessor
+        assert_eq!(
+            result.extensions.get("modified_ext"),
+            Some(&json!("modified_value"))
+        );
+        assert_eq!(result.extensions.get("original_ext"), None);
+
+        // Test 4: Send data and extensions, but not errors
+        let selective_data_ext = BodyConf::Selective(BodyFieldsConf {
+            data: true,
+            errors: false,
+            extensions: true,
+        });
+
+        let copro_response = json!({
+            "data": {"modified": "data"},
+            "extensions": {"modified_ext": "modified_value"}
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_data_ext,
+        )
+        .unwrap();
+
+        // Data should be modified from coprocessor
+        assert_eq!(result.data, Some(json!({"modified": "data"})));
+        // Errors should be preserved from original
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "original error");
+        // Extensions should be modified from coprocessor
+        assert_eq!(
+            result.extensions.get("modified_ext"),
+            Some(&json!("modified_value"))
         );
     }
 

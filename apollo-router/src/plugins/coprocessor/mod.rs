@@ -1598,6 +1598,7 @@ where
         co_processor_output.body,
         response_validation,
         incoming_payload_was_valid,
+        &response_config.body,
     )?;
 
     response.response = http::Response::from_parts(parts, new_body);
@@ -1667,10 +1668,34 @@ pub(super) fn internalize_header_map(
 fn apply_response_post_processing(
     mut new_body: graphql::Response,
     original_response_body: &graphql::Response,
+    body_conf: &BodyConf,
 ) -> graphql::Response {
     // Needs to take back these 2 fields because it's skipped by serde
     new_body.subscribed = original_response_body.subscribed;
     new_body.created_at = original_response_body.created_at;
+
+    // Preserve fields that weren't sent to the coprocessor
+    match body_conf {
+        BodyConf::All(true) => {
+            // All fields were sent, no need to preserve anything
+        }
+        BodyConf::All(false) => {
+            // Nothing was sent, should not happen in this code path
+        }
+        BodyConf::Selective(fields) => {
+            // Preserve fields that weren't sent
+            if !fields.data {
+                new_body.data = original_response_body.data.clone();
+            }
+            if !fields.errors {
+                new_body.errors = original_response_body.errors.clone();
+            }
+            if !fields.extensions {
+                new_body.extensions = original_response_body.extensions.clone();
+            }
+        }
+    }
+
     // Required because for subscription if data is Some(Null) it won't cut the subscription
     // And in some languages they don't have any differences between Some(Null) and Null
     if original_response_body.data == Some(Value::Null)
@@ -1780,6 +1805,7 @@ pub(super) fn handle_graphql_response(
     copro_response_body: Option<Value>,
     response_validation: bool,
     incoming_payload_was_valid: bool,
+    body_conf: &BodyConf,
 ) -> Result<graphql::Response, BoxError> {
     // Enable conditional validation: only validate coprocessor responses when the incoming payload was valid.
     // This prevents validation failures for responses that were already invalid before being sent to the coprocessor.
@@ -1796,12 +1822,12 @@ pub(super) fn handle_graphql_response(
         Some(value) => {
             if should_validate {
                 let new_body = graphql::Response::from_value(value)?;
-                apply_response_post_processing(new_body, &original_response_body)
+                apply_response_post_processing(new_body, &original_response_body, body_conf)
             } else {
                 // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
                 match serde_json_bytes::from_value::<graphql::Response>(value) {
                     Ok(new_body) => {
-                        apply_response_post_processing(new_body, &original_response_body)
+                        apply_response_post_processing(new_body, &original_response_body, body_conf)
                     }
                     Err(_) => {
                         // If deserialization fails completely, return original response

@@ -421,6 +421,7 @@ where
         co_processor_output.body,
         response_validation,
         incoming_payload_was_valid,
+        &response_config.body,
     )?;
 
     if let Some(control) = co_processor_output.control {
@@ -496,6 +497,7 @@ where
                     co_processor_output.body,
                     response_validation,
                     incoming_payload_was_valid,
+                    &response_config.body,
                 )?;
 
                 if let Some(context) = co_processor_output.context {
