@@ -76,6 +76,7 @@ use std::sync::OnceLock;
 
 #[cfg(test)]
 use futures::FutureExt;
+use opentelemetry::metrics::InstrumentProvider;
 
 use crate::metrics::aggregation::AggregateMeterProvider;
 
@@ -154,6 +155,14 @@ impl<I, T> NoopGuard<I, T> {
     }
 }
 
+/// Noop InstrumentProvider - all methods use the default trait implementations
+/// which return noop instruments.
+// This can be replaced with NoopMeterProvider once the changes in
+// https://github.com/open-telemetry/opentelemetry-rust/pull/3111
+// are released.
+struct NoopInstrumentProvider;
+impl InstrumentProvider for NoopInstrumentProvider {}
+
 #[cfg(test)]
 pub(crate) mod test_utils {
     use std::cmp::Ordering;
@@ -171,23 +180,20 @@ pub(crate) mod test_utils {
     use opentelemetry::KeyValue;
     use opentelemetry::StringValue;
     use opentelemetry::Value;
-    use opentelemetry_sdk::metrics::Aggregation;
-    use opentelemetry_sdk::metrics::AttributeSet;
+    use opentelemetry_sdk::error::OTelSdkResult;
     use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::Pipeline;
-    use opentelemetry_sdk::metrics::data::DataPoint;
-    use opentelemetry_sdk::metrics::data::Gauge;
-    use opentelemetry_sdk::metrics::data::Histogram;
+    use opentelemetry_sdk::metrics::Temporality;
+    use opentelemetry_sdk::metrics::data::AggregatedMetrics;
+    use opentelemetry_sdk::metrics::data::GaugeDataPoint;
     use opentelemetry_sdk::metrics::data::HistogramDataPoint;
     use opentelemetry_sdk::metrics::data::Metric;
+    use opentelemetry_sdk::metrics::data::MetricData;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::data::Sum;
-    use opentelemetry_sdk::metrics::data::Temporality;
-    use opentelemetry_sdk::metrics::reader::AggregationSelector;
+    use opentelemetry_sdk::metrics::data::SumDataPoint;
     use opentelemetry_sdk::metrics::reader::MetricReader;
-    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
     use serde::Serialize;
     use tokio::task_local;
 
@@ -206,32 +212,25 @@ pub(crate) mod test_utils {
         reader: Arc<ManualReader>,
     }
 
-    impl TemporalitySelector for ClonableManualReader {
-        fn temporality(&self, kind: InstrumentKind) -> Temporality {
-            self.reader.temporality(kind)
-        }
-    }
-
-    impl AggregationSelector for ClonableManualReader {
-        fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
-            self.reader.aggregation(kind)
-        }
-    }
     impl MetricReader for ClonableManualReader {
         fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
             self.reader.register_pipeline(pipeline)
         }
 
-        fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
+        fn collect(&self, rm: &mut ResourceMetrics) -> OTelSdkResult {
             self.reader.collect(rm)
         }
 
-        fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+        fn force_flush(&self) -> OTelSdkResult {
             self.reader.force_flush()
         }
 
-        fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
-            self.reader.shutdown()
+        fn shutdown_with_timeout(&self, timeout: std::time::Duration) -> OTelSdkResult {
+            self.reader.shutdown_with_timeout(timeout)
+        }
+
+        fn temporality(&self, kind: InstrumentKind) -> Temporality {
+            self.reader.temporality(kind)
         }
     }
 
@@ -265,19 +264,9 @@ pub(crate) mod test_utils {
         }
     }
 
+    #[derive(Default)]
     pub(crate) struct Metrics {
         resource_metrics: ResourceMetrics,
-    }
-
-    impl Default for Metrics {
-        fn default() -> Self {
-            Metrics {
-                resource_metrics: ResourceMetrics {
-                    resource: Default::default(),
-                    scope_metrics: vec![],
-                },
-            }
-        }
     }
 
     pub(crate) fn collect_metrics() -> Metrics {
@@ -292,13 +281,11 @@ pub(crate) mod test_utils {
     impl Metrics {
         pub(crate) fn find(&self, name: &str) -> Option<&opentelemetry_sdk::metrics::data::Metric> {
             self.resource_metrics
-                .scope_metrics
-                .iter()
+                .scope_metrics()
                 .flat_map(|scope_metrics| {
                     scope_metrics
-                        .metrics
-                        .iter()
-                        .filter(|metric| metric.name == name)
+                        .metrics()
+                        .filter(|metric| metric.name() == name)
                 })
                 .next()
         }
@@ -312,21 +299,20 @@ pub(crate) mod test_utils {
             count: bool,
             attributes: &[KeyValue],
         ) -> bool {
-            let attributes = AttributeSet::from(attributes);
             if let Some(value) = value.to_u64()
-                && self.metric_matches(name, &ty, value, count, &attributes)
+                && self.metric_matches_u64(name, &ty, value, count, attributes)
             {
                 return true;
             }
 
             if let Some(value) = value.to_i64()
-                && self.metric_matches(name, &ty, value, count, &attributes)
+                && self.metric_matches_i64(name, &ty, value, count, attributes)
             {
                 return true;
             }
 
             if let Some(value) = value.to_f64()
-                && self.metric_matches(name, &ty, value, count, &attributes)
+                && self.metric_matches_f64(name, &ty, value, count, attributes)
             {
                 return true;
             }
@@ -334,92 +320,175 @@ pub(crate) mod test_utils {
             false
         }
 
-        pub(crate) fn metric_matches<T: Debug + PartialEq + Display + ToPrimitive + 'static>(
+        fn metric_matches_u64(
             &self,
             name: &str,
             ty: &MetricType,
-            value: T,
+            value: u64,
             count: bool,
-            attributes: &AttributeSet,
+            attributes: &[KeyValue],
         ) -> bool {
-            if let Some(metric) = self.find(name) {
-                // Try to downcast the metric to each type of aggregation and assert that the value is correct.
-                if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
-                    // Find the datapoint with the correct attributes.
-                    if matches!(ty, MetricType::Gauge) {
-                        return gauge.data_points.iter().any(|datapoint| {
-                            datapoint.value == value
-                                && Self::equal_attributes(attributes, &datapoint.attributes)
-                        });
-                    }
-                } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
-                    // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
-                    if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
-                        return sum.data_points.iter().any(|datapoint| {
-                            datapoint.value == value
-                                && Self::equal_attributes(attributes, &datapoint.attributes)
-                        });
-                    }
-                } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
-                    && matches!(ty, MetricType::Histogram)
-                {
-                    if count {
-                        return histogram.data_points.iter().any(|datapoint| {
-                            datapoint.count == value.to_u64().unwrap()
-                                && Self::equal_attributes(attributes, &datapoint.attributes)
-                        });
-                    } else {
-                        return histogram.data_points.iter().any(|datapoint| {
-                            datapoint.sum == value
-                                && Self::equal_attributes(attributes, &datapoint.attributes)
-                        });
+            // Try ALL metrics with this name, not just the first one
+            for scope_metrics in self.resource_metrics.scope_metrics() {
+                for metric in scope_metrics.metrics().filter(|m| m.name() == name) {
+                    if let AggregatedMetrics::U64(metric_data) = metric.data()
+                        && Self::check_metric_data(metric_data, ty, value, count, attributes)
+                    {
+                        return true;
                     }
                 }
             }
             false
         }
 
-        pub(crate) fn metric_exists<T: Debug + PartialEq + Display + ToPrimitive + 'static>(
+        fn metric_matches_i64(
+            &self,
+            name: &str,
+            ty: &MetricType,
+            value: i64,
+            count: bool,
+            attributes: &[KeyValue],
+        ) -> bool {
+            // Try ALL metrics with this name, not just the first one
+            for scope_metrics in self.resource_metrics.scope_metrics() {
+                for metric in scope_metrics.metrics().filter(|m| m.name() == name) {
+                    if let AggregatedMetrics::I64(metric_data) = metric.data()
+                        && Self::check_metric_data(metric_data, ty, value, count, attributes)
+                    {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        fn metric_matches_f64(
+            &self,
+            name: &str,
+            ty: &MetricType,
+            value: f64,
+            count: bool,
+            attributes: &[KeyValue],
+        ) -> bool {
+            // Try ALL metrics with this name across all scopes
+            // (there can be multiple metrics with the same name but different types)
+            for scope_metrics in self.resource_metrics.scope_metrics() {
+                for metric in scope_metrics.metrics().filter(|m| m.name() == name) {
+                    if let AggregatedMetrics::F64(metric_data) = metric.data()
+                        && Self::check_metric_data(metric_data, ty, value, count, attributes)
+                    {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        fn check_metric_data<T: Debug + PartialEq + Display + Copy + ToPrimitive + 'static>(
+            metric_data: &MetricData<T>,
+            ty: &MetricType,
+            value: T,
+            count: bool,
+            attributes: &[KeyValue],
+        ) -> bool {
+            match metric_data {
+                MetricData::Gauge(gauge) => {
+                    if matches!(ty, MetricType::Gauge) {
+                        return gauge.data_points().any(|datapoint| {
+                            datapoint.value() == value
+                                && Self::equal_attributes(attributes, datapoint.attributes())
+                        });
+                    }
+                }
+                MetricData::Sum(sum) => {
+                    if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
+                        return sum.data_points().any(|datapoint| {
+                            datapoint.value() == value
+                                && Self::equal_attributes(attributes, datapoint.attributes())
+                        });
+                    }
+                }
+                MetricData::Histogram(histogram) => {
+                    if matches!(ty, MetricType::Histogram) {
+                        if count {
+                            return histogram.data_points().any(|datapoint| {
+                                datapoint.count() == value.to_u64().unwrap()
+                                    && Self::equal_attributes(attributes, datapoint.attributes())
+                            });
+                        } else {
+                            return histogram.data_points().any(|datapoint| {
+                                datapoint.sum() == value
+                                    && Self::equal_attributes(attributes, datapoint.attributes())
+                            });
+                        }
+                    }
+                }
+                MetricData::ExponentialHistogram(_) => {}
+            }
+            false
+        }
+
+        #[must_use]
+        pub(crate) fn metric_exists(
             &self,
             name: &str,
             ty: MetricType,
             attributes: &[KeyValue],
         ) -> bool {
-            let attributes = AttributeSet::from(attributes);
             if let Some(metric) = self.find(name) {
-                // Try to downcast the metric to each type of aggregation and assert that the value is correct.
-                if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
-                    // Find the datapoint with the correct attributes.
-                    if matches!(ty, MetricType::Gauge) {
-                        return gauge.data_points.iter().any(|datapoint| {
-                            Self::equal_attributes(&attributes, &datapoint.attributes)
-                        });
+                match metric.data() {
+                    AggregatedMetrics::U64(metric_data) => {
+                        return Self::check_metric_exists(metric_data, &ty, attributes);
                     }
-                } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
-                    // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
-                    if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
-                        return sum.data_points.iter().any(|datapoint| {
-                            Self::equal_attributes(&attributes, &datapoint.attributes)
-                        });
+                    AggregatedMetrics::I64(metric_data) => {
+                        return Self::check_metric_exists(metric_data, &ty, attributes);
                     }
-                } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
-                    && matches!(ty, MetricType::Histogram)
-                {
-                    return histogram.data_points.iter().any(|datapoint| {
-                        Self::equal_attributes(&attributes, &datapoint.attributes)
-                    });
+                    AggregatedMetrics::F64(metric_data) => {
+                        return Self::check_metric_exists(metric_data, &ty, attributes);
+                    }
                 }
             }
             false
         }
 
+        fn check_metric_exists<T: Debug + PartialEq + Display + Copy + 'static>(
+            metric_data: &MetricData<T>,
+            ty: &MetricType,
+            attributes: &[KeyValue],
+        ) -> bool {
+            match metric_data {
+                MetricData::Gauge(gauge) => {
+                    if matches!(ty, MetricType::Gauge) {
+                        return gauge.data_points().any(|datapoint| {
+                            Self::equal_attributes(attributes, datapoint.attributes())
+                        });
+                    }
+                }
+                MetricData::Sum(sum) => {
+                    if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
+                        return sum.data_points().any(|datapoint| {
+                            Self::equal_attributes(attributes, datapoint.attributes())
+                        });
+                    }
+                }
+                MetricData::Histogram(histogram) => {
+                    if matches!(ty, MetricType::Histogram) {
+                        return histogram.data_points().any(|datapoint| {
+                            Self::equal_attributes(attributes, datapoint.attributes())
+                        });
+                    }
+                }
+                MetricData::ExponentialHistogram(_) => {}
+            }
+            false
+        }
+
         #[allow(dead_code)]
-        pub(crate) fn all(self) -> Vec<SerdeMetric> {
+        pub(crate) fn all(&self) -> Vec<SerdeMetric> {
             self.resource_metrics
-                .scope_metrics
-                .into_iter()
+                .scope_metrics()
                 .flat_map(|scope_metrics| {
-                    scope_metrics.metrics.into_iter().map(|metric| {
+                    scope_metrics.metrics().map(|metric| {
                         let serde_metric: SerdeMetric = metric.into();
                         serde_metric
                     })
@@ -429,7 +498,7 @@ pub(crate) mod test_utils {
         }
 
         #[allow(dead_code)]
-        pub(crate) fn non_zero(self) -> Vec<SerdeMetric> {
+        pub(crate) fn non_zero(&self) -> Vec<SerdeMetric> {
             self.all()
                 .into_iter()
                 .filter(|m| {
@@ -447,18 +516,30 @@ pub(crate) mod test_utils {
                 .collect()
         }
 
-        fn equal_attributes(expected: &AttributeSet, actual: &[KeyValue]) -> bool {
+        fn equal_attributes<'a>(
+            expected: &[KeyValue],
+            actual: impl Iterator<Item = &'a KeyValue>,
+        ) -> bool {
+            let mut actual_vec: Vec<_> = actual.collect();
             // If lengths are different, we can short circuit. This also accounts for a bug where
             // an empty attributes list would always be considered "equal" due to zip capping at
             // the shortest iter's length
-            if expected.iter().count() != actual.len() {
+            if expected.len() != actual_vec.len() {
                 return false;
             }
-            // This works because the attributes are always sorted
-            expected.iter().zip(actual.iter()).all(|((k, v), kv)| {
-                kv.key == *k
-                    && (kv.value == *v || kv.value == Value::String(StringValue::from("<any>")))
-            })
+            // Sort both sides by key for comparison (attributes may not be in same order)
+            let mut expected_sorted: Vec<_> = expected.iter().collect();
+            expected_sorted.sort_by(|a, b| a.key.cmp(&b.key));
+            actual_vec.sort_by(|a, b| a.key.cmp(&b.key));
+
+            expected_sorted
+                .iter()
+                .zip(actual_vec.iter())
+                .all(|(exp, act)| {
+                    exp.key == act.key
+                        && (exp.value == act.value
+                            || exp.value == Value::String(StringValue::from("<any>")))
+                })
         }
     }
 
@@ -516,35 +597,77 @@ pub(crate) mod test_utils {
     }
 
     impl SerdeMetricData {
-        fn extract_datapoints<T: Into<serde_json::Value> + Clone + 'static>(
-            metric_data: &mut SerdeMetricData,
-            value: &dyn opentelemetry_sdk::metrics::data::Aggregation,
-        ) {
-            if let Some(gauge) = value.as_any().downcast_ref::<Gauge<T>>() {
-                gauge.data_points.iter().for_each(|datapoint| {
-                    metric_data.datapoints.push(datapoint.into());
-                });
+        fn extract_datapoints_f64(metric_data: &mut SerdeMetricData, value: &MetricData<f64>) {
+            match value {
+                MetricData::Gauge(gauge) => {
+                    gauge.data_points().for_each(|datapoint| {
+                        metric_data.datapoints.push(datapoint.into());
+                    });
+                }
+                MetricData::Sum(sum) => {
+                    sum.data_points().for_each(|datapoint| {
+                        metric_data.datapoints.push(datapoint.into());
+                    });
+                }
+                MetricData::Histogram(histogram) => {
+                    histogram.data_points().for_each(|datapoint| {
+                        metric_data.datapoints.push(datapoint.into());
+                    });
+                }
+                MetricData::ExponentialHistogram(_) => {}
             }
-            if let Some(sum) = value.as_any().downcast_ref::<Sum<T>>() {
-                sum.data_points.iter().for_each(|datapoint| {
-                    metric_data.datapoints.push(datapoint.into());
-                });
+        }
+
+        fn extract_datapoints_u64(metric_data: &mut SerdeMetricData, value: &MetricData<u64>) {
+            match value {
+                MetricData::Gauge(gauge) => {
+                    gauge.data_points().for_each(|datapoint| {
+                        metric_data.datapoints.push(datapoint.into());
+                    });
+                }
+                MetricData::Sum(sum) => {
+                    sum.data_points().for_each(|datapoint| {
+                        metric_data.datapoints.push(datapoint.into());
+                    });
+                }
+                MetricData::Histogram(histogram) => {
+                    histogram.data_points().for_each(|datapoint| {
+                        metric_data.datapoints.push(datapoint.into());
+                    });
+                }
+                MetricData::ExponentialHistogram(_) => {}
             }
-            if let Some(histogram) = value.as_any().downcast_ref::<Histogram<T>>() {
-                histogram.data_points.iter().for_each(|datapoint| {
-                    metric_data.datapoints.push(datapoint.into());
-                });
+        }
+
+        fn extract_datapoints_i64(metric_data: &mut SerdeMetricData, value: &MetricData<i64>) {
+            match value {
+                MetricData::Gauge(gauge) => {
+                    gauge.data_points().for_each(|datapoint| {
+                        metric_data.datapoints.push(datapoint.into());
+                    });
+                }
+                MetricData::Sum(sum) => {
+                    sum.data_points().for_each(|datapoint| {
+                        metric_data.datapoints.push(datapoint.into());
+                    });
+                }
+                MetricData::Histogram(histogram) => {
+                    histogram.data_points().for_each(|datapoint| {
+                        metric_data.datapoints.push(datapoint.into());
+                    });
+                }
+                MetricData::ExponentialHistogram(_) => {}
             }
         }
     }
 
-    impl From<Metric> for SerdeMetric {
-        fn from(value: Metric) -> Self {
+    impl From<&Metric> for SerdeMetric {
+        fn from(value: &Metric) -> Self {
             let mut serde_metric = SerdeMetric {
-                name: value.name.into_owned(),
-                description: value.description.into_owned(),
-                unit: value.unit.to_string(),
-                data: value.data.into(),
+                name: value.name().to_string(),
+                description: value.description().to_string(),
+                unit: value.unit().to_string(),
+                data: value.data().into(),
             };
             // Sort the datapoints so that we can compare them
             serde_metric.data.datapoints.sort();
@@ -567,18 +690,34 @@ pub(crate) mod test_utils {
         }
     }
 
-    impl<T> From<&DataPoint<T>> for SerdeMetricDataPoint
+    impl<T> From<&GaugeDataPoint<T>> for SerdeMetricDataPoint
     where
-        T: Into<serde_json::Value> + Clone,
+        T: Into<serde_json::Value> + Copy,
     {
-        fn from(value: &DataPoint<T>) -> Self {
+        fn from(value: &GaugeDataPoint<T>) -> Self {
             SerdeMetricDataPoint {
-                value: Some(value.value.clone().into()),
+                value: Some(value.value().into()),
                 sum: None,
                 count: None,
                 attributes: value
-                    .attributes
-                    .iter()
+                    .attributes()
+                    .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl<T> From<&SumDataPoint<T>> for SerdeMetricDataPoint
+    where
+        T: Into<serde_json::Value> + Copy,
+    {
+        fn from(value: &SumDataPoint<T>) -> Self {
+            SerdeMetricDataPoint {
+                value: Some(value.value().into()),
+                sum: None,
+                count: None,
+                attributes: value
+                    .attributes()
                     .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
                     .collect(),
             }
@@ -597,35 +736,44 @@ pub(crate) mod test_utils {
                     Array::I64(v) => v.into(),
                     Array::F64(v) => v.into(),
                     Array::String(v) => v.iter().map(|v| v.to_string()).collect::<Vec<_>>().into(),
+                    _ => unreachable!("unexpected opentelemetry::Array variant"),
                 },
+                _ => unreachable!("unexpected opentelemetry::Value variant"),
             }
         }
     }
 
     impl<T> From<&HistogramDataPoint<T>> for SerdeMetricDataPoint
     where
-        T: Into<serde_json::Value> + Clone,
+        T: Into<serde_json::Value> + Copy,
     {
         fn from(value: &HistogramDataPoint<T>) -> Self {
             SerdeMetricDataPoint {
-                sum: Some(value.sum.clone().into()),
+                sum: Some(value.sum().into()),
                 value: None,
-                count: Some(value.count),
+                count: Some(value.count()),
                 attributes: value
-                    .attributes
-                    .iter()
+                    .attributes()
                     .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
                     .collect(),
             }
         }
     }
 
-    impl From<Box<dyn opentelemetry_sdk::metrics::data::Aggregation>> for SerdeMetricData {
-        fn from(value: Box<dyn opentelemetry_sdk::metrics::data::Aggregation>) -> Self {
+    impl From<&AggregatedMetrics> for SerdeMetricData {
+        fn from(value: &AggregatedMetrics) -> Self {
             let mut metric_data = SerdeMetricData::default();
-            Self::extract_datapoints::<u64>(&mut metric_data, value.as_ref());
-            Self::extract_datapoints::<f64>(&mut metric_data, value.as_ref());
-            Self::extract_datapoints::<i64>(&mut metric_data, value.as_ref());
+            match value {
+                AggregatedMetrics::F64(data) => {
+                    Self::extract_datapoints_f64(&mut metric_data, data)
+                }
+                AggregatedMetrics::U64(data) => {
+                    Self::extract_datapoints_u64(&mut metric_data, data)
+                }
+                AggregatedMetrics::I64(data) => {
+                    Self::extract_datapoints_i64(&mut metric_data, data)
+                }
+            }
             metric_data
         }
     }
@@ -1081,7 +1229,7 @@ macro_rules! metric {
                         builder = builder.with_unit($unit);
                     }
 
-                    builder.init()
+                    builder.build()
                 };
 
                 if cache_callsite {
@@ -1257,36 +1405,36 @@ macro_rules! assert_counter_not_exists {
 
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Counter, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Counter, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
 
     ($name:literal, $value: ty, $attributes: expr) => {
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, $attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Counter, $attributes);
         assert_no_metric!(result, $name, None, None, None, &$attributes);
     };
 
     ($name:literal, $value: ty) => {
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, &[]);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Counter, &[]);
         assert_no_metric!(result, $name, None, None, None, &[]);
     };
 }
@@ -1444,30 +1592,30 @@ macro_rules! assert_histogram_exists {
 
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty) => {
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
         assert_metric!(result, $name, None, None, None, &[]);
     };
 }
@@ -1481,30 +1629,30 @@ macro_rules! assert_histogram_not_exists {
 
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
         assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty) => {
-        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
+        let result = crate::metrics::collect_metrics().metric_exists($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
         assert_no_metric!(result, $name, None, None, None, &[]);
     };
 }
@@ -1595,10 +1743,7 @@ pub(crate) trait FutureMetricsExt<T> {
                 // We want to eagerly create the meter provider, the reason is that this will be shared among subtasks that use `with_current_meter_provider`.
                 let _ = meter_provider_internal();
                 let result = self.await;
-                let _ = tokio::task::spawn_blocking(|| {
-                    meter_provider_internal().shutdown();
-                })
-                .await;
+                let _ = tokio::task::spawn_blocking(|| meter_provider_internal().shutdown()).await;
                 result
             }
             .boxed_local(),
@@ -1665,7 +1810,7 @@ mod test {
     fn assert_unit(name: &str, unit: &str) {
         let collected_metrics = crate::metrics::collect_metrics();
         let metric = collected_metrics.find(name).unwrap();
-        assert_eq!(metric.unit, unit);
+        assert_eq!(metric.unit(), unit);
     }
 
     #[test]
@@ -1675,13 +1820,13 @@ mod test {
             .meter("test")
             .u64_observable_gauge("test")
             .with_callback(|m| m.observe(5, &[]))
-            .init();
+            .build();
         assert_gauge!("test", 5);
     }
 
     #[test]
     fn test_gauge_record() {
-        let gauge = meter_provider().meter("test").u64_gauge("test").init();
+        let gauge = meter_provider().meter("test").u64_gauge("test").build();
         gauge.record(5, &[]);
         assert_gauge!("test", 5);
     }
@@ -1942,7 +2087,7 @@ mod test {
                 .meter("test")
                 .u64_observable_gauge("test")
                 .with_callback(|m| m.observe(5, &[]))
-                .init();
+                .build();
             assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()

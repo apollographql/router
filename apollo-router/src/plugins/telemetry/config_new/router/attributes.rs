@@ -126,8 +126,8 @@ mod test {
         let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
+                TraceId::from(42),
+                SpanId::from(42),
                 TraceFlags::default().with_sampled(true),
                 false,
                 TraceState::default(),

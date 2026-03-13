@@ -16,6 +16,7 @@ import Cors from '../../../shared/config/cors.mdx';
 import Csrf from '../../../shared/config/csrf.mdx';
 import DemandCtrl from '../../../shared/config/demand_control.mdx';
 import ExperimentalChaos from '../../../shared/config/experimental_chaos.mdx';
+import ExperimentalHoistOrphan from '../../../shared/config/experimental_hoist_orphan_errors.mdx';
 import ExperimentalType from '../../../shared/config/experimental_type_conditioned_fetching.mdx';
 import FleetDetector from '../../../shared/config/fleet_detector.mdx';
 import ForbidMut from '../../../shared/config/forbid_mutations.mdx';
@@ -134,11 +135,65 @@ Learn more in [Demand Control](/router/executing-operations/demand-control)
 
 ---
 
-<ExperimentalChaos /> 
+<ExperimentalChaos />
 
 ---
 
-<ExperimentalType /> 
+<ExperimentalHoistOrphan />
+
+<ExperimentalFeatureBadge />
+
+When the entity-resolution process for a subgraph returns errors that apply to multiple entities in a list, the router defaults to propagating each error to every matching entity path. That results in a multiplicative increase in the size of the returned error array.
+
+The `experimental_hoist_orphan_errors` option changes that behavior on a per-subgraph basis. When enabled, the router attaches each orphaned subgraph error to a single parent path instead of duplicating the error across every entity path, which can significantly reduce the number of errors in the response.
+
+<Caution>
+
+
+The `experimental_hoist_orphan_errors` option isn't compliant with the GraphQL spec. The option changes how errors are associated with paths in the response, compared to the behavior described in the [GraphQL specification](https://spec.graphql.org/). Only use the feature for your subgraphs when the reduction in error volume is more desirable than strict compliance.
+
+</Caution>
+
+
+To target a specific subgraph:
+
+```yaml title="router.yaml"
+experimental_hoist_orphan_errors:
+  subgraphs:
+    my_subgraph:
+      enabled: true
+```
+
+To target all subgraphs:
+
+```yaml title="router.yaml"
+experimental_hoist_orphan_errors:
+  all:
+    enabled: true
+```
+
+To target all subgraphs except one:
+
+```yaml title="router.yaml"
+experimental_hoist_orphan_errors:
+  all:
+    enabled: true
+  subgraphs:
+    spec_compliant_one:
+      enabled: false
+```
+
+Per-subgraph settings override `all`.
+
+<Note>
+
+Although the `experimental_hoist_orphan_errors` option can reduce the number of propagated errors, the option doesn't limit the total number of errors. If a subgraph returns a large number of errors, the router still processes all of them. For subgraphs that are likely to produce an unbounded number of errors, consider additional mitigation strategies at the subgraph level.
+
+</Note>
+
+---
+
+<ExperimentalType />
 
 ---
 
@@ -219,6 +274,15 @@ By default, the router obtains the routing URL for each of your subgraphs from t
 Unix socket paths should be absolute (starting with `/`). The URL format is `unix://` followed by the absolute path, resulting in three slashes: `unix:///var/run/subgraph.sock`.
 
 </Note>
+
+Because `.sock` is not required as a file extension, the router cannot determine if a path is appended to the base URL. Specify a custom HTTP path using the `path` query parameter:
+
+```yaml
+override_subgraph_url:
+  my_subgraph: "unix:///tmp/subgraph.sock?path=/graphql/v1"
+```
+
+This configuration also applies to subgraph URLs defined in your supergraph schema (using the `url` argument of the `@join__graph` directive).
 
 However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
 

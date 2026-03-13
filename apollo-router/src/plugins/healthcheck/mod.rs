@@ -19,7 +19,6 @@ use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use tokio::time::Instant;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -200,21 +199,22 @@ impl PluginPrivate for HealthCheck {
         let my_ready = ready.clone();
 
         let ticker = tokio::spawn(async move {
+            let mut sampling_interval = tokio::time::interval(my_sampling_interval);
+            sampling_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
             loop {
-                let start = Instant::now() + my_sampling_interval;
-                let mut interval = tokio::time::interval_at(start, my_sampling_interval);
-                loop {
-                    interval.tick().await;
-                    if my_rejected.load(Ordering::Relaxed) > allowed {
-                        my_ready.store(false, Ordering::SeqCst);
-                        tokio::time::sleep(my_recovery_interval).await;
-                        my_rejected.store(0, Ordering::Relaxed);
-                        my_ready.store(true, Ordering::SeqCst);
-                        break;
-                    }
+                sampling_interval.tick().await;
+                let rejected_count = my_rejected.swap(0, Ordering::Relaxed);
+
+                if rejected_count > allowed {
+                    my_ready.store(false, Ordering::SeqCst);
+                    tokio::time::sleep(my_recovery_interval).await;
+                    my_rejected.store(0, Ordering::Relaxed);
+                    my_ready.store(true, Ordering::SeqCst);
                 }
             }
         });
+
         Ok(Self {
             config: init.config,
             live,
@@ -537,6 +537,246 @@ mod test {
             "UP",
             StatusCode::SERVICE_UNAVAILABLE,
             false,
+        )
+        .await;
+    }
+
+    // Helper to build a fresh health?ready= request
+    fn ready_request(router_addr: &str) -> http::Request<http_body_util::Empty<bytes::Bytes>> {
+        http::Request::builder()
+            .uri(format!("http://{router_addr}/health?ready="))
+            .body(http_body_util::Empty::new())
+            .expect("valid request")
+    }
+
+    // Helper to assert the JSON health body and HTTP status of a response
+    async fn assert_health_response(
+        response: http::Response<axum::body::Body>,
+        expected_status: StatusCode,
+        expected_json: &str,
+    ) {
+        assert_eq!(expected_status, response.status());
+        let body_json: serde_json::Value = serde_json::from_slice(
+            &crate::services::router::body::into_bytes(response)
+                .await
+                .expect("response body should be readable"),
+        )
+        .expect("response body should be parseable as JSON");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(expected_json).unwrap(),
+            body_json
+        );
+    }
+
+    // Verifies that after exceeding the rejection threshold the router reports DOWN,
+    // and that it automatically returns to UP once the recovery interval has elapsed.
+    //
+    // Uses unready=5s so the DOWN check at 2s always falls well within the recovery window,
+    // regardless of when the sampling tick fires after switching to tokio::time::interval
+    // (which fires the first tick immediately on first poll, during setup).
+    #[tokio::test]
+    async fn test_health_check_recovery_after_unready() {
+        let router_addr = "127.0.0.1:8088";
+        let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
+
+        let (axum_router_opt, pipeline_svc_opt, _test_harness) = get_axum_router(
+            listen_addr,
+            include_str!("testdata/allowed_ten_five_second_recovery.router.yaml"),
+            StatusCode::GATEWAY_TIMEOUT,
+        )
+        .await;
+
+        // Exceed the threshold of 10 to trigger unready
+        let pipeline_svc = pipeline_svc_opt.expect("pipeline service must exist");
+        for _ in 0..20 {
+            let _ = pipeline_svc.call_default().await.unwrap();
+        }
+
+        // Wait for the sampling tick to evaluate the count (sampling=1s + 1s buffer).
+        // Recovery takes 5s, so 2s is safely inside the window even if the tick fires at t=0.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let mut axum_router = axum_router_opt.expect("endpoint must exist").into_router();
+        let mut svc = axum_router.as_service();
+
+        // Should be DOWN
+        let response = svc
+            .ready()
+            .await
+            .expect("readied")
+            .call(ready_request(router_addr))
+            .await
+            .expect("called");
+        assert_health_response(
+            response,
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"status":"DOWN"}"#,
+        )
+        .await;
+
+        // Wait for the recovery interval to elapse (unready=5s + 2s buffer)
+        tokio::time::sleep(Duration::from_secs(7)).await;
+
+        // Should be UP again
+        let response = svc
+            .ready()
+            .await
+            .expect("readied")
+            .call(ready_request(router_addr))
+            .await
+            .expect("called");
+        assert_health_response(response, StatusCode::OK, r#"{"status":"UP"}"#).await;
+    }
+
+    // Verifies that the rejection counter is correctly reset between sampling windows,
+    // allowing the router to go unready, recover, and go unready again in a second cycle.
+    // This directly validates the swap(0, ...) atomic reset in the ticker loop.
+    //
+    // Uses unready=5s so that the DOWN checks always fall well within the recovery window,
+    // avoiding a race condition on slow CI environments (ARM, Windows) where a 2s wait could
+    // land right at the boundary of a 2s recovery and produce a non-deterministic result.
+    #[tokio::test]
+    async fn test_health_check_multiple_unready_cycles() {
+        let router_addr = "127.0.0.1:8088";
+        let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
+
+        let (axum_router_opt, pipeline_svc_opt, _test_harness) = get_axum_router(
+            listen_addr,
+            include_str!("testdata/allowed_ten_five_second_recovery.router.yaml"),
+            StatusCode::GATEWAY_TIMEOUT,
+        )
+        .await;
+
+        let pipeline_svc = pipeline_svc_opt.expect("pipeline service must exist");
+        let mut axum_router = axum_router_opt.expect("endpoint must exist").into_router();
+        let mut svc = axum_router.as_service();
+
+        // --- Cycle 1 ---
+        for _ in 0..20 {
+            let _ = pipeline_svc.call_default().await.unwrap();
+        }
+        // Wait for sampling tick (1s) + buffer; recovery takes 5s so we are safely inside it
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let response = svc
+            .ready()
+            .await
+            .expect("readied")
+            .call(ready_request(router_addr))
+            .await
+            .expect("called");
+        assert_health_response(
+            response,
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"status":"DOWN"}"#,
+        )
+        .await;
+
+        // Wait for recovery (unready=5s + 1s buffer)
+        tokio::time::sleep(Duration::from_secs(6)).await;
+
+        let response = svc
+            .ready()
+            .await
+            .expect("readied")
+            .call(ready_request(router_addr))
+            .await
+            .expect("called");
+        assert_health_response(response, StatusCode::OK, r#"{"status":"UP"}"#).await;
+
+        // --- Cycle 2: counter must have been reset; a new wave should trigger unready again ---
+        for _ in 0..20 {
+            let _ = pipeline_svc.call_default().await.unwrap();
+        }
+        // Wait for sampling tick (1s) + buffer; recovery takes 5s so we are safely inside it
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let response = svc
+            .ready()
+            .await
+            .expect("readied")
+            .call(ready_request(router_addr))
+            .await
+            .expect("called");
+        assert_health_response(
+            response,
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"status":"DOWN"}"#,
+        )
+        .await;
+    }
+
+    // Verifies the boundary condition: exactly `allowed` rejections must NOT trigger unready
+    // because the condition is strictly `rejected_count > allowed`.
+    #[tokio::test]
+    async fn test_health_check_at_rejection_threshold_stays_up() {
+        let router_addr = "127.0.0.1:8088";
+        let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
+
+        let (axum_router_opt, pipeline_svc_opt, _test_harness) = get_axum_router(
+            listen_addr,
+            include_str!("testdata/allowed_ten_short_recovery.router.yaml"),
+            StatusCode::GATEWAY_TIMEOUT,
+        )
+        .await;
+
+        // Send exactly `allowed` (10) bad requests — should NOT exceed the threshold
+        if let Some(pipeline_svc) = pipeline_svc_opt {
+            for _ in 0..10 {
+                let _ = pipeline_svc.call_default().await.unwrap();
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let mut axum_router = axum_router_opt.expect("endpoint must exist").into_router();
+        let mut svc = axum_router.as_service();
+        let response = svc
+            .ready()
+            .await
+            .expect("readied")
+            .call(ready_request(router_addr))
+            .await
+            .expect("called");
+        assert_health_response(response, StatusCode::OK, r#"{"status":"UP"}"#).await;
+    }
+
+    // Verifies the boundary condition: `allowed + 1` rejections MUST trigger unready.
+    //
+    // Uses unready=5s so the DOWN check at 2s is safely inside the recovery window regardless
+    // of when the sampling tick fires (first tick fires immediately on first poll with interval()).
+    #[tokio::test]
+    async fn test_health_check_one_above_rejection_threshold_goes_down() {
+        let router_addr = "127.0.0.1:8088";
+        let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
+
+        let (axum_router_opt, pipeline_svc_opt, _test_harness) = get_axum_router(
+            listen_addr,
+            include_str!("testdata/allowed_ten_five_second_recovery.router.yaml"),
+            StatusCode::GATEWAY_TIMEOUT,
+        )
+        .await;
+
+        // Send `allowed + 1` (11) bad requests — must exceed the threshold
+        if let Some(pipeline_svc) = pipeline_svc_opt {
+            for _ in 0..11 {
+                let _ = pipeline_svc.call_default().await.unwrap();
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let mut axum_router = axum_router_opt.expect("endpoint must exist").into_router();
+        let mut svc = axum_router.as_service();
+        let response = svc
+            .ready()
+            .await
+            .expect("readied")
+            .call(ready_request(router_addr))
+            .await
+            .expect("called");
+        assert_health_response(
+            response,
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"status":"DOWN"}"#,
         )
         .await;
     }
