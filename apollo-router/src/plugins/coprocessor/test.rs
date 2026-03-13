@@ -83,12 +83,12 @@ mod tests {
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::coprocessor::BodyConf;
+    use crate::plugins::coprocessor::BodyFieldsConf;
     use crate::plugins::coprocessor::RouterRequestConf;
     use crate::plugins::coprocessor::RouterResponseConf;
     use crate::plugins::coprocessor::SubgraphRequestConf;
     use crate::plugins::coprocessor::SubgraphResponseConf;
-    use crate::plugins::coprocessor::BodyConf;
-    use crate::plugins::coprocessor::BodyFieldsConf;
     use crate::plugins::coprocessor::handle_graphql_response;
     use crate::plugins::coprocessor::is_graphql_response_minimally_valid;
     use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
@@ -4141,7 +4141,10 @@ mod tests {
         // Errors should be modified by coprocessor
         assert_eq!(response.response.body().errors[0].message, "modified error");
         // Original data should be preserved since it wasn't sent to coprocessor
-        assert_eq!(json!({ "test": 1234_u32 }), response.response.body().data.unwrap());
+        assert_eq!(
+            json!({ "test": 1234_u32 }),
+            response.response.body().data.unwrap()
+        );
     }
 
     #[tokio::test]
@@ -4222,7 +4225,10 @@ mod tests {
         let response = service.oneshot(request).await.unwrap();
 
         // Data and extensions should be modified by coprocessor
-        assert_eq!(json!({ "test": 5678_u32 }), response.response.body().data.unwrap());
+        assert_eq!(
+            json!({ "test": 5678_u32 }),
+            response.response.body().data.unwrap()
+        );
         assert_eq!(
             json!("modified_value"),
             response.response.body().extensions.get("ext_key").unwrap()
@@ -4290,7 +4296,10 @@ mod tests {
         let response = service.oneshot(request).await.unwrap();
 
         // Original data should be preserved
-        assert_eq!(json!({ "test": 1234_u32 }), response.response.body().data.unwrap());
+        assert_eq!(
+            json!({ "test": 1234_u32 }),
+            response.response.body().data.unwrap()
+        );
     }
 
     #[allow(clippy::type_complexity)]
@@ -4456,8 +4465,8 @@ mod tests {
 
     #[test]
     fn test_filter_graphql_response_body() {
-        use crate::plugins::coprocessor::filter_graphql_response_body;
         use crate::plugins::coprocessor::BodyFieldsConf;
+        use crate::plugins::coprocessor::filter_graphql_response_body;
 
         // Test BodyConf::All(false) returns None
         let response = valid_response();
@@ -4472,12 +4481,13 @@ mod tests {
         // Test selective: only errors
         let response_with_errors = graphql::Response::builder()
             .data(serde_json_bytes::json!({"test": "data"}))
-            .errors(vec![graphql::Error::builder()
-                .message("test error")
-                .build()])
-            .extensions(serde_json_bytes::Map::from_iter([
-                ("ext_key".into(), serde_json_bytes::json!("ext_value")),
-            ]))
+            .errors(vec![
+                graphql::Error::builder().message("test error").build(),
+            ])
+            .extensions(serde_json_bytes::Map::from_iter([(
+                "ext_key".into(),
+                serde_json_bytes::json!("ext_value"),
+            )]))
             .build();
 
         let result = filter_graphql_response_body(
@@ -4509,7 +4519,10 @@ mod tests {
         assert!(result.is_some());
         let body = result.unwrap();
         assert!(body.get("data").is_some(), "data should be included");
-        assert!(body.get("errors").is_none(), "errors should not be included");
+        assert!(
+            body.get("errors").is_none(),
+            "errors should not be included"
+        );
 
         // Test selective: all fields
         let result = filter_graphql_response_body(

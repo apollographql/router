@@ -1583,8 +1583,7 @@ where
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphResponse)?;
 
     // Check if the incoming GraphQL response was valid according to GraphQL spec
-    let incoming_payload_was_valid =
-        was_incoming_payload_valid(&body, &response_config.body);
+    let incoming_payload_was_valid = was_incoming_payload_valid(&body, &response_config.body);
 
     // Third, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming response with the updated bits if they
@@ -1689,7 +1688,10 @@ pub(super) fn is_graphql_response_minimally_valid(response: &graphql::Response) 
 
 /// Check if the incoming payload was valid for conditional validation purposes.
 /// Returns true if body was not sent to coprocessor OR if the response is minimally valid.
-pub(super) fn was_incoming_payload_valid(response: &graphql::Response, body_conf: &BodyConf) -> bool {
+pub(super) fn was_incoming_payload_valid(
+    response: &graphql::Response,
+    body_conf: &BodyConf,
+) -> bool {
     if body_conf.should_send_any() {
         // If we sent any body fields to the coprocessor, check if it was minimally valid
         is_graphql_response_minimally_valid(response)
