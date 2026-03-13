@@ -44,7 +44,20 @@ expression: response
     {
       "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
       "path": [
-        "topProducts"
+        "topProducts",
+        0
+      ],
+      "extensions": {
+        "service": "inventory",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    },
+    {
+      "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        1
       ],
       "extensions": {
         "service": "inventory",

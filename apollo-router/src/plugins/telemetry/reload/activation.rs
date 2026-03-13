@@ -25,10 +25,12 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use opentelemetry::InstrumentationScope;
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
 use prometheus::Registry;
+use tokio::task::block_in_place;
 use tokio::task::spawn_blocking;
 use tracing_subscriber::Layer;
 
@@ -46,7 +48,7 @@ use crate::plugins::telemetry::reload::otel::reload_fmt;
 /// then atomically applies them during the activation phase via [`Activation::commit()`].
 pub(crate) struct Activation {
     /// The new tracer provider. None means leave the existing one
-    new_trace_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
+    new_trace_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
 
     /// The new tracer propagator. None means leave the existing one
     new_trace_propagator: Option<TextMapCompositePropagator>,
@@ -135,7 +137,7 @@ impl Activation {
 
     pub(crate) fn with_tracer_provider(
         &mut self,
-        tracer_provider: opentelemetry_sdk::trace::TracerProvider,
+        tracer_provider: opentelemetry_sdk::trace::SdkTracerProvider,
     ) {
         self.new_trace_provider = Some(tracer_provider);
         #[cfg(test)]
@@ -191,17 +193,16 @@ impl Activation {
             && let Some(tracer_provider) = self.new_trace_provider.take()
         {
             // Build a new tracer from the provider and hot-swap it into the tracing subscriber
-            let tracer = tracer_provider
-                .tracer_builder(GLOBAL_TRACER_NAME)
+            let scope = InstrumentationScope::builder(GLOBAL_TRACER_NAME)
                 .with_version(env!("CARGO_PKG_VERSION"))
                 .build();
+            let tracer = tracer_provider.tracer_with_scope(scope);
             hot_tracer.reload(tracer);
 
-            // Install the new provider globally and safely drop the old one in a blocking task
-            let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            spawn_blocking(move || {
-                drop(last_provider);
-            });
+            // Install the new provider globally. The old provider is returned and must be
+            // dropped in a blocking task to avoid deadlocking the async runtime during shutdown.
+            // block_in_place is used to ensure that no tasks after this point use the old tracer provider.
+            block_in_place(move || opentelemetry::global::set_tracer_provider(tracer_provider));
         }
     }
 

@@ -1248,8 +1248,8 @@ mod test {
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
+                TraceId::from(42),
+                SpanId::from(42),
                 // Make sure it's sampled if not, it won't create anything at the otel layer
                 TraceFlags::default().with_sampled(true),
                 false,

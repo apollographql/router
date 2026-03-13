@@ -44,7 +44,20 @@ expression: response
     {
       "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
       "path": [
-        "topProducts"
+        "topProducts",
+        0
+      ],
+      "extensions": {
+        "service": "inventory",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    },
+    {
+      "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        1
       ],
       "extensions": {
         "service": "inventory",
@@ -55,7 +68,41 @@ expression: response
     {
       "message": "service 'accounts' response was malformed: graphql response without data must contain at least one error",
       "path": [
-        "topProducts"
+        "topProducts",
+        0,
+        "reviews",
+        0,
+        "author"
+      ],
+      "extensions": {
+        "service": "accounts",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    },
+    {
+      "message": "service 'accounts' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        0,
+        "reviews",
+        1,
+        "author"
+      ],
+      "extensions": {
+        "service": "accounts",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    },
+    {
+      "message": "service 'accounts' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        1,
+        "reviews",
+        0,
+        "author"
       ],
       "extensions": {
         "service": "accounts",

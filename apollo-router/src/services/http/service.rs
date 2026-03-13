@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::task::Poll;
-use std::time::Duration;
 
 use ::serde::Deserialize;
 use bytes::Buf;
@@ -19,6 +18,7 @@ use http_body::Frame;
 use http_body_util::BodyExt;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::rt::TokioTimer;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
 use opentelemetry::global::get_text_map_propagator;
@@ -174,8 +174,6 @@ type MixedClient = HTTPClient;
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
-// TODO: make this configurable: ROUTER-1589
-const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -201,6 +199,8 @@ impl Display for Compression {
     }
 }
 
+/// A set of clients (http, unix) for talking with external services like coprocessors, subgraphs,
+/// connectors-connected subgraphs, and so on, implemented as a tower service
 #[derive(Clone)]
 pub(crate) struct HttpClientService {
     // Note: We use hyper_util::client::legacy::Client here in preference to reqwest to avoid expensive URL translation
@@ -213,6 +213,90 @@ pub(crate) struct HttpClientService {
 }
 
 impl HttpClientService {
+    /// Test-wrapper for HttpClientService::new()
+    ///
+    /// NOTE: this separation is primarily to keep us from exposing `new()`
+    /// when we don't need to
+    #[cfg_attr(test, allow(unreachable_pub))]
+    pub(crate) fn test_new(
+        service: impl Into<String>,
+        tls_config: ClientConfig,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        Self::new(service, tls_config, client_config)
+    }
+
+    /// Create a new HttpClientService using:
+    ///
+    /// - the service's name (eg, connector name, hardcoded "coprocessor", or the subgraph's name) for
+    ///   use in errors and potentially signing requests
+    /// - the tls config to be used in setting tls; though, this is actually rustls's and hyper
+    ///   figuring out which parts of a broader config to use for tls
+    /// - the client's config, which is _our_ set of options from the router config for use in
+    ///   enabling/disabling features like http/2
+    fn new(
+        service: impl Into<String>,
+        tls_config: ClientConfig,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let mut http_connector =
+            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+        http_connector.enforce_http(false);
+
+        let builder = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http()
+            .enable_http1();
+
+        let pool_idle_timeout = client_config.pool_idle_timeout;
+
+        let http2 = client_config.experimental_http2.unwrap_or_default();
+        let connector = if http2 != Http2Config::Disable {
+            builder.enable_http2().wrap_connector(http_connector)
+        } else {
+            builder.wrap_connector(http_connector)
+        };
+
+        let http_client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .pool_idle_timeout(pool_idle_timeout)
+                // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
+                // unless you're also removing `pool_idle_timeout`
+                .pool_timer(TokioTimer::new())
+                .http2_only(http2 == Http2Config::Http2Only)
+                .build(connector);
+
+        #[cfg(unix)]
+        let unix_client = {
+            let unix_client_inner =
+                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                    .pool_idle_timeout(pool_idle_timeout)
+                    // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
+                    // unless you're also removing `pool_idle_timeout`
+                    .pool_timer(TokioTimer::new())
+                    .http2_only(http2 == Http2Config::Http2Only)
+                    .build(UnixConnector);
+
+            ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .layer(WireBodySizeLayer)
+                .service(unix_client_inner)
+        };
+
+        Ok(Self {
+            http_client: ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .layer(WireBodySizeLayer)
+                .service(http_client),
+            #[cfg(unix)]
+            unix_client,
+            service: Arc::new(service.into()),
+        })
+    }
+
+    /// Creates a client for talking to subgraphs
     pub(crate) fn from_config_for_subgraph(
         service: impl Into<String>,
         configuration: &Configuration,
@@ -248,9 +332,10 @@ impl HttpClientService {
         let tls_client_config =
             generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
 
-        HttpClientService::new(name, tls_client_config, client_config)
+        Self::new(name, tls_client_config, client_config)
     }
 
+    /// Creates a client for talking to connectors-connected subgraphs
     pub(crate) fn from_config_for_connector(
         source_name: impl Into<String>,
         configuration: &Configuration,
@@ -286,9 +371,12 @@ impl HttpClientService {
         let tls_client_config =
             generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
 
-        HttpClientService::new(name, tls_client_config, client_config)
+        Self::new(name, tls_client_config, client_config)
     }
 
+    /// Creates a client for talking to coprocessors
+    ///
+    /// NOTE: the service name is hardcoded to "coprocessor"
     pub(crate) fn from_config_for_coprocessor(
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
@@ -296,63 +384,13 @@ impl HttpClientService {
         // Coprocessors don't use client certificates, so use no client auth
         let tls_client_config = generate_tls_client_config(tls_root_store.clone(), None)?;
 
-        HttpClientService::new("coprocessor".to_string(), tls_client_config, client_config)
+        Self::new("coprocessor".to_string(), tls_client_config, client_config)
     }
 
-    pub(crate) fn new(
-        service: impl Into<String>,
-        tls_config: ClientConfig,
-        client_config: crate::configuration::shared::Client,
-    ) -> Result<Self, BoxError> {
-        let mut http_connector =
-            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
-        http_connector.set_nodelay(true);
-        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-        http_connector.enforce_http(false);
-
-        let builder = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
-            .https_or_http()
-            .enable_http1();
-
-        let http2 = client_config.experimental_http2.unwrap_or_default();
-        let connector = if http2 != Http2Config::Disable {
-            builder.enable_http2().wrap_connector(http_connector)
-        } else {
-            builder.wrap_connector(http_connector)
-        };
-
-        let http_client =
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                .http2_only(http2 == Http2Config::Http2Only)
-                .build(connector);
-
-        #[cfg(unix)]
-        let unix_client = {
-            let unix_client_inner =
-                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                    .http2_only(http2 == Http2Config::Http2Only)
-                    .build(UnixConnector);
-
-            ServiceBuilder::new()
-                .layer(DecompressionLayer::new())
-                .layer(WireBodySizeLayer)
-                .service(unix_client_inner)
-        };
-
-        Ok(Self {
-            http_client: ServiceBuilder::new()
-                .layer(DecompressionLayer::new())
-                .layer(WireBodySizeLayer)
-                .service(http_client),
-            #[cfg(unix)]
-            unix_client,
-            service: Arc::new(service.into()),
-        })
-    }
-
+    /// Creates a root certificate store with native certificates. These are used for root-of-trust
+    /// authentication for connections
+    ///
+    /// WARN: if no CA certificates are found, this function will panic
     pub(crate) fn native_roots_store() -> RootCertStore {
         let mut roots = rustls::RootCertStore::empty();
 
