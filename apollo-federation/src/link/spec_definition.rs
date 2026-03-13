@@ -190,12 +190,10 @@ pub(crate) trait SpecDefinition {
             }
         }
 
-        if errors.errors.len() > 1 {
-            Err(FederationError::MultipleFederationErrors(errors))
-        } else if let Some(error) = errors.errors.pop() {
-            Err(FederationError::SingleFederationError(error))
-        } else {
-            Ok(())
+        match errors.errors.as_slice() {
+            [] => Ok(()),
+            [error] => Err(FederationError::SingleFederationError(error.clone())),
+            _ => Err(FederationError::MultipleFederationErrors(errors)),
         }
     }
 }

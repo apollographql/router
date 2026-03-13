@@ -1,8 +1,5 @@
 use derivative::Derivative;
-use futures::TryFutureExt;
-use futures::future;
-use futures::future::BoxFuture;
-use opentelemetry::InstrumentationLibrary;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Event;
 use opentelemetry::trace::SpanContext;
@@ -11,11 +8,12 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::ExportResult;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanEvents;
+use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::trace::SpanLinks;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
@@ -46,10 +44,7 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATI
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct ApolloOtlpExporter {
-    batch_config: BatchProcessorConfig,
-    endpoint: Url,
-    apollo_key: String,
-    intrumentation_library: InstrumentationLibrary,
+    instrumentation_scope: InstrumentationScope,
     #[derivative(Debug = "ignore")]
     otlp_exporter: opentelemetry_otlp::SpanExporter,
     errors_configuration: ErrorsConfiguration,
@@ -71,47 +66,44 @@ impl ApolloOtlpExporter {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
         let mut otlp_exporter = match protocol {
-            Protocol::Grpc => SpanExporterBuilder::from(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                    .with_timeout(batch_config.max_export_timeout)
-                    .with_endpoint(endpoint.to_string())
-                    .with_metadata(metadata)
-                    .with_compression(opentelemetry_otlp::Compression::Gzip),
-            )
-            .build_span_exporter()?,
+            Protocol::Grpc => SpanExporterBuilder::new()
+                .with_tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                .with_timeout(batch_config.max_export_timeout)
+                .with_endpoint(endpoint.to_string())
+                .with_metadata(metadata)
+                .with_compression(opentelemetry_otlp::Compression::Gzip)
+                .build()?,
             // So far only using HTTP path for testing - the Studio backend only accepts GRPC today.
-            Protocol::Http => SpanExporterBuilder::from(
-                opentelemetry_otlp::new_exporter()
-                    .http()
-                    .with_timeout(batch_config.max_export_timeout)
-                    .with_endpoint(endpoint.to_string()),
-            )
-            .build_span_exporter()?,
+            Protocol::Http => SpanExporterBuilder::new()
+                .with_http()
+                .with_timeout(batch_config.max_export_timeout)
+                .with_endpoint(endpoint.to_string())
+                .build()?,
         };
 
-        otlp_exporter.set_resource(&Resource::new([
-            KeyValue::new("apollo.router.id", router_id()),
-            KeyValue::new("apollo.graph.ref", apollo_graph_ref.to_string()),
-            KeyValue::new("apollo.schema.id", schema_id.to_string()),
-            KeyValue::new(
-                "apollo.user.agent",
-                format!(
-                    "{}@{}",
-                    std::env!("CARGO_PKG_NAME"),
-                    std::env!("CARGO_PKG_VERSION")
-                ),
-            ),
-            KeyValue::new("apollo.client.host", hostname()?),
-            KeyValue::new("apollo.client.uname", get_uname()?),
-        ]));
+        otlp_exporter.set_resource(
+            &Resource::builder_empty()
+                .with_attributes([
+                    KeyValue::new("apollo.router.id", router_id()),
+                    KeyValue::new("apollo.graph.ref", apollo_graph_ref.to_string()),
+                    KeyValue::new("apollo.schema.id", schema_id.to_string()),
+                    KeyValue::new(
+                        "apollo.user.agent",
+                        format!(
+                            "{}@{}",
+                            std::env!("CARGO_PKG_NAME"),
+                            std::env!("CARGO_PKG_VERSION")
+                        ),
+                    ),
+                    KeyValue::new("apollo.client.host", hostname()?),
+                    KeyValue::new("apollo.client.uname", get_uname()?),
+                ])
+                .build(),
+        );
 
         Ok(Self {
-            endpoint: endpoint.clone(),
-            batch_config: batch_config.clone(),
-            apollo_key: apollo_key.to_string(),
-            intrumentation_library: InstrumentationLibrary::builder(GLOBAL_TRACER_NAME)
+            instrumentation_scope: InstrumentationScope::builder(GLOBAL_TRACER_NAME)
                 .with_version(format!(
                     "{}@{}",
                     std::env!("CARGO_PKG_NAME"),
@@ -185,6 +177,7 @@ impl ApolloOtlpExporter {
                 TraceState::default(),
             ),
             parent_span_id: span.parent_span_id,
+            parent_span_is_remote: false,
             span_kind: span.span_kind.clone(),
             name: span.name.clone(),
             start_time: span.start_time,
@@ -197,7 +190,7 @@ impl ApolloOtlpExporter {
             events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status: span.status,
-            instrumentation_lib: self.intrumentation_library.clone(),
+            instrumentation_scope: self.instrumentation_scope.clone(),
             dropped_attributes_count: span.droppped_attribute_count,
         }
     }
@@ -238,6 +231,7 @@ impl ApolloOtlpExporter {
                 TraceState::default(),
             ),
             parent_span_id: span.parent_span_id,
+            parent_span_is_remote: false,
             span_kind: span.span_kind.clone(),
             name: span.name.clone(),
             start_time: span.start_time,
@@ -250,27 +244,27 @@ impl ApolloOtlpExporter {
             events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status,
-            instrumentation_lib: self.intrumentation_library.clone(),
+            instrumentation_scope: self.instrumentation_scope.clone(),
             dropped_attributes_count: span.droppped_attribute_count,
         }
     }
+}
 
-    pub(crate) fn export(&mut self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
-        let fut = self.otlp_exporter.export(spans);
-        Box::pin(fut.and_then(|_| {
-            // re-use the metric we already have in apollo_exporter but attach the protocol
-            u64_counter!(
-                "apollo.router.telemetry.studio.reports",
-                "The number of reports submitted to Studio by the Router",
-                1,
-                report.type = ROUTER_REPORT_TYPE_TRACES,
-                report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
-            );
-            future::ready(Ok(()))
-        }))
+impl SpanExporter for ApolloOtlpExporter {
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        self.otlp_exporter.export(batch).await?;
+        // re-use the metric we already have in apollo_exporter but attach the protocol
+        u64_counter!(
+            "apollo.router.telemetry.studio.reports",
+            "The number of reports submitted to Studio by the Router",
+            1,
+            report.type = ROUTER_REPORT_TYPE_TRACES,
+            report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
+        );
+        Ok(())
     }
 
-    pub(crate) fn shutdown(&mut self) {
-        self.otlp_exporter.shutdown()
+    fn shutdown_with_timeout(&mut self, timeout: std::time::Duration) -> OTelSdkResult {
+        self.otlp_exporter.shutdown_with_timeout(timeout)
     }
 }
