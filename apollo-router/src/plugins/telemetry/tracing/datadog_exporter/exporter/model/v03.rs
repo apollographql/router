@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::SpanData;
 
 use crate::plugins::telemetry::tracing::datadog_exporter::Error;
 use crate::plugins::telemetry::tracing::datadog_exporter::ModelConfig;
@@ -111,7 +111,7 @@ where
                     rmp::encode::write_str(&mut encoded, value.as_str().as_ref())?;
                 }
             }
-            for KeyValue { key, value } in span.attributes.iter() {
+            for KeyValue { key, value, .. } in span.attributes.iter() {
                 rmp::encode::write_str(&mut encoded, key.as_str())?;
                 rmp::encode::write_str(&mut encoded, value.as_str().as_ref())?;
             }

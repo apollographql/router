@@ -591,7 +591,7 @@ impl From<InstrumentData> for Metrics {
                         .with_callback(move |observer| {
                             observer.observe(value, &attributes);
                         })
-                        .init()
+                        .build()
                 })
                 .collect(),
         }
@@ -605,6 +605,7 @@ mod test {
 
     use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
+    use crate::metrics::FutureMetricsExt;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
 
@@ -612,20 +613,27 @@ mod test {
     #[folder = "src/configuration/testdata/metrics"]
     struct Asset;
 
-    #[test]
-    fn test_metrics() {
+    #[tokio::test]
+    async fn test_metrics() {
+        // Each config file needs to be tested in isolation to avoid callback accumulation
+        // across iterations (observable gauge callbacks persist until provider shutdown)
         for file_name in Asset::iter() {
-            let source = Asset::get(&file_name).expect("test file must exist");
-            let input = std::str::from_utf8(&source.data)
-                .expect("expected utf8")
-                .to_string();
-            let yaml = &serde_yaml::from_str::<serde_json::Value>(&input)
-                .expect("config must be valid yaml");
+            let file_name_owned = file_name.to_string();
+            async {
+                let source = Asset::get(&file_name_owned).expect("test file must exist");
+                let input = std::str::from_utf8(&source.data)
+                    .expect("expected utf8")
+                    .to_string();
+                let yaml = &serde_yaml::from_str::<serde_json::Value>(&input)
+                    .expect("config must be valid yaml");
 
-            let mut data = InstrumentData::default();
-            data.populate_config_instruments(yaml);
-            let _metrics: Metrics = data.into();
-            assert_non_zero_metrics_snapshot!(file_name);
+                let mut data = InstrumentData::default();
+                data.populate_config_instruments(yaml);
+                let _metrics: Metrics = data.into();
+                assert_non_zero_metrics_snapshot!(file_name_owned);
+            }
+            .with_metrics()
+            .await;
         }
     }
 

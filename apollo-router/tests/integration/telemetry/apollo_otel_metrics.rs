@@ -42,8 +42,10 @@ async fn test_validation_error_emits_metric() {
             telemetry:
               apollo:
                 experimental_otlp_metrics_protocol: http
-                batch_processor:
-                  scheduled_delay: 10ms
+                metrics:
+                  otlp:
+                    batch_processor:
+                      scheduled_delay: 100ms
                 errors:
                   preview_extended_error_metrics: enabled
         "#,
@@ -63,7 +65,7 @@ async fn test_validation_error_emits_metric() {
     assert!(response.contains(expected_error_code));
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
     assert!(!metrics.is_empty());
     assert_metrics_contain(
@@ -96,8 +98,10 @@ async fn test_subgraph_http_error_emits_metric() {
             telemetry:
               apollo:
                 experimental_otlp_metrics_protocol: http
-                batch_processor:
-                  scheduled_delay: 10ms
+                metrics:
+                  otlp:
+                    batch_processor:
+                      scheduled_delay: 100ms
                 errors:
                   preview_extended_error_metrics: enabled
             include_subgraph_errors:
@@ -124,7 +128,7 @@ async fn test_subgraph_http_error_emits_metric() {
     assert!(response.contains(expected_error_code));
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
 
     assert!(!metrics.is_empty());
@@ -163,8 +167,10 @@ async fn test_subgraph_layer_error_emits_metric() {
             telemetry:
               apollo:
                 experimental_otlp_metrics_protocol: http
-                batch_processor:
-                  scheduled_delay: 10ms
+                metrics:
+                  otlp:
+                    batch_processor:
+                      scheduled_delay: 100ms
                 errors:
                   preview_extended_error_metrics: enabled
         "#,
@@ -201,7 +207,7 @@ async fn test_subgraph_layer_error_emits_metric() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(200))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
 
     assert!(!metrics.is_empty());
@@ -240,8 +246,10 @@ async fn test_subgraph_layer_entities_error_emits_metric() {
             telemetry:
               apollo:
                 experimental_otlp_metrics_protocol: http
-                batch_processor:
-                  scheduled_delay: 10ms
+                metrics:
+                  otlp:
+                    batch_processor:
+                      scheduled_delay: 100ms
                 errors:
                   preview_extended_error_metrics: enabled
         "#,
@@ -278,7 +286,7 @@ async fn test_subgraph_layer_entities_error_emits_metric() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
 
     assert!(!metrics.is_empty());
@@ -318,8 +326,10 @@ async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
             telemetry:
               apollo:
                 experimental_otlp_metrics_protocol: http
-                batch_processor:
-                  scheduled_delay: 10ms
+                metrics:
+                  otlp:
+                    batch_processor:
+                      scheduled_delay: 100ms
                 errors:
                   preview_extended_error_metrics: enabled
             include_subgraph_errors:
@@ -358,7 +368,7 @@ async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
 
     assert!(!metrics.is_empty());
@@ -398,8 +408,10 @@ async fn test_supergraph_layer_error_emits_metric() {
           telemetry:
             apollo:
               experimental_otlp_metrics_protocol: http
-              batch_processor:
-                scheduled_delay: 10ms
+              metrics:
+                otlp:
+                  batch_processor:
+                    scheduled_delay: 100ms
               errors:
                 preview_extended_error_metrics: enabled
           supergraph:
@@ -423,7 +435,7 @@ async fn test_supergraph_layer_error_emits_metric() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
 
     assert!(!metrics.is_empty());
@@ -461,8 +473,10 @@ async fn test_execution_layer_error_emits_metric() {
           telemetry:
             apollo:
               experimental_otlp_metrics_protocol: http
-              batch_processor:
-                scheduled_delay: 10ms
+              metrics:
+                otlp:
+                  batch_processor:
+                    scheduled_delay: 100ms
               errors:
                 preview_extended_error_metrics: enabled
           forbid_mutations: true
@@ -487,7 +501,7 @@ async fn test_execution_layer_error_emits_metric() {
     ).await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
 
     assert!(!metrics.is_empty());
@@ -526,8 +540,10 @@ async fn test_router_layer_error_emits_metric() {
           telemetry:
             apollo:
               experimental_otlp_metrics_protocol: http
-              batch_processor:
-                scheduled_delay: 10ms
+              metrics:
+                otlp:
+                  batch_processor:
+                    scheduled_delay: 100ms
               errors:
                 preview_extended_error_metrics: enabled
           csrf:
@@ -553,7 +569,7 @@ async fn test_router_layer_error_emits_metric() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
 
     assert!(!metrics.is_empty());
@@ -590,7 +606,6 @@ async fn test_apollo_studio_metrics_not_affected_by_rename() {
     let expected_error_code = "CSRF_ERROR";
     let expected_client_name = "CLIENT_NAME";
     let expected_client_version = "v0.14";
-
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
         .config(
@@ -598,8 +613,10 @@ async fn test_apollo_studio_metrics_not_affected_by_rename() {
           telemetry:
             apollo:
               experimental_otlp_metrics_protocol: http
-              batch_processor:
-                scheduled_delay: 10ms
+              metrics:
+                otlp:
+                  batch_processor:
+                    scheduled_delay: 100ms
               errors:
                 preview_extended_error_metrics: enabled
             exporters:
@@ -616,10 +633,8 @@ async fn test_apollo_studio_metrics_not_affected_by_rename() {
         )
         .build()
         .await;
-
     router.start().await;
     router.assert_started().await;
-
     router
         .execute_query(
             Query::builder()
@@ -630,13 +645,11 @@ async fn test_apollo_studio_metrics_not_affected_by_rename() {
                 .build(),
         )
         .await;
-
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
 
     assert!(!metrics.is_empty());
-
     assert_metrics_contain(
         &metrics,
         Metric::builder()
@@ -669,8 +682,10 @@ async fn test_subgraph_request_emits_histogram() {
             telemetry:
               apollo:
                 experimental_otlp_metrics_protocol: http
-                batch_processor:
-                  scheduled_delay: 10ms
+                metrics:
+                  otlp:
+                    batch_processor:
+                      scheduled_delay: 100ms
                 subgraph_metrics: true
             include_subgraph_errors:
               all: true
@@ -692,7 +707,7 @@ async fn test_subgraph_request_emits_histogram() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
     assert!(!metrics.is_empty());
     assert_metrics_contain(
@@ -729,8 +744,10 @@ async fn test_failed_subgraph_request_emits_histogram() {
             telemetry:
               apollo:
                 experimental_otlp_metrics_protocol: http
-                batch_processor:
-                  scheduled_delay: 10ms
+                metrics:
+                  otlp:
+                    batch_processor:
+                      scheduled_delay: 100ms
                 subgraph_metrics: true
             include_subgraph_errors:
               all: true
@@ -753,7 +770,7 @@ async fn test_failed_subgraph_request_emits_histogram() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
     assert!(!metrics.is_empty());
     assert_metrics_contain(
@@ -791,8 +808,10 @@ async fn test_connector_request_emits_histogram() {
             telemetry:
               apollo:
                 experimental_otlp_metrics_protocol: http
-                batch_processor:
-                  scheduled_delay: 10ms
+                metrics:
+                  otlp:
+                    batch_processor:
+                      scheduled_delay: 100ms
                 subgraph_metrics: true
             include_subgraph_errors:
               all: true
@@ -828,7 +847,7 @@ async fn test_connector_request_emits_histogram() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
     assert!(!metrics.is_empty());
     assert_metrics_contain(
@@ -867,8 +886,10 @@ async fn test_failed_connector_request_emits_histogram() {
             telemetry:
               apollo:
                 experimental_otlp_metrics_protocol: http
-                batch_processor:
-                  scheduled_delay: 10ms
+                metrics:
+                  otlp:
+                    batch_processor:
+                      scheduled_delay: 100ms
                 subgraph_metrics: true
             traffic_shaping:
                 connector:
@@ -906,7 +927,7 @@ async fn test_failed_connector_request_emits_histogram() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
         .await;
     assert!(!metrics.is_empty());
     assert_metrics_contain(

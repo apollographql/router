@@ -4,10 +4,12 @@ use std::collections::HashSet;
 use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
+use http::header::CACHE_CONTROL;
 use multimap::MultiMap;
 use serde::Deserialize;
 use serde::Serialize;
@@ -23,6 +25,7 @@ use tokio_stream::Stream;
 use tower::BoxError;
 
 use crate::Context;
+use crate::batching::BatchQuery;
 use crate::error::Error;
 use crate::graphql;
 use crate::http_ext::TryIntoHeaderName;
@@ -32,6 +35,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::query_planner::fetch::OperationKind;
 use crate::spec::QueryHash;
 
@@ -138,6 +142,34 @@ impl Request {
             connection_closed_signal,
             None,
         )
+    }
+
+    pub(crate) fn is_part_of_batch(&self) -> bool {
+        self.context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
+    }
+
+    pub(crate) fn subgraph_operation_name(&self) -> Option<&str> {
+        self.subgraph_request.body().operation_name.as_deref()
+    }
+
+    pub(crate) fn root_operation_fields(&self) -> Vec<String> {
+        self.executable_document
+            .as_ref()
+            .and_then(|executable_document| {
+                let operation_name = self.subgraph_operation_name();
+                Some(
+                    executable_document
+                        .operations
+                        .get(operation_name)
+                        .ok()?
+                        .root_fields(executable_document)
+                        .map(|f| f.name.to_string())
+                        .collect(),
+                )
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -374,6 +406,21 @@ impl Response {
             subgraph_name,
             id,
         )
+    }
+
+    pub(crate) fn subgraph_cache_control(
+        &self,
+        default_ttl: Option<Duration>,
+    ) -> Result<CacheControl, BoxError> {
+        if self.response.headers().contains_key(&CACHE_CONTROL) {
+            CacheControl::new(self.response.headers(), default_ttl)
+        } else {
+            Ok(CacheControl::no_store())
+        }
+    }
+
+    pub(crate) fn get_from_extensions(&self, key: &str) -> Option<&Value> {
+        self.response.body().extensions.get(key)
     }
 }
 

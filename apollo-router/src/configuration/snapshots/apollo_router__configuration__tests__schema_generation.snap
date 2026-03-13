@@ -903,7 +903,7 @@ expression: "&schema"
     },
     "Client": {
       "additionalProperties": false,
-      "description": "HTTP client configuration for coprocessors.",
+      "description": "HTTP client configuration",
       "properties": {
         "dns_resolution_strategy": {
           "anyOf": [
@@ -926,6 +926,14 @@ expression: "&schema"
             }
           ],
           "description": "Use HTTP/2 to communicate with the coprocessor."
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         }
       },
       "type": "object"
@@ -2612,6 +2620,14 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         },
         "timeout": {
           "default": null,
@@ -5666,6 +5682,18 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "HoistOrphanErrors": {
+      "additionalProperties": false,
+      "description": "Per-subgraph configuration for hoisting orphan errors.\n\n\"Orphan errors\" are errors from entity fetches that lack a valid `_entities` path.\nWhen hoisting is enabled, these errors are assigned to the nearest non-array\nancestor in the response path, preventing them from being duplicated across\nevery element in an array.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable hoisting of orphan errors for this subgraph.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
     },
     "Homepage": {
       "additionalProperties": false,
@@ -9698,6 +9726,31 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphHoistOrphanErrorsConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HoistOrphanErrors"
+            }
+          ],
+          "default": {
+            "enabled": false
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HoistOrphanErrors"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphInvalidationConfig": {
       "additionalProperties": false,
       "properties": {
@@ -10557,6 +10610,14 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         },
         "timeout": {
           "default": null,
@@ -12349,6 +12410,20 @@ expression: "&schema"
     },
     "experimental_diagnostics": {
       "$ref": "#/definitions/Config5"
+    },
+    "experimental_hoist_orphan_errors": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/SubgraphHoistOrphanErrorsConfiguration"
+        }
+      ],
+      "default": {
+        "all": {
+          "enabled": false
+        },
+        "subgraphs": {}
+      },
+      "description": "When enabled for specific subgraphs, orphan errors (those without a valid\n`_entities` path) are assigned to the nearest non-array ancestor in the\nresponse path, preventing them from being duplicated across every array\nelement."
     },
     "experimental_type_conditioned_fetching": {
       "default": false,
