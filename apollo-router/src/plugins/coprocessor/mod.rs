@@ -485,6 +485,7 @@ impl BodyConf {
     }
 
     /// Returns true if the data field should be sent
+    #[allow(dead_code)]
     pub(super) fn should_send_data(&self) -> bool {
         match self {
             BodyConf::All(send) => *send,
@@ -493,6 +494,7 @@ impl BodyConf {
     }
 
     /// Returns true if the errors field should be sent
+    #[allow(dead_code)]
     pub(super) fn should_send_errors(&self) -> bool {
         match self {
             BodyConf::All(send) => *send,
@@ -501,6 +503,7 @@ impl BodyConf {
     }
 
     /// Returns true if the extensions field should be sent
+    #[allow(dead_code)]
     pub(super) fn should_send_extensions(&self) -> bool {
         match self {
             BodyConf::All(send) => *send,
@@ -1717,10 +1720,10 @@ pub(super) fn filter_graphql_response_body(
                 return None;
             }
             let mut obj = serde_json_bytes::Map::new();
-            if fields.data {
-                if let Some(data) = &response.data {
-                    obj.insert("data", data.clone());
-                }
+            if fields.data
+                && let Some(data) = &response.data
+            {
+                obj.insert("data", data.clone());
             }
             if fields.errors && !response.errors.is_empty() {
                 obj.insert(

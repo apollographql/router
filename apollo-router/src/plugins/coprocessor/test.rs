@@ -169,7 +169,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: false,
                 path: false,
                 method: false,
@@ -255,7 +255,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 path: false,
                 method: false,
@@ -319,7 +319,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 path: false,
                 method: false,
@@ -383,7 +383,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 path: false,
                 method: false,
@@ -444,7 +444,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: BodyConf::All(true),
+                body: true,
                 ..Default::default()
             },
             response: Default::default(),
@@ -504,7 +504,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: BodyConf::All(true),
+                body: true,
                 subgraph_request_id: true,
                 ..Default::default()
             },
@@ -643,7 +643,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: BodyConf::All(true),
+                body: true,
                 subgraph_request_id: true,
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
@@ -804,7 +804,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: BodyConf::All(true),
+                body: true,
                 subgraph_request_id: true,
                 context: ContextConf::NewContextConf(NewContextConf::Deprecated),
                 ..Default::default()
@@ -978,7 +978,7 @@ mod tests {
                     }),
                     SelectorOrValue::Value("value".to_string().into()),
                 ]),
-                body: BodyConf::All(true),
+                body: true,
                 ..Default::default()
             },
             response: Default::default(),
@@ -1050,7 +1050,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: BodyConf::All(true),
+                body: true,
                 ..Default::default()
             },
             response: Default::default(),
@@ -1117,7 +1117,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: BodyConf::All(true),
+                body: true,
                 ..Default::default()
             },
             response: Default::default(),
@@ -2106,7 +2106,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 path: true,
                 method: true,
@@ -2232,7 +2232,7 @@ mod tests {
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
                 ))),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 path: true,
                 method: true,
@@ -2401,7 +2401,7 @@ mod tests {
                 .into(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 path: true,
                 method: true,
@@ -2512,7 +2512,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 path: true,
                 method: true,
@@ -2646,7 +2646,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 path: true,
                 method: true,
@@ -2742,7 +2742,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 path: true,
                 method: true,
@@ -2829,7 +2829,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 status_code: false,
                 url: None,
@@ -2965,7 +2965,7 @@ mod tests {
         // permissive deserialization since it handles streaming responses differently
         let router_stage = RouterStage {
             response: RouterResponseConf {
-                body: BodyConf::All(true),
+                body: true,
                 ..Default::default()
             },
             ..Default::default()
@@ -3181,7 +3181,7 @@ mod tests {
     fn create_router_stage_for_request_validation_test() -> RouterStage {
         RouterStage {
             request: RouterRequestConf {
-                body: BodyConf::All(true),
+                body: true,
                 ..Default::default()
             },
             ..Default::default()
@@ -3195,7 +3195,7 @@ mod tests {
                 condition: Some(Condition::False),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 path: false,
                 method: false,
@@ -3213,7 +3213,7 @@ mod tests {
                 condition: Condition::False,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 status_code: false,
                 url: None,
@@ -3342,7 +3342,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 sdl: true,
                 status_code: false,
                 url: None,
@@ -3624,7 +3624,7 @@ mod tests {
                 condition: Condition::True,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 uri: true,
                 method: true,
                 service_name: true,
@@ -3642,7 +3642,7 @@ mod tests {
                 condition: Condition::False,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: BodyConf::All(true),
+                body: true,
                 uri: true,
                 method: true,
                 service_name: true,
@@ -4091,7 +4091,7 @@ mod tests {
                             .build(),
                     )
                     .extensions(Object::from_iter(vec![(
-                        "ext_key".to_string(),
+                        "ext_key".into(),
                         json!("ext_value"),
                     )]))
                     .context(req.context)
@@ -4176,7 +4176,7 @@ mod tests {
                             .build(),
                     )
                     .extensions(Object::from_iter(vec![(
-                        "ext_key".to_string(),
+                        "ext_key".into(),
                         json!("ext_value"),
                     )]))
                     .context(req.context)
@@ -4231,7 +4231,7 @@ mod tests {
         );
         assert_eq!(
             json!("modified_value"),
-            response.response.body().extensions.get("ext_key").unwrap()
+            *response.response.body().extensions.get("ext_key").unwrap()
         );
         // Original errors should be preserved since they weren't sent to coprocessor
         assert_eq!(response.response.body().errors[0].message, "test error");
@@ -4258,6 +4258,7 @@ mod tests {
             .returning(|req: subgraph::Request| {
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
+                    .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
@@ -5757,6 +5758,7 @@ mod tests {
 
         use crate::metrics::FutureMetricsExt;
         use crate::plugin::test::MockInternalHttpClientService;
+        use crate::plugins::coprocessor::BodyConf;
         use crate::plugins::coprocessor::ContextConf;
         use crate::plugins::coprocessor::NewContextConf;
         use crate::plugins::coprocessor::connector::ConnectorRequestConf;
