@@ -596,7 +596,7 @@ mod h2c_cleartext {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_h2c_server(listener));
 
-        let subgraph_service = HttpClientService::new(
+        let subgraph_service = HttpClientService::test_new(
             "test",
             rustls::ClientConfig::builder()
                 .with_native_roots()
@@ -666,7 +666,7 @@ mod compressed_req_res {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_compressed_response(listener));
 
-        let subgraph_service = HttpClientService::new(
+        let subgraph_service = HttpClientService::test_new(
             "test",
             rustls::ClientConfig::builder()
                 .with_native_roots()
@@ -980,5 +980,111 @@ mod http_version_negotiation {
 
         expected.check(&version_tracker);
         assert_response_body(response, r#"{"data": "success"}"#).await;
+    }
+}
+
+mod pool_idle_timeout {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use super::*;
+
+    /// Server that counts how many TCP connections are accepted
+    async fn serve_counting(
+        listener: TcpListener,
+        connection_count: Arc<AtomicUsize>,
+    ) -> std::io::Result<()> {
+        loop {
+            let (stream, _) = listener.accept().await?;
+            connection_count.fetch_add(1, Ordering::SeqCst);
+            let io = TokioIo::new(stream);
+            tokio::spawn(async move {
+                let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
+                    Ok::<_, Infallible>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .body::<Body>(r#"{"data":null}"#.into())
+                            .unwrap(),
+                    )
+                });
+                let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                    .serve_connection_with_upgrades(io, svc)
+                    .await;
+            });
+        }
+    }
+
+    fn make_client_config(timeout: Option<Duration>) -> crate::configuration::shared::Client {
+        match timeout {
+            Some(d) => crate::configuration::shared::Client::builder()
+                .pool_idle_timeout(d)
+                .build(),
+            None => crate::configuration::shared::Client {
+                pool_idle_timeout: None,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[rstest]
+    #[case::short_timeout_evicts(
+        Some(Duration::from_millis(50)),
+        Duration::from_millis(200),
+        2, // expect a new connection after the idle timeout
+    )]
+    #[case::long_timeout_reuses(
+        Some(Duration::from_secs(60)),
+        Duration::from_millis(200),
+        1, // expect the pooled connection to be reused
+    )]
+    #[case::none_disables_eviction(
+        None,
+        Duration::from_millis(200),
+        1, // None means no idle timeout → connection stays pooled
+    )]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_pool_idle_timeout_evicts_connections(
+        #[case] timeout: Option<Duration>,
+        #[case] sleep_between: Duration,
+        #[case] expected_connections: usize,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let connection_count = Arc::new(AtomicUsize::new(0));
+
+        tokio::task::spawn(serve_counting(listener, connection_count.clone()));
+
+        let mut service = HttpClientService::test_new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            make_client_config(timeout),
+        )
+        .expect("can create HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+
+        let response = send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            connection_count.load(Ordering::SeqCst),
+            1,
+            "first request opens one connection"
+        );
+
+        tokio::time::sleep(sleep_between).await;
+
+        tower::ServiceExt::ready(&mut service).await.unwrap();
+        let response = send_request(service, url, r#"{"query":"{ b }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            connection_count.load(Ordering::SeqCst),
+            expected_connections,
+            "expected {expected_connections} total TCP connections for timeout {timeout:?} with {sleep_between:?} sleep"
+        );
     }
 }
