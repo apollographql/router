@@ -36,7 +36,7 @@ impl TracingConfigurator for super::super::otlp::Config {
         let exporter = config.build_span_exporter()?;
         let named_exporter = NamedSpanExporter::new(exporter, "otlp");
         let batch_span_processor =
-            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("otlp"))
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("otlp-tracing"))
                 .with_batch_config(config.batch_processor.clone().with_env_overrides()?.into())
                 .build()
                 .filtered();

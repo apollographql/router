@@ -259,7 +259,7 @@ impl TracingConfigurator for Config {
         let named_exporter = NamedSpanExporter::new(wrapper, "datadog");
 
         let batch_processor =
-            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("datadog"))
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("datadog-tracing"))
                 .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
                 .build()
                 .filtered();
