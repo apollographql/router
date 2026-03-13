@@ -1,43 +1,94 @@
+//! Named wrappers for OpenTelemetry components.
+//!
+//! This module provides wrappers that add exporter name context to errors and metrics:
+//! - `NamedSpanExporter`: Prefixes export error messages with exporter name
+//! - `NamedTokioRuntime`: Emits metrics when batch processor channel operations fail
+
 use std::fmt::Debug;
+use std::future::Future;
 use std::time::Duration;
 
-use futures::future::BoxFuture;
+use opentelemetry_sdk::error::OTelSdkError;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::runtime::Runtime;
 use opentelemetry_sdk::runtime::RuntimeChannel;
 use opentelemetry_sdk::runtime::Tokio;
 use opentelemetry_sdk::runtime::TrySend;
 use opentelemetry_sdk::runtime::TrySendError;
+use opentelemetry_sdk::trace::SpanData;
+use opentelemetry_sdk::trace::SpanExporter;
 
-/// Wraps an otel tokio runtime to provide a name in the error messages and metrics
+/// Wrapper that modifies trace export errors to include exporter name.
+pub(crate) struct NamedSpanExporter<E> {
+    name: &'static str,
+    inner: E,
+}
+
+impl<E> NamedSpanExporter<E> {
+    pub(crate) fn new(inner: E, name: &'static str) -> Self {
+        Self { name, inner }
+    }
+}
+
+impl<E: SpanExporter> Debug for NamedSpanExporter<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NamedSpanExporter")
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+impl<E: SpanExporter> SpanExporter for NamedSpanExporter<E> {
+    fn export(
+        &self,
+        batch: Vec<SpanData>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+        let name = self.name;
+        let fut = self.inner.export(batch);
+        async move {
+            fut.await
+                .map_err(|err| OTelSdkError::InternalFailure(format!("[{} traces] {}", name, err)))
+        }
+    }
+
+    fn shutdown(&mut self) -> OTelSdkResult {
+        self.inner.shutdown()
+    }
+
+    fn force_flush(&mut self) -> OTelSdkResult {
+        self.inner.force_flush()
+    }
+
+    fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+        self.inner.set_resource(resource)
+    }
+}
+
+/// Wraps the Tokio runtime to emit metrics when batch processor channel operations fail.
+///
+/// This enables the `apollo.router.telemetry.batch_processor.errors` metric to be
+/// emitted with the exporter name when spans are dropped due to a full or closed channel.
 #[derive(Debug, Clone)]
 pub(crate) struct NamedTokioRuntime {
     name: &'static str,
-    parent: Tokio,
 }
 
 impl NamedTokioRuntime {
     pub(crate) fn new(name: &'static str) -> Self {
-        Self {
-            name,
-            parent: Tokio,
-        }
+        Self { name }
     }
 }
 
 impl Runtime for NamedTokioRuntime {
-    type Interval = <Tokio as Runtime>::Interval;
-    type Delay = <Tokio as Runtime>::Delay;
-
-    fn interval(&self, duration: Duration) -> Self::Interval {
-        self.parent.interval(duration)
+    fn spawn<F>(&self, future: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        Tokio.spawn(future)
     }
 
-    fn spawn(&self, future: BoxFuture<'static, ()>) {
-        self.parent.spawn(future)
-    }
-
-    fn delay(&self, duration: Duration) -> Self::Delay {
-        self.parent.delay(duration)
+    fn delay(&self, duration: Duration) -> impl Future<Output = ()> + Send + 'static {
+        Tokio.delay(duration)
     }
 }
 
@@ -57,6 +108,7 @@ impl RuntimeChannel for NamedTokioRuntime {
     }
 }
 
+/// A channel sender that emits metrics when send operations fail.
 #[derive(Debug)]
 pub(crate) struct NamedSender<T> {
     name: &'static str,
@@ -66,8 +118,8 @@ pub(crate) struct NamedSender<T> {
 }
 
 impl<T: Send> NamedSender<T> {
-    fn new(name: &'static str, sender: tokio::sync::mpsc::Sender<T>) -> NamedSender<T> {
-        NamedSender {
+    fn new(name: &'static str, sender: tokio::sync::mpsc::Sender<T>) -> Self {
+        Self {
             name,
             channel_full_message: format!(
                 "cannot send message to batch processor '{name}' as the channel is full"
@@ -84,7 +136,6 @@ impl<T: Send> TrySend for NamedSender<T> {
     type Message = T;
 
     fn try_send(&self, item: Self::Message) -> Result<(), TrySendError> {
-        // Convert the error into something that has a name
         self.sender.try_send(item).map_err(|err| {
             let error = match &err {
                 tokio::sync::mpsc::error::TrySendError::Full(_) => "channel full",
@@ -109,16 +160,57 @@ impl<T: Send> TrySend for NamedSender<T> {
         })
     }
 }
+
 #[cfg(test)]
 mod tests {
+    use opentelemetry_sdk::error::OTelSdkError;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::trace::SpanData;
+    use opentelemetry_sdk::trace::SpanExporter;
+
     use super::*;
     use crate::metrics::FutureMetricsExt;
 
+    #[derive(Debug)]
+    struct FailingSpanExporter;
+
+    impl SpanExporter for FailingSpanExporter {
+        async fn export(&self, _batch: Vec<SpanData>) -> OTelSdkResult {
+            Err(OTelSdkError::InternalFailure(
+                "connection failed".to_string(),
+            ))
+        }
+
+        fn shutdown(&mut self) -> OTelSdkResult {
+            Ok(())
+        }
+
+        fn force_flush(&mut self) -> OTelSdkResult {
+            Ok(())
+        }
+
+        fn set_resource(&mut self, _resource: &opentelemetry_sdk::Resource) {}
+    }
+
     #[tokio::test]
-    async fn test_channel_full_error_metrics() {
+    async fn test_named_span_exporter_adds_prefix() {
+        let inner = FailingSpanExporter;
+        let named = NamedSpanExporter::new(inner, "test-exporter");
+
+        let result = named.export(vec![]).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("[test-exporter traces]"));
+        assert!(err_msg.contains("connection failed"));
+    }
+
+    #[tokio::test]
+    async fn test_named_runtime_channel_full_emits_metric() {
         async {
             let runtime = NamedTokioRuntime::new("test_processor");
-            let (sender, mut _receiver) = runtime.batch_message_channel(1);
+            let (sender, _receiver) = runtime.batch_message_channel::<&str>(1);
 
             // Fill the channel
             sender.try_send("first").expect("should send first message");
@@ -139,10 +231,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_channel_closed_error_metrics() {
+    async fn test_named_runtime_channel_closed_emits_metric() {
         async {
             let runtime = NamedTokioRuntime::new("test_processor");
-            let (sender, receiver) = runtime.batch_message_channel(1);
+            let (sender, receiver) = runtime.batch_message_channel::<&str>(1);
 
             // Drop receiver to close channel
             drop(receiver);
@@ -162,10 +254,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_successful_message_send() {
+    async fn test_named_runtime_successful_send_no_metric() {
         async {
             let runtime = NamedTokioRuntime::new("test_processor");
-            let (sender, _receiver) = runtime.batch_message_channel(1);
+            let (sender, _receiver) = runtime.batch_message_channel::<&str>(1);
 
             let result = sender.try_send("message");
             assert!(result.is_ok());
