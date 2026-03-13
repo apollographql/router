@@ -87,6 +87,8 @@ mod tests {
     use crate::plugins::coprocessor::RouterResponseConf;
     use crate::plugins::coprocessor::SubgraphRequestConf;
     use crate::plugins::coprocessor::SubgraphResponseConf;
+    use crate::plugins::coprocessor::BodyConf;
+    use crate::plugins::coprocessor::BodyFieldsConf;
     use crate::plugins::coprocessor::handle_graphql_response;
     use crate::plugins::coprocessor::is_graphql_response_minimally_valid;
     use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
@@ -167,7 +169,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: false,
                 path: false,
                 method: false,
@@ -253,7 +255,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 path: false,
                 method: false,
@@ -317,7 +319,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 path: false,
                 method: false,
@@ -381,7 +383,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 path: false,
                 method: false,
@@ -442,7 +444,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 ..Default::default()
             },
             response: Default::default(),
@@ -502,7 +504,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 ..Default::default()
             },
@@ -641,7 +643,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
@@ -802,7 +804,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 context: ContextConf::NewContextConf(NewContextConf::Deprecated),
                 ..Default::default()
@@ -976,7 +978,7 @@ mod tests {
                     }),
                     SelectorOrValue::Value("value".to_string().into()),
                 ]),
-                body: true,
+                body: BodyConf::All(true),
                 ..Default::default()
             },
             response: Default::default(),
@@ -1048,7 +1050,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 ..Default::default()
             },
             response: Default::default(),
@@ -1115,7 +1117,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 ..Default::default()
             },
             response: Default::default(),
@@ -1177,7 +1179,7 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 ..Default::default()
             },
@@ -1300,7 +1302,7 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 ..Default::default()
             },
@@ -1402,7 +1404,7 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
@@ -1552,7 +1554,7 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 context: ContextConf::NewContextConf(NewContextConf::Deprecated),
                 ..Default::default()
@@ -1714,7 +1716,7 @@ mod tests {
                     redact: None,
                     default: None,
                 }),
-                body: true,
+                body: BodyConf::All(true),
                 ..Default::default()
             },
         };
@@ -1830,7 +1832,7 @@ mod tests {
                 condition: Default::default(),
                 headers: false,
                 context: ContextConf::Deprecated(false),
-                body: true,
+                body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
                 url: None,
@@ -1896,7 +1898,7 @@ mod tests {
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
                 ))),
-                body: true,
+                body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
                 url: None,
@@ -2002,7 +2004,7 @@ mod tests {
                 condition: Default::default(),
                 headers: false,
                 context: ContextConf::NewContextConf(NewContextConf::Deprecated),
-                body: true,
+                body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
                 url: None,
@@ -2104,7 +2106,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 path: true,
                 method: true,
@@ -2230,7 +2232,7 @@ mod tests {
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
                 ))),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 path: true,
                 method: true,
@@ -2399,7 +2401,7 @@ mod tests {
                 .into(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 path: true,
                 method: true,
@@ -2510,7 +2512,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 path: true,
                 method: true,
@@ -2644,7 +2646,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 path: true,
                 method: true,
@@ -2740,7 +2742,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 path: true,
                 method: true,
@@ -2827,7 +2829,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
                 url: None,
@@ -2963,7 +2965,7 @@ mod tests {
         // permissive deserialization since it handles streaming responses differently
         let router_stage = RouterStage {
             response: RouterResponseConf {
-                body: true,
+                body: BodyConf::All(true),
                 ..Default::default()
             },
             ..Default::default()
@@ -3179,7 +3181,7 @@ mod tests {
     fn create_router_stage_for_request_validation_test() -> RouterStage {
         RouterStage {
             request: RouterRequestConf {
-                body: true,
+                body: BodyConf::All(true),
                 ..Default::default()
             },
             ..Default::default()
@@ -3193,7 +3195,7 @@ mod tests {
                 condition: Some(Condition::False),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 path: false,
                 method: false,
@@ -3211,7 +3213,7 @@ mod tests {
                 condition: Condition::False,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
                 url: None,
@@ -3340,7 +3342,7 @@ mod tests {
                 condition: Default::default(),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
                 url: None,
@@ -3588,7 +3590,7 @@ mod tests {
                 condition: Condition::True,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 service_name: false,
                 status_code: false,
                 subgraph_request_id: false,
@@ -3622,7 +3624,7 @@ mod tests {
                 condition: Condition::True,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 uri: true,
                 method: true,
                 service_name: true,
@@ -3640,7 +3642,7 @@ mod tests {
                 condition: Condition::False,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 uri: true,
                 method: true,
                 service_name: true,
@@ -3659,7 +3661,7 @@ mod tests {
                 condition: Condition::False,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 service_name: false,
                 status_code: false,
                 subgraph_request_id: false,
@@ -4058,6 +4060,239 @@ mod tests {
         assert_eq!(res.response.body().errors.len(), 0);
     }
 
+    // ===== SUBGRAPH SELECTIVE BODY FILTERING TESTS =====
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_errors_only() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: false,
+                    errors: true,
+                    extensions: false,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                use crate::graphql::Error;
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .error(
+                        Error::builder()
+                            .message("test error")
+                            .extension_code("TEST_ERROR")
+                            .build(),
+                    )
+                    .extensions(Object::from_iter(vec![(
+                        "ext_key".to_string(),
+                        json!("ext_value"),
+                    )]))
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify only errors are sent, not data or extensions
+                assert!(body.get("body").is_some());
+                let response_body = body.get("body").unwrap();
+                assert!(response_body.get("errors").is_some());
+                assert!(response_body.get("data").is_none());
+                assert!(response_body.get("extensions").is_none());
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "body": {
+                                "errors": [{ "message": "modified error" }]
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Errors should be modified by coprocessor
+        assert_eq!(response.response.body().errors[0].message, "modified error");
+        // Original data should be preserved since it wasn't sent to coprocessor
+        assert_eq!(json!({ "test": 1234_u32 }), response.response.body().data.unwrap());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_data_and_extensions() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: true,
+                    errors: false,
+                    extensions: true,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                use crate::graphql::Error;
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .error(
+                        Error::builder()
+                            .message("test error")
+                            .extension_code("TEST_ERROR")
+                            .build(),
+                    )
+                    .extensions(Object::from_iter(vec![(
+                        "ext_key".to_string(),
+                        json!("ext_value"),
+                    )]))
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify data and extensions are sent, but not errors
+                assert!(body.get("body").is_some());
+                let response_body = body.get("body").unwrap();
+                assert!(response_body.get("data").is_some());
+                assert!(response_body.get("extensions").is_some());
+                assert!(response_body.get("errors").is_none());
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "body": {
+                                "data": { "test": 5678 },
+                                "extensions": { "ext_key": "modified_value" }
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Data and extensions should be modified by coprocessor
+        assert_eq!(json!({ "test": 5678_u32 }), response.response.body().data.unwrap());
+        assert_eq!(
+            json!("modified_value"),
+            response.response.body().extensions.get("ext_key").unwrap()
+        );
+        // Original errors should be preserved since they weren't sent to coprocessor
+        assert_eq!(response.response.body().errors[0].message, "test error");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_nothing() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: false,
+                    errors: false,
+                    extensions: false,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify no body is sent
+                assert!(body.get("body").is_none());
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse"
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Original data should be preserved
+        assert_eq!(json!({ "test": 1234_u32 }), response.response.body().data.unwrap());
+    }
+
     #[allow(clippy::type_complexity)]
     fn mock_with_callback(
         callback: fn(
@@ -4171,12 +4406,163 @@ mod tests {
     #[test]
     fn test_was_incoming_payload_valid() {
         // When body is not sent, always return true
-        assert!(was_incoming_payload_valid(&valid_response(), false));
-        assert!(was_incoming_payload_valid(&invalid_response(), false));
+        assert!(was_incoming_payload_valid(
+            &valid_response(),
+            &BodyConf::All(false)
+        ));
+        assert!(was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::All(false)
+        ));
 
         // When body is sent, check validity
-        assert!(was_incoming_payload_valid(&valid_response(), true));
-        assert!(!was_incoming_payload_valid(&invalid_response(), true));
+        assert!(was_incoming_payload_valid(
+            &valid_response(),
+            &BodyConf::All(true)
+        ));
+        assert!(!was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::All(true)
+        ));
+
+        // With selective body config, should check validity when any field is sent
+        assert!(was_incoming_payload_valid(
+            &valid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            })
+        ));
+        assert!(!was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            })
+        ));
+
+        // When no fields are sent in selective mode, assume valid
+        assert!(was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: false,
+                extensions: false,
+            })
+        ));
+    }
+
+    #[test]
+    fn test_filter_graphql_response_body() {
+        use crate::plugins::coprocessor::filter_graphql_response_body;
+        use crate::plugins::coprocessor::BodyFieldsConf;
+
+        // Test BodyConf::All(false) returns None
+        let response = valid_response();
+        assert!(filter_graphql_response_body(&response, &BodyConf::All(false)).is_none());
+
+        // Test BodyConf::All(true) returns full body
+        let result = filter_graphql_response_body(&response, &BodyConf::All(true));
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_some());
+
+        // Test selective: only errors
+        let response_with_errors = graphql::Response::builder()
+            .data(serde_json_bytes::json!({"test": "data"}))
+            .errors(vec![graphql::Error::builder()
+                .message("test error")
+                .build()])
+            .extensions(serde_json_bytes::Map::from_iter([
+                ("ext_key".into(), serde_json_bytes::json!("ext_value")),
+            ]))
+            .build();
+
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_none(), "data should not be included");
+        assert!(body.get("errors").is_some(), "errors should be included");
+        assert!(
+            body.get("extensions").is_none(),
+            "extensions should not be included"
+        );
+
+        // Test selective: only data
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: true,
+                errors: false,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_some(), "data should be included");
+        assert!(body.get("errors").is_none(), "errors should not be included");
+
+        // Test selective: all fields
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: true,
+                errors: true,
+                extensions: true,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_some());
+        assert!(body.get("errors").is_some());
+        assert!(body.get("extensions").is_some());
+
+        // Test selective: no fields returns None
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: false,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_body_conf_methods() {
+        use crate::plugins::coprocessor::BodyFieldsConf;
+
+        // Test BodyConf::All
+        assert!(!BodyConf::All(false).should_send_any());
+        assert!(BodyConf::All(true).should_send_any());
+
+        // Test BodyConf::Selective
+        let selective_errors_only = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: true,
+            extensions: false,
+        });
+        assert!(selective_errors_only.should_send_any());
+        assert!(!selective_errors_only.should_send_data());
+        assert!(selective_errors_only.should_send_errors());
+        assert!(!selective_errors_only.should_send_extensions());
+
+        let selective_none = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: false,
+            extensions: false,
+        });
+        assert!(!selective_none.should_send_any());
     }
 
     #[test]
@@ -5080,6 +5466,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_selective_body_field_configuration() {
+        // Test that new selective body field configurations work
+        let selective_configs = vec![
+            // Boolean body (backwards compatible)
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": true
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": false
+                        }
+                    }
+                }
+            }),
+            // Selective body fields - errors only
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": {
+                                "data": false,
+                                "errors": true,
+                                "extensions": false
+                            }
+                        }
+                    }
+                }
+            }),
+            // Selective body fields - all fields
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": {
+                                "data": true,
+                                "errors": true,
+                                "extensions": true
+                            }
+                        }
+                    }
+                }
+            }),
+            // Selective body fields - execution stage
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "execution": {
+                        "response": {
+                            "body": {
+                                "errors": true
+                            }
+                        }
+                    }
+                }
+            }),
+        ];
+
+        for config in selective_configs {
+            let test_harness = crate::TestHarness::builder()
+                .configuration_json(config.clone())
+                .unwrap()
+                .build_router()
+                .await;
+
+            assert!(
+                test_harness.is_ok(),
+                "Selective body configuration should load successfully: {:?}",
+                config
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn test_empty_unix_socket_path_rejected() {
         let config = serde_json::json!({
             "coprocessor": {
@@ -5387,7 +5858,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
                     headers: true,
-                    body: true,
+                    body: BodyConf::All(true),
                     uri: true,
                     ..Default::default()
                 },
@@ -5435,7 +5906,7 @@ mod tests {
         async fn should_send_json_body_as_parsed_json_to_coprocessor() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -5486,7 +5957,7 @@ mod tests {
         async fn should_send_non_json_body_as_string_to_coprocessor() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -5559,7 +6030,7 @@ mod tests {
         async fn should_return_transport_error_when_coprocessor_breaks() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -5683,7 +6154,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
                     context: ContextConf::NewContextConf(NewContextConf::All),
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -5735,7 +6206,7 @@ mod tests {
                 for _ in 0..2 {
                     let connector_stage = ConnectorStage {
                         request: ConnectorRequestConf {
-                            body: true,
+                            body: BodyConf::All(true),
                             ..Default::default()
                         },
                         response: Default::default(),
@@ -5788,7 +6259,7 @@ mod tests {
                     let connector_stage = ConnectorStage {
                         request: ConnectorRequestConf {
                             condition: Condition::False,
-                            body: true,
+                            body: BodyConf::All(true),
                             ..Default::default()
                         },
                         response: Default::default(),
@@ -5838,7 +6309,7 @@ mod tests {
                 response: ConnectorResponseConf {
                     headers: true,
                     status_code: true,
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
             };
@@ -5880,7 +6351,7 @@ mod tests {
                     let connector_stage = ConnectorStage {
                         request: Default::default(),
                         response: ConnectorResponseConf {
-                            body: true,
+                            body: BodyConf::All(true),
                             ..Default::default()
                         },
                     };
@@ -5928,7 +6399,7 @@ mod tests {
         async fn should_use_structured_error_when_coprocessor_breaks_with_errors_object() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -5985,7 +6456,7 @@ mod tests {
         async fn should_use_string_error_when_coprocessor_breaks_with_string_body() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -6033,7 +6504,7 @@ mod tests {
         async fn should_pass_extra_extensions_from_structured_error() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -6097,7 +6568,7 @@ mod tests {
                 request: Default::default(),
                 response: ConnectorResponseConf {
                     context: ContextConf::NewContextConf(NewContextConf::All),
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
             };
@@ -6147,7 +6618,7 @@ mod tests {
                 request: Default::default(),
                 response: ConnectorResponseConf {
                     context: ContextConf::NewContextConf(NewContextConf::All),
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
             };
@@ -6196,7 +6667,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: Default::default(),
                 response: ConnectorResponseConf {
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
             };
@@ -6265,7 +6736,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: Default::default(),
                 response: ConnectorResponseConf {
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
             };
@@ -6309,7 +6780,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: Default::default(),
                 response: ConnectorResponseConf {
-                    body: true,
+                    body: BodyConf::All(true),
                     ..Default::default()
                 },
             };

@@ -414,8 +414,8 @@ pub(super) struct SubgraphResponseConf {
     pub(super) headers: bool,
     /// Send the context
     pub(super) context: ContextConf,
-    /// Send the body
-    pub(super) body: bool,
+    /// Send the body (can be true/false or selective with data/errors/extensions)
+    pub(super) body: BodyConf,
     /// Send the service name
     pub(super) service_name: bool,
     /// Send the http status
@@ -457,6 +457,68 @@ struct Conf {
     /// The connector stage request/response configuration
     #[serde(default)]
     connector: connector::ConnectorStages,
+}
+
+/// Configuration for which body fields to send to coprocessor
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, JsonSchema)]
+#[serde(untagged)]
+pub(super) enum BodyConf {
+    /// Send entire body (true) or nothing (false)
+    All(bool),
+    /// Send specific fields
+    Selective(BodyFieldsConf),
+}
+
+impl Default for BodyConf {
+    fn default() -> Self {
+        BodyConf::All(false)
+    }
+}
+
+impl BodyConf {
+    /// Returns true if any body content should be sent
+    pub(super) fn should_send_any(&self) -> bool {
+        match self {
+            BodyConf::All(send) => *send,
+            BodyConf::Selective(fields) => fields.data || fields.errors || fields.extensions,
+        }
+    }
+
+    /// Returns true if the data field should be sent
+    pub(super) fn should_send_data(&self) -> bool {
+        match self {
+            BodyConf::All(send) => *send,
+            BodyConf::Selective(fields) => fields.data,
+        }
+    }
+
+    /// Returns true if the errors field should be sent
+    pub(super) fn should_send_errors(&self) -> bool {
+        match self {
+            BodyConf::All(send) => *send,
+            BodyConf::Selective(fields) => fields.errors,
+        }
+    }
+
+    /// Returns true if the extensions field should be sent
+    pub(super) fn should_send_extensions(&self) -> bool {
+        match self {
+            BodyConf::All(send) => *send,
+            BodyConf::Selective(fields) => fields.extensions,
+        }
+    }
+}
+
+/// Configuration for selective body fields
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct BodyFieldsConf {
+    /// Send the data field
+    pub(super) data: bool,
+    /// Send the errors field
+    pub(super) errors: bool,
+    /// Send the extensions field
+    pub(super) extensions: bool,
 }
 
 /// Configures the context
@@ -1480,10 +1542,7 @@ where
 
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
 
-    let body_to_send = response_config
-        .body
-        .then(|| serde_json_bytes::to_value(&body))
-        .transpose()?;
+    let body_to_send = filter_graphql_response_body(&body, &response_config.body);
     let context_to_send = response_config.context.get_context(&response.context);
     let service_name = response_config.service_name.then_some(service_name);
     let subgraph_request_id = response_config
@@ -1524,7 +1583,8 @@ where
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphResponse)?;
 
     // Check if the incoming GraphQL response was valid according to GraphQL spec
-    let incoming_payload_was_valid = was_incoming_payload_valid(&body, response_config.body);
+    let incoming_payload_was_valid =
+        was_incoming_payload_valid(&body, &response_config.body);
 
     // Third, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming response with the updated bits if they
@@ -1629,13 +1689,49 @@ pub(super) fn is_graphql_response_minimally_valid(response: &graphql::Response) 
 
 /// Check if the incoming payload was valid for conditional validation purposes.
 /// Returns true if body was not sent to coprocessor OR if the response is minimally valid.
-pub(super) fn was_incoming_payload_valid(response: &graphql::Response, body_sent: bool) -> bool {
-    if body_sent {
-        // If we sent the body to the coprocessor, check if it was minimally valid
+pub(super) fn was_incoming_payload_valid(response: &graphql::Response, body_conf: &BodyConf) -> bool {
+    if body_conf.should_send_any() {
+        // If we sent any body fields to the coprocessor, check if it was minimally valid
         is_graphql_response_minimally_valid(response)
     } else {
-        // If we didn't send the body, assume it was valid
+        // If we didn't send any body fields, assume it was valid
         true
+    }
+}
+
+/// Filter a GraphQL response body based on configuration.
+/// Returns None if no fields should be sent, or a Value containing only the configured fields.
+pub(super) fn filter_graphql_response_body(
+    response: &graphql::Response,
+    body_conf: &BodyConf,
+) -> Option<Value> {
+    match body_conf {
+        BodyConf::All(false) => None,
+        BodyConf::All(true) => {
+            Some(serde_json_bytes::to_value(response).expect("serialization will not fail"))
+        }
+        BodyConf::Selective(fields) => {
+            if !fields.data && !fields.errors && !fields.extensions {
+                return None;
+            }
+            let mut obj = serde_json_bytes::Map::new();
+            if fields.data {
+                if let Some(data) = &response.data {
+                    obj.insert("data", data.clone());
+                }
+            }
+            if fields.errors && !response.errors.is_empty() {
+                obj.insert(
+                    "errors",
+                    serde_json_bytes::to_value(&response.errors)
+                        .expect("serialization will not fail"),
+                );
+            }
+            if fields.extensions && !response.extensions.is_empty() {
+                obj.insert("extensions", Value::Object(response.extensions.clone()));
+            }
+            Some(Value::Object(obj))
+        }
     }
 }
 
