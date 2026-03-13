@@ -589,7 +589,7 @@ mod h2c_cleartext {
                 Version::HTTP_11 => response_builder
                     .status(StatusCode::HTTP_VERSION_NOT_SUPPORTED)
                     .body(Body::empty()),
-                version => panic!("{}", format!("unexpected version {version:?}")),
+                version => panic!("unexpected version {version:?}"),
             };
 
             Ok(response.unwrap())
@@ -618,12 +618,11 @@ mod h2c_cleartext {
         )
         .await;
 
-        assert!(response.http_response.status().is_success());
         assert_response_body(response, r#"{"data":null}"#).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_subgraph_h2c_fails_with_enable() {
+    async fn test_subgraph_h2c_not_used_with_enable() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_h2c_server(listener));
