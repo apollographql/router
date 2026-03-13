@@ -69,6 +69,7 @@ use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAtt
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphValue;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::utils::extend_attributes;
 use crate::services::router;
 use crate::services::supergraph;
 
@@ -191,7 +192,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_REQUEST_DURATION_METRIC)
                         .with_unit("s")
                         .with_description("Duration of HTTP server requests.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -209,7 +210,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_REQUEST_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP server request bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -227,7 +228,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP server response bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -245,7 +246,7 @@ impl InstrumentsConfig {
                         .i64_up_down_counter(HTTP_SERVER_ACTIVE_REQUESTS)
                         .with_unit("request")
                         .with_description("Number of active HTTP server requests.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -266,7 +267,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -278,7 +279,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -467,7 +468,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -479,7 +480,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -521,7 +522,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_CLIENT_REQUEST_DURATION_METRIC)
                         .with_unit("s")
                         .with_description("Duration of HTTP client requests.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -539,7 +540,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP client request bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -557,7 +558,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP client response bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -572,7 +573,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -584,7 +585,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -761,7 +762,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -773,7 +774,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -807,7 +808,7 @@ impl InstrumentsConfig {
                     meter
                         .f64_histogram(FIELD_LENGTH)
                         .with_description("Length of a selected field in the GraphQL response")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -819,7 +820,7 @@ impl InstrumentsConfig {
                     meter
                         .f64_counter(FIELD_EXECUTION)
                         .with_description("Number of times a field is used.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -834,7 +835,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -846,7 +847,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -952,7 +953,7 @@ impl InstrumentsConfig {
                         .with_description(
                             "Entity cache hit/miss operations at the subgraph level (deprecated)",
                         )
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -966,7 +967,7 @@ impl InstrumentsConfig {
                         .with_description(
                             "Response cache hit/miss operations at the subgraph level",
                         )
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -1692,6 +1693,7 @@ fn value_to_f64(value: &opentelemetry::Value) -> Option<f64> {
         opentelemetry::Value::String(s) => s.as_str().parse::<f64>().ok(),
         opentelemetry::Value::Bool(_) => None,
         opentelemetry::Value::Array(_) => None,
+        _ => unreachable!("unexpected opentelemetry::Value variant"),
     }
 }
 
@@ -1821,12 +1823,12 @@ where
             return;
         }
 
-        let attrs: Vec<KeyValue> = inner
+        let attrs = inner
             .selectors
             .as_ref()
-            .map(|s| s.on_response(response).into_iter().collect())
+            .map(|s| s.on_response(response))
             .unwrap_or_default();
-        inner.attributes.extend(attrs);
+        extend_attributes(&mut inner.attributes, attrs);
 
         if let Some(selected_value) = inner
             .selector
@@ -1876,12 +1878,7 @@ where
         // Response event may be called multiple times so we don't extend inner.attributes
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_event(response, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
+            extend_attributes(&mut attrs, selectors.on_response_event(response, ctx));
         }
 
         if let Some(selected_value) = inner
@@ -1933,12 +1930,7 @@ where
 
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_error(error, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
+            extend_attributes(&mut attrs, selectors.on_error(error, ctx));
         }
 
         let increment = match &inner.increment {
@@ -2257,12 +2249,12 @@ where
             }
             return;
         }
-        let attrs: Vec<KeyValue> = inner
+        let attrs = inner
             .selectors
             .as_ref()
-            .map(|s| s.on_response(response).into_iter().collect())
+            .map(|s| s.on_response(response))
             .unwrap_or_default();
-        inner.attributes.extend(attrs);
+        extend_attributes(&mut inner.attributes, attrs);
         if let Some(selected_value) = inner
             .selector
             .as_ref()
@@ -2313,12 +2305,7 @@ where
         // Response event may be called multiple times so we don't extend inner.attributes
         let mut attrs: Vec<KeyValue> = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_event(response, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
+            extend_attributes(&mut attrs, selectors.on_response_event(response, ctx));
         }
 
         if let Some(selected_value) = inner
@@ -2367,12 +2354,10 @@ where
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
-        let mut attrs: Vec<KeyValue> = inner
-            .selectors
-            .as_ref()
-            .map(|s| s.on_error(error, ctx).into_iter().collect())
-            .unwrap_or_default();
-        attrs.append(&mut inner.attributes);
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            extend_attributes(&mut attrs, selectors.on_error(error, ctx));
+        }
 
         let increment = match &inner.increment {
             Increment::Unit | Increment::EventUnit | Increment::FieldUnit => {
