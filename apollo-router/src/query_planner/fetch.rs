@@ -274,6 +274,7 @@ impl FetchNode {
         paths: Vec<Vec<Path>>,
         operation_str: &str,
         variables: Map<ByteString, Value>,
+        hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         let (_parts, response) = match service
             .oneshot(subgraph_request)
@@ -301,7 +302,8 @@ impl FetchNode {
             );
         }
 
-        let (value, errors) = self.response_at_path(schema, current_dir, paths, response);
+        let (value, errors) =
+            self.response_at_path(schema, current_dir, paths, response, hoist_orphan_errors);
 
         (value, errors)
     }
@@ -332,6 +334,14 @@ impl FetchNode {
         }
     }
 
+    /// Maps a subgraph's response into what can be merged in the overall supergraph response. It
+    /// does this by making sure both the data and errors from a subgraph's response can be plugged
+    /// into the right slots for the supergraph response, and it does that by a bit of path
+    /// handling and manipulation
+    ///
+    /// When `hoist_orphan_errors` is true, entity-less errors are assigned to the nearest
+    /// non-array ancestor of `current_dir`, preventing error multiplication across array
+    /// elements. When false, they are assigned to `current_dir` as-is.
     #[instrument(skip_all, level = "debug", name = "response_insert")]
     pub(crate) fn response_at_path<'a>(
         &'a self,
@@ -339,12 +349,30 @@ impl FetchNode {
         current_dir: &'a Path,
         inverted_paths: Vec<Vec<Path>>,
         response: graphql::Response,
+        hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         if !self.requires.is_empty() {
             let entities_path = Path(vec![json_ext::PathElement::Key(
                 "_entities".to_string(),
                 None,
             )]);
+
+            // when hoist_orphan_errors is enabled, the fallback_dir is the immediate parent of
+            // the current_dir when the current_dir is wildcarded (ie, @, which is PathElement::Flatten)
+            //
+            // this prevents error multiplication across array elements
+            let error_dir = if hoist_orphan_errors {
+                let pos = current_dir
+                    .0
+                    .iter()
+                    .position(|e| matches!(e, json_ext::PathElement::Flatten(_)));
+                match pos {
+                    Some(i) => Path(current_dir.0[..i].to_vec()),
+                    None => current_dir.clone(),
+                }
+            } else {
+                current_dir.clone()
+            };
 
             let mut errors: Vec<Error> = vec![];
             for mut error in response.errors {
@@ -380,16 +408,16 @@ impl FetchNode {
                                 }
                             }
                             _ => {
-                                error.path = Some(current_dir.clone());
+                                error.path = Some(error_dir.clone());
                                 errors.push(error)
                             }
                         }
                     } else {
-                        error.path = Some(current_dir.clone());
+                        error.path = Some(error_dir.clone());
                         errors.push(error);
                     }
                 } else {
-                    error.path = Some(current_dir.clone());
+                    error.path = Some(error_dir.clone());
                     errors.push(error);
                 }
             }
@@ -527,5 +555,810 @@ impl FetchNode {
             global_authorisation_cache_key,
             &subgraph_query_cache_key,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::name;
+    use apollo_federation::query_plan::requires_selection;
+    use apollo_federation::query_plan::serializable_document::SerializableDocument;
+    use rstest::rstest;
+    use serde_json_bytes::json;
+
+    use super::*;
+    use crate::Configuration;
+
+    fn test_schema() -> Schema {
+        let sdl = r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+                query: Query
+            }
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            scalar link__Import
+            scalar join__FieldSet
+
+            enum link__Purpose { SECURITY EXECUTION }
+
+            enum join__Graph {
+                TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+            }
+
+            type Query {
+                me: String
+            }
+        "#;
+        Schema::parse(sdl, &Configuration::default()).unwrap()
+    }
+
+    fn make_fetch_node(requires: Vec<requires_selection::Selection>) -> FetchNode {
+        FetchNode {
+            service_name: "test".into(),
+            requires,
+            variable_usages: vec![],
+            operation: SerializableDocument::from_string("{ me }"),
+            operation_name: None,
+            operation_kind: OperationKind::Query,
+            id: None,
+            input_rewrites: None,
+            output_rewrites: None,
+            context_rewrites: None,
+            schema_aware_hash: Default::default(),
+            authorization: Default::default(),
+        }
+    }
+
+    fn make_requires() -> Vec<requires_selection::Selection> {
+        vec![requires_selection::Selection::InlineFragment(
+            requires_selection::InlineFragment {
+                type_condition: Some(name!("T")),
+                selections: vec![requires_selection::Selection::Field(
+                    requires_selection::Field {
+                        alias: None,
+                        name: name!("id"),
+                        selections: Vec::new(),
+                    },
+                )],
+            },
+        )]
+    }
+
+    fn key(name: &str) -> json_ext::PathElement {
+        json_ext::PathElement::Key(name.to_string(), None)
+    }
+
+    fn index(i: usize) -> json_ext::PathElement {
+        json_ext::PathElement::Index(i)
+    }
+
+    fn flatten() -> json_ext::PathElement {
+        json_ext::PathElement::Flatten(None)
+    }
+
+    fn make_error(path: Option<Path>) -> graphql::Error {
+        match path {
+            Some(p) => graphql::Error::builder().message("err").path(p).build(),
+            None => graphql::Error::builder().message("err").build(),
+        }
+    }
+
+    #[rstest]
+    #[case::single_key(
+        vec![key("topLevel")],
+        Some(json!({"field": "value"})),
+        json!({"topLevel": {"field": "value"}})
+    )]
+    #[case::no_data(
+        vec![key("topLevel")],
+        None,
+        json!({"topLevel": null})
+    )]
+    #[case::empty_current_dir(
+        vec![],
+        Some(json!({"me": "hello"})),
+        json!({"me": "hello"})
+    )]
+    #[case::deep_nesting(
+        vec![key("a"), key("b"), key("c"), key("d")],
+        Some(json!({"value": 42})),
+        json!({"a": {"b": {"c": {"d": {"value": 42}}}}})
+    )]
+    fn root_fetch_data_wrapping(
+        #[case] dir_elements: Vec<json_ext::PathElement>,
+        #[case] data: Option<Value>,
+        #[case] expected: Value,
+    ) {
+        let schema = test_schema();
+        let node = make_fetch_node(vec![]);
+        let current_dir = Path(dir_elements);
+        let response = graphql::Response {
+            data,
+            ..Default::default()
+        };
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert!(errors.is_empty());
+        assert_eq!(value, expected);
+    }
+
+    #[rstest]
+    #[case::prepends_current_dir(
+        vec![key("top"), key("nested")],
+        Some(Path(vec![key("field")])),
+        Path(vec![key("top"), key("nested"), key("field")])
+    )]
+    #[case::no_error_path_uses_current_dir(
+        vec![key("top")],
+        None,
+        Path(vec![key("top")])
+    )]
+    #[case::trailing_flatten_stripped(
+        vec![key("list"), flatten()],
+        Some(Path(vec![key("name")])),
+        Path(vec![key("list"), key("name")])
+    )]
+    #[case::no_error_path_keeps_flatten(
+        vec![key("list"), flatten()],
+        None,
+        Path(vec![key("list"), flatten()])
+    )]
+    #[case::index_in_error_path(
+        vec![key("items")],
+        Some(Path(vec![index(2), key("name")])),
+        Path(vec![key("items"), index(2), key("name")])
+    )]
+    #[case::flatten_mid_path_not_stripped(
+        vec![key("a"), flatten(), key("b")],
+        Some(Path(vec![key("c")])),
+        Path(vec![key("a"), flatten(), key("b"), key("c")])
+    )]
+    fn root_fetch_error_path(
+        #[case] dir_elements: Vec<json_ext::PathElement>,
+        #[case] error_path: Option<Path>,
+        #[case] expected_path: Path,
+    ) {
+        let schema = test_schema();
+        let node = make_fetch_node(vec![]);
+        let current_dir = Path(dir_elements);
+        let response = graphql::Response::builder()
+            .error(make_error(error_path))
+            .build();
+
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
+    }
+
+    #[test]
+    fn root_fetch_multiple_errors() {
+        let schema = test_schema();
+        let node = make_fetch_node(vec![]);
+        let current_dir = Path(vec![key("root")]);
+        let response = graphql::Response::builder()
+            .error(
+                graphql::Error::builder()
+                    .message("error 1")
+                    .path(Path(vec![key("a")]))
+                    .build(),
+            )
+            .error(
+                graphql::Error::builder()
+                    .message("error 2")
+                    .path(Path(vec![key("b")]))
+                    .build(),
+            )
+            .error(graphql::Error::builder().message("error 3").build())
+            .build();
+
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert_eq!(errors.len(), 3);
+        assert_eq!(
+            errors[0].path.as_ref().unwrap(),
+            &Path(vec![key("root"), key("a")])
+        );
+        assert_eq!(
+            errors[1].path.as_ref().unwrap(),
+            &Path(vec![key("root"), key("b")])
+        );
+        assert_eq!(errors[2].path.as_ref().unwrap(), &Path(vec![key("root")]));
+    }
+
+    #[test]
+    fn root_fetch_preserves_error_extension_code() {
+        let schema = test_schema();
+        let node = make_fetch_node(vec![]);
+        let current_dir = Path(vec![key("root")]);
+        let response = graphql::Response::builder()
+            .error(
+                graphql::Error::builder()
+                    .message("auth error")
+                    .extension_code("UNAUTHORIZED")
+                    .path(Path(vec![key("field")]))
+                    .build(),
+            )
+            .build();
+
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].extension_code().as_deref(), Some("UNAUTHORIZED"));
+    }
+
+    #[rstest]
+    #[case::entities_path_no_index(
+        vec![key("users"), flatten()],
+        Some(Path(vec![key("_entities")])),
+        Path(vec![key("users")])
+    )]
+    #[case::non_entities_prefix(
+        vec![key("a"), key("b")],
+        Some(Path(vec![key("other"), key("field")])),
+        Path(vec![key("a"), key("b")])
+    )]
+    #[case::no_path_truncates_at_flatten(
+        vec![key("a"), flatten(), key("b")],
+        None,
+        Path(vec![key("a")])
+    )]
+    #[case::no_flatten_equals_current_dir(
+        vec![key("a"), key("b"), key("c")],
+        None,
+        Path(vec![key("a"), key("b"), key("c")])
+    )]
+    #[case::two_flattens_truncates_at_first(
+        vec![key("a"), flatten(), key("b"), flatten()],
+        None,
+        Path(vec![key("a")])
+    )]
+    #[case::entities_key_not_index(
+        vec![key("root")],
+        Some(Path(vec![key("_entities"), key("notAnIndex")])),
+        Path(vec![key("root")])
+    )]
+    fn entity_error_uses_fallback_dir(
+        #[case] dir_elements: Vec<json_ext::PathElement>,
+        #[case] error_path: Option<Path>,
+        #[case] expected_path: Path,
+    ) {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(dir_elements);
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": []}))
+            .error(make_error(error_path))
+            .build();
+
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
+    }
+
+    #[rstest]
+    #[case::flatten_preserved_when_disabled(
+        vec![key("users"), flatten()],
+        None,
+        Path(vec![key("users"), flatten()])
+    )]
+    #[case::nested_flatten_preserved_when_disabled(
+        vec![key("a"), flatten(), key("b"), flatten()],
+        None,
+        Path(vec![key("a"), flatten(), key("b"), flatten()])
+    )]
+    #[case::non_entities_path_gets_current_dir_when_disabled(
+        vec![key("items"), flatten()],
+        Some(Path(vec![key("something")])),
+        Path(vec![key("items"), flatten()])
+    )]
+    fn entity_error_uses_current_dir_when_hoist_disabled(
+        #[case] dir_elements: Vec<json_ext::PathElement>,
+        #[case] error_path: Option<Path>,
+        #[case] expected_path: Path,
+    ) {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(dir_elements);
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": []}))
+            .error(make_error(error_path))
+            .build();
+
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
+    }
+
+    #[test]
+    fn entity_fetch_basic_entities_inserted_at_inverted_paths() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("topField"), flatten()]);
+        let inverted_paths = vec![
+            vec![Path(vec![key("topField"), index(0)])],
+            vec![Path(vec![key("topField"), index(1)])],
+        ];
+        let response = graphql::Response::builder()
+            .data(json!({
+                "_entities": [
+                    {"name": "Alice"},
+                    {"name": "Bob"}
+                ]
+            }))
+            .build();
+
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+
+        assert!(errors.is_empty());
+        let top = value.as_object().unwrap().get("topField").unwrap();
+        let arr = top.as_array().unwrap();
+        assert_eq!(arr[0], json!({"name": "Alice"}));
+        assert_eq!(arr[1], json!({"name": "Bob"}));
+    }
+
+    #[test]
+    fn entity_fetch_entity_at_multiple_inverted_paths() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("field"), flatten()]);
+        let inverted_paths = vec![vec![
+            Path(vec![key("field"), index(0)]),
+            Path(vec![key("field"), index(2)]),
+        ]];
+        let response = graphql::Response::builder()
+            .data(json!({
+                "_entities": [{"name": "Alice"}]
+            }))
+            .build();
+
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+
+        assert!(errors.is_empty());
+        let arr = value
+            .as_object()
+            .unwrap()
+            .get("field")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr[0], json!({"name": "Alice"}));
+        assert_eq!(arr[2], json!({"name": "Alice"}));
+    }
+
+    #[test]
+    fn entity_fetch_empty_entities_array_returns_default_value() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("field")]);
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": []}))
+            .build();
+
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert!(errors.is_empty());
+        assert_eq!(value, Value::default());
+    }
+
+    #[test]
+    fn entity_fetch_more_entities_than_inverted_paths() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("f"), flatten()]);
+        let inverted_paths = vec![vec![Path(vec![key("f"), index(0)])]];
+        let response = graphql::Response::builder()
+            .data(json!({
+                "_entities": [
+                    {"name": "Alice"},
+                    {"name": "Bob"},
+                    {"name": "Charlie"}
+                ]
+            }))
+            .build();
+
+        let (value, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+
+        assert!(errors.is_empty());
+        let arr = value
+            .as_object()
+            .unwrap()
+            .get("f")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr[0], json!({"name": "Alice"}));
+    }
+
+    #[test]
+    fn entity_fetch_error_with_entities_path_and_index_remapped() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("users"), flatten()]);
+        let inverted_paths = vec![
+            vec![Path(vec![key("users"), index(0)])],
+            vec![Path(vec![key("users"), index(1)])],
+        ];
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": [null, null]}))
+            .error(
+                graphql::Error::builder()
+                    .message("entity error")
+                    .path(Path(vec![key("_entities"), index(1), key("name")]))
+                    .build(),
+            )
+            .build();
+
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].path.as_ref().unwrap(),
+            &Path(vec![key("users"), index(1), key("name")])
+        );
+        assert_eq!(errors[0].message, "entity error");
+    }
+
+    #[test]
+    fn entity_fetch_error_locations_cleared() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("data")]);
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": [null]}))
+            .error(
+                graphql::Error::builder()
+                    .message("err")
+                    .locations(vec![graphql::Location { line: 1, column: 5 }])
+                    .path(Path(vec![key("_entities"), index(0), key("x")]))
+                    .build(),
+            )
+            .build();
+
+        let (_, errors) = node.response_at_path(
+            &schema,
+            &current_dir,
+            vec![vec![Path(vec![key("data"), index(0)])]],
+            response,
+            false,
+        );
+
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].locations.is_empty());
+    }
+
+    #[test]
+    fn entity_fetch_error_index_remapped_to_multiple_inverted_paths() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("items"), flatten()]);
+        let inverted_paths = vec![vec![
+            Path(vec![key("items"), index(0)]),
+            Path(vec![key("items"), index(3)]),
+        ]];
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": [null]}))
+            .error(
+                graphql::Error::builder()
+                    .message("err")
+                    .path(Path(vec![key("_entities"), index(0), key("name")]))
+                    .build(),
+            )
+            .build();
+
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+
+        assert_eq!(errors.len(), 2);
+        assert_eq!(
+            errors[0].path.as_ref().unwrap(),
+            &Path(vec![key("items"), index(0), key("name")])
+        );
+        assert_eq!(
+            errors[1].path.as_ref().unwrap(),
+            &Path(vec![key("items"), index(3), key("name")])
+        );
+    }
+
+    #[test]
+    fn entity_fetch_error_index_out_of_bounds_inverted_paths_no_panic() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("x")]);
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": []}))
+            .error(
+                graphql::Error::builder()
+                    .message("oob")
+                    .path(Path(vec![key("_entities"), index(5), key("f")]))
+                    .build(),
+            )
+            .build();
+
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn entity_fetch_preserves_extension_code_on_remapped_errors() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("users"), flatten()]);
+        let inverted_paths = vec![vec![Path(vec![key("users"), index(0)])]];
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": [null]}))
+            .error(
+                graphql::Error::builder()
+                    .message("forbidden")
+                    .extension_code("FORBIDDEN")
+                    .path(Path(vec![key("_entities"), index(0)]))
+                    .build(),
+            )
+            .build();
+
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].extension_code().as_deref(), Some("FORBIDDEN"));
+        assert_eq!(
+            errors[0].path.as_ref().unwrap(),
+            &Path(vec![key("users"), index(0)])
+        );
+    }
+
+    #[test]
+    fn entity_fetch_error_appends_remaining_path_after_index() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("data"), flatten()]);
+        let inverted_paths = vec![vec![Path(vec![key("data"), index(0)])]];
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": [null]}))
+            .error(
+                graphql::Error::builder()
+                    .message("nested err")
+                    .path(Path(vec![
+                        key("_entities"),
+                        index(0),
+                        key("address"),
+                        key("city"),
+                    ]))
+                    .build(),
+            )
+            .build();
+
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].path.as_ref().unwrap(),
+            &Path(vec![key("data"), index(0), key("address"), key("city")])
+        );
+    }
+
+    #[test]
+    fn entity_fetch_missing_entities_key_with_errors() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("users"), flatten()]);
+        let response = graphql::Response::builder()
+            .data(json!({"something": "else"}))
+            .error(
+                graphql::Error::builder()
+                    .message("permission denied")
+                    .build(),
+            )
+            .build();
+
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert_eq!(value, Value::Null);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].message, "permission denied");
+    }
+
+    #[test]
+    fn entity_fetch_missing_entities_key_no_errors() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("users")]);
+        let response = graphql::Response::builder()
+            .data(json!({"something": "else"}))
+            .build();
+
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert_eq!(value, Value::Null);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn entity_fetch_null_data_returns_null_with_errors() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("field")]);
+        let response = graphql::Response::builder()
+            .error(graphql::Error::builder().message("subgraph error").build())
+            .build();
+
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert_eq!(value, Value::Null);
+        assert_eq!(errors.len(), 1);
+    }
+
+    #[test]
+    fn entity_fetch_null_data_errors_get_fallback_dir() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("users"), flatten(), key("reviews")]);
+        let expected_fallback = Path(vec![key("users")]);
+        let response = graphql::Response::builder()
+            .error(graphql::Error::builder().message("pathless error").build())
+            .error(
+                graphql::Error::builder()
+                    .message("non-entities path")
+                    .path(Path(vec![key("something")]))
+                    .build(),
+            )
+            .error(
+                graphql::Error::builder()
+                    .message("entities no index")
+                    .path(Path(vec![key("_entities")]))
+                    .build(),
+            )
+            .build();
+
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+
+        assert_eq!(value, Value::Null);
+        assert_eq!(errors.len(), 3);
+        for error in &errors {
+            assert_eq!(
+                error.path.as_ref().unwrap(),
+                &expected_fallback,
+                "error '{}' did not get fallback_dir",
+                error.message,
+            );
+        }
+    }
+
+    #[test]
+    fn entity_fetch_missing_entities_key_errors_get_fallback_dir() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("items"), flatten()]);
+        let expected_fallback = Path(vec![key("items")]);
+        let response = graphql::Response::builder()
+            .data(json!({"something": "else"}))
+            .error(
+                graphql::Error::builder()
+                    .message("permission denied")
+                    .build(),
+            )
+            .error(
+                graphql::Error::builder()
+                    .message("other error")
+                    .path(Path(vec![key("unrelated")]))
+                    .build(),
+            )
+            .build();
+
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+
+        assert_eq!(value, Value::Null);
+        assert_eq!(errors.len(), 2);
+        for error in &errors {
+            assert_eq!(
+                error.path.as_ref().unwrap(),
+                &expected_fallback,
+                "error '{}' did not get fallback_dir",
+                error.message,
+            );
+        }
+    }
+
+    #[test]
+    fn entity_fetch_entities_not_array_returns_null() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("field")]);
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": "not_an_array"}))
+            .build();
+
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
+
+        assert_eq!(value, Value::Null);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn entity_fetch_entities_not_array_errors_get_fallback_dir() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("products"), flatten()]);
+        let expected_fallback = Path(vec![key("products")]);
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": 42}))
+            .error(graphql::Error::builder().message("bad entities").build())
+            .build();
+
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+
+        assert_eq!(value, Value::Null);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path.as_ref().unwrap(), &expected_fallback);
+    }
+
+    #[test]
+    fn entity_fetch_data_is_non_object_returns_null_with_fallback_errors() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("orders"), flatten(), key("items")]);
+        let expected_fallback = Path(vec![key("orders")]);
+        let response = graphql::Response {
+            data: Some(Value::Null),
+            errors: vec![graphql::Error::builder().message("null data error").build()],
+            ..Default::default()
+        };
+
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+
+        assert_eq!(value, Value::Null);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path.as_ref().unwrap(), &expected_fallback);
+    }
+
+    #[test]
+    fn entity_fetch_mixed_error_types() {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(vec![key("users"), flatten()]);
+        let inverted_paths = vec![
+            vec![Path(vec![key("users"), index(0)])],
+            vec![Path(vec![key("users"), index(1)])],
+        ];
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": [{"name": "Alice"}, null]}))
+            .error(
+                graphql::Error::builder()
+                    .message("entity 1 error")
+                    .path(Path(vec![key("_entities"), index(1), key("field")]))
+                    .build(),
+            )
+            .error(
+                graphql::Error::builder()
+                    .message("general error")
+                    .path(Path(vec![key("other")]))
+                    .build(),
+            )
+            .error(graphql::Error::builder().message("pathless").build())
+            .build();
+
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, true);
+
+        assert_eq!(errors.len(), 3);
+        assert_eq!(
+            errors[0].path.as_ref().unwrap(),
+            &Path(vec![key("users"), index(1), key("field")])
+        );
+        assert_eq!(errors[1].path.as_ref().unwrap(), &Path(vec![key("users")]));
+        assert_eq!(errors[2].path.as_ref().unwrap(), &Path(vec![key("users")]));
     }
 }
