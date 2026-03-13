@@ -381,7 +381,7 @@ serde_json.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = [
-    "serde_regex", # Referenced only as a string in a macro
+    "socket2", # Only used to enable a transitive feature pending https://github.com/aembke/fred.rs/pull/369
 ]
 
 [[test]]
