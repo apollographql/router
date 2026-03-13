@@ -325,6 +325,9 @@ mod tests {
             assert!(retrieved.is_ok(), "Should have retrieved value from mock");
             assert_eq!(retrieved.unwrap().0.data, "test_value");
 
+            // Pause to ensure that queue length is zero & metrics have been exported
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
             // Verify Redis connection metrics are emitted.
             // Since this metric is based on a global AtomicU64, it's not unique across tests - so
             // we can only reliably check for metric existence, rather than a specific value.
@@ -333,9 +336,6 @@ mod tests {
                 MetricType::Gauge,
                 &[],
             ));
-
-            // Pause to ensure that queue length is zero
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             // Verify Redis gauge metrics are available (observables are created immediately)
             assert_gauge!(
