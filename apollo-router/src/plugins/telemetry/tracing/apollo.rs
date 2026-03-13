@@ -51,7 +51,7 @@ impl TracingConfigurator for Config {
             .build()?;
         let named_exporter = NamedSpanExporter::new(exporter, "apollo");
         builder.with_span_processor(
-            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("apollo"))
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("apollo-tracing"))
                 .with_batch_config(self.tracing.batch_processor.clone().into())
                 .build(),
         );
