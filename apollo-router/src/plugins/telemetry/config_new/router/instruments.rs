@@ -260,7 +260,7 @@ mod tests {
     async fn recording_stream_accumulates_bytes_across_chunks() {
         async {
             let meter = crate::metrics::meter_provider().meter("test");
-            let histogram = meter.f64_histogram("test.body.size").init();
+            let histogram = meter.f64_histogram("test.body.size").build();
 
             let chunks: Vec<Result<Bytes, BoxError>> = vec![
                 Ok(Bytes::from_static(b"hello")),
@@ -289,7 +289,7 @@ mod tests {
     async fn recording_stream_records_zero_for_empty_stream() {
         async {
             let meter = crate::metrics::meter_provider().meter("test");
-            let histogram = meter.f64_histogram("test.body.size").init();
+            let histogram = meter.f64_histogram("test.body.size").build();
 
             let chunks: Vec<Result<Bytes, BoxError>> = vec![];
             let inner = stream::iter(chunks);
@@ -308,7 +308,7 @@ mod tests {
     async fn recording_stream_skips_error_chunks_in_byte_count() {
         async {
             let meter = crate::metrics::meter_provider().meter("test");
-            let histogram = meter.f64_histogram("test.body.size").init();
+            let histogram = meter.f64_histogram("test.body.size").build();
 
             let chunks: Vec<Result<Bytes, BoxError>> = vec![
                 Ok(Bytes::from_static(b"abc")),
