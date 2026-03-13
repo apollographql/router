@@ -35,7 +35,7 @@ async fn test_trace_error() -> Result<(), BoxError> {
 
     router.start().await;
     router.assert_started().await;
-    router.assert_metrics_contains(r#"apollo_router_telemetry_batch_processor_errors_total{error="channel full",name="otlp",otel_scope_name="apollo/router"}"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_telemetry_batch_processor_errors_total{error="channel full",name="otlp-tracing",otel_scope_name="apollo/router"}"#, None).await;
     router.graceful_shutdown().await;
 
     drop(mock_server);
