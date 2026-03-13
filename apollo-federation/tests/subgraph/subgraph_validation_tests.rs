@@ -989,6 +989,7 @@ Did you mean "@shareable"?{}"#,
 // PORT_NOTE: Corresponds to '@core/@link handling' tests in JS
 mod link_handling_tests {
     use similar::TextDiff;
+    use test_log::test;
 
     use super::*;
 
@@ -1318,7 +1319,10 @@ type Query {
                 ) repeatable on SCHEMA
 
                 scalar link__Import
-                scalar link__Purpose
+                enum link__Purpose {
+                  SECURITY
+                  EXECUTION
+                }
             "#,
         ];
 
