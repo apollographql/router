@@ -4143,7 +4143,7 @@ mod tests {
         // Original data should be preserved since it wasn't sent to coprocessor
         assert_eq!(
             json!({ "test": 1234_u32 }),
-            response.response.body().data.as_ref().unwrap()
+            *response.response.body().data.as_ref().unwrap()
         );
     }
 
@@ -4227,7 +4227,7 @@ mod tests {
         // Data and extensions should be modified by coprocessor
         assert_eq!(
             json!({ "test": 5678_u32 }),
-            response.response.body().data.as_ref().unwrap()
+            *response.response.body().data.as_ref().unwrap()
         );
         assert_eq!(
             json!("modified_value"),
@@ -4299,7 +4299,7 @@ mod tests {
         // Original data should be preserved
         assert_eq!(
             json!({ "test": 1234_u32 }),
-            response.response.body().data.as_ref().unwrap()
+            *response.response.body().data.as_ref().unwrap()
         );
     }
 
@@ -5758,7 +5758,6 @@ mod tests {
 
         use crate::metrics::FutureMetricsExt;
         use crate::plugin::test::MockInternalHttpClientService;
-        use crate::plugins::coprocessor::BodyConf;
         use crate::plugins::coprocessor::ContextConf;
         use crate::plugins::coprocessor::NewContextConf;
         use crate::plugins::coprocessor::connector::ConnectorRequestConf;
