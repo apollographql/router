@@ -4143,7 +4143,7 @@ mod tests {
         // Original data should be preserved since it wasn't sent to coprocessor
         assert_eq!(
             json!({ "test": 1234_u32 }),
-            response.response.body().data.unwrap()
+            response.response.body().data.as_ref().unwrap()
         );
     }
 
@@ -4227,7 +4227,7 @@ mod tests {
         // Data and extensions should be modified by coprocessor
         assert_eq!(
             json!({ "test": 5678_u32 }),
-            response.response.body().data.unwrap()
+            response.response.body().data.as_ref().unwrap()
         );
         assert_eq!(
             json!("modified_value"),
@@ -4299,7 +4299,7 @@ mod tests {
         // Original data should be preserved
         assert_eq!(
             json!({ "test": 1234_u32 }),
-            response.response.body().data.unwrap()
+            response.response.body().data.as_ref().unwrap()
         );
     }
 
@@ -5873,7 +5873,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
                     headers: true,
-                    body: BodyConf::All(true),
+                    body: true,
                     uri: true,
                     ..Default::default()
                 },
@@ -5921,7 +5921,7 @@ mod tests {
         async fn should_send_json_body_as_parsed_json_to_coprocessor() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -5972,7 +5972,7 @@ mod tests {
         async fn should_send_non_json_body_as_string_to_coprocessor() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -6045,7 +6045,7 @@ mod tests {
         async fn should_return_transport_error_when_coprocessor_breaks() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -6169,7 +6169,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
                     context: ContextConf::NewContextConf(NewContextConf::All),
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -6221,7 +6221,7 @@ mod tests {
                 for _ in 0..2 {
                     let connector_stage = ConnectorStage {
                         request: ConnectorRequestConf {
-                            body: BodyConf::All(true),
+                            body: true,
                             ..Default::default()
                         },
                         response: Default::default(),
@@ -6274,7 +6274,7 @@ mod tests {
                     let connector_stage = ConnectorStage {
                         request: ConnectorRequestConf {
                             condition: Condition::False,
-                            body: BodyConf::All(true),
+                            body: true,
                             ..Default::default()
                         },
                         response: Default::default(),
@@ -6324,7 +6324,7 @@ mod tests {
                 response: ConnectorResponseConf {
                     headers: true,
                     status_code: true,
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
             };
@@ -6366,7 +6366,7 @@ mod tests {
                     let connector_stage = ConnectorStage {
                         request: Default::default(),
                         response: ConnectorResponseConf {
-                            body: BodyConf::All(true),
+                            body: true,
                             ..Default::default()
                         },
                     };
@@ -6414,7 +6414,7 @@ mod tests {
         async fn should_use_structured_error_when_coprocessor_breaks_with_errors_object() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -6471,7 +6471,7 @@ mod tests {
         async fn should_use_string_error_when_coprocessor_breaks_with_string_body() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -6519,7 +6519,7 @@ mod tests {
         async fn should_pass_extra_extensions_from_structured_error() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
                 response: Default::default(),
@@ -6583,7 +6583,7 @@ mod tests {
                 request: Default::default(),
                 response: ConnectorResponseConf {
                     context: ContextConf::NewContextConf(NewContextConf::All),
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
             };
@@ -6633,7 +6633,7 @@ mod tests {
                 request: Default::default(),
                 response: ConnectorResponseConf {
                     context: ContextConf::NewContextConf(NewContextConf::All),
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
             };
@@ -6682,7 +6682,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: Default::default(),
                 response: ConnectorResponseConf {
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
             };
@@ -6751,7 +6751,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: Default::default(),
                 response: ConnectorResponseConf {
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
             };
@@ -6795,7 +6795,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: Default::default(),
                 response: ConnectorResponseConf {
-                    body: BodyConf::All(true),
+                    body: true,
                     ..Default::default()
                 },
             };
