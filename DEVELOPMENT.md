@@ -36,6 +36,8 @@ Some tests that use the features above are configured with `required_to_start: t
 
 **Note:** `-d` runs services in the background. Remove `-d` if you want to see logs or run in foreground.
 
+**Helper script:** From the repo root, run `./scripts/start-test-services.sh` to start Docker Desktop (on macOS) if needed, run `docker compose up -d`, and wait for Redis and the Redis cluster to be reachable. If Docker is not available, the script will try to start a local Redis server (e.g. from `brew install redis`) so that non-cluster tests can run; cluster tests still require the full Docker Compose stack.
+
 Several tests also require the `redis-cli` binary; this is installed by default if you use `mise`.
 
 #### Enterprise feature testing
