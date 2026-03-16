@@ -137,7 +137,7 @@ impl RedisMetricsCollector {
     ///
     /// The background task is NOT started until `activate()` is called.
     pub(crate) fn new(
-        pool: Arc<RedisPool>,
+        pool: Arc<RwLock<Option<RedisPool>>>,
         caller: &'static str,
         metrics_interval: Duration,
     ) -> Self {
