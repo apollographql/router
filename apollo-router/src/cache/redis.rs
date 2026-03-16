@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -126,13 +127,6 @@ where
 //   is cloned frequently throughout the router, and we don't want to close the connections
 //   when each clone is dropped, only when the last instance is dropped.
 struct DropSafeRedisPool {
-    // we use a lock for its interior mutability, don't confuse this lock for a lock on the redis
-    // commands (eg, by thinking you need  to take a write lock out before doing a redis write command)
-    //
-    // NOTE: we use the parking_lot::RwLock rather than the tokio::sync::RwLock because we don't do
-    // any asynchronous work for the lock: we acquire it, read the pool, and clone the client; only
-    // after that do we the asynchronous work of talking to redis. tokio::sync::RwLock introduces
-    // all the normal asynchronous machinery and we want to avoid that overhead here
     pool: Arc<RwLock<Option<RedisPool>>>,
     caller: &'static str,
     heartbeat_abort_handle: AbortHandle,
@@ -147,26 +141,22 @@ impl DropSafeRedisPool {
     }
 }
 
+impl Deref for DropSafeRedisPool {
+    type Target = RedisPool;
+
+    fn deref(&self) -> &Option<Self::Target> {
+        &self.pool.read()
+    }
+}
+
 impl Drop for DropSafeRedisPool {
     fn drop(&mut self) {
         let inner = self.pool.clone();
         let caller = self.caller;
         self.heartbeat_abort_handle.abort();
         tokio::spawn(async move {
-            // WARN: drop safety: we take the pool here so that any other callers of the RwLock
-            // will see None; be careful replacing this, we _could_ get a race condition if we
-            // change the take() for something else that gets the RwWriteLockGuard, creates the
-            // quit future, and then drops the guard before awaiting the quit future because some
-            // other caller could, between the space of dropping the guard and attempting to await
-            // the quit, try to use the pool
-            let pool = if let Some(pool) = inner.write().take() {
-                pool
-            } else {
-                tracing::warn!("attempted to drop redis pool, but pool was already gone");
-                return;
-            };
-
-            pool.quit()
+            let _ = inner
+                .quit()
                 .await
                 .inspect_err(|err| record_redis_error(err, caller, "shutdown"));
         });
@@ -472,7 +462,7 @@ impl RedisCacheStorage {
                 .await
         });
 
-        let pooled_client_arc = Arc::new(RwLock::new(Some(pooled_client)));
+        let pooled_client_arc = Arc::new(pooled_client);
         let metrics_collector =
             RedisMetricsCollector::new(pooled_client_arc.clone(), caller, metrics_interval);
 
@@ -587,30 +577,11 @@ impl RedisCacheStorage {
     }
 
     pub(crate) fn client(&self) -> Client {
-        let guard = self.inner.pool.read();
-        match guard.as_ref() {
-            Some(pool) => pool.next().clone(),
-            // TODO: retry logic
-            None => {
-                // this is where we'll retry creating the client if necessary, with some
-                // backoff/etc
-                unimplemented!()
-            }
-        }
+        self.inner.next().clone()
     }
 
     pub(crate) fn pipeline(&self) -> Pipeline<Client> {
-        let guard = self.inner.pool.read();
-        match guard.as_ref() {
-            // TODO: decide if we should clone; didn't originally, we do for the pool
-            Some(pipeline) => pipeline.next().pipeline().clone(),
-            // TODO: retry logic
-            None => {
-                // this is where we'll retry creating the client if necessary, with some
-                // backoff/etc
-                unimplemented!()
-            }
-        }
+        self.inner.next().pipeline()
     }
 
     fn expiration(&self, ttl: Option<Duration>) -> Option<Expiration> {
