@@ -142,7 +142,7 @@ impl AuthorizationPlugin {
         configuration: &Configuration,
         schema: &Schema,
     ) -> Result<bool, ServiceBuildError> {
-        let has_config = Self::configuration(configuration).map(|c| c.directives.enabled);
+        let has_config = Self::configuration(configuration).directives.enabled;
 
         let has_authorization_directives = schema.has_spec(
             &Identity::authenticated_identity(),
@@ -153,18 +153,20 @@ impl AuthorizationPlugin {
         ) || schema
             .has_spec(&Identity::policy_identity(), POLICY_SPEC_VERSION_RANGE);
 
-        Ok(has_config.unwrap_or(true) && has_authorization_directives)
+        Ok(has_config && has_authorization_directives)
     }
 
-    fn configuration(configuration: &Configuration) -> Option<Conf> {
-        let value = configuration.apollo_plugins.plugins.get("authorization")?;
-        serde_json::from_value(value.clone()).ok()
+    fn configuration(configuration: &Configuration) -> Conf {
+        configuration
+            .apollo_plugins
+            .plugins
+            .get("authorization")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default()
     }
 
     pub(crate) fn log_errors(configuration: &Configuration) -> ErrorConfig {
-        Self::configuration(configuration)
-            .map(|c| c.directives.errors)
-            .unwrap_or_default()
+        Self::configuration(configuration).directives.errors
     }
 
     pub(crate) fn query_analysis(
@@ -321,14 +323,9 @@ impl AuthorizationPlugin {
         key: &QueryKey,
         schema: &Schema,
     ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
-        let (reject_unauthorized, dry_run) = Self::configuration(configuration)
-            .map(|config| {
-                (
-                    config.directives.reject_unauthorized,
-                    config.directives.dry_run,
-                )
-            })
-            .unwrap_or((false, false));
+        let config = Self::configuration(configuration);
+        let reject_unauthorized = config.directives.reject_unauthorized;
+        let dry_run = config.directives.dry_run;
 
         // The filtered query will then be used
         // to generate selections for response formatting, to execute introspection and

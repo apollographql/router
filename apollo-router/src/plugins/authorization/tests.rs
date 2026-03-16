@@ -1191,27 +1191,20 @@ mod config_parsing {
         let conf = new_conf(&value);
 
         let old_enabled = old_enabled(&value).unwrap_or(true);
-        let new_enabled = conf.as_ref().map(|c| c.directives.enabled).unwrap_or(true);
-        assert_eq!(
-            old_enabled, new_enabled,
-            "enabled mismatch for conf {conf:?}"
-        );
-
         let old_errors = old_errors(&value).unwrap_or_default();
-        let new_errors = conf
-            .as_ref()
-            .map(|c| c.directives.errors.clone())
-            .unwrap_or_default();
-        assert_eq!(old_errors, new_errors, "errors mismatch for conf {conf:?}");
-
         let old_flags = old_directives_flags(&value).unwrap_or((false, false));
-        let new_flags = conf
-            .as_ref()
-            .map(|c| (c.directives.reject_unauthorized, c.directives.dry_run))
-            .unwrap_or((false, false));
-        assert_eq!(
-            old_flags, new_flags,
-            "directives flags mismatch for conf {conf:?}"
+
+        let new_conf = conf.clone().unwrap_or_default();
+
+        let new_enabled = new_conf.directives.enabled;
+        let new_errors = new_conf.directives.errors;
+        let new_flags = (
+            new_conf.directives.reject_unauthorized,
+            new_conf.directives.dry_run,
         );
+
+        assert_eq!(old_enabled, new_enabled);
+        assert_eq!(old_errors, new_errors);
+        assert_eq!(old_flags, new_flags);
     }
 }
