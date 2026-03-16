@@ -142,12 +142,8 @@ impl AuthorizationPlugin {
         configuration: &Configuration,
         schema: &Schema,
     ) -> Result<bool, ServiceBuildError> {
-        let has_config = configuration
-            .apollo_plugins
-            .plugins
-            .iter()
-            .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| v.get("directives").and_then(|v| v.as_object()))
+        let has_config = Self::configuration(configuration)
+            .and_then(|v| v.get("directives").and_then(|v| v.as_object()))
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
 
         let has_authorization_directives = schema.has_spec(
@@ -162,13 +158,13 @@ impl AuthorizationPlugin {
         Ok(has_config.unwrap_or(true) && has_authorization_directives)
     }
 
+    fn configuration(configuration: &Configuration) -> Option<&serde_json::Value> {
+        configuration.apollo_plugins.plugins.get("authorization")
+    }
+
     pub(crate) fn log_errors(configuration: &Configuration) -> ErrorConfig {
-        configuration
-            .apollo_plugins
-            .plugins
-            .iter()
-            .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| v.get("directives").and_then(|v| v.as_object()))
+        Self::configuration(configuration)
+            .and_then(|v| v.get("directives").and_then(|v| v.as_object()))
             .and_then(|v| {
                 v.get("errors")
                     .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -330,12 +326,8 @@ impl AuthorizationPlugin {
         key: &QueryKey,
         schema: &Schema,
     ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
-        let (reject_unauthorized, dry_run) = configuration
-            .apollo_plugins
-            .plugins
-            .iter()
-            .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| v.get("directives").and_then(|v| v.as_object()))
+        let (reject_unauthorized, dry_run) = Self::configuration(configuration)
+            .and_then(|v| v.get("directives").and_then(|v| v.as_object()))
             .map(|config| {
                 (
                     config
