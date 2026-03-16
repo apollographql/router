@@ -142,9 +142,7 @@ impl AuthorizationPlugin {
         configuration: &Configuration,
         schema: &Schema,
     ) -> Result<bool, ServiceBuildError> {
-        let has_config = Self::configuration(configuration)
-            .and_then(|v| v.get("directives").and_then(|v| v.as_object()))
-            .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
+        let has_config = Self::configuration(configuration).map(|c| c.directives.enabled);
 
         let has_authorization_directives = schema.has_spec(
             &Identity::authenticated_identity(),
@@ -158,17 +156,14 @@ impl AuthorizationPlugin {
         Ok(has_config.unwrap_or(true) && has_authorization_directives)
     }
 
-    fn configuration(configuration: &Configuration) -> Option<&serde_json::Value> {
-        configuration.apollo_plugins.plugins.get("authorization")
+    fn configuration(configuration: &Configuration) -> Option<Conf> {
+        let value = configuration.apollo_plugins.plugins.get("authorization")?;
+        serde_json::from_value(value.clone()).ok()
     }
 
     pub(crate) fn log_errors(configuration: &Configuration) -> ErrorConfig {
         Self::configuration(configuration)
-            .and_then(|v| v.get("directives").and_then(|v| v.as_object()))
-            .and_then(|v| {
-                v.get("errors")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-            })
+            .map(|c| c.directives.errors)
             .unwrap_or_default()
     }
 
@@ -327,17 +322,10 @@ impl AuthorizationPlugin {
         schema: &Schema,
     ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
         let (reject_unauthorized, dry_run) = Self::configuration(configuration)
-            .and_then(|v| v.get("directives").and_then(|v| v.as_object()))
             .map(|config| {
                 (
-                    config
-                        .get("reject_unauthorized")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
-                    config
-                        .get("dry_run")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
+                    config.directives.reject_unauthorized,
+                    config.directives.dry_run,
                 )
             })
             .unwrap_or((false, false));
