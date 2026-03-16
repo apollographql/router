@@ -1116,3 +1116,102 @@ async fn cache_key_metadata() {
 
     insta::assert_json_snapshot!(response);
 }
+
+// Verifies that the refactored typed config parsing produces the same values as the
+// old manual JSON path navigation for every combination of present/absent config fields.
+mod config_parsing {
+    use serde_json::json;
+
+    use crate::plugins::authorization::Conf;
+    use crate::plugins::authorization::ErrorConfig;
+
+    // Old extraction logic, preserved verbatim from before the refactor.
+    fn old_enabled(value: &serde_json::Value) -> Option<bool> {
+        value
+            .get("directives")
+            .and_then(|v| v.as_object())
+            .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
+    }
+
+    fn old_errors(value: &serde_json::Value) -> Option<ErrorConfig> {
+        value
+            .get("directives")
+            .and_then(|v| v.as_object())
+            .and_then(|v| {
+                v.get("errors")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+            })
+    }
+
+    fn old_directives_flags(value: &serde_json::Value) -> Option<(bool, bool)> {
+        value
+            .get("directives")
+            .and_then(|v| v.as_object())
+            .map(|config| {
+                (
+                    config
+                        .get("reject_unauthorized")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    config
+                        .get("dry_run")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                )
+            })
+    }
+
+    // New extraction via typed deserialization.
+    fn new_conf(value: &serde_json::Value) -> Option<Conf> {
+        serde_json::from_value(value.clone()).ok()
+    }
+
+    #[rstest::rstest]
+    #[case(json!({}))]
+    #[case(json!({ "directives": {} }))]
+    #[case(json!({ "directives": { "enabled": true } }))]
+    #[case(json!({ "directives": { "enabled": false } }))]
+    #[case(json!({ "directives": { "dry_run": true } }))]
+    #[case(json!({ "directives": { "reject_unauthorized": true } }))]
+    #[case(json!({ "directives": { "dry_run": true, "reject_unauthorized": true } }))]
+    #[case(json!({ "directives": { "errors": {} } }))]
+    #[case(json!({ "directives": { "errors": { "log": false } } }))]
+    #[case(json!({ "directives": { "errors": { "response": "extensions" } } }))]
+    #[case(json!({ "directives": { "errors": { "response": "disabled" } } }))]
+    #[case(json!({ "directives": { "errors": { "log": false, "response": "extensions" } } }))]
+    #[case(json!({
+        "directives": {
+            "enabled": true,
+            "dry_run": true,
+            "reject_unauthorized": true,
+            "errors": { "log": true, "response": "errors" }
+        }
+    }))]
+    fn config_parsing_matches(#[case] value: serde_json::Value) {
+        let conf = new_conf(&value);
+
+        let old_enabled = old_enabled(&value).unwrap_or(true);
+        let new_enabled = conf.as_ref().map(|c| c.directives.enabled).unwrap_or(true);
+        assert_eq!(
+            old_enabled, new_enabled,
+            "enabled mismatch for conf {conf:?}"
+        );
+
+        let old_errors = old_errors(&value).unwrap_or_default();
+        let new_errors = conf
+            .as_ref()
+            .map(|c| c.directives.errors.clone())
+            .unwrap_or_default();
+        assert_eq!(old_errors, new_errors, "errors mismatch for conf {conf:?}");
+
+        let old_flags = old_directives_flags(&value).unwrap_or((false, false));
+        let new_flags = conf
+            .as_ref()
+            .map(|c| (c.directives.reject_unauthorized, c.directives.dry_run))
+            .unwrap_or((false, false));
+        assert_eq!(
+            old_flags, new_flags,
+            "directives flags mismatch for conf {conf:?}"
+        );
+    }
+}
