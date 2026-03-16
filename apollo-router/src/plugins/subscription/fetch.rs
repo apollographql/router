@@ -102,8 +102,7 @@ fn subscription_with_subgraph_service(
             "apollo.router.operations.subscriptions.rejected",
             "Number of subscription requests rejected",
             1,
-            reason = "max_opened_subscriptions_limit_reached",
-            subgraph.name = ""
+            reason = "max_opened_subscriptions_limit_reached"
         );
         return Box::pin(async {
             Ok((
@@ -330,8 +329,7 @@ mod tests {
             assert_counter!(
                 "apollo.router.operations.subscriptions.rejected",
                 1,
-                "reason" = "max_opened_subscriptions_limit_reached",
-                "subgraph.name" = ""
+                "reason" = "max_opened_subscriptions_limit_reached"
             );
 
             OPENED_SUBSCRIPTIONS.store(original_count, Ordering::Relaxed);
