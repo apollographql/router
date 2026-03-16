@@ -46,7 +46,9 @@ use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
 
 pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
-
+/// Represents when a caller is lost (eg, by losing the inner client) and is no longer known.
+/// Useful for having something to emit with metrics
+const UNKNOWN_CALLER: &'static str = "UNKNOWN_CALLER";
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "redis",
     "rediss",
@@ -127,7 +129,9 @@ where
 //   is cloned frequently throughout the router, and we don't want to close the connections
 //   when each clone is dropped, only when the last instance is dropped.
 struct DropSafeRedisPool {
-    pool: Arc<RwLock<Option<RedisPool>>>,
+    pool: Arc<RedisPool>,
+    // the caller is whatever feature is using redis (eg, response-cache is a caller); used in
+    // metrics and so on
     caller: &'static str,
     heartbeat_abort_handle: AbortHandle,
     // Metrics collector handles its own abort and spawns a background task for gauge updates
@@ -144,8 +148,8 @@ impl DropSafeRedisPool {
 impl Deref for DropSafeRedisPool {
     type Target = RedisPool;
 
-    fn deref(&self) -> &Option<Self::Target> {
-        &self.pool.read()
+    fn deref(&self) -> &Self::Target {
+        &self.pool
     }
 }
 
@@ -166,7 +170,8 @@ impl Drop for DropSafeRedisPool {
 
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
-    inner: Arc<DropSafeRedisPool>,
+    // TODO: notes on why parking_lot::RwLock, see reverted commit
+    inner: Arc<RwLock<Option<DropSafeRedisPool>>>,
     namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
     is_cluster: bool,
@@ -389,7 +394,7 @@ impl RedisCacheStorage {
         caller: &'static str,
         metrics_interval: Duration,
         required_to_start: bool,
-    ) -> Result<Arc<DropSafeRedisPool>, BoxError> {
+    ) -> Result<Arc<RwLock<Option<DropSafeRedisPool>>>, BoxError> {
         let pooled_client = Builder::from_config(client_config)
             .with_config(|client_config| {
                 if is_cluster {
@@ -466,12 +471,12 @@ impl RedisCacheStorage {
         let metrics_collector =
             RedisMetricsCollector::new(pooled_client_arc.clone(), caller, metrics_interval);
 
-        Ok(Arc::new(DropSafeRedisPool {
+        Ok(Arc::new(RwLock::new(Some(DropSafeRedisPool {
             pool: pooled_client_arc,
             caller,
             heartbeat_abort_handle: heartbeat_handle.abort_handle(),
             _metrics_collector: metrics_collector,
-        }))
+        }))))
     }
 
     pub(crate) fn ttl(&self) -> Option<Duration> {
@@ -488,7 +493,10 @@ impl RedisCacheStorage {
 
     /// Helper method to record Redis errors for metrics
     fn record_query_error(&self, error: &RedisError) {
-        record_redis_error(error, self.inner.caller, "query");
+        match self.inner.read().as_ref() {
+            Some(pool) => record_redis_error(error, pool.caller, "query"),
+            None => record_redis_error(error, UNKNOWN_CALLER, "query"),
+        }
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
@@ -577,11 +585,25 @@ impl RedisCacheStorage {
     }
 
     pub(crate) fn client(&self) -> Client {
-        self.inner.next().clone()
+        let pool = self.inner.read();
+        match pool.as_ref() {
+            Some(pool) => pool.next().clone(),
+            None => {
+                // TODO: implement retry logic here
+                unimplemented!()
+            }
+        }
     }
 
     pub(crate) fn pipeline(&self) -> Pipeline<Client> {
-        self.inner.next().pipeline()
+        let pool = self.inner.read();
+        match pool.as_ref() {
+            Some(pool) => pool.next().pipeline(),
+            None => {
+                // TODO: implement retry logic here
+                unimplemented!()
+            }
+        }
     }
 
     fn expiration(&self, ttl: Option<Duration>) -> Option<Expiration> {
