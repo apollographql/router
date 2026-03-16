@@ -136,16 +136,18 @@ impl HttpClientService {
 
         let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
-            .https_or_http()
-            .enable_http1();
+            .https_or_http();
 
         let pool_idle_timeout = client_config.pool_idle_timeout;
 
         let http2 = client_config.experimental_http2.unwrap_or_default();
-        let connector = if http2 != Http2Config::Disable {
-            builder.enable_http2().wrap_connector(http_connector)
-        } else {
-            builder.wrap_connector(http_connector)
+        let connector = match http2 {
+            Http2Config::Enable => builder
+                .enable_http1()
+                .enable_http2()
+                .wrap_connector(http_connector),
+            Http2Config::Disable => builder.enable_http1().wrap_connector(http_connector),
+            Http2Config::Http2Only => builder.enable_http2().wrap_connector(http_connector),
         };
 
         let http_client =
@@ -307,6 +309,19 @@ pub(crate) fn generate_tls_client_config(
             .with_root_certificates(tls_cert_store)
             .with_no_client_auth(),
     })
+}
+
+#[cfg(test)]
+impl HttpClientService {
+    pub(crate) fn from_client_config(
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        // No TLS config - provide empty root store
+        let tls_root_store = RootCertStore::empty();
+        let tls_client_config = generate_tls_client_config(tls_root_store, None)?;
+
+        HttpClientService::new("test".to_string(), tls_client_config, client_config)
+    }
 }
 
 impl tower::Service<HttpRequest> for HttpClientService {
