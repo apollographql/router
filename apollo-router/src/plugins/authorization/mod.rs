@@ -75,7 +75,13 @@ pub(crate) struct Conf {
     directives: Directives,
 }
 
-#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
+impl Conf {
+    pub(crate) fn error_config(&self) -> ErrorConfig {
+        self.directives.errors
+    }
+}
+
+#[derive(Copy, Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 #[schemars(rename = "AuthorizationDirectivesConfig")]
 pub(crate) struct Directives {
@@ -93,9 +99,7 @@ pub(crate) struct Directives {
     errors: ErrorConfig,
 }
 
-#[derive(
-    Clone, Debug, serde_derive_default::Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 #[schemars(rename = "AuthorizationErrorConfig")]
 pub(crate) struct ErrorConfig {
@@ -111,7 +115,7 @@ fn enable_log_errors() -> bool {
     true
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ErrorLocation {
     /// store authorization errors in the response errors
@@ -156,17 +160,13 @@ impl AuthorizationPlugin {
         Ok(has_config && has_authorization_directives)
     }
 
-    fn configuration(configuration: &Configuration) -> Conf {
+    pub(crate) fn configuration(configuration: &Configuration) -> Conf {
         configuration
             .apollo_plugins
             .plugins
             .get("authorization")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default()
-    }
-
-    pub(crate) fn log_errors(configuration: &Configuration) -> ErrorConfig {
-        Self::configuration(configuration).directives.errors
     }
 
     pub(crate) fn query_analysis(
@@ -319,13 +319,12 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn filter_query(
-        configuration: &Configuration,
+        configuration: &Conf,
         key: &QueryKey,
         schema: &Schema,
     ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
-        let config = Self::configuration(configuration);
-        let reject_unauthorized = config.directives.reject_unauthorized;
-        let dry_run = config.directives.dry_run;
+        let reject_unauthorized = configuration.directives.reject_unauthorized;
+        let dry_run = configuration.directives.dry_run;
 
         // The filtered query will then be used
         // to generate selections for response formatting, to execute introspection and
