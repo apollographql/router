@@ -514,7 +514,7 @@ async fn setup_callback(
         1,
         subscriptions.mode = "callback",
         subscriptions.deduplicated = !created,
-        subgraph.service.name = service_name.to_string()
+        subgraph.name = service_name.to_string()
     );
     if !created {
         // Dedup happens here
@@ -650,7 +650,7 @@ fn increment_subgraph_rejected_counter(service_name: &str) {
         "Number of subscription requests rejected",
         1,
         reason = "subgraph",
-        subgraph.service.name = service_name.to_string()
+        subgraph.name = service_name.to_string()
     );
 }
 
@@ -659,6 +659,6 @@ fn increment_subgraph_ended_counter(service_name: &str) {
         "apollo.router.operations.subscriptions.ended.subgraph",
         "Number of subscriptions ended by the subgraph closing the WebSocket connection",
         1,
-        subgraph.service.name = service_name.to_string()
+        subgraph.name = service_name.to_string()
     );
 }

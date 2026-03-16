@@ -260,7 +260,7 @@ impl Multipart {
             "Subscription terminated",
             1,
             reason = reason_str,
-            subgraph.service.name = subgraph_name,
+            subgraph.name = subgraph_name,
             client.name = client_name
         );
     }
@@ -521,7 +521,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "server_close",
-                "subgraph.service.name" = "test_subgraph",
+                "subgraph.name" = "test_subgraph",
                 "client.name" = ""
             );
         }
@@ -570,7 +570,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "server_close",
-                "subgraph.service.name" = "test_subgraph",
+                "subgraph.name" = "test_subgraph",
                 "client.name" = ""
             );
         }
@@ -611,7 +611,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "server_close",
-                "subgraph.service.name" = "test_subgraph",
+                "subgraph.name" = "test_subgraph",
                 "client.name" = ""
             );
         }
@@ -671,7 +671,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "heartbeat_delivery_failed",
-                "subgraph.service.name" = "",
+                "subgraph.name" = "",
                 "client.name" = "test_client"
             );
         }
@@ -722,7 +722,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "client_disconnect",
-                "subgraph.service.name" = "",
+                "subgraph.name" = "",
                 "client.name" = "test_client"
             );
         }
@@ -773,7 +773,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "schema_reload",
-                "subgraph.service.name" = "",
+                "subgraph.name" = "",
                 "client.name" = ""
             );
         }
@@ -825,7 +825,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "config_reload",
-                "subgraph.service.name" = "",
+                "subgraph.name" = "",
                 "client.name" = ""
             );
         }
@@ -1202,7 +1202,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "subgraph_error",
-                "subgraph.service.name" = "flaky_subgraph",
+                "subgraph.name" = "flaky_subgraph",
                 "client.name" = ""
             );
         }
@@ -1253,7 +1253,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "subgraph_error",
-                "subgraph.service.name" = "error_subgraph",
+                "subgraph.name" = "error_subgraph",
                 "client.name" = ""
             );
         }
@@ -1282,7 +1282,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "server_close",
-                "subgraph.service.name" = "",
+                "subgraph.name" = "",
                 "client.name" = ""
             );
         }
@@ -1317,7 +1317,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated",
                 1,
                 "reason" = "client_disconnect",
-                "subgraph.service.name" = "",
+                "subgraph.name" = "",
                 "client.name" = ""
             );
         }

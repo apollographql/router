@@ -2341,7 +2341,7 @@ mod tests {
                 "apollo.router.operations.subscriptions.rejected",
                 1,
                 "reason" = "subgraph",
-                "subgraph.service.name" = "test"
+                "subgraph.name" = "test"
             );
         }
         .with_metrics()
@@ -2411,7 +2411,7 @@ mod tests {
             assert_counter!(
                 "apollo.router.operations.subscriptions.ended.subgraph",
                 1,
-                "subgraph.service.name" = "test"
+                "subgraph.name" = "test"
             );
 
             spawned_task.abort();

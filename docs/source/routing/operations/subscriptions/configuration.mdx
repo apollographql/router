@@ -476,8 +476,8 @@ The `apollo.subscription.end_reason` attribute can have these values:
 
 Apollo Router emits counter metrics to track when subgraph WebSocket connections fail or close:
 
-- `apollo.router.operations.subscriptions.rejected` (attributes: `reason`, `subgraph.service.name`): Incremented when a subscription request is rejected. The `reason` attribute indicates why (`max_opened_subscriptions_limit_reached` or `subgraph`), and `subgraph.service.name` identifies the subgraph when applicable.
-- `apollo.router.operations.subscriptions.ended.subgraph` (attribute: `subgraph.service.name`): Incremented once per subgraph WebSocket closure. Each deduplicated client sharing that connection will also emit a corresponding `apollo.router.operations.subscriptions.terminated` event with `reason=server_close`.
+- `apollo.router.operations.subscriptions.rejected` (attributes: `reason`, `subgraph.name`): Incremented when a subscription request is rejected. The `reason` attribute indicates why (`max_opened_subscriptions_limit_reached` or `subgraph`), and `subgraph.name` identifies the subgraph when applicable.
+- `apollo.router.operations.subscriptions.ended.subgraph` (attribute: `subgraph.name`): Incremented once per subgraph WebSocket closure. Each deduplicated client sharing that connection will also emit a corresponding `apollo.router.operations.subscriptions.terminated` event with `reason=server_close`.
 
 #### Understanding metric multiplicity
 
