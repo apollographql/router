@@ -162,10 +162,13 @@ impl UnauthorizedPaths {
         &self,
         response: &mut graphql::Response,
     ) {
-        let unauthorized_path_errors = self
-            .paths
-            .iter()
-            .map(|path| unauthorized_field_or_type_error(path.clone()));
+        let unauthorized_path_errors = self.paths.iter().map(|path| {
+            graphql::Error::builder()
+                .message("Unauthorized field or type")
+                .path(path.clone())
+                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
+                .build()
+        });
 
         match self.errors.response {
             ErrorLocation::Errors => {
@@ -640,14 +643,6 @@ impl Plugin for AuthorizationPlugin {
             .service(service)
             .boxed()
     }
-}
-
-pub(crate) fn unauthorized_field_or_type_error(path: Path) -> graphql::Error {
-    graphql::Error::builder()
-        .message("Unauthorized field or type")
-        .path(path)
-        .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
-        .build()
 }
 
 // This macro allows us to use it in our plugin registry!
