@@ -41,7 +41,6 @@ pub(crate) struct SubgraphMetadata {
     shareable_fields: IndexSet<FieldDefinitionPosition>,
 }
 
-#[allow(dead_code)]
 impl SubgraphMetadata {
     pub(super) fn new(
         schema: &FederationSchema,
@@ -134,6 +133,17 @@ impl SubgraphMetadata {
         self.external_metadata.external_fields.shift_remove(field);
     }
 
+    pub(crate) fn remove_external_type_fields(
+        &mut self,
+        fields: Vec<ObjectFieldDefinitionPosition>,
+    ) {
+        for field in fields {
+            self.external_metadata
+                .fields_on_external_types
+                .shift_remove(&FieldDefinitionPosition::Object(field));
+        }
+    }
+
     /// Update field coordinates in metadata after a type has been renamed.
     /// This is necessary when root operation types are normalized (e.g., MyMutation -> Mutation).
     pub(crate) fn update_type_references(
@@ -156,6 +166,7 @@ impl SubgraphMetadata {
             .update_type_references(old_type_name, new_type_name);
     }
 
+    #[allow(unused)]
     pub(crate) fn selection_selects_any_external_field(&self, selection: &SelectionSet) -> bool {
         self.external_metadata()
             .selects_any_external_field(selection)

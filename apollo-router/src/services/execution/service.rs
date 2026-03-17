@@ -477,7 +477,7 @@ impl ExecutionService {
                         None => false,
                         Some(error_path) => {
                             query.contains_error_path(&response.label, error_path, variables_set)
-                                && error_path.starts_with(&path)
+                                && error_path_matches_response_path(error_path, &path)
                         }
                     })
                     .cloned()
@@ -540,6 +540,17 @@ impl ExecutionService {
                 .build(),
         )
     }
+}
+
+/// Whether an error at `error_path` should be included in a deferred incremental
+/// sub-response at `response_path`. An error matches if it is at or below the
+/// sub-response (the original behavior), OR if it is a parent of the sub-response
+/// path (e.g., an error at `topProducts` matches a sub-response at
+/// `topProducts/0`). The parent-path case handles errors produced by
+/// `response_at_path`'s `fallback_dir` truncation, which strips wildcard
+/// segments to prevent error multiplication in FlattenNode
+fn error_path_matches_response_path(error_path: &Path, response_path: &Path) -> bool {
+    error_path.starts_with(response_path) || response_path.starts_with(error_path)
 }
 
 fn rewrite_defer_label(response: &Response) -> Option<String> {
@@ -679,5 +690,306 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
                 ),
             )
             .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use apollo_compiler::Name;
+    use apollo_compiler::schema;
+    use rstest::rstest;
+    use serde_json_bytes::ByteString;
+
+    use super::*;
+    use crate::graphql::Error;
+    use crate::graphql::Response;
+    use crate::json_ext::Path;
+    use crate::json_ext::PathElement;
+    use crate::spec::FieldType;
+    use crate::spec::IncludeSkip;
+    use crate::spec::Query;
+    use crate::spec::Selection;
+    use crate::spec::query::subselections::BooleanValues;
+
+    fn key(name: &str) -> PathElement {
+        PathElement::Key(name.to_string(), None)
+    }
+
+    fn index(i: usize) -> PathElement {
+        PathElement::Index(i)
+    }
+
+    fn path(elements: Vec<PathElement>) -> Path {
+        Path(elements)
+    }
+
+    fn dummy_field_type() -> FieldType {
+        FieldType(schema::Type::Named(Name::new_unchecked("String")))
+    }
+
+    fn field(name: &str, sub: Option<Vec<Selection>>) -> Selection {
+        Selection::Field {
+            name: ByteString::from(name),
+            alias: None,
+            selection_set: sub,
+            field_type: dummy_field_type(),
+            include_skip: IncludeSkip::default(),
+        }
+    }
+
+    /// Builds a Query whose selection set is:
+    ///   topProducts { name reviews { author { username } } }
+    /// This validates error paths through topProducts/N/reviews/N/author/...
+    fn make_test_query() -> Arc<Query> {
+        let mut query = Query::empty_for_tests();
+        query.operation.selection_set = vec![field(
+            "topProducts",
+            Some(vec![
+                field("name", None),
+                field(
+                    "reviews",
+                    Some(vec![field("author", Some(vec![field("username", None)]))]),
+                ),
+            ]),
+        )];
+        Arc::new(query)
+    }
+
+    fn make_error_at(p: Path, message: &str) -> Error {
+        Error::builder().message(message).path(p).build()
+    }
+
+    fn make_error_no_path(message: &str) -> Error {
+        Error::builder().message(message).build()
+    }
+
+    #[rstest]
+    #[case::exact_match(
+        vec![key("topProducts"), index(0)],
+        vec![key("topProducts"), index(0)],
+        true
+    )]
+    #[case::error_deeper(
+        vec![key("topProducts"), index(0), key("name")],
+        vec![key("topProducts"), index(0)],
+        true
+    )]
+    #[case::error_is_parent(
+        vec![key("topProducts")],
+        vec![key("topProducts"), index(0)],
+        true
+    )]
+    #[case::unrelated(
+        vec![key("otherField")],
+        vec![key("topProducts"), index(0)],
+        false
+    )]
+    #[case::diverging_indices(
+        vec![key("topProducts"), index(0), key("name")],
+        vec![key("topProducts"), index(1)],
+        false
+    )]
+    #[case::empty_error_path(
+        vec![],
+        vec![key("topProducts"), index(0)],
+        true
+    )]
+    #[case::empty_response_path(
+        vec![key("topProducts")],
+        vec![],
+        true
+    )]
+    #[case::both_empty(vec![], vec![], true)]
+    #[case::parent_matches_index_0(
+        vec![key("topProducts")],
+        vec![key("topProducts"), index(0)],
+        true
+    )]
+    #[case::parent_matches_index_1(
+        vec![key("topProducts")],
+        vec![key("topProducts"), index(1)],
+        true
+    )]
+    #[case::parent_matches_index_99(
+        vec![key("topProducts")],
+        vec![key("topProducts"), index(99)],
+        true
+    )]
+    #[case::nested_parent_matches_descendant(
+        vec![key("topProducts"), index(0), key("reviews")],
+        vec![key("topProducts"), index(0), key("reviews"), index(0), key("author")],
+        true
+    )]
+    #[case::nested_parent_no_match_different_branch(
+        vec![key("topProducts"), index(0), key("reviews")],
+        vec![key("topProducts"), index(1), key("reviews"), index(0)],
+        false
+    )]
+    fn error_path_matching(
+        #[case] error_elements: Vec<PathElement>,
+        #[case] response_elements: Vec<PathElement>,
+        #[case] expected: bool,
+    ) {
+        let ep = path(error_elements);
+        let rp = path(response_elements);
+        assert_eq!(
+            error_path_matches_response_path(&ep, &rp),
+            expected,
+            "error_path={ep}, response_path={rp}"
+        );
+    }
+
+    #[rstest]
+    #[case::exact_path(
+        vec![make_error_at(path(vec![key("topProducts"), index(0)]), "err")],
+        vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
+        vec![1],
+        vec![vec!["err"]]
+    )]
+    #[case::deeper_error(
+        vec![make_error_at(
+            path(vec![key("topProducts"), index(0), key("reviews"), index(0), key("author")]),
+            "deep err",
+        )],
+        vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
+        vec![1],
+        vec![vec!["deep err"]]
+    )]
+    #[case::parent_error(
+        vec![make_error_at(path(vec![key("topProducts")]), "parent err")],
+        vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
+        vec![1],
+        vec![vec!["parent err"]]
+    )]
+    #[case::parent_fans_out(
+        vec![make_error_at(path(vec![key("topProducts")]), "parent err")],
+        vec![
+            (path(vec![key("topProducts"), index(0)]), Value::Object(Object::default())),
+            (path(vec![key("topProducts"), index(1)]), Value::Object(Object::default())),
+            (path(vec![key("topProducts"), index(2)]), Value::Object(Object::default())),
+        ],
+        vec![1, 1, 1],
+        vec![vec!["parent err"], vec!["parent err"], vec!["parent err"]]
+    )]
+    #[case::no_path(
+        vec![make_error_no_path("no path")],
+        vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
+        vec![0],
+        vec![vec![]]
+    )]
+    #[case::wrong_index(
+        vec![make_error_at(path(vec![key("topProducts"), index(1), key("name")]), "wrong index")],
+        vec![(path(vec![key("topProducts"), index(0)]), Value::Object(Object::default()))],
+        vec![0],
+        vec![vec![]]
+    )]
+    #[case::multi_error_distribution(
+        vec![
+            make_error_at(path(vec![key("topProducts"), index(0), key("name")]), "err for 0"),
+            make_error_at(path(vec![key("topProducts"), index(1), key("name")]), "err for 1"),
+        ],
+        vec![
+            (path(vec![key("topProducts"), index(0)]), Value::Object(Object::default())),
+            (path(vec![key("topProducts"), index(1)]), Value::Object(Object::default())),
+        ],
+        vec![1, 1],
+        vec![vec!["err for 0"], vec!["err for 1"]]
+    )]
+    fn split_incremental_error_distribution(
+        #[case] errors: Vec<Error>,
+        #[case] sub_responses: Vec<(Path, Value)>,
+        #[case] expected_error_counts: Vec<usize>,
+        #[case] expected_messages: Vec<Vec<&str>>,
+    ) {
+        let query = make_test_query();
+        let response = Response::builder().errors(errors).build();
+
+        let result = ExecutionService::split_incremental_response(
+            &query,
+            false,
+            BooleanValues { bits: 0 },
+            response,
+            sub_responses,
+        )
+        .unwrap();
+
+        assert_eq!(result.incremental.len(), expected_error_counts.len());
+        for (i, inc) in result.incremental.iter().enumerate() {
+            assert_eq!(
+                inc.errors.len(),
+                expected_error_counts[i],
+                "sub-response {i} error count mismatch"
+            );
+            let messages: Vec<&str> = inc.errors.iter().map(|e| e.message.as_str()).collect();
+            assert_eq!(
+                messages, expected_messages[i],
+                "sub-response {i} error messages mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn null_data_sub_response_with_no_errors_is_filtered_out() {
+        let query = make_test_query();
+        let response = Response::builder().build();
+        let sub_responses = vec![(path(vec![key("topProducts"), index(0)]), Value::Null)];
+
+        let result = ExecutionService::split_incremental_response(
+            &query,
+            false,
+            BooleanValues { bits: 0 },
+            response,
+            sub_responses,
+        )
+        .unwrap();
+
+        assert!(result.incremental.is_empty());
+    }
+
+    #[test]
+    fn null_data_sub_response_with_errors_is_kept() {
+        let query = make_test_query();
+        let response = Response::builder()
+            .errors(vec![make_error_at(
+                path(vec![key("topProducts"), index(0)]),
+                "err",
+            )])
+            .build();
+        let sub_responses = vec![(path(vec![key("topProducts"), index(0)]), Value::Null)];
+
+        let result = ExecutionService::split_incremental_response(
+            &query,
+            false,
+            BooleanValues { bits: 0 },
+            response,
+            sub_responses,
+        )
+        .unwrap();
+
+        assert_eq!(result.incremental.len(), 1);
+        assert_eq!(result.incremental[0].errors.len(), 1);
+    }
+
+    #[test]
+    fn has_next_is_propagated() {
+        let query = make_test_query();
+        let response = Response::builder().build();
+        let sub_responses = vec![(
+            path(vec![key("topProducts"), index(0)]),
+            Value::Object(Object::default()),
+        )];
+
+        let result = ExecutionService::split_incremental_response(
+            &query,
+            true,
+            BooleanValues { bits: 0 },
+            response,
+            sub_responses,
+        )
+        .unwrap();
+
+        assert_eq!(result.has_next, Some(true));
     }
 }

@@ -29,17 +29,14 @@ use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TracerProvider as OtherTracerProvider;
-use opentelemetry_otlp::HttpExporterBuilder;
-use opentelemetry_otlp::Protocol;
-use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::testing::trace::NoopSpanExporter;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
-use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::Config;
-use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use parking_lot::Mutex;
 use prost::Message;
@@ -209,8 +206,8 @@ pub struct IntegrationTest {
     telemetry: Telemetry,
     extra_propagator: Telemetry,
 
-    pub _tracer_provider_client: TracerProvider,
-    pub _tracer_provider_subgraph: TracerProvider,
+    pub _tracer_provider_client: SdkTracerProvider,
+    pub _tracer_provider_subgraph: SdkTracerProvider,
     subscriber_client: Dispatch,
 
     _subgraph_overrides: HashMap<String, String>,
@@ -224,6 +221,7 @@ pub struct IntegrationTest {
     jwt: Option<String>,
     env: Option<HashMap<String, OsString>>,
     hot_reload: bool,
+    reqwest_client: reqwest::Client,
 }
 
 impl IntegrationTest {
@@ -374,27 +372,24 @@ pub enum Telemetry {
 }
 
 impl Telemetry {
-    fn tracer_provider(&self, service_name: &str) -> TracerProvider {
-        let config = Config::default().with_resource(Resource::new(vec![KeyValue::new(
-            SERVICE_NAME,
-            service_name.to_string(),
-        )]));
+    fn tracer_provider(&self, service_name: &str) -> SdkTracerProvider {
+        let resource = Resource::builder_empty()
+            .with_attributes([KeyValue::new(SERVICE_NAME, service_name.to_string())])
+            .build();
 
         match self {
             Telemetry::Otlp {
                 endpoint: Some(endpoint),
-            } => TracerProvider::builder()
-                .with_config(config)
+            } => SdkTracerProvider::builder()
+                .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        SpanExporterBuilder::Http(
-                            HttpExporterBuilder::default()
-                                .with_endpoint(endpoint)
-                                .with_protocol(Protocol::HttpBinary),
-                        )
-                        .build_span_exporter()
-                        .expect("otlp pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
+                        opentelemetry_otlp::SpanExporter::builder()
+                            .with_http()
+                            .with_endpoint(endpoint)
+                            .build()
+                            .expect("otlp pipeline failed"),
+                        runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -404,15 +399,15 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Datadog => TracerProvider::builder()
-                .with_config(config)
+            Telemetry::Datadog => SdkTracerProvider::builder()
+                .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
                         opentelemetry_datadog::new_pipeline()
                             .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
+                        runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -422,15 +417,15 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Zipkin => TracerProvider::builder()
-                .with_config(config)
+            Telemetry::Zipkin => SdkTracerProvider::builder()
+                .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        opentelemetry_zipkin::new_pipeline()
-                            .with_service_name(service_name)
-                            .init_exporter()
+                        opentelemetry_zipkin::ZipkinExporter::builder()
+                            .with_collector_endpoint("http://127.0.0.1:9411/api/v2/spans")
+                            .build()
                             .expect("zipkin pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
+                        runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -440,8 +435,8 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::None | Telemetry::Otlp { endpoint: None } => TracerProvider::builder()
-                .with_config(config)
+            Telemetry::None | Telemetry::Otlp { endpoint: None } => SdkTracerProvider::builder()
+                .with_resource(resource)
                 .with_simple_exporter(NoopSpanExporter::default())
                 .build(),
         }
@@ -568,6 +563,7 @@ impl IntegrationTest {
         env: Option<HashMap<String, OsString>>,
         redis_namespace: Option<String>,
         hot_reload: Option<bool>,
+        reqwest_client: Option<reqwest::Client>,
     ) -> Self {
         let redis_namespace = redis_namespace.unwrap_or_else(|| Uuid::new_v4().to_string());
         let telemetry = telemetry.unwrap_or_default();
@@ -686,12 +682,12 @@ impl IntegrationTest {
         Mock::given(method(Method::POST))
             .and(path("/v1/metrics"))
             .and(move |req: &wiremock::Request| {
-                // Decode the OTLP request
+                // Decode the OTLP request and forward to the channel
                 if let Ok(msg) = ExportMetricsServiceRequest::decode(req.body.as_ref()) {
-                    // We don't care about the result of send here
                     let _ = apollo_otlp_metrics_tx.try_send(msg);
                 }
-                false
+                // Always match so we return 200 OK
+                true
             })
             .respond_with(ResponseTemplate::new(200))
             .mount(&apollo_otlp_server)
@@ -725,10 +721,11 @@ impl IntegrationTest {
             jwt,
             env,
             hot_reload: hot_reload.unwrap_or(true),
+            reqwest_client: reqwest_client.unwrap_or_default(),
         }
     }
 
-    fn dispatch(tracer_provider: &TracerProvider) -> Dispatch {
+    fn dispatch(tracer_provider: &SdkTracerProvider) -> Dispatch {
         let tracer = tracer_provider.tracer("tracer");
         let tracing_layer = tracing_opentelemetry::layer()
             .with_tracer(tracer)
@@ -960,12 +957,13 @@ impl IntegrationTest {
 
         let url = format!("http://{}", self.bind_address());
         let subgraph_context = self.subgraph_context.clone();
+
+        let client = self.reqwest_client.clone();
+
         async move {
             let span = info_span!("client_request");
             let trace_id = span.context().span().span_context().trace_id();
             async move {
-                let client = reqwest::Client::new();
-
                 let mut builder = client.post(url).header(CONTENT_TYPE, query.content_type);
 
                 for (name, value) in query.headers {
@@ -1021,12 +1019,13 @@ impl IntegrationTest {
         );
 
         let url = format!("http://{}", self.bind_address());
+        let client = self.reqwest_client.clone();
+
         async move {
             let span = info_span!("client_raw_request");
             let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
-                let client = reqwest::Client::new();
                 let mut request = client
                     .post(url)
                     .header("apollographql-client-name", "custom_name")
@@ -1065,12 +1064,12 @@ impl IntegrationTest {
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        let client = reqwest::Client::new();
         let id = Uuid::new_v4().to_string();
         let span = info_span!("client_request", unit_test = id.as_str());
         let _span_guard = span.enter();
 
-        let mut request = client
+        let mut request = self
+            .reqwest_client
             .post(format!("http://{}", self.bind_address()))
             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .header(ACCEPT, "multipart/mixed;subscriptionSpec=1.0")
@@ -1087,7 +1086,7 @@ impl IntegrationTest {
             );
         });
 
-        match client.execute(request).await {
+        match self.reqwest_client.execute(request).await {
             Ok(response) => (id, response),
             Err(err) => {
                 panic!("unable to send successful request to router, {err}")
@@ -1097,16 +1096,15 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn get_metrics_response(&self) -> reqwest::Result<reqwest::Response> {
-        let client = reqwest::Client::new();
-
-        let request = client
+        let request = self
+            .reqwest_client
             .get(format!("http://{}/metrics", self.bind_address()))
             .header("apollographql-client-name", "custom_name")
             .header("apollographql-client-version", "1.0")
             .build()
             .unwrap();
 
-        client.execute(request).await
+        self.reqwest_client.execute(request).await
     }
 
     /// Waits for any metrics to be emitted for the given duration. This will return as soon as the
@@ -1120,19 +1118,27 @@ impl IntegrationTest {
         let mut metrics = Vec::new();
 
         while Instant::now() < deadline {
-            if let Some(msg) = self.apollo_otlp_metrics_rx.recv().await {
-                // Only break once we see a batch with metrics in it
-                if msg
-                    .resource_metrics
-                    .iter()
-                    .any(|rm| !rm.scope_metrics.is_empty())
-                {
-                    metrics.push(msg);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match tokio::time::timeout(remaining, self.apollo_otlp_metrics_rx.recv()).await {
+                Ok(Some(msg)) => {
+                    // Only break once we see a batch with metrics in it
+                    if msg
+                        .resource_metrics
+                        .iter()
+                        .any(|rm| !rm.scope_metrics.is_empty())
+                    {
+                        metrics.push(msg);
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    // channel closed
                     break;
                 }
-            } else {
-                // channel closed
-                break;
+                Err(_) => {
+                    // timeout elapsed
+                    break;
+                }
             }
         }
 
@@ -1562,16 +1568,12 @@ impl IntegrationTest {
     pub(crate) fn force_flush(&self) {
         let tracer_provider_client = self._tracer_provider_client.clone();
         let tracer_provider_subgraph = self._tracer_provider_subgraph.clone();
-        for r in tracer_provider_subgraph.force_flush() {
-            if let Err(e) = r {
-                eprintln!("failed to flush subgraph tracer: {e}");
-            }
+        if let Err(e) = tracer_provider_subgraph.force_flush() {
+            eprintln!("failed to flush subgraph tracer: {e}");
         }
 
-        for r in tracer_provider_client.force_flush() {
-            if let Err(e) = r {
-                eprintln!("failed to flush client tracer: {e}");
-            }
+        if let Err(e) = tracer_provider_client.force_flush() {
+            eprintln!("failed to flush client tracer: {e}");
         }
     }
 

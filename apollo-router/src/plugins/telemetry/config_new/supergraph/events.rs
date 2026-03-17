@@ -281,6 +281,54 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_supergraph_events_with_request_header_response_condition() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!(
+                "../../testdata/custom_events_request_header_response.router.yaml"
+            ))
+            .build()
+            .await
+            .expect("test harness");
+
+        async {
+            // With the request header present, the response event should fire
+            test_harness
+                .supergraph_service(|_r| async {
+                    supergraph::Response::fake_builder()
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                })
+                .call(
+                    supergraph::Request::fake_builder()
+                        .query("query { foo }")
+                        .header("x-log-request", HeaderValue::from_static("enabled"))
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .expect("expecting successful response");
+            // Without the request header, the response event should not fire
+            test_harness
+                .supergraph_service(|_r| async {
+                    Ok(supergraph::Response::fake_builder()
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                        .expect("expecting valid response"))
+                })
+                .call(
+                    supergraph::Request::fake_builder()
+                        .query("query { foo }")
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_supergraph_events_on_response() {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../../testdata/custom_events.router.yaml"))

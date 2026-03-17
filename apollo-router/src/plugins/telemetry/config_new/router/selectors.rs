@@ -161,8 +161,9 @@ pub(crate) enum RouterSelector {
         response_status: ResponseStatus,
     },
     /// The size hint of the body.
-    /// This is used as the Content-Length header has not yet been populated
-    /// when selectors are evaluated
+    /// If compression is enabled, this will be the uncompressed size.
+    /// Its not possible to get the compressed size in selector as the
+    /// body has not yet been compressed at the time on_response is called.
     ResponseSizeHint {
         /// Extract response size hint in bytes
         response_size_hint: bool,
@@ -747,8 +748,8 @@ mod test {
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
+                TraceId::from(42),
+                SpanId::from(42),
                 // Make sure it's sampled if not, it won't create anything at the otel layer
                 TraceFlags::default().with_sampled(true),
                 false,
@@ -801,8 +802,8 @@ mod test {
             );
 
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
+                TraceId::from(42),
+                SpanId::from(42),
                 TraceFlags::default().with_sampled(true),
                 false,
                 TraceState::default(),
