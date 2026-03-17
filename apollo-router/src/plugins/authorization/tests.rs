@@ -21,6 +21,13 @@ use crate::test_harness::tracing_test;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 
+fn authorization_error_event_regex(span: &str) -> Regex {
+    let pattern = format!(
+        r"^[0-9TZ\-:.]+ ERROR router\{{[^}}]+}}:{span}.*Authorization error unauthorized_query_paths=\[.*]$"
+    );
+    Regex::new(&pattern).unwrap()
+}
+
 #[tokio::test]
 async fn authenticated_request() {
     let subgraphs = MockedSubgraphs([
@@ -740,6 +747,8 @@ async fn scopes_directive() {
 
 #[tokio::test]
 async fn scopes_directive_reject_unauthorized() {
+    let _guard = tracing_test::dispatcher_guard();
+
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -816,6 +825,18 @@ async fn scopes_directive_reject_unauthorized() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+
+    let span_regex = authorization_error_event_regex("query_planning");
+    let contains_err_event_in_span = tracing_test::logs_assert(|lines| {
+        for line in lines {
+            if span_regex.captures(line).is_some() {
+                return Ok(());
+            }
+        }
+
+        Err(lines.join("\n"))
+    });
+    assert!(contains_err_event_in_span.is_ok());
 }
 
 #[tokio::test]
@@ -898,7 +919,7 @@ async fn scopes_directive_dry_run() {
 
     insta::assert_json_snapshot!(response);
 
-    let span_regex = Regex::new(r"^[0-9TZ\-:.]+ ERROR router\{[^}]+}:format_response:.*Authorization error unauthorized_query_paths=\[.*]$").unwrap();
+    let span_regex = authorization_error_event_regex("format_response");
     let contains_err_event_in_span = tracing_test::logs_assert(|lines| {
         for line in lines {
             if span_regex.captures(line).is_some() {
