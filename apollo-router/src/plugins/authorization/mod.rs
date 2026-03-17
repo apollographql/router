@@ -157,6 +157,34 @@ impl UnauthorizedPaths {
             tracing::event!(tracing_core::Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
         })
     }
+
+    pub(crate) fn update_response_with_unauthorized_path_errors(
+        &self,
+        response: &mut graphql::Response,
+    ) {
+        let unauthorized_path_errors = self
+            .paths
+            .iter()
+            .map(|path| unauthorized_field_or_type_error(path.clone()));
+
+        match self.errors.response {
+            ErrorLocation::Errors => {
+                response.errors.extend(unauthorized_path_errors);
+            }
+            ErrorLocation::Extensions => {
+                let serialized_auth_errors = unauthorized_path_errors
+                    .map(|err| {
+                        serde_json_bytes::to_value(err)
+                            .expect("error serialization should not fail")
+                    })
+                    .collect();
+                response
+                    .extensions
+                    .insert("authorizationErrors", Value::Array(serialized_auth_errors));
+            }
+            ErrorLocation::Disabled => {}
+        }
+    }
 }
 
 fn default_enable_directives() -> bool {

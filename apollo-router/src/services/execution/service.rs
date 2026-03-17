@@ -38,8 +38,6 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::plugins::authorization;
-use crate::plugins::authorization::unauthorized_field_or_type_error;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -302,29 +300,9 @@ impl ExecutionService {
             let mut paths = Vec::new();
             if !query.unauthorized.paths.is_empty() {
                 query.unauthorized.log_unauthorized_paths();
-
-                let unauthorized_path_errors = query
+                query
                     .unauthorized
-                    .paths
-                    .iter()
-                    .map(|path| unauthorized_field_or_type_error(path.clone()));
-                match query.unauthorized.errors.response {
-                    authorization::ErrorLocation::Errors => {
-                        response.errors.extend(unauthorized_path_errors);
-                    }
-                    authorization::ErrorLocation::Extensions => {
-                        let serialized_auth_errors = unauthorized_path_errors
-                            .map(|err| {
-                                serde_json_bytes::to_value(err)
-                                    .expect("error serialization should not fail")
-                            })
-                            .collect();
-                        response
-                            .extensions
-                            .insert("authorizationErrors", Value::Array(serialized_auth_errors));
-                    }
-                    authorization::ErrorLocation::Disabled => {}
-                }
+                    .update_response_with_unauthorized_path_errors(&mut response);
             }
 
             if let Some(filtered_query) = query.filtered_query.as_ref() {
