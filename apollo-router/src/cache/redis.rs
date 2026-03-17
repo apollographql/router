@@ -46,9 +46,6 @@ use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
 
 pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
-/// Represents when a caller is lost (eg, by losing the inner client) and is no longer known.
-/// Useful for having something to emit with metrics
-const UNKNOWN_CALLER: &'static str = "UNKNOWN_CALLER";
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "redis",
     "rediss",

@@ -107,8 +107,11 @@ impl Invalidation {
             key_prefix
         );
 
-        let mut stream =
-            redis_storage.scan_with_namespaced_results(key_prefix.clone(), Some(self.scan_count));
+        let mut stream = redis_storage
+            .scan_with_namespaced_results(key_prefix.clone(), Some(self.scan_count))
+            .await
+            .or_else(|e| Err(InvalidationError::RedisError(e)))?;
+
         let mut count = 0u64;
         let mut error = None;
 

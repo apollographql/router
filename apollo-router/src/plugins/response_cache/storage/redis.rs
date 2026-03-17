@@ -114,7 +114,7 @@ impl Storage {
             timeout: Some(self.invalidate_timeout()),
             ..Options::default()
         };
-        let pipeline = self.storage.pipeline().with_options(&options);
+        let pipeline = self.storage.pipeline().await.with_options(&options);
         for invalidation_key in &invalidation_keys {
             let invalidation_key =
                 format!("version:{RESPONSE_CACHE_VERSION}:cache-tag:{invalidation_key}");
@@ -207,6 +207,7 @@ impl Storage {
         Ok(self
             .storage
             .client()
+            .await?
             .with_options(&options)
             .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff_time)
             .await?)
@@ -312,7 +313,7 @@ impl CacheStorage for Storage {
             timeout: Some(self.insert_timeout()),
             ..Options::default()
         };
-        let pipeline = self.storage.client().pipeline().with_options(&options);
+        let pipeline = self.storage.pipeline().await.with_options(&options);
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             self.send_to_maintenance_queue(cache_tag_key.clone());
 
@@ -361,7 +362,7 @@ impl CacheStorage for Storage {
         }
 
         // phase 3
-        let pipeline = self.storage.client().pipeline().with_options(&options);
+        let pipeline = self.storage.pipeline().await.with_options(&options);
         for (document, cache_tags) in batch_docs.into_iter().zip(original_cache_tags.into_iter()) {
             let value = CacheValue {
                 data: document.data,
