@@ -40,6 +40,7 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authorization;
 use crate::plugins::authorization::unauthorized_field_or_type_error;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
@@ -308,18 +309,16 @@ impl ExecutionService {
                     event!(Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
                 }
 
+                let unauthorized_path_errors = query.unauthorized.paths.iter().map(|path| unauthorized_field_or_type_error(path.clone()));
                 match query.unauthorized.errors.response {
-                    crate::plugins::authorization::ErrorLocation::Errors => for path in &query.unauthorized.paths {
-                        response.errors.push(unauthorized_field_or_type_error(path.clone()));
+                    authorization::ErrorLocation::Errors => {
+                        response.errors.extend(unauthorized_path_errors);
                     },
-                    crate::plugins::authorization::ErrorLocation::Extensions => {
-                        let mut v = vec![];
-                        for path in &query.unauthorized.paths {
-                            v.push(serde_json_bytes::to_value(unauthorized_field_or_type_error(path.clone())).expect("error serialization should not fail"));
-                        }
-                        response.extensions.insert("authorizationErrors", Value::Array(v));
+                    authorization::ErrorLocation::Extensions => {
+                        let serialized_auth_errors = unauthorized_path_errors.map(|err| serde_json_bytes::to_value(err).expect("error serialization should not fail")).collect();
+                        response.extensions.insert("authorizationErrors", Value::Array(serialized_auth_errors));
                     }
-                    crate::plugins::authorization::ErrorLocation::Disabled => {}
+                    authorization::ErrorLocation::Disabled => {}
                 }
             }
 
