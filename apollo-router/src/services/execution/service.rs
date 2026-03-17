@@ -312,15 +312,13 @@ impl ExecutionService {
                     crate::plugins::authorization::ErrorLocation::Errors => for path in &query.unauthorized.paths {
                         response.errors.push(unauthorized_field_or_type_error(path.clone()));
                     },
-                    crate::plugins::authorization::ErrorLocation::Extensions =>{
-                        if !query.unauthorized.paths.is_empty() {
-                            let mut v = vec![];
-                            for path in &query.unauthorized.paths{
-                                v.push(serde_json_bytes::to_value(unauthorized_field_or_type_error(path.clone())).expect("error serialization should not fail"));
-                            }
-                            response.extensions.insert("authorizationErrors", Value::Array(v));
+                    crate::plugins::authorization::ErrorLocation::Extensions => {
+                        let mut v = vec![];
+                        for path in &query.unauthorized.paths {
+                            v.push(serde_json_bytes::to_value(unauthorized_field_or_type_error(path.clone())).expect("error serialization should not fail"));
                         }
-                    },
+                        response.extensions.insert("authorizationErrors", Value::Array(v));
+                    }
                     crate::plugins::authorization::ErrorLocation::Disabled => {}
                 }
             }
