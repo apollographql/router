@@ -534,13 +534,7 @@ impl QueryPlannerService {
                         .errors(
                             unauthorized_paths
                                 .into_iter()
-                                .map(|path| {
-                                    graphql::Error::builder()
-                                        .message("Unauthorized field or type")
-                                        .path(path)
-                                        .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
-                                        .build()
-                                })
+                                .map(authorization::unauthorized_field_or_type_error)
                                 .collect(),
                         )
                         .build();
