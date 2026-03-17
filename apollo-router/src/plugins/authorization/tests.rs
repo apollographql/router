@@ -1,6 +1,7 @@
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use regex::Regex;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 
@@ -16,6 +17,7 @@ use crate::services::router;
 use crate::services::router::body;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::test_harness::tracing_test;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 
@@ -818,6 +820,7 @@ async fn scopes_directive_reject_unauthorized() {
 
 #[tokio::test]
 async fn scopes_directive_dry_run() {
+    let _guard = tracing_test::dispatcher_guard();
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -894,6 +897,18 @@ async fn scopes_directive_dry_run() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+
+    let span_regex = Regex::new(r"^[0-9TZ\-:.]+ ERROR router\{[^}]+}:format_response:.*Authorization error unauthorized_query_paths=\[.*]$").unwrap();
+    let contains_err_event_in_span = tracing_test::logs_assert(|lines| {
+        for line in lines {
+            if span_regex.captures(line).is_some() {
+                return Ok(());
+            }
+        }
+
+        Err(lines.join("\n"))
+    });
+    assert!(contains_err_event_in_span.is_ok());
 }
 
 #[tokio::test]
