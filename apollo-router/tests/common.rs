@@ -221,6 +221,7 @@ pub struct IntegrationTest {
     jwt: Option<String>,
     env: Option<HashMap<String, OsString>>,
     hot_reload: bool,
+    reqwest_client: reqwest::Client,
 }
 
 impl IntegrationTest {
@@ -562,6 +563,7 @@ impl IntegrationTest {
         env: Option<HashMap<String, OsString>>,
         redis_namespace: Option<String>,
         hot_reload: Option<bool>,
+        reqwest_client: Option<reqwest::Client>,
     ) -> Self {
         let redis_namespace = redis_namespace.unwrap_or_else(|| Uuid::new_v4().to_string());
         let telemetry = telemetry.unwrap_or_default();
@@ -719,6 +721,7 @@ impl IntegrationTest {
             jwt,
             env,
             hot_reload: hot_reload.unwrap_or(true),
+            reqwest_client: reqwest_client.unwrap_or_default(),
         }
     }
 
@@ -954,12 +957,13 @@ impl IntegrationTest {
 
         let url = format!("http://{}", self.bind_address());
         let subgraph_context = self.subgraph_context.clone();
+
+        let client = self.reqwest_client.clone();
+
         async move {
             let span = info_span!("client_request");
             let trace_id = span.context().span().span_context().trace_id();
             async move {
-                let client = reqwest::Client::new();
-
                 let mut builder = client.post(url).header(CONTENT_TYPE, query.content_type);
 
                 for (name, value) in query.headers {
@@ -1015,12 +1019,13 @@ impl IntegrationTest {
         );
 
         let url = format!("http://{}", self.bind_address());
+        let client = self.reqwest_client.clone();
+
         async move {
             let span = info_span!("client_raw_request");
             let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
-                let client = reqwest::Client::new();
                 let mut request = client
                     .post(url)
                     .header("apollographql-client-name", "custom_name")
@@ -1059,12 +1064,12 @@ impl IntegrationTest {
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        let client = reqwest::Client::new();
         let id = Uuid::new_v4().to_string();
         let span = info_span!("client_request", unit_test = id.as_str());
         let _span_guard = span.enter();
 
-        let mut request = client
+        let mut request = self
+            .reqwest_client
             .post(format!("http://{}", self.bind_address()))
             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .header(ACCEPT, "multipart/mixed;subscriptionSpec=1.0")
@@ -1081,7 +1086,7 @@ impl IntegrationTest {
             );
         });
 
-        match client.execute(request).await {
+        match self.reqwest_client.execute(request).await {
             Ok(response) => (id, response),
             Err(err) => {
                 panic!("unable to send successful request to router, {err}")
@@ -1091,16 +1096,15 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn get_metrics_response(&self) -> reqwest::Result<reqwest::Response> {
-        let client = reqwest::Client::new();
-
-        let request = client
+        let request = self
+            .reqwest_client
             .get(format!("http://{}/metrics", self.bind_address()))
             .header("apollographql-client-name", "custom_name")
             .header("apollographql-client-version", "1.0")
             .build()
             .unwrap();
 
-        client.execute(request).await
+        self.reqwest_client.execute(request).await
     }
 
     /// Waits for any metrics to be emitted for the given duration. This will return as soon as the
