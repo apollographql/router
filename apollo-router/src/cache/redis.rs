@@ -168,6 +168,18 @@ impl Drop for DropSafeRedisPool {
     }
 }
 
+// TODO: comment
+#[derive(Clone)]
+struct RedisClientConfig {
+    client_config: RedisConfig,
+    timeout: Duration,
+    pool_size: usize,
+    caller: &'static str,
+    metrics_interval: Duration,
+    required_to_start: bool,
+}
+
+// TODO: comment
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
     // TODO: notes on why parking_lot::RwLock, see reverted commit
@@ -176,6 +188,8 @@ pub(crate) struct RedisCacheStorage {
     pub(crate) ttl: Option<Duration>,
     is_cluster: bool,
     reset_ttl: bool,
+    // TODO: comment
+    redis_client_config: RedisClientConfig,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -290,120 +304,112 @@ impl RedisCacheStorage {
             });
         }
 
-        Self::create_client(
+        let redis_client_config = RedisClientConfig {
             client_config,
-            config.timeout,
-            config.pool_size as usize,
-            config.namespace,
-            config.ttl,
-            config.reset_ttl,
-            is_cluster,
+            timeout: config.timeout,
+            pool_size: config.pool_size as usize,
             caller,
-            config.metrics_interval,
-            config.required_to_start,
-        )
-        .await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn from_mocks(mocks: Arc<dyn Mocks>) -> Result<Self, BoxError> {
-        let config = RedisCache {
-            urls: vec![],
-            username: None,
-            password: None,
-            timeout: Duration::from_millis(2),
-            ttl: None,
-            namespace: None,
-            tls: None,
-            required_to_start: false,
-            reset_ttl: false,
-            pool_size: 1,
-            metrics_interval: Duration::from_millis(100),
+            metrics_interval: config.metrics_interval,
+            required_to_start: config.required_to_start,
         };
-
-        Self::from_mocks_and_config(mocks, config, "test", false).await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn from_mocks_and_config(
-        mocks: Arc<dyn Mocks>,
-        config: RedisCache,
-        caller: &'static str,
-        is_cluster: bool,
-    ) -> Result<Self, BoxError> {
-        let client_config = RedisConfig {
-            mocks: Some(mocks),
-            ..Default::default()
-        };
-
-        Self::create_client(
-            client_config,
-            config.timeout,
-            config.pool_size as usize,
-            config.namespace,
-            config.ttl,
-            config.reset_ttl,
-            is_cluster,
-            caller,
-            config.metrics_interval,
-            true,
-        )
-        .await
-    }
-
-    // TODO: docs: why split
-    #[allow(clippy::too_many_arguments)]
-    async fn create_client(
-        client_config: RedisConfig,
-        timeout: Duration,
-        pool_size: usize,
-        namespace: Option<String>,
-        ttl: Option<Duration>,
-        reset_ttl: bool,
-        is_cluster: bool,
-        caller: &'static str,
-        metrics_interval: Duration,
-        required_to_start: bool,
-    ) -> Result<Self, BoxError> {
-        let inner = Self::create_inner_client(
-            client_config,
-            timeout,
-            pool_size,
-            is_cluster,
-            caller,
-            metrics_interval,
-            required_to_start,
-        )
-        .await?;
 
         Ok(Self {
-            inner,
-            namespace: namespace.map(Arc::new),
-            ttl,
+            inner: Arc::new(RwLock::new(None)),
+            redis_client_config,
+            namespace: config.namespace.map(Arc::new),
+            ttl: config.ttl,
+            reset_ttl: config.reset_ttl,
             is_cluster,
-            reset_ttl,
         })
+
+        //Self::create_client(
+        //    client_config,
+        //    config.timeout,
+        //    config.pool_size as usize,
+        //    config.namespace,
+        //    config.ttl,
+        //    config.reset_ttl,
+        //    is_cluster,
+        //    caller,
+        //    config.metrics_interval,
+        //    config.required_to_start,
+        //)
+        //.await
     }
 
-    // TODO: docs: why split
-    async fn create_inner_client(
-        client_config: RedisConfig,
-        timeout: Duration,
-        pool_size: usize,
-        is_cluster: bool,
-        caller: &'static str,
-        metrics_interval: Duration,
-        required_to_start: bool,
-    ) -> Result<Arc<RwLock<Option<DropSafeRedisPool>>>, BoxError> {
-        let pooled_client = Builder::from_config(client_config)
+    //#[cfg(test)]
+    //pub(crate) async fn from_mocks(mocks: Arc<dyn Mocks>) -> Result<Self, BoxError> {
+    //    let config = RedisCache {
+    //        urls: vec![],
+    //        username: None,
+    //        password: None,
+    //        timeout: Duration::from_millis(2),
+    //        ttl: None,
+    //        namespace: None,
+    //        tls: None,
+    //        required_to_start: false,
+    //        reset_ttl: false,
+    //        pool_size: 1,
+    //        metrics_interval: Duration::from_millis(100),
+    //    };
+
+    //    Self::from_mocks_and_config(mocks, config, "test", false).await
+    //}
+
+    //#[cfg(test)]
+    //pub(crate) async fn from_mocks_and_config(
+    //    mocks: Arc<dyn Mocks>,
+    //    config: RedisCache,
+    //    caller: &'static str,
+    //    is_cluster: bool,
+    //) -> Result<Self, BoxError> {
+    //    let client_config = RedisConfig {
+    //        mocks: Some(mocks),
+    //        ..Default::default()
+    //    };
+
+    //    Self::create_client(
+    //        client_config,
+    //        config.timeout,
+    //        config.pool_size as usize,
+    //        config.namespace,
+    //        config.ttl,
+    //        config.reset_ttl,
+    //        is_cluster,
+    //        caller,
+    //        config.metrics_interval,
+    //        true,
+    //    )
+    //    .await
+    //}
+
+    /// Creates an inner client alongside some metadata (namespace, ttl, whether it's a clustered
+    /// client, ttl reset) to create a fully fledged RedisCacheStorage
+    // NOTE: this splits up the actual inner's creation from the RedisCacheStorage creation because
+    // we need to have a way to recreate the inner client when it errors out but we don't need to
+    // recreate all of RedisCacheStorage
+    #[allow(clippy::too_many_arguments)]
+    async fn create_client(&self) -> Result<&Self, BoxError> {
+        let inner = self.create_inner_client().await?;
+        *self.inner.write() = inner;
+        Ok(self)
+    }
+
+    /// Creates the inner redis client for RedisCacheStorage
+    // NOTE: this is a separate fn than the overall RedisCacheStorage creation fn because we need a
+    // way to recreate the client when it errors out
+    async fn create_inner_client(&self) -> Result<Option<DropSafeRedisPool>, BoxError> {
+        let pooled_client = Builder::from_config(self.redis_client_config.client_config.clone())
             .with_config(|client_config| {
-                if is_cluster {
+                if self.is_cluster {
                     // use `ClusterDiscoveryPolicy::ConfigEndpoint` - explicit in case the default changes.
                     // this determines how the clients discover other cluster nodes
                     let _ = client_config
                         .server
                         .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint)
-                        .inspect_err(|err| record_redis_error(err, caller, "startup"));
+                        .inspect_err(|err| {
+                            record_redis_error(err, self.redis_client_config.caller, "startup")
+                        });
                 }
             })
             .with_connection_config(|config| {
@@ -415,7 +421,7 @@ impl RedisCacheStorage {
                 config.reconnect_on_auth_error = true;
                 config.tcp = TcpConfig {
                     #[cfg(target_os = "linux")]
-                    user_timeout: Some(timeout),
+                    user_timeout: Some(self.redis_client_config.timeout),
                     ..Default::default()
                 };
                 config.unresponsive = UnresponsiveConfig {
@@ -427,24 +433,24 @@ impl RedisCacheStorage {
                 // PR-8671: must only disable lazy connections in cluster mode. otherwise, fred will
                 //  try to connect to unreachable replicas and fall over.
                 //  https://github.com/aembke/fred.rs/blob/f222ad7bfba844dbdc57e93da61b0a5483858df9/src/router/replicas.rs#L34
-                if is_cluster {
+                if self.is_cluster {
                     config.replica.lazy_connections = false;
                 }
             })
             .with_performance_config(|config| {
-                config.default_command_timeout = timeout;
+                config.default_command_timeout = self.redis_client_config.timeout;
             })
             .set_policy(ReconnectPolicy::new_exponential(0, 1, 2000, 5))
-            .build_pool(pool_size)?;
+            .build_pool(self.redis_client_config.pool_size)?;
 
         for client in pooled_client.clients() {
-            setup_event_listeners(caller, client);
+            setup_event_listeners(self.redis_client_config.caller, client);
             ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
         }
 
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
         let client_handles = pooled_client.connect_pool();
-        if required_to_start {
+        if self.redis_client_config.required_to_start {
             pooled_client.wait_for_connect().await?;
             tracing::trace!("redis connections established");
         }
@@ -468,15 +474,18 @@ impl RedisCacheStorage {
         });
 
         let pooled_client_arc = Arc::new(pooled_client);
-        let metrics_collector =
-            RedisMetricsCollector::new(pooled_client_arc.clone(), caller, metrics_interval);
+        let metrics_collector = RedisMetricsCollector::new(
+            pooled_client_arc.clone(),
+            self.redis_client_config.caller,
+            self.redis_client_config.metrics_interval,
+        );
 
-        Ok(Arc::new(RwLock::new(Some(DropSafeRedisPool {
+        Ok(Some(DropSafeRedisPool {
             pool: pooled_client_arc,
-            caller,
+            caller: self.redis_client_config.caller,
             heartbeat_abort_handle: heartbeat_handle.abort_handle(),
             _metrics_collector: metrics_collector,
-        }))))
+        }))
     }
 
     pub(crate) fn ttl(&self) -> Option<Duration> {
@@ -493,10 +502,7 @@ impl RedisCacheStorage {
 
     /// Helper method to record Redis errors for metrics
     fn record_query_error(&self, error: &RedisError) {
-        match self.inner.read().as_ref() {
-            Some(pool) => record_redis_error(error, pool.caller, "query"),
-            None => record_redis_error(error, UNKNOWN_CALLER, "query"),
-        }
+        record_redis_error(error, self.redis_client_config.caller, "query");
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
