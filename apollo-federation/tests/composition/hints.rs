@@ -837,14 +837,14 @@ mod description_inconsistencies {
         assert_has_hint(
             &result,
             "INCONSISTENT_DESCRIPTION",
-            r#"The schema definition has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Subgraph1"):
+            r#"The schema definition has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Subgraph2"):
+  """
+  Entry point for the API
+  """
+In subgraph "Subgraph1", the description is:
   """
   Queries to the API
     - a: gives you a int
-  """
-In subgraph "Subgraph2", the description is:
-  """
-  Entry point for the API
   """"#,
         );
     }
