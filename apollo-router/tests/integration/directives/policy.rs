@@ -226,9 +226,8 @@ async fn policy_directive_should_not_pass_if_coproc_disallowed() -> Result<(), B
         .unwrap();
 
     // THEN
-    //   * we get NO data back forthe private field!
-
-    let response = supergraph_harness
+    //   * we get NO data back for the private field!
+    let data = supergraph_harness
         .oneshot(request)
         .await
         .unwrap()
@@ -237,10 +236,7 @@ async fn policy_directive_should_not_pass_if_coproc_disallowed() -> Result<(), B
         .unwrap()
         .data
         .unwrap();
-
-    let response = response.as_object().unwrap();
-
-    assert!(response.is_empty());
+    assert!(data.is_null());
 
     Ok(())
 }
@@ -464,7 +460,7 @@ async fn interface_with_different_implementation_policies_should_require_auth() 
     let data = response.data.unwrap();
     let error = response.errors.first().unwrap();
 
-    assert!(data.as_object().unwrap().is_empty());
+    assert!(data.is_null());
     assert_eq!(
         error.extension_code().unwrap(),
         "UNAUTHORIZED_FIELD_OR_TYPE".to_string()
