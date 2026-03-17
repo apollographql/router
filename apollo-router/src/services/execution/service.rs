@@ -309,14 +309,25 @@ impl ExecutionService {
                     event!(Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
                 }
 
-                let unauthorized_path_errors = query.unauthorized.paths.iter().map(|path| unauthorized_field_or_type_error(path.clone()));
+                let unauthorized_path_errors = query
+                    .unauthorized
+                    .paths
+                    .iter()
+                    .map(|path| unauthorized_field_or_type_error(path.clone()));
                 match query.unauthorized.errors.response {
                     authorization::ErrorLocation::Errors => {
                         response.errors.extend(unauthorized_path_errors);
-                    },
+                    }
                     authorization::ErrorLocation::Extensions => {
-                        let serialized_auth_errors = unauthorized_path_errors.map(|err| serde_json_bytes::to_value(err).expect("error serialization should not fail")).collect();
-                        response.extensions.insert("authorizationErrors", Value::Array(serialized_auth_errors));
+                        let serialized_auth_errors = unauthorized_path_errors
+                            .map(|err| {
+                                serde_json_bytes::to_value(err)
+                                    .expect("error serialization should not fail")
+                            })
+                            .collect();
+                        response
+                            .extensions
+                            .insert("authorizationErrors", Value::Array(serialized_auth_errors));
                     }
                     authorization::ErrorLocation::Disabled => {}
                 }
@@ -332,17 +343,13 @@ impl ExecutionService {
                 );
             }
 
-            paths.extend(
-                query
-                    .format_response(
-                        &mut response,
-                        variables.clone(),
-                        schema.api_schema(),
-                        variables_set,
-                        insert_result_coercion_errors,
-                    )
-                ,
-            );
+            paths.extend(query.format_response(
+                &mut response,
+                variables.clone(),
+                schema.api_schema(),
+                variables_set,
+                insert_result_coercion_errors,
+            ));
 
             for error in response.errors.iter_mut() {
                 if let Some(path) = &mut error.path {
@@ -367,7 +374,9 @@ impl ExecutionService {
                 .extensions()
                 .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
                 .unwrap_or_default();
-            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
+            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) =
+                (metrics_ref_mode, &response.data)
+            {
                 extract_enums_from_response(
                     query.clone(),
                     schema.api_schema(),
