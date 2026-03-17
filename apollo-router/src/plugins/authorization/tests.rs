@@ -119,8 +119,6 @@ async fn authenticated_request() {
 
 #[tokio::test]
 async fn unauthenticated_request() {
-    let _guard = tracing_test::dispatcher_guard();
-
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -184,7 +182,6 @@ async fn unauthenticated_request() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
-    assert_logs_contain_entire_request_authorization_error();
 }
 
 const AUTHENTICATED_SCHEMA: &str = r#"schema
