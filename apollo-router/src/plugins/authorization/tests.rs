@@ -28,6 +28,20 @@ fn authorization_error_event_regex(span: &str) -> Regex {
     Regex::new(&pattern).unwrap()
 }
 
+fn assert_span_contains_authorization_error_event(span: &str) {
+    let span_regex = authorization_error_event_regex(span);
+    let contains_err_event_in_span = tracing_test::logs_assert(|lines| {
+        for line in lines {
+            if span_regex.captures(line).is_some() {
+                return Ok(());
+            }
+        }
+
+        Err(lines.join("\n"))
+    });
+    assert!(contains_err_event_in_span.is_ok());
+}
+
 #[tokio::test]
 async fn authenticated_request() {
     let subgraphs = MockedSubgraphs([
@@ -825,18 +839,7 @@ async fn scopes_directive_reject_unauthorized() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
-
-    let span_regex = authorization_error_event_regex("query_planning");
-    let contains_err_event_in_span = tracing_test::logs_assert(|lines| {
-        for line in lines {
-            if span_regex.captures(line).is_some() {
-                return Ok(());
-            }
-        }
-
-        Err(lines.join("\n"))
-    });
-    assert!(contains_err_event_in_span.is_ok());
+    assert_span_contains_authorization_error_event("query_planning");
 }
 
 #[tokio::test]
@@ -918,18 +921,7 @@ async fn scopes_directive_dry_run() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
-
-    let span_regex = authorization_error_event_regex("format_response");
-    let contains_err_event_in_span = tracing_test::logs_assert(|lines| {
-        for line in lines {
-            if span_regex.captures(line).is_some() {
-                return Ok(());
-            }
-        }
-
-        Err(lines.join("\n"))
-    });
-    assert!(contains_err_event_in_span.is_ok());
+    assert_span_contains_authorization_error_event("format_response");
 }
 
 #[tokio::test]
