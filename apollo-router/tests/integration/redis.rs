@@ -85,6 +85,33 @@ async fn find_redis_key_matching(
     all_keys.into_iter().next()
 }
 
+/// Find a key matching the pattern that is not equal to `exclude_key`.
+/// Used when multiple keys match the same pattern and we need a different one (e.g. a second entity cache key).
+async fn find_redis_key_matching_different_from(
+    client: &RedisClient,
+    namespace: &str,
+    pattern: &str,
+    exclude_key: &str,
+) -> Option<String> {
+    let full_pattern = format!("{namespace}:{pattern}");
+    let mut scanner = client.scan(&full_pattern, Some(100), Some(ScanType::String));
+    let mut all_keys = Vec::new();
+
+    while let Some(result) = scanner.next().await {
+        if let Ok(ref scan_result) = result
+            && let Some(keys) = scan_result.results()
+        {
+            for key in keys {
+                if let Some(s) = key.as_str() {
+                    all_keys.push(s.to_string());
+                }
+            }
+        }
+    }
+    all_keys.sort();
+    all_keys.into_iter().find(|k| k != exclude_key)
+}
+
 fn make_redis_url(ports: &[&str]) -> Option<String> {
     let port = ports.first()?;
     let scheme = if ports.len() == 1 {
@@ -182,12 +209,6 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     let s: String = match client.get(known_cache_key).await {
         Ok(s) => s,
         Err(e) => {
-            println!("keys in Redis server:");
-            let mut scan = client.scan("plan:*", Some(u32::MAX), Some(ScanType::String));
-            while let Some(key) = scan.next().await {
-                let key = key.as_ref().unwrap().results();
-                println!("\t{key:?}");
-            }
             panic!(
                 "key {known_cache_key} not found: {e}\nIf you see this error, make sure the federation version you use matches the redis key."
             );
@@ -674,14 +695,15 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    // Use dynamic key lookup instead of hardcoded hash
-    let reviews_key_2 = find_redis_key_matching(
+    // Find a different reviews entity key than the first (the second request fetched entity for product 3)
+    let reviews_key_2 = find_redis_key_matching_different_from(
         &client,
         &namespace,
-        "version:*:subgraph:reviews:type:Product:entity:*",
+        "version:*:subgraph:reviews:type:Product:*",
+        &reviews_key,
     )
     .await
-    .expect("reviews entity cache key should exist");
+    .expect("second reviews entity cache key should exist");
     let v: Value = client.get(&reviews_key_2).await.unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -791,15 +813,10 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     // We can't check for a specific key since hashes change, but we verified
     // invalidation count above (1u64)
 
-    // The products Query cache key should still exist
-    let products_key_after = find_redis_key_matching(
-        &client,
-        &namespace,
-        "version:*:subgraph:products:type:Query:*",
-    )
-    .await;
+    // The products Query cache key should still exist (reuse the key we found earlier)
+    let products_still_exists = client.exists(&products_key).await.unwrap_or(0) == 1;
     assert!(
-        products_key_after.is_some(),
+        products_still_exists,
         "products cache key should still exist after invalidation"
     );
 
@@ -895,7 +912,6 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    // Use dynamic key lookup instead of hardcoded hashes
     let products_key = find_redis_key_matching(
         &client,
         &namespace,
@@ -903,6 +919,8 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
     )
     .await
     .expect("products cache key should exist");
+
+    // Reuse the products key for snapshot and for exists check after invalidation
     let s: String = client.get(&products_key).await.unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
@@ -1088,15 +1106,10 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
     assert!(response_status.is_success());
 
     // After invalidation, user entity cache key should be gone (verified by count above)
-    // The products Query cache key should still exist
-    let products_key_after = find_redis_key_matching(
-        &client,
-        &namespace,
-        "version:*:subgraph:products:type:Query:*",
-    )
-    .await;
+    // The products Query cache key should still exist (reuse the key we found earlier)
+    let products_still_exists = client.exists(&products_key).await.unwrap_or(0) == 1;
     assert!(
-        products_key_after.is_some(),
+        products_still_exists,
         "products cache key should still exist after invalidation"
     );
 
@@ -1824,8 +1837,11 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
     router.start().await;
     router.assert_started().await;
 
+    // Allow time for Redis pool to register both clients before asserting metrics
     let expected_metric = r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 2"#;
-    router.assert_metrics_contains(expected_metric, None).await;
+    router
+        .assert_metrics_contains(expected_metric, Some(std::time::Duration::from_secs(30)))
+        .await;
 
     // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
     // the in-memory cache

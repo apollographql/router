@@ -19,7 +19,6 @@ use http_body_util::BodyExt as _;
 use indexmap::IndexMap;
 use serde_json::Value;
 use serde_json::json;
-use tokio::time::sleep;
 use tokio_util::future::FutureExt;
 use tower::BoxError;
 use tower::Service as _;
@@ -27,6 +26,7 @@ use tower::ServiceExt as _;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::redact_cache_debug_query_hash;
 
 const REDIS_URL: &str = "redis://127.0.0.1:6379";
 const INVALIDATION_PATH: &str = "/invalidation";
@@ -42,22 +42,6 @@ async fn redis_client() -> Result<Client, BoxError> {
         Builder::from_config(fred::prelude::Config::from_url(REDIS_URL).unwrap()).build()?;
     client.init().await?;
     Ok(client)
-}
-
-fn redact_cache_debug_query_hash(key: &str) -> String {
-    let marker = ":hash:";
-    let data_marker = ":data:";
-
-    let Some(hash_marker_idx) = key.find(marker) else {
-        return key.to_string();
-    };
-    let hash_start = hash_marker_idx + marker.len();
-    let Some(data_idx) = key[hash_start..].find(data_marker) else {
-        return key.to_string();
-    };
-    let hash_end = hash_start + data_idx;
-
-    format!("{}[query-hash]{}", &key[..hash_start], &key[hash_end..])
 }
 
 fn extract_cache_keys_from_response(response: &graphql::Response) -> Vec<String> {
@@ -79,7 +63,8 @@ fn extract_cache_keys_from_response(response: &graphql::Response) -> Vec<String>
 fn extract_cache_keys_by_subgraph(
     response: &graphql::Response,
 ) -> std::collections::HashMap<String, Vec<String>> {
-    let mut result = std::collections::HashMap::new();
+    let mut result: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     if let Some(data) = response
         .extensions
         .get("apolloCacheDebugging")
@@ -93,7 +78,7 @@ fn extract_cache_keys_by_subgraph(
             ) {
                 result
                     .entry(subgraph.to_string())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(key.to_string());
             }
         }
@@ -1082,10 +1067,12 @@ fn parse_max_age(cache_control: &str) -> u32 {
 
 macro_rules! check_cache_key {
     ($namespace: expr, $cache_key: expr, $client: expr) => {
-        let mut record: Option<String> = None;
         let key = format!("{}:{}", $namespace, $cache_key);
-        // Retry a few times because insert is asynchronous
+        let mut record: Option<String> = None;
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         for _ in 0..10 {
+            interval.tick().await;
             match $client
                 .get(key.clone())
                 .timeout(Duration::from_secs(5))
@@ -1095,22 +1082,17 @@ macro_rules! check_cache_key {
                     record = Some(resp);
                     break;
                 }
-                Ok(Err(_)) => {
-                    sleep(Duration::from_secs(1)).await;
-                }
-                Err(_) => {
-                    panic!("long timeout connecting to redis - did you call client.init()?");
-                }
+                Err(_) => panic!("long timeout connecting to redis - did you call client.init()?"),
+                _ => {}
             }
         }
-
         match record {
             Some(s) => {
                 let cache_value: Value = serde_json::from_str(&s).unwrap();
                 let v: Value = cache_value.get("data").unwrap().clone();
                 insta::assert_json_snapshot!(v);
             }
-            None => panic!("cannot get cache key {}", key),
+            None => panic!("cache key not found after retries: {}", key),
         }
     };
 }
@@ -1118,29 +1100,26 @@ macro_rules! check_cache_key {
 macro_rules! assert_cache_key_exists {
     ($namespace: expr, $cache_key: expr, $client: expr) => {
         let key = format!("{}:{}", $namespace, $cache_key);
-        // Retry a few times because insert is asynchronous
-        for i in 0..10 {
+        let mut found = false;
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        for _ in 0..10 {
+            interval.tick().await;
             match $client
                 .get::<Option<String>, _>(key.clone())
                 .timeout(Duration::from_secs(5))
                 .await
             {
                 Ok(Ok(Some(_))) => {
+                    found = true;
                     break;
                 }
-                Ok(Ok(None)) => {
-                    if i == 9 {
-                        panic!("cache key not found after retries: {}", key);
-                    }
-                    sleep(Duration::from_secs(1)).await;
-                }
-                Ok(Err(_)) => {
-                    sleep(Duration::from_secs(1)).await;
-                }
-                Err(_) => {
-                    panic!("long timeout connecting to redis - did you call client.init()?");
-                }
+                Err(_) => panic!("long timeout connecting to redis - did you call client.init()?"),
+                _ => {}
             }
+        }
+        if !found {
+            panic!("cache key not found after retries: {}", key);
         }
     };
 }

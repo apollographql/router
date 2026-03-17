@@ -74,6 +74,18 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
 
+/// Redact the query hash in cache debug keys so snapshots are stable.
+/// Uses the next `:` after `:hash:` as the end marker (e.g. `:hash:[^:]*`) so it remains
+/// correct if additional fields are added between hash and data.
+#[allow(dead_code)] // used by integration/response_cache and integration/coprocessor test binaries
+pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
+    static REDACT_HASH_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r":hash:[^:]*").expect("redact regex"));
+    REDACT_HASH_RE
+        .replace(key, ":hash:[query-hash]")
+        .into_owned()
+}
+
 /// Global registry to keep track of allocated ports across all tests
 /// This helps avoid port conflicts between concurrent tests
 static ALLOCATED_PORTS: OnceLock<Arc<Mutex<HashMap<u16, String>>>> = OnceLock::new();
@@ -1626,7 +1638,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_redis_cache_contains(&self, key: &str, ignore: Option<&str>) -> String {
+    pub async fn assert_redis_cache_contains(&self, key: &str, _ignore: Option<&str>) -> String {
         let url = self.redis_url().expect("no redis urls");
         let config = RedisConfig::from_url(&url).unwrap();
         let client = RedisClient::new(config, None, None, None);
@@ -1637,17 +1649,6 @@ impl IntegrationTest {
         let s = match client.get(&namespaced_key).await {
             Ok(s) => s,
             Err(e) => {
-                println!("non-ignored keys in the same namespace in Redis:");
-                for key in self
-                    .scan(&client)
-                    .await
-                    .expect("couldn't get keys from redis")
-                {
-                    let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
-                    if Some(unnamespaced_key.as_str()) != ignore {
-                        println!("\t{unnamespaced_key}");
-                    }
-                }
                 panic!(
                     "key {key} not found: {e}\n This may be caused by a number of things including federation version changes"
                 );
@@ -1680,11 +1681,6 @@ impl IntegrationTest {
         });
 
         if matching_key.is_none() {
-            println!("keys in namespace:");
-            for key in &keys {
-                let unnamespaced = key.replace(&format!("{redis_namespace}:"), "");
-                println!("\t{unnamespaced}");
-            }
             panic!("no key matching pattern '{pattern}' found in Redis cache");
         }
 

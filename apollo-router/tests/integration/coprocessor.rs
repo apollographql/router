@@ -14,6 +14,7 @@ use wiremock::matchers::path;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::redact_cache_debug_query_hash;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
@@ -150,22 +151,6 @@ fn remove_body(mut body: serde_json::Value) -> serde_json::Value {
 
 fn null_out_response(_body: serde_json::Value) -> serde_json::Value {
     json!("")
-}
-
-fn redact_cache_debug_query_hash(key: &str) -> String {
-    let marker = ":hash:";
-    let data_marker = ":data:";
-
-    let Some(hash_marker_idx) = key.find(marker) else {
-        return key.to_string();
-    };
-    let hash_start = hash_marker_idx + marker.len();
-    let Some(data_idx) = key[hash_start..].find(data_marker) else {
-        return key.to_string();
-    };
-    let hash_end = hash_start + data_idx;
-
-    format!("{}[query-hash]{}", &key[..hash_start], &key[hash_end..])
 }
 
 async fn test_full_pipeline(
