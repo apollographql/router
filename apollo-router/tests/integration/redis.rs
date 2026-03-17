@@ -809,9 +809,14 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     );
     assert!(response_status.is_success());
 
-    // After invalidation, the reviews entity cache key should be gone
-    // We can't check for a specific key since hashes change, but we verified
-    // invalidation count above (1u64)
+    // After invalidation, exactly one reviews entity key was invalidated, so at least one
+    // of [reviews_key, reviews_key_2] should still be present.
+    let reviews_key_still_exists = client.exists(&reviews_key).await.unwrap_or(0) == 1;
+    let reviews_key_2_still_exists = client.exists(&reviews_key_2).await.unwrap_or(0) == 1;
+    assert!(
+        reviews_key_still_exists || reviews_key_2_still_exists,
+        "at least one of the two reviews entity cache keys should still exist after invalidating one"
+    );
 
     // The products Query cache key should still exist (reuse the key we found earlier)
     let products_still_exists = client.exists(&products_key).await.unwrap_or(0) == 1;
@@ -1616,15 +1621,13 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router
         .execute_query(Query::default().with_anonymous())
         .await;
-    router.assert_redis_cache_contains(starting_key, None).await;
+    router.assert_redis_cache_contains(starting_key).await;
     router.update_config(updated_config).await;
     router.assert_reloaded().await;
     router
         .execute_query(Query::default().with_anonymous())
         .await;
-    router
-        .assert_redis_cache_contains(new_cache_key, Some(starting_key))
-        .await;
+    router.assert_redis_cache_contains(new_cache_key).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

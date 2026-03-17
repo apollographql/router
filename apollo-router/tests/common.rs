@@ -1636,7 +1636,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_redis_cache_contains(&self, key: &str, _ignore: Option<&str>) -> String {
+    pub async fn assert_redis_cache_contains(&self, key: &str) -> String {
         let url = self.redis_url().expect("no redis urls");
         let config = RedisConfig::from_url(&url).unwrap();
         let client = RedisClient::new(config, None, None, None);
