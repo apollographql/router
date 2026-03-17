@@ -1,7 +1,9 @@
 ```yaml title="router.yaml"
 coprocessor:
   url: http://127.0.0.1:8081 # Required. Replace with the URL of your coprocessor's HTTP endpoint.
-  timeout: 2s # The timeout for all coprocessor requests. Defaults to 1 second (1s)
+  # The timeout for all coprocessor requests. Defaults to 1 second (1s)
+  # Supported formats: https://docs.rs/humantime/latest/humantime/fn.parse_duration.html
+  timeout: 2s
   router: # This coprocessor hooks into the `RouterService`
     request: # By including this key, the `RouterService` sends a coprocessor request whenever it first receives a client request.
       headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.

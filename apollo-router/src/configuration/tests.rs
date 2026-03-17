@@ -724,6 +724,8 @@ fn upgrade_old_minor_configuration() {
     }
 }
 
+// NOTE: if this test fails, you might need to annotate your configuration field(s) with the
+// schemars macro
 #[test]
 fn all_properties_are_documented() {
     // Not using `generate_config_schema` here because of custom configuration.
@@ -1338,4 +1340,107 @@ fn it_prevents_enablement_of_both_subgraph_caching_plugins() {
     let config_result: Result<Configuration, _> =
         serde_json::from_value(make_config(Some(true), Some(true)));
     config_result.expect_err("both plugins configured");
+}
+
+#[rstest::rstest]
+#[case::all_enabled("some_subgraph_name", true, &[], true)]
+#[case::all_enabled_unknown("unknown", true, &[], true)]
+#[case::subgraph_enabled("some_subgraph_name", false, &[("some_subgraph_name", true)], true)]
+#[case::subgraph_disabled("disabled", false, &[("disabled", false)], false)]
+#[case::subgraph_unknown_falls_back_to_all("unknown", false, &[("some_subgraph_name", true)], false)]
+#[case::default_hoists_nothing("anything", false, &[], false)]
+#[case::all_with_subgraph_override("overridden", true, &[("overridden", false)], false)]
+fn hoist_orphan_errors_get(
+    #[case] query_subgraph: &str,
+    #[case] all_enabled: bool,
+    #[case] subgraph_entries: &[(&str, bool)],
+    #[case] expected: bool,
+) {
+    let config = super::subgraph::SubgraphConfiguration {
+        all: super::HoistOrphanErrors {
+            enabled: all_enabled,
+        },
+        subgraphs: subgraph_entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), super::HoistOrphanErrors { enabled: *v }))
+            .collect(),
+    };
+    assert_eq!(config.get(query_subgraph).enabled, expected);
+}
+
+#[test]
+fn hoist_orphan_errors_deserializes_with_subgraphs() {
+    let config: Configuration = serde_json::from_value(json!({
+        "experimental_hoist_orphan_errors": {
+            "subgraphs": {
+                "some_subgraph_name": {
+                    "enabled": true
+                },
+                "other": {
+                    "enabled": false
+                }
+            }
+        }
+    }))
+    .expect("valid config");
+    assert!(
+        config
+            .experimental_hoist_orphan_errors
+            .get("some_subgraph_name")
+            .enabled
+    );
+    assert!(!config.experimental_hoist_orphan_errors.get("other").enabled);
+    assert!(
+        !config
+            .experimental_hoist_orphan_errors
+            .get("unknown")
+            .enabled
+    );
+}
+
+#[test]
+fn hoist_orphan_errors_deserializes_with_all() {
+    let config: Configuration = serde_json::from_value(json!({
+        "experimental_hoist_orphan_errors": {
+            "all": {
+                "enabled": true
+            }
+        }
+    }))
+    .expect("valid config");
+    assert!(
+        config
+            .experimental_hoist_orphan_errors
+            .get("anything")
+            .enabled
+    );
+}
+
+#[test]
+fn hoist_orphan_errors_all_with_subgraph_override() {
+    let config: Configuration = serde_json::from_value(json!({
+        "experimental_hoist_orphan_errors": {
+            "all": {
+                "enabled": true
+            },
+            "subgraphs": {
+                "noisy_one": {
+                    "enabled": false
+                }
+            }
+        }
+    }))
+    .expect("valid config");
+    assert!(
+        config
+            .experimental_hoist_orphan_errors
+            .get("anything")
+            .enabled
+    );
+    assert!(
+        !config
+            .experimental_hoist_orphan_errors
+            .get("noisy_one")
+            .enabled
+    );
 }

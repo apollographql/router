@@ -15,7 +15,6 @@ use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
 use config_new::router_overhead;
-use error_handler::handle_error;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::future::ready;
@@ -153,7 +152,6 @@ pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
 mod error_counter;
-mod error_handler;
 mod fmt_layer;
 pub(crate) mod formatters;
 mod logging;
@@ -238,7 +236,7 @@ impl LruSizeInstrument {
                     gauge.observe(value.load(std::sync::atomic::Ordering::Relaxed), &[]);
                 }
             })
-            .init();
+            .build();
 
         Self {
             value,
@@ -316,9 +314,6 @@ impl PluginPrivate for Telemetry {
                 );
             }
         }
-
-        opentelemetry::global::set_error_handler(handle_error)
-            .expect("otel error handler lock poisoned, fatal");
 
         let mut config = init.config;
         config.instrumentation.spans.update_defaults();
@@ -2177,13 +2172,16 @@ mod tests {
                     .full_config(full_config)
                     .build(),
             )
+            .with_metrics()
             .await
             .unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_serialization() {
-        create_plugin_with_config(include_str!("testdata/config.router.yaml")).await;
+        create_plugin_with_config(include_str!("testdata/config.router.yaml"))
+            .with_metrics()
+            .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2192,6 +2190,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_all_features_enabled.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2207,6 +2206,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_all_features_enabled_response_cache.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2222,6 +2222,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_all_features_explicitly_disabled.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2241,6 +2242,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_all_features_defaults.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2260,6 +2262,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_apq_enabled_partial_defaults.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2271,6 +2274,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_apq_disabled_partial_defaults.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2297,7 +2301,7 @@ mod tests {
 
             assert_counter!(
                 "http.request",
-                1,
+                1.0,
                 "another_test" = "my_default_value",
                 "my_value" = 2,
                 "myname" = "label_value",
@@ -2348,7 +2352,7 @@ mod tests {
 
             assert_counter!(
                 "http.request",
-                1,
+                1.0,
                 "another_test" = "my_default_value",
                 "error" = "nope",
                 "myname" = "label_value",
@@ -2517,7 +2521,6 @@ mod tests {
                 "http.response.status_code" = 400,
                 "acme.my_attribute" = "application/json",
                 "error.type" = "Bad Request",
-                "http.response.status_code" = 400,
                 "network.protocol.version" = "HTTP/1.1"
             );
         }
@@ -2836,6 +2839,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/config.field_instrumentation_sampler.router.yaml"
         ))
+        .with_metrics()
         .await;
 
         let ftv1_counter = Arc::new(AtomicUsize::new(0));
@@ -3217,7 +3221,7 @@ mod tests {
         let mut injected = Injected(HashMap::new());
         let _ctx = opentelemetry::Context::new()
             .with_remote_span_context(SpanContext::new(
-                TraceId::from_u128(0x04f9e396465c4840bc2bf493b8b1a7fc),
+                TraceId::from(0x04f9e396465c4840bc2bf493b8b1a7fc),
                 SpanId::INVALID,
                 TraceFlags::default(),
                 false,

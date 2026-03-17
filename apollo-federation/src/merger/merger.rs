@@ -17,6 +17,8 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
 use indexmap::IndexSet;
 use itertools::Itertools;
@@ -1018,7 +1020,13 @@ impl Merger {
             }
         }
         for implemented_itf in implemented {
-            dest.insert_implements_interface(&mut self.merged, implemented_itf)?;
+            dest.insert_implements_interface(
+                &mut self.merged,
+                ComponentName {
+                    origin: ComponentOrigin::Definition,
+                    name: implemented_itf.name.clone(),
+                },
+            )?;
         }
         Ok(())
     }

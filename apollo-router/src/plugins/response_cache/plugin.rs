@@ -51,6 +51,7 @@ use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::Error;
@@ -140,6 +141,20 @@ impl StorageInterface {
     pub(crate) fn get(&self, subgraph: &str) -> Option<&Storage> {
         let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
         storage.get()
+    }
+
+    /// Activate all storages so they can start emitting metrics.
+    pub(crate) fn activate(&self) {
+        if let Some(all) = &self.all
+            && let Some(storage) = all.get()
+        {
+            storage.activate();
+        }
+        for storage in self.subgraphs.values() {
+            if let Some(storage) = storage.get() {
+                storage.activate();
+            }
+        }
     }
 }
 
@@ -360,17 +375,30 @@ impl PluginPrivate for ResponseCache {
         })
     }
 
-    fn activate(&self) {}
+    fn activate(&self) {
+        self.storage.activate();
+    }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let debug = self.debug;
         ServiceBuilder::new()
             .map_response(move |mut response: supergraph::Response| {
-                if let Some(cache_control) = response
+                if let Some(mut cache_control) = response
                     .context
                     .extensions()
                     .with_lock(|lock| lock.get::<CacheControl>().cloned())
                 {
+                    // If the response contains GraphQL errors, force Cache-Control: no-store to prevent
+                    // intermediate caches (CDNs, reverse proxies) from caching partial or error responses.
+                    let has_errors = response
+                        .context
+                        .get_json_value(CONTAINS_GRAPHQL_ERROR)
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if has_errors {
+                        cache_control = CacheControl::no_store();
+                    }
+
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
@@ -751,6 +779,7 @@ impl CacheService {
                 .headers()
                 .get(CACHE_DEBUG_HEADER_NAME)
                 == Some(&HeaderValue::from_static("true")));
+
         // Check if the request is part of a batch. If it is, completely bypass response caching since it
         // will break any request batches which this request is part of.
         // This check is what enables Batching and response caching to work together, so be very careful
@@ -758,8 +787,15 @@ impl CacheService {
         if request.is_part_of_batch() {
             return self.service.call(request).await;
         }
-        // Don't use cache at all if no-store is set in cache-control header
-        if request
+
+        // [RFC 9111](https://datatracker.ietf.org/doc/html/rfc9111):
+        //  * no-store: allows serving response from cache, but prohibits storing response in cache
+        //  * no-cache: prohibits serving response from cache, but allows storing response in cache
+        //
+        // NB: no-cache actually prohibits serving response from cache _without revalidation_, but
+        //  in the router this is the same thing
+
+        let cache_control = if request
             .subgraph_request
             .headers()
             .contains_key(&CACHE_CONTROL)
@@ -781,12 +817,19 @@ impl CacheService {
                         .build());
                 }
             };
-            if !cache_control.should_store() {
+
+            // Don't use cache at all if both no-store and no-cache are set in cache-control header
+            if cache_control.is_no_cache() && cache_control.is_no_store() {
                 let mut resp = self.service.call(request).await?;
                 cache_control.to_headers(resp.response.headers_mut())?;
                 return Ok(resp);
             }
-        }
+
+            Some(cache_control)
+        } else {
+            None
+        };
+
         let private_id = self.get_private_id(&request.context);
         // Knowing if there's a private_id or not will differentiate the hash because for a same query it can be both public and private depending if we have private_id set or not
         let private_query_key = PrivateQueryKey {
@@ -818,6 +861,7 @@ impl CacheService {
                 is_known_private,
                 private_id,
                 private_query_key,
+                cache_control,
             )
             .await
         } else {
@@ -827,6 +871,7 @@ impl CacheService {
                 is_known_private,
                 private_id,
                 private_query_key,
+                cache_control,
             )
             .await
         }
@@ -885,6 +930,7 @@ impl CacheService {
         is_known_private: bool,
         private_id: Option<String>,
         private_query_key: PrivateQueryKey,
+        request_cache_control: Option<CacheControl>,
     ) -> Result<subgraph::Response, BoxError> {
         // Skip cache entirely if this is a root fields operation that isn't a query
         if request.operation_kind != OperationKind::Query {
@@ -902,6 +948,7 @@ impl CacheService {
             request,
             self.supergraph_schema.clone(),
             &self.subgraph_enums,
+            request_cache_control.as_ref(),
         )
         .instrument(tracing::info_span!(
             "response_cache.lookup",
@@ -941,7 +988,8 @@ impl CacheService {
 
                 let response = self.service.call(request).await?;
 
-                let cache_control = response.subgraph_cache_control(self.subgraph_ttl.into())?;
+                let mut cache_control =
+                    response.subgraph_cache_control(self.subgraph_ttl.into())?;
 
                 // Support cache tags coming from subgraph response extensions
                 if let Some(Value::Array(cache_tags)) =
@@ -960,8 +1008,6 @@ impl CacheService {
                     cache_control.clone(),
                 );
 
-                let mut should_store = true;
-
                 if cache_control.private() {
                     // we did not know in advance that this was a query with a private scope, so we update the cache key
                     if !is_known_private {
@@ -976,12 +1022,11 @@ impl CacheService {
                             root_cache_key = format!("{root_cache_key}:{s}");
                         }
                     }
+                }
 
-                    if private_id.is_none() {
-                        // the response has a private scope but we don't have a way to differentiate
-                        // users, so we do not store the response in cache
-                        should_store = false;
-                    }
+                // if the request had no_store on it, propagate that to this cache control
+                if let Some(request_cache_control) = request_cache_control {
+                    cache_control.no_store |= request_cache_control.no_store;
                 }
 
                 if self.debug {
@@ -1005,7 +1050,11 @@ impl CacheService {
                     add_cache_key_to_context(&response.context, cache_key_context)?;
                 }
 
-                if should_store && cache_control.should_store() {
+                // the response has a private scope but we don't have a way to differentiate
+                // users, so we do not store the response in cache
+                let unstorable_private_response = cache_control.private() && private_id.is_none();
+
+                if !unstorable_private_response && cache_control.should_store() {
                     cache_store_root_from_response(
                         storage,
                         self.subgraph_ttl,
@@ -1030,6 +1079,7 @@ impl CacheService {
         is_known_private: bool,
         private_id: Option<String>,
         private_query_key: PrivateQueryKey,
+        request_cache_control: Option<CacheControl>,
     ) -> Result<subgraph::Response, BoxError> {
         match cache_lookup_entities(
             self.name.clone(),
@@ -1040,6 +1090,7 @@ impl CacheService {
             private_id.as_deref(),
             request,
             self.debug,
+            request_cache_control.as_ref(),
         )
         .instrument(tracing::info_span!(
             "response_cache.lookup",
@@ -1134,6 +1185,11 @@ impl CacheService {
                     cache_control = cache_control.merge(&control_from_cached);
                 }
 
+                // if the request had no_store on it, propagate that to this cache control
+                if let Some(request_cache_control) = request_cache_control {
+                    cache_control.no_store |= request_cache_control.no_store;
+                }
+
                 if !is_known_private && cache_control.private() {
                     self.private_queries
                         .write()
@@ -1181,6 +1237,7 @@ async fn cache_lookup_root(
     mut request: subgraph::Request,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
+    cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String, Vec<String>)>, BoxError> {
     let invalidation_cache_keys =
         get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?;
@@ -1200,6 +1257,12 @@ async fn cache_lookup_root(
     invalidation_keys.extend(invalidation_cache_keys);
 
     Span::current().record("cache.key", key.clone());
+
+    if cache_control.is_some_and(|c| c.is_no_cache()) {
+        // skip cache lookup if no-cache is set - we have no means of revalidating entries without
+        // just performing the query, so there's no benefit to hitting the cache
+        return Ok(ControlFlow::Continue((request, key, invalidation_keys)));
+    }
 
     match cache.fetch(&key, &request.subgraph_name).await {
         Ok(value) => {
@@ -1411,6 +1474,7 @@ fn get_invalidation_root_keys_from_schema(
     root.result.into_inner()
 }
 
+#[derive(Default)]
 struct ResponseCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
 
 #[allow(clippy::too_many_arguments)]
@@ -1423,6 +1487,7 @@ async fn cache_lookup_entities(
     private_id: Option<&str>,
     mut request: subgraph::Request,
     debug: bool,
+    cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, ResponseCacheResults)>, BoxError> {
     let cache_metadata = extract_cache_keys(
         &name,
@@ -1449,6 +1514,15 @@ async fn cache_lookup_entities(
                 .collect(),
         )),
     );
+
+    if cache_control.is_some_and(|c| c.is_no_cache()) {
+        // skip cache lookup if no-cache is set - we have no means of revalidating entries without
+        // just performing the query, so there's no benefit to hitting the cache
+        return Ok(ControlFlow::Continue((
+            request,
+            ResponseCacheResults::default(),
+        )));
+    }
 
     let cache_result: Vec<Option<CacheEntry>> = match cache_result {
         Ok(res) => res
@@ -2067,6 +2141,11 @@ fn collect_key_field_sets(
 /// * This function and `get_entity_key_from_selection_set` are separate because this is called for
 ///   multiple possible `@key` fields to find the matching one, while
 ///   `get_entity_key_from_selection_set` is only called once the matching `@key` fields is found.
+// NB(nullability-note): We allow nullable fields in selection sets (ie, those fields that
+// identify an entity, usually [if not always] listed in `@key`). That _doesn't_ mean that
+// entities definitively must allow nullable fields, only that we happen to allow it right now.
+// It's probably a bit of a schema-development smell to have an entity identifiable by nullable
+// fields, but it makes practical sense if you're wanting to cache partial responses.
 pub(in crate::plugins) fn matches_selection_set(
     // the JSON representation of the entity data
     representation: &serde_json_bytes::Map<ByteString, Value>,
@@ -2077,7 +2156,12 @@ pub(in crate::plugins) fn matches_selection_set(
         // the heart of finding the match: we take the field from the selection
         // set and try to find it in the entity representation;
         let Some(value) = representation.get(field.name.as_str()) else {
-            return false;
+            if field.definition.ty.is_non_null() {
+                return false;
+            } else {
+                // allow missing field to match nullable field type (see NB(nullability-note))
+                continue;
+            }
         };
 
         // This field selection is not expecting any subdata.
@@ -2099,15 +2183,17 @@ pub(in crate::plugins) fn matches_selection_set(
             }
 
             Value::Array(arr) => {
-                // Recurse into array values
+                // Recurse into array values, filtering out any `null` objects if we're allowed to do so
+                // NB: we have to do this here where the field type is known, as the selection set doesn't
+                //  include knowledge of whether the type is nullable
+                // See NB(nullability-note)
+                let list_item_is_nullable = !field.definition.ty.item_type().is_non_null();
+                let exclude_value = |value: &&Value| list_item_is_nullable && value.is_null();
+                let arr = arr.iter().filter(|value| !exclude_value(value));
                 matches_array_of_objects(arr, &field.selection_set)
             }
 
-            // We allow nullable fields in selection sets (ie, those fields that identify an entity, usually
-            // [if not always] listed in `@key`). That _doesn't_ mean that entities definitively
-            // must allow nullable fields, only that we happen to allow it right now; it's probably
-            // a bit of a schema-development smell to have an entity identifiable by nullable
-            // fields, but it makes practical sense if you're wanting to cache partial responses
+            // See NB(nullability-note)
             Value::Null => {
                 return true;
             }
@@ -2137,14 +2223,14 @@ fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
 /// * Note: The array can be multi-dimensional. (the @key field set can match any levels of nested
 ///   arrays)
 /// * Precondition: `selection_set` must be non-empty.
-fn matches_array_of_objects(
-    arr: &[Value],
+fn matches_array_of_objects<'a, I: Iterator<Item = &'a Value>>(
+    arr: I,
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
-    for item in arr.iter() {
+    for item in arr {
         let result = match item {
             Value::Object(obj) => matches_selection_set(obj, selection_set),
-            Value::Array(arr) => matches_array_of_objects(arr, selection_set),
+            Value::Array(arr) => matches_array_of_objects(arr.iter(), selection_set),
             _other => false,
         };
         if !result {
@@ -3225,6 +3311,118 @@ mod tests {
             matches_selection_set(&representation, &field_set.selection_set),
             "complex nested arrays should match"
         );
+    }
+
+    fn repr_matches_selection_set_for_schema(
+        schema: &str,
+        named_type: &str,
+        selection_text: &str,
+        representation: serde_json_bytes::Value,
+    ) -> bool {
+        let schema = Schema::parse_and_validate(schema, "test.graphql")
+            .expect("should be able to parse schema");
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new(named_type).unwrap(),
+                selection_text,
+                "test.graphql",
+            )
+            .expect("should be able to parse field set");
+
+        matches_selection_set(
+            representation.as_object().expect("must provide an object"),
+            &field_set.selection_set,
+        )
+    }
+
+    #[rstest::rstest]
+    #[case::null_list(json!(null))]
+    #[case::null_element(json!([null]))]
+    #[case::null_element(json!([{"id": "TEST1"}, null]))]
+    #[case::null_value_for_nullable_field(json!([{"id": "TEST1"}]))]
+    #[case::null_value_for_nullable_field(json!([{"id": "TEST1", "quantity": 5}]))]
+    #[case::multiple_differently_null_objects(json!([{"id": "TEST1"}, null, {"id": "TEST3", "quantity": null}]))]
+    fn test_matches_selection_set_handles_arrays_with_nullable_elements(
+        #[case] list_repr: serde_json_bytes::Value,
+    ) {
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                list: [NullableListElement]
+            }
+            type NullableListElement {
+                id: ID!
+                quantity: Int
+                inStock: Boolean
+            }
+        "#;
+
+        let named_type = "Test";
+        let selection_text = "id list { id quantity inStock }";
+
+        let representation = json!({
+            "id": "TEST123",
+            "list": list_repr
+        });
+
+        let matches_selection_set = repr_matches_selection_set_for_schema(
+            schema_text,
+            named_type,
+            selection_text,
+            representation,
+        );
+        assert!(matches_selection_set);
+    }
+
+    #[rstest::rstest]
+    #[case::null_element(json!([null]))]
+    #[case::null_element(json!([{"id": "TEST1"}, null]))]
+    #[case::null_value_for_nonnullable_field(json!([{}]))]
+    #[case::null_value_for_nonnullable_field(json!([{"quantity": 5}]))]
+    #[case::null_value_for_nonnullable_field(json!([{"id": "TEST1"}, {}]))]
+    #[case::null_value_for_nonnullable_field(json!([{"id": "TEST1"}, {"quantity": 5}]))]
+    fn test_matches_selection_set_handles_arrays_with_non_nullable_elements(
+        #[case] list_repr: serde_json_bytes::Value,
+    ) {
+        // NB: same as test_matches_selection_set_handles_arrays_with_nullable_elements but with a
+        //  NonNullableListElement! rather than a NullableListElement
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                list: [NonNullableListElement!]
+            }
+            type NonNullableListElement {
+                id: ID!
+                quantity: Int
+                inStock: Boolean
+            }
+        "#;
+
+        let named_type = "Test";
+        let selection_text = "id list { id quantity inStock }";
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "list": list_repr
+        });
+
+        let matches_selection_set = repr_matches_selection_set_for_schema(
+            schema_text,
+            named_type,
+            selection_text,
+            representation,
+        );
+        assert!(!matches_selection_set);
     }
 
     #[test]

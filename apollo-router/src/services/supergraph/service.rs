@@ -572,6 +572,7 @@ impl PluggableSupergraphServiceBuilder {
                     connector_sources,
                 )),
             )),
+            Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
         ));
 
         let execution_service_factory = ExecutionServiceFactory {

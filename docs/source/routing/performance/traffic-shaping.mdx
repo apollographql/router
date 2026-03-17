@@ -55,6 +55,8 @@ traffic_shaping:
 
 This rate limiting applies to all requests, there is no filtering per IP or other criteria.
 
+If the router-level rate limit is hit, Apollo Router returns a [HTTP 503 status code](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/503) to indicate that the service is unavailable.
+
 ### Timeouts
 
 The router applies a default timeout of 30 seconds for all requests, including the following:
