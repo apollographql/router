@@ -321,7 +321,7 @@ impl ExecutionService {
                             response.extensions.insert("authorizationErrors", Value::Array(v));
                         }
                     },
-                    crate::plugins::authorization::ErrorLocation::Disabled => {},
+                    crate::plugins::authorization::ErrorLocation::Disabled => {}
                 }
             }
 
@@ -331,7 +331,7 @@ impl ExecutionService {
                     variables.clone(),
                     schema.api_schema(),
                     variables_set,
-                    insert_result_coercion_errors
+                    insert_result_coercion_errors,
                 );
             }
 
@@ -342,9 +342,9 @@ impl ExecutionService {
                         variables.clone(),
                         schema.api_schema(),
                         variables_set,
-                        insert_result_coercion_errors
+                        insert_result_coercion_errors,
                     )
-                    ,
+                ,
             );
 
             for error in response.errors.iter_mut() {
@@ -380,8 +380,8 @@ impl ExecutionService {
             };
 
             context
-                    .extensions()
-                    .with_lock(|lock| lock.insert::<ReferencedEnums>(referenced_enums));
+                .extensions()
+                .with_lock(|lock| lock.insert::<ReferencedEnums>(referenced_enums));
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {
