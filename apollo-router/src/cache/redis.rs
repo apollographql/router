@@ -271,6 +271,7 @@ where
 }
 
 impl RedisCacheStorage {
+    /// Create a new RedisCacheStorage without an inner client. To create an inner client, you must call `create_client`
     pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)
             .inspect_err(|err| record_redis_error(err, caller, "startup"))?;
@@ -318,40 +319,27 @@ impl RedisCacheStorage {
             reset_ttl: config.reset_ttl,
             is_cluster,
         })
-
-        //Self::create_client(
-        //    client_config,
-        //    config.timeout,
-        //    config.pool_size as usize,
-        //    config.namespace,
-        //    config.ttl,
-        //    config.reset_ttl,
-        //    is_cluster,
-        //    caller,
-        //    config.metrics_interval,
-        //    config.required_to_start,
-        //)
-        //.await
     }
 
-    //#[cfg(test)]
-    //pub(crate) async fn from_mocks(mocks: Arc<dyn Mocks>) -> Result<Self, BoxError> {
-    //    let config = RedisCache {
-    //        urls: vec![],
-    //        username: None,
-    //        password: None,
-    //        timeout: Duration::from_millis(2),
-    //        ttl: None,
-    //        namespace: None,
-    //        tls: None,
-    //        required_to_start: false,
-    //        reset_ttl: false,
-    //        pool_size: 1,
-    //        metrics_interval: Duration::from_millis(100),
-    //    };
+    #[cfg(test)]
+    async fn from_mocks(mocks: Arc<dyn Mocks>) -> Result<Self, BoxError> {
+        let config = RedisCache {
+            urls: vec![],
+            username: None,
+            password: None,
+            timeout: Duration::from_millis(2),
+            ttl: None,
+            namespace: None,
+            tls: None,
+            required_to_start: false,
+            reset_ttl: false,
+            pool_size: 1,
+            metrics_interval: Duration::from_millis(100),
+        };
 
-    //    Self::from_mocks_and_config(mocks, config, "test", false).await
-    //}
+        unimplemented!()
+        //Self::from_mocks_and_config(mocks, config, "test", false).await
+    }
 
     //#[cfg(test)]
     //pub(crate) async fn from_mocks_and_config(
@@ -386,7 +374,7 @@ impl RedisCacheStorage {
     // we need to have a way to recreate the inner client when it errors out but we don't need to
     // recreate all of RedisCacheStorage
     #[allow(clippy::too_many_arguments)]
-    async fn create_client(&self) -> Result<&Self, BoxError> {
+    pub(crate) async fn create_client(self) -> Result<Self, BoxError> {
         let inner = self.create_inner_client().await?;
         *self.inner.write() = inner;
         Ok(self)
@@ -628,13 +616,41 @@ impl RedisCacheStorage {
         }
     }
 
-    pub(crate) async fn pipeline(&self) -> Pipeline<Client> {
-        let pool = self.inner.read();
-        match pool.as_ref() {
-            Some(pool) => pool.next().pipeline(),
+    pub(crate) async fn pipeline(&self) -> Result<Pipeline<Client>, RedisError> {
+        // WARN: this looks funky but is important to leave alone: this creates a read guard, gets
+        // the client out of the pool, and then drops the guard; this avoids a deadlock below when
+        // we try to take a write guard out in scenarios where we're recreating the client
+        let maybe_pipeline = {
+            let pool = self.inner.read();
+            pool.as_ref().map(|pool| pool.next().pipeline())
+        };
+
+        match maybe_pipeline {
+            Some(pipeline) => Ok(pipeline),
             None => {
-                // TODO: implement retry logic here
-                unimplemented!()
+                let new_inner = match self.create_inner_client().await {
+                    Ok(new_inner) => new_inner,
+                    Err(e) => {
+                        let error = RedisError::new(
+                            RedisErrorKind::Unknown,
+                            format!("Error attempting to recreate client: {e:?}"),
+                        );
+                        record_redis_error(&error, self.redis_client_config.caller, "client");
+                        return Err(error);
+                    }
+                };
+
+                *self.inner.write() = new_inner;
+
+                // rather than get into either recursion or a loop, we just return an error and let
+                // the current attempt to reach redis fail. We have a new client waiting for the
+                // next attempt, so this should be a temporary failure
+                let error = RedisError::new(
+                    RedisErrorKind::Unknown,
+                    format!("client being recreated after connection interrupt, retry command"),
+                );
+                record_redis_error(&error, self.redis_client_config.caller, "client");
+                Err(error)
             }
         }
     }
@@ -667,7 +683,7 @@ impl RedisCacheStorage {
         if self.reset_ttl
             && let Some(ttl) = self.ttl
         {
-            let pipeline = self.pipeline().await.with_options(&options);
+            let pipeline = self.pipeline().await?.with_options(&options);
             let _: () = pipeline
                 .get(&key)
                 .await
@@ -790,17 +806,19 @@ impl RedisCacheStorage {
         }
     }
 
+    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
+    /// inserts, and otherwise an error and error traces and error-level log
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
         ttl: Option<Duration>,
-    ) {
+    ) -> Result<(), RedisError> {
         tracing::trace!("inserting into redis: {:#?}", data);
         let expiration = self.expiration(ttl);
 
         // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
         // seems to split the pipeline by hash slot in the background.
-        let pipeline = self.pipeline().await;
+        let pipeline = self.pipeline().await?;
         for (key, value) in data {
             let key = self.make_key(key.clone());
             let _: Result<(), _> = pipeline
@@ -816,6 +834,8 @@ impl RedisCacheStorage {
                 self.record_query_error(&err);
             }
         }
+
+        Ok(())
     }
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
