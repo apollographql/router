@@ -26,8 +26,6 @@ use tower::ServiceExt as _;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Span;
-use tracing::event;
-use tracing_core::Level;
 
 use crate::Configuration;
 use crate::apollo_studio_interop::ReferencedEnums;
@@ -303,11 +301,7 @@ impl ExecutionService {
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
             if !query.unauthorized.paths.is_empty() {
-                if query.unauthorized.errors.log {
-                    let unauthorized_paths = query.unauthorized.paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
-
-                    event!(Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
-                }
+                query.unauthorized.log_unauthorized_paths();
 
                 let unauthorized_path_errors = query
                     .unauthorized
