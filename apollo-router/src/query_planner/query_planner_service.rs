@@ -530,7 +530,7 @@ impl QueryPlannerService {
             {
                 Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
                     let response = graphql::Response::builder()
-                        .data(Object::new())
+                        .data(Value::Null)
                         .errors(
                             unauthorized_paths
                                 .into_iter()
