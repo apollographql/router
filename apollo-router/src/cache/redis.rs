@@ -322,7 +322,7 @@ impl RedisCacheStorage {
     }
 
     #[cfg(test)]
-    async fn from_mocks(mocks: Arc<dyn Mocks>) -> Result<Self, BoxError> {
+    pub(crate) async fn from_mocks(mocks: Arc<dyn Mocks>) -> Result<Self, BoxError> {
         let config = RedisCache {
             urls: vec![],
             username: None,
@@ -337,36 +337,41 @@ impl RedisCacheStorage {
             metrics_interval: Duration::from_millis(100),
         };
 
-        unimplemented!()
-        //Self::from_mocks_and_config(mocks, config, "test", false).await
+        Self::from_mocks_and_config(mocks, config, "test", false).await
     }
 
-    //#[cfg(test)]
-    //pub(crate) async fn from_mocks_and_config(
-    //    mocks: Arc<dyn Mocks>,
-    //    config: RedisCache,
-    //    caller: &'static str,
-    //    is_cluster: bool,
-    //) -> Result<Self, BoxError> {
-    //    let client_config = RedisConfig {
-    //        mocks: Some(mocks),
-    //        ..Default::default()
-    //    };
+    #[cfg(test)]
+    pub(crate) async fn from_mocks_and_config(
+        mocks: Arc<dyn Mocks>,
+        config: RedisCache,
+        caller: &'static str,
+        is_cluster: bool,
+    ) -> Result<Self, BoxError> {
+        let client_config = RedisConfig {
+            mocks: Some(mocks),
+            ..Default::default()
+        };
 
-    //    Self::create_client(
-    //        client_config,
-    //        config.timeout,
-    //        config.pool_size as usize,
-    //        config.namespace,
-    //        config.ttl,
-    //        config.reset_ttl,
-    //        is_cluster,
-    //        caller,
-    //        config.metrics_interval,
-    //        true,
-    //    )
-    //    .await
-    //}
+        let redis_client_config = RedisClientConfig {
+            client_config,
+            timeout: config.timeout,
+            pool_size: config.pool_size as usize,
+            caller,
+            metrics_interval: config.metrics_interval,
+            required_to_start: config.required_to_start,
+        };
+
+        let storage = Self {
+            inner: Arc::new(RwLock::new(None)),
+            namespace: config.namespace.map(Arc::new),
+            ttl: config.ttl,
+            is_cluster,
+            reset_ttl: config.reset_ttl,
+            redis_client_config,
+        };
+
+        Ok(storage.create_client().await?)
+    }
 
     /// Creates an inner client alongside some metadata (namespace, ttl, whether it's a clustered
     /// client, ttl reset) to create a fully fledged RedisCacheStorage
@@ -1202,8 +1207,10 @@ mod test {
         #[tokio::test(flavor = "multi_thread")]
         async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
             let clustered = true;
-            let storage =
-                RedisCacheStorage::new(redis_config(clustered), "test_redis_storage").await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test_redis_storage")
+                .await?
+                .create_client()
+                .await?;
 
             // insert values which reflect different cluster slots
             let mut data = HashMap::default();
@@ -1229,7 +1236,7 @@ mod test {
             // insert values
             let keys: Vec<_> = data.keys().cloned().collect();
             let data: Vec<_> = data.into_iter().collect();
-            storage.insert_multiple(&data, None).await;
+            let _ = storage.insert_multiple(&data, None).await;
 
             // make a `get` call for each key and ensure that it has the expected value. this tests both
             // the `get` and `insert_multiple` functions
@@ -1256,11 +1263,13 @@ mod test {
         ) -> Result<(), BoxError> {
             let storage =
                 RedisCacheStorage::new(redis_config(clustered), "test_get_multiple_is_ordered")
+                    .await?
+                    .create_client()
                     .await?;
 
             let data = [("a", "1"), ("b", "2"), ("c", "3")]
                 .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
-            storage.insert_multiple(&data, None).await;
+            let _ = storage.insert_multiple(&data, None).await;
 
             // check different orders of fetches to make everything is ordered correctly, including
             // when some values are none

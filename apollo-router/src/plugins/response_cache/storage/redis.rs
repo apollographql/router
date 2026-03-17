@@ -1070,6 +1070,7 @@ mod tests {
                 let _: () = storage
                     .storage
                     .client()
+                    .await?
                     .set(namespaced_key, 1, Some(Expiration::EX(60)), None, false)
                     .await?;
                 Ok::<(), BoxError>(())
