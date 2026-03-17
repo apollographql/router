@@ -64,7 +64,7 @@ const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(10);
 /// Interval on which we send PING commands to the Redis servers.
 const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
-/// Record a Redis error as a metric, independent of having an active connection
+/// Record a Redis error as a metric and emits an error-level log for it, independent of having an active connection
 fn record_redis_error(error: &RedisError, caller: &'static str, context: &'static str) {
     // Don't track NotFound errors as they're expected for cache misses
 
@@ -396,8 +396,6 @@ impl RedisCacheStorage {
     }
 
     /// Creates the inner redis client for RedisCacheStorage
-    // NOTE: this is a separate fn than the overall RedisCacheStorage creation fn because we need a
-    // way to recreate the client when it errors out
     async fn create_inner_client(&self) -> Result<Option<DropSafeRedisPool>, BoxError> {
         let pooled_client = Builder::from_config(self.redis_client_config.client_config.clone())
             .with_config(|client_config| {
@@ -497,10 +495,13 @@ impl RedisCacheStorage {
     /// This MUST be called after `Telemetry.activate()` to ensure gauges are
     /// registered with the correct meter provider.
     pub(crate) fn activate(&self) {
-        self.inner.activate();
+        if let Some(inner) = self.inner.read().as_ref() {
+            inner.activate();
+        }
     }
 
-    /// Helper method to record Redis errors for metrics
+    /// Helper method to record Redis errors for metrics. Calls `record_redis_error` for both
+    /// metrics recording but also emitting an error-level log for the error
     fn record_query_error(&self, error: &RedisError) {
         record_redis_error(error, self.redis_client_config.caller, "query");
     }
@@ -590,18 +591,47 @@ impl RedisCacheStorage {
         self.ttl = ttl;
     }
 
-    pub(crate) fn client(&self) -> Client {
-        let pool = self.inner.read();
-        match pool.as_ref() {
-            Some(pool) => pool.next().clone(),
+    // TODO: note on why RedisError for ease/compatibility/fewest changes for now
+    pub(crate) async fn client(&self) -> Result<Client, RedisError> {
+        // WARN: this looks funky but is important to leave alone: this creates a read guard, gets
+        // the client out of the pool, and then drops the guard; this avoids a deadlock below when
+        // we try to take a write guard out in scenarios where we're recreating the client
+        let maybe_client = {
+            let pool = self.inner.read();
+            pool.as_ref().map(|pool| pool.next().clone())
+        };
+
+        match maybe_client {
+            Some(client) => Ok(client),
             None => {
-                // TODO: implement retry logic here
-                unimplemented!()
+                let new_inner = match self.create_inner_client().await {
+                    Ok(new_inner) => new_inner,
+                    Err(e) => {
+                        let error = RedisError::new(
+                            RedisErrorKind::Unknown,
+                            format!("Error attempting to recreate client: {e:?}"),
+                        );
+                        record_redis_error(&error, self.redis_client_config.caller, "client");
+                        return Err(error);
+                    }
+                };
+
+                *self.inner.write() = new_inner;
+
+                // rather than get into either recursion or a loop, we just return an error and let
+                // the current attempt to reach redis fail. We have a new client waiting for the
+                // next attempt, so this should be a temporary failure
+                let error = RedisError::new(
+                    RedisErrorKind::Unknown,
+                    format!("client being recreated after connection interrupt, retry command"),
+                );
+                record_redis_error(&error, self.redis_client_config.caller, "client");
+                Err(error)
             }
         }
     }
 
-    pub(crate) fn pipeline(&self) -> Pipeline<Client> {
+    pub(crate) async fn pipeline(&self) -> Pipeline<Client> {
         let pool = self.inner.read();
         match pool.as_ref() {
             Some(pool) => pool.next().pipeline(),
@@ -640,7 +670,7 @@ impl RedisCacheStorage {
         if self.reset_ttl
             && let Some(ttl) = self.ttl
         {
-            let pipeline = self.pipeline().with_options(&options);
+            let pipeline = self.pipeline().await.with_options(&options);
             let _: () = pipeline
                 .get(&key)
                 .await
@@ -656,13 +686,13 @@ impl RedisCacheStorage {
                 .inspect_err(|e| self.record_query_error(e))?;
             Ok(value)
         } else if self.is_cluster {
-            let client = self.client().replicas().with_options(&options);
+            let client = self.client().await?.replicas().with_options(&options);
             client
                 .get(key)
                 .await
                 .inspect_err(|e| self.record_query_error(e))
         } else {
-            let client = self.client().with_options(&options);
+            let client = self.client().await?.with_options(&options);
             client
                 .get(key)
                 .await
@@ -683,9 +713,6 @@ impl RedisCacheStorage {
     ///
     /// The outer `Result` covers total failures (ie the standalone node is down), while the inner
     /// `Result`s cover partial cluster failures and values not being found.
-    ///
-    /// TODO: in the future gateway, we will probably have to make this `Result<Vec<Result<Option<Value>>>>`
-    ///  because `NotFound` shouldn't be considered an error.
     pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
@@ -702,7 +729,7 @@ impl RedisCacheStorage {
 
             // then we query all the key groups at the same time
             // use `client.replicas()` since we're in a cluster and can take advantage of read-replicas
-            let client = self.client().replicas().with_options(&options);
+            let client = self.client().await?.replicas().with_options(&options);
             let mut tasks = Vec::with_capacity(len);
             for (index, key) in keys.into_iter().enumerate() {
                 let client = client.clone();
@@ -726,6 +753,7 @@ impl RedisCacheStorage {
                 .collect::<Vec<_>>();
             let values: Vec<Option<RedisValue<V>>> = self
                 .client()
+                .await?
                 .with_options(&options)
                 .mget(keys)
                 .await
@@ -747,14 +775,21 @@ impl RedisCacheStorage {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
 
         // NOTE: we need a writer, so don't use replicas() here
-        let result: Result<(), _> = self
-            .client()
-            .set(key, value, self.expiration(ttl), None, false)
-            .await;
-        tracing::trace!("insert result {:?}", result);
+        match self.client().await {
+            Ok(client) => {
+                let result: Result<(), _> = client
+                    .set(key, value, self.expiration(ttl), None, false)
+                    .await;
 
-        if let Err(err) = result {
-            self.record_query_error(&err);
+                tracing::trace!("insert result {:?}", result);
+
+                if let Err(err) = result {
+                    self.record_query_error(&err);
+                }
+            }
+            Err(err) => {
+                self.record_query_error(&err);
+            }
         }
     }
 
@@ -768,7 +803,7 @@ impl RedisCacheStorage {
 
         // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
         // seems to split the pipeline by hash slot in the background.
-        let pipeline = self.pipeline();
+        let pipeline = self.pipeline().await;
         for (key, value) in data {
             let key = self.make_key(key.clone());
             let _: Result<(), _> = pipeline
@@ -815,7 +850,7 @@ impl RedisCacheStorage {
 
         // then we execute against all the key groups at the same time
         let results: Vec<Result<u32, RedisError>> = join_all(h.into_values().map(|keys| async {
-            let client = self.client().with_options(&options);
+            let client = self.client().await?.with_options(&options);
             client.del(keys).await
         }))
         .await;
@@ -830,18 +865,21 @@ impl RedisCacheStorage {
     }
 
     /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
-    pub(crate) fn scan_with_namespaced_results(
+    pub(crate) async fn scan_with_namespaced_results(
         &self,
         pattern: String,
         count: Option<u32>,
-    ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>>, RedisError>
+    {
         let pattern = self.make_key(RedisKey(pattern));
         if self.is_cluster {
             // NOTE: scans might be better send to only the read replicas, but the read-only client
             // doesn't have a scan_cluster(), just a paginated version called scan_page()
-            Box::pin(self.client().scan_cluster(pattern, count, None))
+            Ok(Box::pin(
+                self.client().await?.scan_cluster(pattern, count, None),
+            ))
         } else {
-            Box::pin(self.client().scan(pattern, count, None))
+            Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
         }
     }
 }
@@ -921,7 +959,7 @@ impl RedisCacheStorage {
 
         // find all members of this namespace via `SCAN`
         let pattern = self.make_key(RedisKey("*"));
-        let client = self.client();
+        let client = self.client().await?;
         let mut stream: Pin<Box<dyn Stream<Item = Result<Key, RedisError>>>> = if self.is_cluster {
             Box::pin(client.scan_cluster_buffered(pattern, None, None))
         } else {
