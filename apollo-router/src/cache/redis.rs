@@ -370,7 +370,7 @@ impl RedisCacheStorage {
             redis_client_config,
         };
 
-        Ok(storage.create_client().await?)
+        storage.create_client().await
     }
 
     /// Creates an inner client alongside some metadata (namespace, ttl, whether it's a clustered
@@ -613,7 +613,7 @@ impl RedisCacheStorage {
                 // next attempt, so this should be a temporary failure
                 let error = RedisError::new(
                     RedisErrorKind::Unknown,
-                    format!("client being recreated after connection interrupt, retry command"),
+                    "client being recreated after connection interrupt, retry command",
                 );
                 record_redis_error(&error, self.redis_client_config.caller, "client");
                 Err(error)
@@ -652,7 +652,7 @@ impl RedisCacheStorage {
                 // next attempt, so this should be a temporary failure
                 let error = RedisError::new(
                     RedisErrorKind::Unknown,
-                    format!("client being recreated after connection interrupt, retry command"),
+                    "client being recreated after connection interrupt, retry command",
                 );
                 record_redis_error(&error, self.redis_client_config.caller, "client");
                 Err(error)
