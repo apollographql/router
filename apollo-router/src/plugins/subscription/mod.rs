@@ -118,9 +118,11 @@ pub(crate) struct SubscriptionModeConfig {
 impl SubscriptionModeConfig {
     pub(crate) fn get_subgraph_config(&self, service_name: &str) -> Option<SubscriptionMode> {
         if let Some(custom_cfg) = &self.custom {
-             if custom_cfg.subgraphs.contains(&service_name.to_string()) || custom_cfg.subgraphs.is_empty() {
-                 return SubscriptionMode::Custom(custom_cfg.clone()).into();
-             }
+            if custom_cfg.subgraphs.contains(&service_name.to_string())
+                || custom_cfg.subgraphs.is_empty()
+            {
+                return SubscriptionMode::Custom(custom_cfg.clone()).into();
+            }
         }
 
         if let Some(passthrough_cfg) = &self.passthrough {
@@ -376,6 +378,7 @@ mod tests {
     #[test]
     fn test_custom_mode_config() {
         use std::collections::HashSet;
+
         use crate::plugins::subscription::provider::CustomMode;
 
         let config = SubscriptionModeConfig {

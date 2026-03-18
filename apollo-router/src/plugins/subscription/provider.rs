@@ -1,13 +1,17 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::RwLock;
+
 use once_cell::sync::Lazy;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 use tower::util::BoxService;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 
-use crate::plugins::subscription::notification::Notify;
 use crate::graphql;
+use crate::plugins::subscription::notification::Notify;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
@@ -21,7 +25,8 @@ pub trait SubscriptionProvider: Send + Sync {
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
 }
 
-static REGISTRY: Lazy<RwLock<HashMap<String, Arc<dyn SubscriptionProvider>>>> = Lazy::new(|| RwLock::new(HashMap::new()));
+static REGISTRY: Lazy<RwLock<HashMap<String, Arc<dyn SubscriptionProvider>>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 pub fn register_provider(name: impl Into<String>, provider: impl SubscriptionProvider + 'static) {
     let mut registry = REGISTRY.write().expect("Registry lock poisoned");
@@ -45,13 +50,14 @@ pub struct CustomMode {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::plugins::subscription::notification::Notify;
-    use crate::graphql;
-    use crate::services::SubgraphRequest;
-    use crate::services::SubgraphResponse;
     use tower::BoxError;
     use tower::util::BoxService;
+
+    use super::*;
+    use crate::graphql;
+    use crate::plugins::subscription::notification::Notify;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
 
     struct MockProvider;
 
@@ -72,9 +78,8 @@ mod tests {
         register_provider("mock", MockProvider);
         let provider = get_provider("mock");
         assert!(provider.is_some());
-        
+
         let provider_missing = get_provider("missing");
         assert!(provider_missing.is_none());
     }
 }
-
