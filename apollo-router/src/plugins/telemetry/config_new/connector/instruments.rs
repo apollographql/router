@@ -217,10 +217,8 @@ impl ConnectorInstruments {
                                 )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(ConnectorSelector::ConnectorResponseHeader {
-                                connector_http_response_header: "content-length".to_string(),
-                                redact: None,
-                                default: None,
+                            selector: Some(Arc::new(ConnectorSelector::ConnectorResponseBodySize {
+                                connector_http_response_body_size: true,
                             })),
                             selectors,
                             updated: false,
@@ -253,7 +251,7 @@ impl ConnectorInstruments {
                         .f64_histogram(HTTP_CLIENT_REQUEST_DURATION_METRIC)
                         .with_unit("s")
                         .with_description("Duration of HTTP client requests.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -266,7 +264,7 @@ impl ConnectorInstruments {
                         .f64_histogram(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP client request bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -283,7 +281,7 @@ impl ConnectorInstruments {
                         .f64_histogram(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP client response bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }

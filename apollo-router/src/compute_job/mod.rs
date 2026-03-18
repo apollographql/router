@@ -410,7 +410,7 @@ pub(crate) fn create_queue_size_gauge() -> ObservableGauge<u64> {
             "Number of computation jobs (parsing, planning, …) waiting to be scheduled",
         )
         .with_callback(move |m| m.observe(queue().queued_count() as u64, &[]))
-        .init()
+        .build()
 }
 
 #[cfg(test)]
