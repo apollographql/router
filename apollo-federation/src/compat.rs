@@ -162,14 +162,20 @@ fn coerce_value(
                         coerce_value(types, value, &field_definition.ty)?;
                     }
                     None => {
-                        if let Some(default_value) = &field_definition.default_value {
-                            let mut value = default_value.clone();
-                            // If the default value is an input object we may need to fill in
-                            // its defaulted fields recursively.
-                            coerce_value(types, &mut value, &field_definition.ty)?;
-                            object.push((field_name.clone(), value));
-                        } else if field_definition.is_required() {
-                            return Err(());
+                        // Only fill in missing fields when the field is required (so that the
+                        // default value remains valid). Optional fields with defaults are not
+                        // filled in, preserving the minimal form (e.g. `input: Foo = {}` stays
+                        // as `{}` when Foo has optional fields with defaults).
+                        if field_definition.is_required() {
+                            if let Some(default_value) = &field_definition.default_value {
+                                let mut value = default_value.clone();
+                                // If the default value is an input object we may need to fill in
+                                // its required fields recursively.
+                                coerce_value(types, &mut value, &field_definition.ty)?;
+                                object.push((field_name.clone(), value));
+                            } else {
+                                return Err(());
+                            }
                         }
                     }
                 }
@@ -538,11 +544,15 @@ pub(crate) fn make_print_schema_compatible(schema: &mut Schema) {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::name;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::ast::Value;
+    use apollo_compiler::schema::ExtendedType;
     use apollo_compiler::validation::Valid;
 
     use super::coerce_executable_values;
+    use super::coerce_schema_default_values;
 
     fn parse_and_coerce(schema: &Valid<Schema>, input: &str) -> String {
         let mut document = ExecutableDocument::parse(schema, input, "test.graphql").unwrap();
@@ -644,5 +654,51 @@ mod tests {
           get(bools: [true])
         }
         "###);
+    }
+
+    /// Empty input object default `{}` is preserved when the input type only has
+    /// optional fields with defaults (not expanded to `{ intent: NOT_SPECIFIED }`).
+    #[test]
+    fn preserves_empty_input_object_argument_default() {
+        let sdl = r#"
+            type Query {
+                profile(input: ProfileInput = {}): String
+            }
+
+            input ProfileInput {
+                intent: Intent = NOT_SPECIFIED
+            }
+
+            enum Intent {
+                NOT_SPECIFIED
+            }
+        "#;
+
+        let mut schema = Schema::parse(sdl, "schema.graphql").unwrap();
+        coerce_schema_default_values(&mut schema);
+
+        let query = schema.types.get(&name!("Query")).expect("Query type");
+        let ExtendedType::Object(obj) = query else {
+            panic!("Query should be an object type");
+        };
+        let field = obj.fields.get(&name!("profile")).expect("profile field");
+        let arg = field
+            .arguments
+            .iter()
+            .find(|a| a.name == name!("input"))
+            .expect("input argument");
+
+        let default = arg.default_value.as_ref().expect("argument should have default");
+        match default.as_ref() {
+            Value::Object(fields) => {
+                assert!(
+                    fields.is_empty(),
+                    "expected empty object default, got {} field(s): {:?}",
+                    fields.len(),
+                    fields
+                );
+            }
+            other => panic!("expected object default, got {:?}", other),
+        }
     }
 }
