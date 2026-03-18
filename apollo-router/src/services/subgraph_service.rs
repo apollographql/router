@@ -1896,7 +1896,9 @@ mod tests {
                 }),
                 custom: Some(crate::plugins::subscription::provider::CustomMode {
                     provider_name: "test_provider".to_string(),
-                    subgraphs: vec!["test_custom".to_string(), "test_custom_missing".to_string()].into_iter().collect(),
+                    subgraphs: vec!["test_custom".to_string(), "test_custom_missing".to_string()]
+                        .into_iter()
+                        .collect(),
                     config: serde_json::json!({"test_key": "test_value"}),
                 }),
             },
@@ -2900,7 +2902,8 @@ mod tests {
                         .context(req.context)
                         .extensions(crate::json_ext::Object::default())
                         .build())
-                }) as futures::future::BoxFuture<'static, Result<SubgraphResponse, BoxError>>
+                })
+                    as futures::future::BoxFuture<'static, Result<SubgraphResponse, BoxError>>
             }))
         }
     }
@@ -2949,7 +2952,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_custom_mode_missing_provider() {
         let mut config = subscription_config();
-        if let Some(crate::plugins::subscription::provider::CustomMode { ref mut provider_name, .. }) = config.mode.custom {
+        if let Some(crate::plugins::subscription::provider::CustomMode {
+            ref mut provider_name,
+            ..
+        }) = config.mode.custom
+        {
             *provider_name = "test_provider_missing".to_string();
         }
 
@@ -2968,7 +2975,7 @@ mod tests {
                     crate::configuration::shared::Client::default(),
                 ),
             )
-            .expect("can create a SubgraphService")
+            .expect("can create a SubgraphService"),
         );
         let (tx, _rx) = mpsc::channel(2);
 
@@ -2992,6 +2999,9 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(err.to_string().contains("Custom subscription provider 'test_provider_missing' not found"));
+        assert!(
+            err.to_string()
+                .contains("Custom subscription provider 'test_provider_missing' not found")
+        );
     }
 }
