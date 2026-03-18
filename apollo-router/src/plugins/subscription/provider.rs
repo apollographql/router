@@ -43,3 +43,38 @@ pub struct CustomMode {
     pub config: serde_json::Value,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::subscription::notification::Notify;
+    use crate::graphql;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
+    use tower::BoxError;
+    use tower::util::BoxService;
+
+    struct MockProvider;
+
+    impl SubscriptionProvider for MockProvider {
+        fn create_service(
+            &self,
+            inner: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+            _notify: Notify<String, graphql::Response>,
+            _service_name: String,
+            _config: serde_json::Value,
+        ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+            inner
+        }
+    }
+
+    #[test]
+    fn test_register_and_get_provider() {
+        register_provider("mock", MockProvider);
+        let provider = get_provider("mock");
+        assert!(provider.is_some());
+        
+        let provider_missing = get_provider("missing");
+        assert!(provider_missing.is_none());
+    }
+}
+
