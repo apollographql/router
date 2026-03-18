@@ -472,7 +472,7 @@ impl RedisCacheStorage {
             pool: pooled_client_arc,
             caller: self.redis_client_config.caller,
             heartbeat_abort_handle: heartbeat_handle.abort_handle(),
-            _metrics_collector: metrics_collector,
+            metrics_collector,
         }))
     }
 
@@ -1194,6 +1194,215 @@ mod test {
             });
 
             serde_json::from_value(config_json).expect("invalid redis cache configuration")
+        }
+
+        async fn create_and_connect(clustered: bool) -> Result<RedisCacheStorage, BoxError> {
+            Ok(RedisCacheStorage::new(redis_config(clustered), "test")
+                .await?
+                .create_client()
+                .await?)
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn new_starts_empty_and_create_client_populates(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            assert!(storage.inner.read().is_none());
+
+            let storage = storage.create_client().await?;
+            assert!(storage.inner.read().is_some());
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn accessor_recreates_when_inner_is_none(
+            #[values(true, false)] clustered: bool,
+            #[values("client", "pipeline")] method: &str,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            storage.inner.write().take();
+            assert!(storage.inner.read().is_none());
+
+            let first_call_failed = match method {
+                "client" => storage.client().await.is_err(),
+                "pipeline" => storage.pipeline().await.is_err(),
+                _ => unreachable!(),
+            };
+            assert!(first_call_failed, "expected error during recreation");
+            assert!(storage.inner.read().is_some());
+
+            let second_call_ok = match method {
+                "client" => storage.client().await.is_ok(),
+                "pipeline" => storage.pipeline().await.is_ok(),
+                _ => unreachable!(),
+            };
+            assert!(second_call_ok, "expected success after recreation");
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn client_works_after_recreation(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            let key = RedisKey("recreation_test_key".to_string());
+            storage
+                .insert(key.clone(), RedisValue("before".to_string()), None)
+                .await;
+
+            storage.inner.write().take();
+            let _ = storage.client().await;
+
+            storage
+                .insert(key.clone(), RedisValue("after".to_string()), None)
+                .await;
+            let fetched: RedisValue<String> = storage.get(key).await?;
+            assert_eq!(fetched.0, "after");
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn recreation_stops_old_tasks_and_starts_new_ones(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            // activate metrics so the abort handle is populated
+            storage.activate();
+
+            let (old_heartbeat, old_metrics) = {
+                let guard = storage.inner.read();
+                let inner = guard.as_ref().unwrap();
+                (
+                    inner.heartbeat_abort_handle.clone(),
+                    inner.metrics_collector.abort_handle().expect("metrics not activated"),
+                )
+            };
+            assert!(!old_heartbeat.is_finished());
+            assert!(!old_metrics.is_finished());
+
+            storage.inner.write().take();
+            let _ = storage.client().await;
+
+            assert!(old_heartbeat.is_finished());
+            // old metrics task stops when the old DropSafeRedisPool is dropped
+            assert!(old_metrics.is_finished());
+
+            // activate the new inner's metrics
+            storage.activate();
+
+            let guard = storage.inner.read();
+            let new_inner = guard.as_ref().unwrap();
+            assert!(!new_inner.heartbeat_abort_handle.is_finished());
+            let new_metrics = new_inner.metrics_collector.abort_handle().expect("metrics not activated");
+            assert!(!new_metrics.is_finished());
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn clones_share_recreated_client(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+            let clone = storage.clone();
+
+            storage.inner.write().take();
+            assert!(clone.inner.read().is_none(), "clone should also see None");
+
+            let _ = storage.client().await;
+            assert!(
+                clone.inner.read().is_some(),
+                "clone should see the recreated client"
+            );
+            assert!(clone.client().await.is_ok());
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn create_client_replaces_existing_inner(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            let old_heartbeat = storage
+                .inner
+                .read()
+                .as_ref()
+                .unwrap()
+                .heartbeat_abort_handle
+                .clone();
+            assert!(!old_heartbeat.is_finished());
+
+            let storage = storage.create_client().await?;
+            tokio::task::yield_now().await;
+
+            assert!(old_heartbeat.is_finished());
+            assert!(storage.inner.read().is_some());
+            assert!(storage.client().await.is_ok());
+            Ok(())
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        #[rstest::rstest]
+        async fn concurrent_recreation_does_not_panic_or_deadlock(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+            storage.inner.write().take();
+
+            let handles: Vec<_> = (0..10)
+                .map(|_| {
+                    let s = storage.clone();
+                    tokio::spawn(async move { s.client().await })
+                })
+                .collect();
+
+            for result in futures::future::join_all(handles).await {
+                assert!(result.is_ok(), "task panicked");
+            }
+            assert!(storage.inner.read().is_some());
+            assert!(storage.client().await.is_ok());
+            Ok(())
+        }
+
+        /// scan_with_namespaced_results should work after client recreation
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn scan_works_after_recreation(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            use fred::types::scan::Scanner;
+            use futures::StreamExt;
+
+            let storage = create_and_connect(clustered).await?;
+            let key = RedisKey("scan_test_key".to_string());
+            storage
+                .insert(key, RedisValue("value".to_string()), None)
+                .await;
+
+            storage.inner.write().take();
+            let _ = storage.client().await;
+
+            let mut stream = storage
+                .scan_with_namespaced_results("*".to_string(), Some(100))
+                .await?;
+            let mut found_keys = Vec::new();
+            while let Some(result) = stream.next().await {
+                if let Some(keys) = result?.take_results() {
+                    found_keys.extend(keys);
+                }
+            }
+            assert!(!found_keys.is_empty(), "scan should find at least one key");
+            Ok(())
         }
 
         /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
