@@ -388,12 +388,12 @@ async fn call_websocket(
                     if result.is_ok() {
                         increment_subgraph_ended_counter(&service_name_for_task);
                     }
-                    // We only record metrics for subgraphs endding subscriptions, 
+                    // We only record metrics for subgraphs ending subscriptions,
                     // not for clients disconnecting, so no metrics are incremented here.
                 },
                 // This branch handles subscription termination signals. Unlike callback mode,
                 // passthrough mode maintains persistent connections that require explicit cleanup.
-                // Similar to above, we don't increment any metrics here because the 
+                // Similar to above, we don't increment any metrics here because the
                 // subscription was ended by all clients disconnecting.
                 _ = subscription_closing_signal.recv() => {
                     tracing::debug!("subscription_closing_signal triggered");
