@@ -1894,6 +1894,7 @@ mod tests {
                     )]
                     .into(),
                 }),
+                custom: None,
             },
             deduplication: DeduplicationConfig::default(),
             max_opened_subscriptions: None,
