@@ -1197,10 +1197,10 @@ mod test {
         }
 
         async fn create_and_connect(clustered: bool) -> Result<RedisCacheStorage, BoxError> {
-            Ok(RedisCacheStorage::new(redis_config(clustered), "test")
+            RedisCacheStorage::new(redis_config(clustered), "test")
                 .await?
                 .create_client()
-                .await?)
+                .await
         }
 
         #[tokio::test]
