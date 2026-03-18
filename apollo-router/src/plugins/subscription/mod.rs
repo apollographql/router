@@ -373,6 +373,41 @@ mod tests {
     use crate::services::router::body;
     use crate::uplink::license_enforcement::LicenseState;
 
+    #[test]
+    fn test_custom_mode_config() {
+        use std::collections::HashSet;
+        use crate::plugins::subscription::provider::CustomMode;
+
+        let config = SubscriptionModeConfig {
+            callback: None,
+            passthrough: None,
+            custom: Some(CustomMode {
+                provider_name: "test_provider".to_string(),
+                subgraphs: vec!["custom_subgraph".to_string()].into_iter().collect(),
+                config: serde_json::Value::Null,
+            }),
+        };
+
+        let mode = config.get_subgraph_config("custom_subgraph");
+        assert!(matches!(mode, Some(SubscriptionMode::Custom(_))));
+
+        let mode2 = config.get_subgraph_config("other_subgraph");
+        assert!(matches!(mode2, None));
+
+        let config_all = SubscriptionModeConfig {
+            callback: None,
+            passthrough: None,
+            custom: Some(CustomMode {
+                provider_name: "test_provider".to_string(),
+                subgraphs: HashSet::new(),
+                config: serde_json::Value::Null,
+            }),
+        };
+
+        let mode3 = config_all.get_subgraph_config("any_subgraph");
+        assert!(matches!(mode3, Some(SubscriptionMode::Custom(_))));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_callback_endpoint() {
         let mut notify = Notify::builder().build();
