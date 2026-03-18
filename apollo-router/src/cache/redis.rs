@@ -606,7 +606,13 @@ impl RedisCacheStorage {
                     }
                 };
 
-                *self.inner.write() = new_inner;
+                {
+                    let mut guard = self.inner.write();
+                    *guard = new_inner;
+                    if let Some(inner) = guard.as_ref() {
+                        inner.activate();
+                    }
+                }
 
                 // rather than get into either recursion or a loop, we just return an error and let
                 // the current attempt to reach redis fail. We have a new client waiting for the
@@ -645,7 +651,13 @@ impl RedisCacheStorage {
                     }
                 };
 
-                *self.inner.write() = new_inner;
+                {
+                    let mut guard = self.inner.write();
+                    *guard = new_inner;
+                    if let Some(inner) = guard.as_ref() {
+                        inner.activate();
+                    }
+                }
 
                 // rather than get into either recursion or a loop, we just return an error and let
                 // the current attempt to reach redis fail. We have a new client waiting for the
@@ -1292,12 +1304,9 @@ mod test {
             let _ = storage.client().await;
 
             assert!(old_heartbeat.is_finished());
-            // old metrics task stops when the old DropSafeRedisPool is dropped
             assert!(old_metrics.is_finished());
 
-            // activate the new inner's metrics
-            storage.activate();
-
+            // client() should have activated the new inner's metrics automatically
             let guard = storage.inner.read();
             let new_inner = guard.as_ref().unwrap();
             assert!(!new_inner.heartbeat_abort_handle.is_finished());
