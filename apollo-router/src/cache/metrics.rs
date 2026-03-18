@@ -183,7 +183,11 @@ impl RedisMetricsCollector {
             .with_current_meter_provider(),
         );
 
-        *self.abort_handle.lock() = Some(handle.abort_handle());
+        let mut guard = self.abort_handle.lock();
+        if let Some(old) = guard.take() {
+            old.abort();
+        }
+        *guard = Some(handle.abort_handle());
     }
 
     /// Collect metrics from all Redis clients
