@@ -1294,7 +1294,10 @@ mod test {
                 let inner = guard.as_ref().unwrap();
                 (
                     inner.heartbeat_abort_handle.clone(),
-                    inner.metrics_collector.abort_handle().expect("metrics not activated"),
+                    inner
+                        .metrics_collector
+                        .abort_handle()
+                        .expect("metrics not activated"),
                 )
             };
             assert!(!old_heartbeat.is_finished());
@@ -1302,8 +1305,12 @@ mod test {
 
             storage.inner.write().take();
             match method {
-                "client" => { let _ = storage.client().await; }
-                "pipeline" => { let _ = storage.pipeline().await; }
+                "client" => {
+                    let _ = storage.client().await;
+                }
+                "pipeline" => {
+                    let _ = storage.pipeline().await;
+                }
                 _ => unreachable!(),
             }
 
@@ -1313,7 +1320,10 @@ mod test {
             let guard = storage.inner.read();
             let new_inner = guard.as_ref().unwrap();
             assert!(!new_inner.heartbeat_abort_handle.is_finished());
-            let new_metrics = new_inner.metrics_collector.abort_handle().expect("metrics not activated after recreation");
+            let new_metrics = new_inner
+                .metrics_collector
+                .abort_handle()
+                .expect("metrics not activated after recreation");
             assert!(!new_metrics.is_finished());
             Ok(())
         }
@@ -1339,13 +1349,26 @@ mod test {
             let storage = create_and_connect(clustered).await?;
 
             // before activate, metrics abort handle should be None
-            assert!(storage.inner.read().as_ref().unwrap()
-                .metrics_collector.abort_handle().is_none());
+            assert!(
+                storage
+                    .inner
+                    .read()
+                    .as_ref()
+                    .unwrap()
+                    .metrics_collector
+                    .abort_handle()
+                    .is_none()
+            );
 
             storage.activate();
 
-            let handle = storage.inner.read().as_ref().unwrap()
-                .metrics_collector.abort_handle()
+            let handle = storage
+                .inner
+                .read()
+                .as_ref()
+                .unwrap()
+                .metrics_collector
+                .abort_handle()
                 .expect("metrics should be activated");
             assert!(!handle.is_finished());
             Ok(())
@@ -1361,18 +1384,31 @@ mod test {
             let storage = create_and_connect(clustered).await?;
             storage.activate();
 
-            let first_handle = storage.inner.read().as_ref().unwrap()
-                .metrics_collector.abort_handle()
+            let first_handle = storage
+                .inner
+                .read()
+                .as_ref()
+                .unwrap()
+                .metrics_collector
+                .abort_handle()
                 .expect("first activate should populate handle");
             assert!(!first_handle.is_finished());
 
             storage.activate();
             tokio::task::yield_now().await;
 
-            assert!(first_handle.is_finished(), "first metrics task should be aborted");
+            assert!(
+                first_handle.is_finished(),
+                "first metrics task should be aborted"
+            );
 
-            let second_handle = storage.inner.read().as_ref().unwrap()
-                .metrics_collector.abort_handle()
+            let second_handle = storage
+                .inner
+                .read()
+                .as_ref()
+                .unwrap()
+                .metrics_collector
+                .abort_handle()
                 .expect("second activate should populate handle");
             assert!(!second_handle.is_finished());
             Ok(())
@@ -1391,13 +1427,21 @@ mod test {
             let _ = storage.client().await;
 
             let data = vec![
-                (RedisKey("pipe_key_1".to_string()), RedisValue("val_1".to_string())),
-                (RedisKey("pipe_key_2".to_string()), RedisValue("val_2".to_string())),
+                (
+                    RedisKey("pipe_key_1".to_string()),
+                    RedisValue("val_1".to_string()),
+                ),
+                (
+                    RedisKey("pipe_key_2".to_string()),
+                    RedisValue("val_2".to_string()),
+                ),
             ];
             storage.insert_multiple(&data, None).await?;
 
-            let fetched1: RedisValue<String> = storage.get(RedisKey("pipe_key_1".to_string())).await?;
-            let fetched2: RedisValue<String> = storage.get(RedisKey("pipe_key_2".to_string())).await?;
+            let fetched1: RedisValue<String> =
+                storage.get(RedisKey("pipe_key_1".to_string())).await?;
+            let fetched2: RedisValue<String> =
+                storage.get(RedisKey("pipe_key_2".to_string())).await?;
             assert_eq!(fetched1.0, "val_1");
             assert_eq!(fetched2.0, "val_2");
             Ok(())
