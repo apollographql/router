@@ -724,6 +724,8 @@ fn upgrade_old_minor_configuration() {
     }
 }
 
+// NOTE: if this test fails, you might need to annotate your configuration field(s) with the
+// schemars macro
 #[test]
 fn all_properties_are_documented() {
     // Not using `generate_config_schema` here because of custom configuration.

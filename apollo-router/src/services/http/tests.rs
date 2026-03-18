@@ -568,45 +568,47 @@ mod tls {
 
 mod h2c_cleartext {
     use super::*;
+    use crate::configuration::shared::Client;
 
     // Starts a local server that responds with a default GraphQL response over plain HTTP.
     async fn emulate_h2c_server(listener: TcpListener) {
-        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            Ok(http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .status(StatusCode::OK)
-                .body(
-                    serde_json::to_string(&Response {
+        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            let response_builder =
+                http::Response::builder().header(CONTENT_TYPE, APPLICATION_JSON.essence_str());
+
+            let response = match request.version() {
+                Version::HTTP_2 => {
+                    let response_body = serde_json::to_string(&Response {
                         data: Some(Value::default()),
                         ..Response::default()
-                    })
-                    .expect("always valid")
-                    .into(),
-                )
-                .unwrap())
+                    });
+                    response_builder
+                        .status(StatusCode::OK)
+                        .body(response_body.unwrap().into())
+                }
+                Version::HTTP_11 => response_builder
+                    .status(StatusCode::HTTP_VERSION_NOT_SUPPORTED)
+                    .body(Body::empty()),
+                version => panic!("unexpected version {version:?}"),
+            };
+
+            Ok(response.unwrap())
         }
 
-        // XXX(@goto-bus-stop): ideally this server would *only* support HTTP 2 and not HTTP 1
         serve(listener, handle).await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_subgraph_h2c() {
+    async fn test_subgraph_h2c_works_with_http2only() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_h2c_server(listener));
 
-        let subgraph_service = HttpClientService::new(
-            "test",
-            rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("read native TLS root certificates")
-                .with_no_client_auth(),
-            crate::configuration::shared::Client::builder()
-                .experimental_http2(Http2Config::Http2Only)
-                .build(),
-        )
-        .expect("can create a HttpService");
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .build();
+        let subgraph_service =
+            HttpClientService::from_client_config(client_config).expect("can create a HttpService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = send_request(
@@ -615,7 +617,37 @@ mod h2c_cleartext {
             r#"{"query":"{ me { name username } }"#,
         )
         .await;
+
         assert_response_body(response, r#"{"data":null}"#).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_h2c_not_used_with_enable() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_h2c_server(listener));
+
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Enable)
+            .build();
+        let subgraph_service =
+            HttpClientService::from_client_config(client_config).expect("can create a HttpService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = send_request(
+            subgraph_service,
+            url,
+            r#"{"query":"{ me { name username } }"#,
+        )
+        .await;
+
+        // h2c only works with `Http2Config::Http2Only` - hyper only supports HTTP/2 with TLS or
+        // with 'prior knowledge'
+        // https://github.com/hyperium/hyper/issues/2411
+        assert_eq!(
+            response.http_response.status(),
+            StatusCode::HTTP_VERSION_NOT_SUPPORTED
+        );
     }
 }
 
@@ -666,7 +698,7 @@ mod compressed_req_res {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_compressed_response(listener));
 
-        let subgraph_service = HttpClientService::new(
+        let subgraph_service = HttpClientService::test_new(
             "test",
             rustls::ClientConfig::builder()
                 .with_native_roots()
@@ -980,5 +1012,111 @@ mod http_version_negotiation {
 
         expected.check(&version_tracker);
         assert_response_body(response, r#"{"data": "success"}"#).await;
+    }
+}
+
+mod pool_idle_timeout {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use super::*;
+
+    /// Server that counts how many TCP connections are accepted
+    async fn serve_counting(
+        listener: TcpListener,
+        connection_count: Arc<AtomicUsize>,
+    ) -> std::io::Result<()> {
+        loop {
+            let (stream, _) = listener.accept().await?;
+            connection_count.fetch_add(1, Ordering::SeqCst);
+            let io = TokioIo::new(stream);
+            tokio::spawn(async move {
+                let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
+                    Ok::<_, Infallible>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .body::<Body>(r#"{"data":null}"#.into())
+                            .unwrap(),
+                    )
+                });
+                let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                    .serve_connection_with_upgrades(io, svc)
+                    .await;
+            });
+        }
+    }
+
+    fn make_client_config(timeout: Option<Duration>) -> crate::configuration::shared::Client {
+        match timeout {
+            Some(d) => crate::configuration::shared::Client::builder()
+                .pool_idle_timeout(d)
+                .build(),
+            None => crate::configuration::shared::Client {
+                pool_idle_timeout: None,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[rstest]
+    #[case::short_timeout_evicts(
+        Some(Duration::from_millis(50)),
+        Duration::from_millis(200),
+        2, // expect a new connection after the idle timeout
+    )]
+    #[case::long_timeout_reuses(
+        Some(Duration::from_secs(60)),
+        Duration::from_millis(200),
+        1, // expect the pooled connection to be reused
+    )]
+    #[case::none_disables_eviction(
+        None,
+        Duration::from_millis(200),
+        1, // None means no idle timeout → connection stays pooled
+    )]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_pool_idle_timeout_evicts_connections(
+        #[case] timeout: Option<Duration>,
+        #[case] sleep_between: Duration,
+        #[case] expected_connections: usize,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let connection_count = Arc::new(AtomicUsize::new(0));
+
+        tokio::task::spawn(serve_counting(listener, connection_count.clone()));
+
+        let mut service = HttpClientService::test_new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            make_client_config(timeout),
+        )
+        .expect("can create HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+
+        let response = send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            connection_count.load(Ordering::SeqCst),
+            1,
+            "first request opens one connection"
+        );
+
+        tokio::time::sleep(sleep_between).await;
+
+        tower::ServiceExt::ready(&mut service).await.unwrap();
+        let response = send_request(service, url, r#"{"query":"{ b }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            connection_count.load(Ordering::SeqCst),
+            expected_connections,
+            "expected {expected_connections} total TCP connections for timeout {timeout:?} with {sleep_between:?} sleep"
+        );
     }
 }
