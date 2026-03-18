@@ -206,6 +206,8 @@ impl SubscriptionEndReason {
 pub(crate) enum DeferEndReason {
     /// All deferred chunks were delivered successfully
     Completed,
+    /// A subgraph returned an error during a deferred query
+    SubgraphError,
     /// Client disconnected before all deferred data was delivered
     ClientDisconnect,
 }
@@ -214,6 +216,7 @@ impl DeferEndReason {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::Completed => "completed",
+            Self::SubgraphError => "subgraph_error",
             Self::ClientDisconnect => "client_disconnect",
         }
     }
@@ -314,11 +317,10 @@ impl Stream for Multipart {
                         Vec::from(&b"\r\ncontent-type: application/json\r\n\r\n"[..])
                     };
 
-                    // Track whether this is an unexpected subgraph error (e.g. WebSocket
-                    // WEBSOCKET_MESSAGE_ERROR or WEBSOCKET_CLOSE_ERROR from a killed process
-                    // or network drop). This is set inside the Subscription branch below,
-                    // before errors are consumed.
-                    let mut has_subgraph_errors = false;
+                    // Track whether the response contains subgraph errors. For subscriptions
+                    // this means unexpected WebSocket errors (WEBSOCKET_MESSAGE_ERROR, etc.);
+                    // for defer this means any errors in the response or if there is no data.
+                    let has_subgraph_errors;
 
                     match self.mode {
                         ProtocolMode::Subscription => {
@@ -366,6 +368,7 @@ impl Stream for Multipart {
                             serde_json::to_writer(&mut buf, &response)?;
                         }
                         ProtocolMode::Defer => {
+                            has_subgraph_errors = !response.errors.is_empty() || response.data.is_none();
                             serde_json::to_writer(&mut buf, &response)?;
                         }
                     }
@@ -382,7 +385,11 @@ impl Stream for Multipart {
                                     SubscriptionEndReason::ServerClose
                                 }),
                             ),
-                            ProtocolMode::Defer => EndReason::Defer(DeferEndReason::Completed),
+                            ProtocolMode::Defer => EndReason::Defer(if has_subgraph_errors {
+                                DeferEndReason::SubgraphError
+                            } else {
+                                DeferEndReason::Completed
+                            }),
                         });
                         buf.extend_from_slice(b"\r\n--graphql--\r\n");
                     }
@@ -968,6 +975,153 @@ mod tests {
             Some(KeyValue::new(
                 DEFER_END_REASON_KEY,
                 DeferEndReason::ClientDisconnect.as_value()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_defer_end_reason_subgraph_error() {
+        // Test: A deferred chunk contains errors from a subgraph (e.g. 500 or connection refused)
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!("test_span");
+        let _span_guard = span.enter();
+        let responses = vec![
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("initial")))
+                .has_next(true)
+                .build(),
+            graphql::Response::builder()
+                .error(
+                    graphql::Error::builder()
+                        .message("HTTP fetch failed from 'reviews': 500 Internal Server Error")
+                        .extension_code("SUBREQUEST_HTTP_ERROR")
+                        .build(),
+                )
+                .has_next(false)
+                .build(),
+        ];
+        let gql_responses = stream::iter(responses);
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
+
+        while protocol.next().await.is_some() {}
+
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
+        let end_reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            end_reason,
+            Some(KeyValue::new(
+                DEFER_END_REASON_KEY,
+                DeferEndReason::SubgraphError.as_value()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_defer_end_reason_subgraph_error_single_chunk() {
+        // Test: Single-chunk deferred response with errors (subgraph unreachable)
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!("test_span");
+        let _span_guard = span.enter();
+        let responses = vec![graphql::Response::builder()
+            .error(
+                graphql::Error::builder()
+                    .message("HTTP fetch failed from 'products': connection refused")
+                    .extension_code("SUBREQUEST_HTTP_ERROR")
+                    .build(),
+            )
+            .has_next(false)
+            .build()];
+        let gql_responses = stream::iter(responses);
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
+
+        while protocol.next().await.is_some() {}
+
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
+        let end_reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            end_reason,
+            Some(KeyValue::new(
+                DEFER_END_REASON_KEY,
+                DeferEndReason::SubgraphError.as_value()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_defer_end_reason_subgraph_error_no_data() {
+        // Test: Terminating chunk has no data and no errors — e.g. the connection
+        // was dropped before the subgraph could produce a complete response.
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!("test_span");
+        let _span_guard = span.enter();
+        let responses = vec![
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("initial")))
+                .has_next(true)
+                .build(),
+            // Final chunk with no data and no errors — abnormal termination
+            graphql::Response::builder().has_next(false).build(),
+        ];
+        let gql_responses = stream::iter(responses);
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
+
+        while protocol.next().await.is_some() {}
+
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
+        let end_reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            end_reason,
+            Some(KeyValue::new(
+                DEFER_END_REASON_KEY,
+                DeferEndReason::SubgraphError.as_value()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_defer_end_reason_subgraph_error_partial_data_with_errors() {
+        // Test: Final chunk has data but also errors — partial success from
+        // a subgraph that returned some data alongside an error (e.g. one field
+        // resolved but another hit a 500).
+        let (_guard, layer) = setup_tracing();
+        let span = tracing::info_span!("test_span");
+        let _span_guard = span.enter();
+        let responses = vec![graphql::Response::builder()
+            .data(serde_json_bytes::Value::String(ByteString::from(
+                "partial",
+            )))
+            .error(
+                graphql::Error::builder()
+                    .message("HTTP fetch failed from 'inventory': 500 Internal Server Error")
+                    .extension_code("SUBREQUEST_HTTP_ERROR")
+                    .build(),
+            )
+            .has_next(false)
+            .build()];
+        let gql_responses = stream::iter(responses);
+        let mut protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
+
+        while protocol.next().await.is_some() {}
+
+        drop(protocol);
+        drop(_span_guard);
+        drop(span);
+
+        let end_reason = layer.captured_reason.lock().unwrap().clone();
+        assert_eq!(
+            end_reason,
+            Some(KeyValue::new(
+                DEFER_END_REASON_KEY,
+                DeferEndReason::SubgraphError.as_value()
             ))
         );
     }
