@@ -1,6 +1,7 @@
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use regex::Regex;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 
@@ -16,8 +17,35 @@ use crate::services::router;
 use crate::services::router::body;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::test_harness::tracing_test;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
+
+fn assert_span_contains_authorization_error_event(span: &str) {
+    let pattern = format!(
+        r"^[0-9TZ\-:.]+ ERROR router\{{[^}}]+}}:{span}.*Authorization error unauthorized_query_paths=\[.*]$"
+    );
+    let span_regex = Regex::new(&pattern).unwrap();
+
+    let contains_err_event_in_span = tracing_test::logs_assert(|lines| {
+        for line in lines {
+            if span_regex.captures(line).is_some() {
+                return Ok(());
+            }
+        }
+
+        Err(lines.join("\n"))
+    });
+    assert!(contains_err_event_in_span.is_ok());
+}
+
+fn assert_logs_contain_entire_request_authorization_error() {
+    assert_span_contains_authorization_error_event("query_planning");
+}
+
+fn assert_logs_contain_partial_authorization_error() {
+    assert_span_contains_authorization_error_event("format_response");
+}
 
 #[tokio::test]
 async fn authenticated_request() {
@@ -335,6 +363,8 @@ async fn authenticated_directive() {
 
 #[tokio::test]
 async fn authenticated_directive_reject_unauthorized() {
+    let _guard = tracing_test::dispatcher_guard();
+
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -416,10 +446,12 @@ async fn authenticated_directive_reject_unauthorized() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    assert_logs_contain_entire_request_authorization_error();
 }
 
 #[tokio::test]
 async fn authenticated_directive_dry_run() {
+    let _guard = tracing_test::dispatcher_guard();
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -501,6 +533,7 @@ async fn authenticated_directive_dry_run() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    assert_logs_contain_partial_authorization_error();
 }
 
 const SCOPES_SCHEMA: &str = r#"schema
@@ -738,6 +771,8 @@ async fn scopes_directive() {
 
 #[tokio::test]
 async fn scopes_directive_reject_unauthorized() {
+    let _guard = tracing_test::dispatcher_guard();
+
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -814,10 +849,12 @@ async fn scopes_directive_reject_unauthorized() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    assert_logs_contain_entire_request_authorization_error();
 }
 
 #[tokio::test]
 async fn scopes_directive_dry_run() {
+    let _guard = tracing_test::dispatcher_guard();
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -894,10 +931,12 @@ async fn scopes_directive_dry_run() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    assert_logs_contain_partial_authorization_error();
 }
 
 #[tokio::test]
 async fn errors_in_extensions() {
+    let _guard = tracing_test::dispatcher_guard();
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -976,6 +1015,7 @@ async fn errors_in_extensions() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    assert_logs_contain_partial_authorization_error();
 }
 
 const CACHE_KEY_SCHEMA: &str = r#"schema

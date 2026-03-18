@@ -528,22 +528,18 @@ impl QueryPlannerService {
         let filter_res = if self.enable_authorization_directives {
             match AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)
             {
-                Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
-                    let response = graphql::Response::builder()
-                        .data(Object::new())
-                        .errors(
-                            unauthorized_paths
-                                .into_iter()
-                                .map(|path| {
-                                    graphql::Error::builder()
-                                        .message("Unauthorized field or type")
-                                        .path(path)
-                                        .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
-                                        .build()
-                                })
-                                .collect(),
-                        )
-                        .build();
+                Err(QueryPlannerError::Unauthorized(paths)) => {
+                    let mut response = graphql::Response::builder().data(Value::Null).build();
+
+                    if !paths.is_empty() {
+                        let unauthorized = UnauthorizedPaths {
+                            paths,
+                            errors: self.authorization_config.error_config(),
+                        };
+                        unauthorized.log_unauthorized_paths();
+                        unauthorized.update_response_with_unauthorized_path_errors(&mut response);
+                    }
+
                     return Ok(QueryPlannerContent::Response {
                         response: Box::new(response),
                     });
