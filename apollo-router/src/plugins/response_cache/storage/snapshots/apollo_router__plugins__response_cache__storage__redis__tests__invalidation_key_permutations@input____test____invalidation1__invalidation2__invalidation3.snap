@@ -3,8 +3,8 @@ source: apollo-router/src/plugins/response_cache/storage/redis.rs
 expression: cache_tags
 ---
 [
-    "version:1.1:cache-tag:subgraph-products",
-    "version:1.1:cache-tag:subgraph-products:key-invalidation1",
-    "version:1.1:cache-tag:subgraph-products:key-invalidation2",
-    "version:1.1:cache-tag:subgraph-products:key-invalidation3",
+    "version:1.2:cache-tag:subgraph-products",
+    "version:1.2:cache-tag:subgraph-products:key-invalidation1",
+    "version:1.2:cache-tag:subgraph-products:key-invalidation2",
+    "version:1.2:cache-tag:subgraph-products:key-invalidation3",
 ]
