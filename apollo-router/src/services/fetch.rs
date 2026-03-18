@@ -190,4 +190,3 @@ impl SubgraphNameExt for Error {
         }
     }
 }
-
