@@ -64,9 +64,11 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventResponse;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
+use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphResponseBodySize;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::services::http::service::WireByteCount;
 use crate::services::layers::apq;
 use crate::services::router;
 use crate::services::subgraph;
@@ -978,6 +980,17 @@ pub(crate) async fn call_single_http(
                 &format!("Raw response from subgraph {service_name:?} received"),
             );
         }
+    }
+
+    if body.as_ref().is_some_and(|r| r.is_ok())
+        && let Some(wire_size) = parts
+            .extensions
+            .get::<WireByteCount>()
+            .map(|c| c.0.load(Relaxed))
+    {
+        context.extensions().with_lock(|lock| {
+            lock.insert::<SubgraphResponseBodySize>(SubgraphResponseBodySize(wire_size));
+        });
     }
 
     let graphql_response =
@@ -1924,31 +1937,6 @@ mod tests {
             .expect("expecting valid request")
     }
 
-    use tower::util::BoxService;
-
-    struct DummyProvider;
-
-    impl crate::plugins::subscription::provider::SubscriptionProvider for DummyProvider {
-        fn create_service(
-            &self,
-            _inner: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-            _notify: Notify<String, graphql::Response>,
-            service_name: String,
-            _config: serde_json::Value,
-        ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
-            BoxService::new(tower::service_fn(move |req: SubgraphRequest| {
-                let service_name = service_name.clone();
-                Box::pin(async move {
-                    Ok(SubgraphResponse::builder()
-                        .subgraph_name(service_name)
-                        .context(req.context)
-                        .extensions(crate::json_ext::Object::default())
-                        .build())
-                }) as futures::future::BoxFuture<'static, Result<SubgraphResponse, BoxError>>
-            }))
-        }
-    }
-
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_callback() {
         let _ = SUBSCRIPTION_CALLBACK_HMAC_KEY.set(String::from("TESTEST"));
@@ -2306,96 +2294,6 @@ mod tests {
 
         let err_str = err.to_string();
         assert!(err_str.starts_with("Websocket fetch failed from 'test': cannot connect websocket to subgraph: WebSocket upgrade failed. Status: 400 Bad Request; Headers: [\"content-type\": \"text/plain; charset=utf-8\"; \"content-length\": \"11\";"));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_subgraph_service_custom_mode() {
-        crate::plugins::subscription::provider::register_provider("test_provider", DummyProvider);
-
-        let subgraph_service = with_subscription_layer(
-            SubgraphService::new(
-                "test_custom",
-                true,
-                HttpClientServiceFactory::from_config(
-                    "test_custom",
-                    &Configuration::default(),
-                    crate::configuration::shared::Client::default(),
-                ),
-            )
-            .expect("can create a SubgraphService"),
-        );
-        let (tx, _rx) = mpsc::channel(2);
-
-        let url = Uri::from_str("http://127.0.0.1:0").unwrap();
-        let response = subgraph_service
-            .oneshot(
-                SubgraphRequest::builder()
-                    .supergraph_request(supergraph_request(
-                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
-                    ))
-                    .subgraph_request(subgraph_http_request(
-                        url,
-                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
-                    ))
-                    .operation_kind(OperationKind::Subscription)
-                    .subscription_stream(tx)
-                    .subgraph_name(String::from("test_custom"))
-                    .context(Context::new())
-                    .build(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.subgraph_name, "test_custom");
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_subgraph_service_custom_mode_missing_provider() {
-        let mut config = subscription_config();
-        if let Some(crate::plugins::subscription::provider::CustomMode { ref mut provider_name, .. }) = config.mode.custom {
-            *provider_name = "test_provider_missing".to_string();
-        }
-
-        let subgraph_service = SubscriptionSubgraphLayer::new(
-            Notify::builder().build(),
-            Some(Arc::new(config)),
-            Arc::from("test_custom_missing"),
-        )
-        .layer(
-            SubgraphService::new(
-                "test_custom_missing",
-                true,
-                HttpClientServiceFactory::from_config(
-                    "test_custom_missing",
-                    &Configuration::default(),
-                    crate::configuration::shared::Client::default(),
-                ),
-            )
-            .expect("can create a SubgraphService")
-        );
-        let (tx, _rx) = mpsc::channel(2);
-
-        let url = Uri::from_str("http://127.0.0.1:0").unwrap();
-        let err = subgraph_service
-            .oneshot(
-                SubgraphRequest::builder()
-                    .supergraph_request(supergraph_request(
-                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
-                    ))
-                    .subgraph_request(subgraph_http_request(
-                        url,
-                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
-                    ))
-                    .operation_kind(OperationKind::Subscription)
-                    .subscription_stream(tx)
-                    .subgraph_name(String::from("test_custom_missing"))
-                    .context(Context::new())
-                    .build(),
-            )
-            .await
-            .unwrap_err();
-
-        assert!(err.to_string().contains("Custom subscription provider 'test_provider_missing' not found"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2980,5 +2878,120 @@ mod tests {
             .error(error)
             .build();
         assert_response_eq_ignoring_error_id!(expected, actual);
+    }
+
+    use tower::util::BoxService;
+
+    struct DummyProvider;
+
+    impl crate::plugins::subscription::provider::SubscriptionProvider for DummyProvider {
+        fn create_service(
+            &self,
+            _inner: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+            _notify: Notify<String, graphql::Response>,
+            service_name: String,
+            _config: serde_json::Value,
+        ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+            BoxService::new(tower::service_fn(move |req: SubgraphRequest| {
+                let service_name = service_name.clone();
+                Box::pin(async move {
+                    Ok(SubgraphResponse::builder()
+                        .subgraph_name(service_name)
+                        .context(req.context)
+                        .extensions(crate::json_ext::Object::default())
+                        .build())
+                }) as futures::future::BoxFuture<'static, Result<SubgraphResponse, BoxError>>
+            }))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_custom_mode() {
+        crate::plugins::subscription::provider::register_provider("test_provider", DummyProvider);
+
+        let subgraph_service = with_subscription_layer(
+            SubgraphService::new(
+                "test_custom",
+                true,
+                HttpClientServiceFactory::from_config(
+                    "test_custom",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService"),
+        );
+        let (tx, _rx) = mpsc::channel(2);
+
+        let url = Uri::from_str("http://127.0.0.1:0").unwrap();
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request(
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .subgraph_request(subgraph_http_request(
+                        url,
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .operation_kind(OperationKind::Subscription)
+                    .subscription_stream(tx)
+                    .subgraph_name(String::from("test_custom"))
+                    .context(Context::new())
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.subgraph_name, "test_custom");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_custom_mode_missing_provider() {
+        let mut config = subscription_config();
+        if let Some(crate::plugins::subscription::provider::CustomMode { ref mut provider_name, .. }) = config.mode.custom {
+            *provider_name = "test_provider_missing".to_string();
+        }
+
+        let subgraph_service = SubscriptionSubgraphLayer::new(
+            Notify::builder().build(),
+            Some(Arc::new(config)),
+            Arc::from("test_custom_missing"),
+        )
+        .layer(
+            SubgraphService::new(
+                "test_custom_missing",
+                true,
+                HttpClientServiceFactory::from_config(
+                    "test_custom_missing",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService")
+        );
+        let (tx, _rx) = mpsc::channel(2);
+
+        let url = Uri::from_str("http://127.0.0.1:0").unwrap();
+        let err = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request(
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .subgraph_request(subgraph_http_request(
+                        url,
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .operation_kind(OperationKind::Subscription)
+                    .subscription_stream(tx)
+                    .subgraph_name(String::from("test_custom_missing"))
+                    .context(Context::new())
+                    .build(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("Custom subscription provider 'test_provider_missing' not found"));
     }
 }
