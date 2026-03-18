@@ -368,7 +368,8 @@ impl Stream for Multipart {
                             serde_json::to_writer(&mut buf, &response)?;
                         }
                         ProtocolMode::Defer => {
-                            has_subgraph_errors = !response.errors.is_empty() || response.data.is_none();
+                            has_subgraph_errors =
+                                !response.errors.is_empty() || response.data.is_none();
                             serde_json::to_writer(&mut buf, &response)?;
                         }
                     }
@@ -378,13 +379,16 @@ impl Stream for Multipart {
                     } else {
                         self.is_terminated = true;
                         self.end_reason = Some(match self.mode {
-                            ProtocolMode::Subscription => EndReason::Subscription(
-                                maybe_end_reason.unwrap_or(if has_subgraph_errors {
-                                    SubscriptionEndReason::SubgraphError
-                                } else {
-                                    SubscriptionEndReason::ServerClose
-                                }),
-                            ),
+                            ProtocolMode::Subscription => {
+                                let end_reason = match maybe_end_reason {
+                                    Some(reason) => reason,
+                                    None if has_subgraph_errors => {
+                                        SubscriptionEndReason::SubgraphError
+                                    }
+                                    None => SubscriptionEndReason::ServerClose,
+                                };
+                                EndReason::Subscription(end_reason)
+                            }
                             ProtocolMode::Defer => EndReason::Defer(if has_subgraph_errors {
                                 DeferEndReason::SubgraphError
                             } else {
@@ -1025,15 +1029,17 @@ mod tests {
         let (_guard, layer) = setup_tracing();
         let span = tracing::info_span!("test_span");
         let _span_guard = span.enter();
-        let responses = vec![graphql::Response::builder()
-            .error(
-                graphql::Error::builder()
-                    .message("HTTP fetch failed from 'products': connection refused")
-                    .extension_code("SUBREQUEST_HTTP_ERROR")
-                    .build(),
-            )
-            .has_next(false)
-            .build()];
+        let responses = vec![
+            graphql::Response::builder()
+                .error(
+                    graphql::Error::builder()
+                        .message("HTTP fetch failed from 'products': connection refused")
+                        .extension_code("SUBREQUEST_HTTP_ERROR")
+                        .build(),
+                )
+                .has_next(false)
+                .build(),
+        ];
         let gql_responses = stream::iter(responses);
         let mut protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
 
@@ -1095,18 +1101,18 @@ mod tests {
         let (_guard, layer) = setup_tracing();
         let span = tracing::info_span!("test_span");
         let _span_guard = span.enter();
-        let responses = vec![graphql::Response::builder()
-            .data(serde_json_bytes::Value::String(ByteString::from(
-                "partial",
-            )))
-            .error(
-                graphql::Error::builder()
-                    .message("HTTP fetch failed from 'inventory': 500 Internal Server Error")
-                    .extension_code("SUBREQUEST_HTTP_ERROR")
-                    .build(),
-            )
-            .has_next(false)
-            .build()];
+        let responses = vec![
+            graphql::Response::builder()
+                .data(serde_json_bytes::Value::String(ByteString::from("partial")))
+                .error(
+                    graphql::Error::builder()
+                        .message("HTTP fetch failed from 'inventory': 500 Internal Server Error")
+                        .extension_code("SUBREQUEST_HTTP_ERROR")
+                        .build(),
+                )
+                .has_next(false)
+                .build(),
+        ];
         let gql_responses = stream::iter(responses);
         let mut protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
 
