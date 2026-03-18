@@ -531,7 +531,7 @@ impl Storage {
             .storage
             .scan_with_namespaced_results(String::from("*"), None)
             .await
-            .or_else(|e| Err(BoxError::from(e)))?;
+            .map_err(BoxError::from)?;
 
         let mut keys = Vec::default();
         while let Some(result) = scan_stream.next().await {
