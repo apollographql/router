@@ -1351,6 +1351,58 @@ mod test {
             Ok(())
         }
 
+        /// Calling activate() twice should abort the first metrics task before starting a new one,
+        /// not orphan it
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn activate_twice_does_not_orphan_old_task(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+            storage.activate();
+
+            let first_handle = storage.inner.read().as_ref().unwrap()
+                .metrics_collector.abort_handle()
+                .expect("first activate should populate handle");
+            assert!(!first_handle.is_finished());
+
+            storage.activate();
+            tokio::task::yield_now().await;
+
+            assert!(first_handle.is_finished(), "first metrics task should be aborted");
+
+            let second_handle = storage.inner.read().as_ref().unwrap()
+                .metrics_collector.abort_handle()
+                .expect("second activate should populate handle");
+            assert!(!second_handle.is_finished());
+            Ok(())
+        }
+
+        /// Pipeline operations (batched commands) should work after client recreation.
+        /// insert_multiple uses pipeline() under the hood.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn pipeline_operations_work_after_recreation(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            storage.inner.write().take();
+            let _ = storage.client().await;
+
+            let data = vec![
+                (RedisKey("pipe_key_1".to_string()), RedisValue("val_1".to_string())),
+                (RedisKey("pipe_key_2".to_string()), RedisValue("val_2".to_string())),
+            ];
+            storage.insert_multiple(&data, None).await?;
+
+            let fetched1: RedisValue<String> = storage.get(RedisKey("pipe_key_1".to_string())).await?;
+            let fetched2: RedisValue<String> = storage.get(RedisKey("pipe_key_2".to_string())).await?;
+            assert_eq!(fetched1.0, "val_1");
+            assert_eq!(fetched2.0, "val_2");
+            Ok(())
+        }
+
         #[tokio::test]
         #[rstest::rstest]
         async fn clones_share_recreated_client(
