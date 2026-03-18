@@ -1279,14 +1279,14 @@ mod test {
             Ok(())
         }
 
+        /// Recreation via client() or pipeline() should stop old tasks and activate new ones
         #[tokio::test]
         #[rstest::rstest]
         async fn recreation_stops_old_tasks_and_starts_new_ones(
             #[values(true, false)] clustered: bool,
+            #[values("client", "pipeline")] method: &str,
         ) -> Result<(), BoxError> {
             let storage = create_and_connect(clustered).await?;
-
-            // activate metrics so the abort handle is populated
             storage.activate();
 
             let (old_heartbeat, old_metrics) = {
@@ -1301,17 +1301,53 @@ mod test {
             assert!(!old_metrics.is_finished());
 
             storage.inner.write().take();
-            let _ = storage.client().await;
+            match method {
+                "client" => { let _ = storage.client().await; }
+                "pipeline" => { let _ = storage.pipeline().await; }
+                _ => unreachable!(),
+            }
 
             assert!(old_heartbeat.is_finished());
             assert!(old_metrics.is_finished());
 
-            // client() should have activated the new inner's metrics automatically
             let guard = storage.inner.read();
             let new_inner = guard.as_ref().unwrap();
             assert!(!new_inner.heartbeat_abort_handle.is_finished());
-            let new_metrics = new_inner.metrics_collector.abort_handle().expect("metrics not activated");
+            let new_metrics = new_inner.metrics_collector.abort_handle().expect("metrics not activated after recreation");
             assert!(!new_metrics.is_finished());
+            Ok(())
+        }
+
+        /// activate() on an empty inner (None) should be a no-op and not panic
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn activate_on_none_inner_is_noop(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            assert!(storage.inner.read().is_none());
+            storage.activate();
+            Ok(())
+        }
+
+        /// activate() after initial create_client() populates the metrics abort handle
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn activate_after_create_client_starts_metrics(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            // before activate, metrics abort handle should be None
+            assert!(storage.inner.read().as_ref().unwrap()
+                .metrics_collector.abort_handle().is_none());
+
+            storage.activate();
+
+            let handle = storage.inner.read().as_ref().unwrap()
+                .metrics_collector.abort_handle()
+                .expect("metrics should be activated");
+            assert!(!handle.is_finished());
             Ok(())
         }
 
