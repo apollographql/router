@@ -14,6 +14,7 @@ use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveCompositionOptions;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
@@ -68,9 +69,13 @@ impl RequiresScopesSpecDefinition {
                 DirectiveLocation::Scalar,
                 DirectiveLocation::Enum,
             ],
-            true, // composes
-            Some(&|v| REQUIRES_SCOPES_VERSIONS.get_dyn_minimum_required_version(v)),
-            None,
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|v| {
+                    REQUIRES_SCOPES_VERSIONS.get_dyn_minimum_required_version(v)
+                },
+                static_argument_transform: None,
+                use_join_directive: false,
+            }),
         ))
     }
 

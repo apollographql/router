@@ -31,6 +31,7 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveCompositionOptions;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
@@ -287,9 +288,11 @@ impl CostSpecDefinition {
                 DirectiveLocation::Object,
                 DirectiveLocation::Scalar,
             ],
-            true,
-            Some(&|v| COST_VERSIONS.get_dyn_minimum_required_version(v)),
-            None,
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|v| COST_VERSIONS.get_dyn_minimum_required_version(v),
+                static_argument_transform: None,
+                use_join_directive: false,
+            }),
         )
     }
 
@@ -332,9 +335,11 @@ impl CostSpecDefinition {
             ],
             false,
             &[DirectiveLocation::FieldDefinition],
-            true,
-            Some(&|v| COST_VERSIONS.get_dyn_minimum_required_version(v)),
-            None,
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|v| COST_VERSIONS.get_dyn_minimum_required_version(v),
+                static_argument_transform: None,
+                use_join_directive: false,
+            }),
         )
     }
 }

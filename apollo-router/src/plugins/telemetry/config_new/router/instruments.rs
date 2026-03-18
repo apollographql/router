@@ -1,5 +1,13 @@
 use std::fmt::Debug;
+use std::pin::Pin;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::task::Poll;
 
+use bytes::Bytes;
+use futures::Stream;
+use opentelemetry::metrics::Histogram;
+use pin_project_lite::pin_project;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -163,3 +171,160 @@ pub(crate) type RouterCustomInstruments = CustomInstruments<
     RouterSelector,
     RouterValue,
 >;
+
+/// Stashed by `RouterInstruments::on_response` when the `http.server.response.body.size`
+/// histogram was not recorded during `on_response` (because compression is pending).
+/// Contains the histogram handle and computed attributes so the metric can be recorded
+/// later, after the compressed body stream is fully consumed.
+pub(crate) struct ResponseBodySizeRecording {
+    pub(crate) histogram: Histogram<f64>,
+    pub(crate) attributes: Vec<opentelemetry::KeyValue>,
+    pub(crate) byte_count: AtomicU64,
+}
+
+impl ResponseBodySizeRecording {
+    pub(crate) fn new(histogram: Histogram<f64>, attributes: Vec<opentelemetry::KeyValue>) -> Self {
+        Self {
+            histogram,
+            attributes,
+            byte_count: AtomicU64::new(0),
+        }
+    }
+
+    pub(crate) fn record_byte_count(&self, size: u64) {
+        self.byte_count.store(size, Ordering::Relaxed);
+    }
+}
+
+/// Record the `http.server.response.body.size` histogram when dropped,
+/// using the final value from `byte_count`. This ensures the metric reflects the
+/// actual compressed byte count after the body stream is fully consumed.
+impl Drop for ResponseBodySizeRecording {
+    fn drop(&mut self) {
+        let size = self.byte_count.load(Ordering::Relaxed);
+        self.histogram.record(size as f64, &self.attributes);
+    }
+}
+
+pin_project! {
+    /// Stream wrapper that delegates to an inner stream and records the response body
+    /// size histogram on drop via the contained `ResponseBodySizeRecording` guard.
+    pub(crate) struct ResponseBodySizeRecordingStream<S> {
+        #[pin]
+        inner: S,
+        recording: ResponseBodySizeRecording,
+    }
+}
+
+impl<S> ResponseBodySizeRecordingStream<S> {
+    pub(crate) fn new(inner: S, recording: ResponseBodySizeRecording) -> Self {
+        Self { inner, recording }
+    }
+}
+
+impl<S> Stream for ResponseBodySizeRecordingStream<S>
+where
+    S: Stream<Item = Result<Bytes, BoxError>>,
+{
+    type Item = Result<Bytes, BoxError>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        let next = this.inner.poll_next(cx);
+        if let Poll::Ready(Some(Ok(data))) = &next {
+            this.recording
+                .byte_count
+                .fetch_add(data.len() as u64, Ordering::Relaxed);
+        }
+        next
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+    use futures::stream;
+    use opentelemetry::metrics::MeterProvider;
+
+    use super::*;
+    use crate::metrics::FutureMetricsExt;
+
+    fn make_recording(histogram: Histogram<f64>) -> ResponseBodySizeRecording {
+        ResponseBodySizeRecording::new(histogram, vec![])
+    }
+
+    #[tokio::test]
+    async fn recording_stream_accumulates_bytes_across_chunks() {
+        async {
+            let meter = crate::metrics::meter_provider().meter("test");
+            let histogram = meter.f64_histogram("test.body.size").build();
+
+            let chunks: Vec<Result<Bytes, BoxError>> = vec![
+                Ok(Bytes::from_static(b"hello")),
+                Ok(Bytes::from_static(b" ")),
+                Ok(Bytes::from_static(b"world")),
+            ];
+            let inner = stream::iter(chunks);
+            let mut stream = ResponseBodySizeRecordingStream::new(inner, make_recording(histogram));
+
+            let mut collected = Vec::new();
+            while let Some(item) = stream.next().await {
+                collected.push(item.unwrap());
+            }
+            assert_eq!(collected.len(), 3);
+
+            assert_eq!(stream.recording.byte_count.load(Ordering::Relaxed), 11);
+            drop(stream);
+
+            assert_histogram_sum!("test.body.size", 11);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn recording_stream_records_zero_for_empty_stream() {
+        async {
+            let meter = crate::metrics::meter_provider().meter("test");
+            let histogram = meter.f64_histogram("test.body.size").build();
+
+            let chunks: Vec<Result<Bytes, BoxError>> = vec![];
+            let inner = stream::iter(chunks);
+            let stream = ResponseBodySizeRecordingStream::new(inner, make_recording(histogram));
+
+            let collected: Vec<_> = stream.collect().await;
+            assert!(collected.is_empty());
+
+            assert_histogram_sum!("test.body.size", 0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn recording_stream_skips_error_chunks_in_byte_count() {
+        async {
+            let meter = crate::metrics::meter_provider().meter("test");
+            let histogram = meter.f64_histogram("test.body.size").build();
+
+            let chunks: Vec<Result<Bytes, BoxError>> = vec![
+                Ok(Bytes::from_static(b"abc")),
+                Err("simulated error".into()),
+                Ok(Bytes::from_static(b"de")),
+            ];
+            let inner = stream::iter(chunks);
+            let mut stream = ResponseBodySizeRecordingStream::new(inner, make_recording(histogram));
+
+            while stream.next().await.is_some() {}
+            assert_eq!(stream.recording.byte_count.load(Ordering::Relaxed), 5);
+            drop(stream);
+
+            assert_histogram_sum!("test.body.size", 5);
+        }
+        .with_metrics()
+        .await;
+    }
+}
