@@ -1,6 +1,6 @@
-### Set minimum `h2` version floor to 0.4.13 to pick up critical flow-control and deadlock fixes ([PR #9033](https://github.com/apollographql/router/pull/9033))
+### Pin transitive `h2` dependency at minimum v0.4.13 to pick up critical flow-control and deadlock fixes ([PR #9033](https://github.com/apollographql/router/pull/9033))
 
-The `h2` crate is a transitive dependency (pulled in via `hyper`) and was not previously declared as an explicit workspace dependency. As a result, Renovate does not manage it and the version in `Cargo.lock` would remain pinned indefinitely unless someone manually ran `cargo update`.
+Updates the transitive `h2` dependency `0.4.12 → 0.4.13`. Because `h2` is pulled in via `hyper` and not declared directly, Renovate does not manage it — this PR adds an explicit `[workspace.dependencies]` floor to force the resolution. There are no API or behavioral changes to router code; only the `Cargo.toml` floor declaration and `Cargo.lock` pin are affected.
 
 `h2` 0.4.13 (released January 5, 2026) contains two silent liveness fixes that are particularly relevant to a production router — both produce connections that appear alive but stop transferring data with no error surfaced:
 
