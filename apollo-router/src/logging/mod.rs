@@ -70,7 +70,6 @@ pub(crate) mod test {
                     .lines()
                     .map(|line| {
                         let mut line: serde_json::Value = serde_json::from_str(line).unwrap();
-                        // move the message field to the top level
                         let fields = line
                             .as_object_mut()
                             .unwrap()
@@ -78,6 +77,8 @@ pub(crate) mod test {
                             .unwrap()
                             .as_object_mut()
                             .unwrap();
+
+                        // move the message field to the top level
                         let message = fields.remove("message").unwrap_or_default();
                         line.as_object_mut()
                             .unwrap()

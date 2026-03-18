@@ -37,6 +37,7 @@ use crate::introspection::IntrospectionCache;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::metrics::meter_provider;
+use crate::plugins::authorization;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
@@ -90,6 +91,7 @@ pub(crate) struct QueryPlannerService {
     subgraph_schemas: Arc<SubgraphSchemas>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
+    authorization_config: Arc<authorization::Conf>,
     _federation_instrument: ObservableGauge<u64>,
     compute_jobs_queue_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
@@ -109,7 +111,7 @@ fn federation_version_instrument(federation_version: Option<i64>) -> ObservableG
                 )],
             );
         })
-        .init()
+        .build()
 }
 
 impl QueryPlannerService {
@@ -245,6 +247,7 @@ impl QueryPlannerService {
             schema,
             subgraph_schemas,
             enable_authorization_directives,
+            authorization_config: Arc::new(AuthorizationPlugin::configuration(&configuration)),
             configuration,
             _federation_instrument: federation_instrument,
             compute_jobs_queue_size_gauge: Default::default(),
@@ -293,7 +296,7 @@ impl QueryPlannerService {
             filtered_query: None,
             unauthorized: UnauthorizedPaths {
                 paths: vec![],
-                errors: AuthorizationPlugin::log_errors(&self.configuration),
+                errors: self.authorization_config.error_config(),
             },
             subselections,
             defer_stats,
@@ -523,7 +526,8 @@ impl QueryPlannerService {
         }
 
         let filter_res = if self.enable_authorization_directives {
-            match AuthorizationPlugin::filter_query(&self.configuration, &key, &self.schema) {
+            match AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)
+            {
                 Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
                     let response = graphql::Response::builder()
                         .data(Object::new())

@@ -903,7 +903,7 @@ expression: "&schema"
     },
     "Client": {
       "additionalProperties": false,
-      "description": "HTTP client configuration for coprocessors.",
+      "description": "HTTP client configuration",
       "properties": {
         "dns_resolution_strategy": {
           "anyOf": [
@@ -926,6 +926,14 @@ expression: "&schema"
             }
           ],
           "description": "Use HTTP/2 to communicate with the coprocessor."
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         }
       },
       "type": "object"
@@ -2375,6 +2383,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "connector_http_response_body_size": {
+              "description": "The connector HTTP response body size (wire bytes before decompression).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_http_response_body_size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "connector_http_method": {
               "description": "The connector HTTP method.",
               "type": "boolean"
@@ -2612,6 +2633,14 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         },
         "timeout": {
           "default": null,
@@ -8533,7 +8562,7 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
-          "description": "The size hint of the body.\nThis is used as the Content-Length header has not yet been populated\nwhen selectors are evaluated",
+          "description": "The size hint of the body.\nIf compression is enabled, this will be the uncompressed size.\nIts not possible to get the compressed size in selector as the\nbody has not yet been compressed at the time on_response is called.",
           "properties": {
             "response_size_hint": {
               "description": "Extract response size hint in bytes",
@@ -10144,6 +10173,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "subgraph_response_body_size": {
+              "description": "The subgraph response body size.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_response_body_size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "default": {
               "anyOf": [
                 {
@@ -10594,6 +10636,14 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         },
         "timeout": {
           "default": null,
