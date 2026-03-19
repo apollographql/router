@@ -1,9 +1,13 @@
-use fred::types::config::{ReplicaFilter, Server};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+
+use fred::types::config::ReplicaFilter;
+use fred::types::config::Server;
 use parking_lot::RwLock;
 use tokio::time::Instant;
-use tracing::{debug, warn};
-
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use tracing::debug;
+use tracing::warn;
 
 /// Filters calls to replicas based on a filter() fn that returns true if there's a routeable
 /// replica in the replicas cache. Replicas are routeable when we're able to make a TCP Connection
@@ -73,8 +77,9 @@ impl ReplicaFilter for RouteableReplicaFilter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio::net::TcpListener;
+
+    use super::*;
 
     fn dummy_primary() -> Server {
         Server::new("127.0.0.1", 6379)
