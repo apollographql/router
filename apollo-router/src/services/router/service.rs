@@ -60,6 +60,7 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterRequest;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterResponse;
+use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedCounter;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
@@ -386,12 +387,16 @@ impl RouterService {
                                 .flatten();
                             let client_name: Option<String> =
                                 context.get(CLIENT_NAME).ok().flatten();
+                            let terminated_counter = context
+                                .extensions()
+                                .with_lock(|lock| lock.get::<SubscriptionsTerminatedCounter>().cloned());
                             http::Response::from_parts(
                                 parts,
                                 router::body::from_result_stream(
                                     Multipart::new(body, ProtocolMode::Subscription)
                                         .with_subgraph_name(subgraph_name)
-                                        .with_client_name(client_name),
+                                        .with_client_name(client_name)
+                                        .with_terminated_counter(terminated_counter),
                                 ),
                             )
                         }

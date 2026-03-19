@@ -13,7 +13,21 @@ Both attributes are added dynamically to router spans only when relevant (i.e., 
 
 A single counter is emitted when a subscription terminates:
 
-- **`apollo.router.operations.subscriptions.terminated`** (attributes: `reason`, `subgraph.name`, `client.name`): Incremented once per client connection when a subscription stream ends. The `reason` attribute indicates why (possible values: `server_close`, `subgraph_error`, `client_disconnect`, `heartbeat_delivery_failed`, `schema_reload`, `config_reload`). The `subgraph.name` and `client.name` attributes are populated if available. When deduplication is enabled, a single subgraph WebSocket closure produces one `terminated` event per deduplicated client sharing that connection (each with `reason=server_close`).
+- **`apollo.router.operations.subscriptions.terminated`** (default attributes: `reason`, `subgraph.name`): Incremented once per client connection when a subscription stream ends. The `reason` attribute indicates why (possible values: `server_close`, `subgraph_error`, `client_disconnect`, `heartbeat_delivery_failed`, `schema_reload`, `config_reload`). The `subgraph.name` attribute is populated if available. When deduplication is enabled, a single subgraph WebSocket closure produces one `terminated` event per deduplicated client sharing that connection (each with `reason=server_close`).
+
+  Attributes for this metric are configurable. By default, `reason` and `subgraph.name` are enabled. You can also enable `client.name` via configuration:
+
+  ```yaml
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          apollo.router.operations.subscriptions.terminated:
+            attributes:
+              reason: true
+              subgraph.name: true
+              client.name: true
+  ```
 
 The following counter is emitted when a subscription request is rejected:
 
