@@ -4746,6 +4746,14 @@ expression: "&schema"
         "$ref": "#/definitions/Instrument"
       },
       "properties": {
+        "apollo.router.operations.subscriptions.terminated": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StandardInstrumentExtendedSubscriptionsTerminatedAttributesWithRouterSelector"
+            }
+          ],
+          "description": "Counter of subscriptions terminated"
+        },
         "apollo.router.overhead": {
           "allOf": [
             {
@@ -4982,6 +4990,38 @@ expression: "&schema"
             }
           ],
           "description": "Histogram of client response body size"
+        }
+      },
+      "type": "object"
+    },
+    "ExtendedSubscriptionsTerminatedAttributesWithRouterSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/RouterSelector"
+      },
+      "properties": {
+        "client.name": {
+          "default": null,
+          "description": "The client name",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "default": null,
+          "description": "The reason the subscription terminated",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "subgraph.name": {
+          "default": null,
+          "description": "The subgraph name",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -9255,6 +9295,28 @@ expression: "&schema"
           "properties": {
             "attributes": {
               "$ref": "#/definitions/ExtendedSubgraphAttributesWithSubgraphSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardInstrumentExtendedSubscriptionsTerminatedAttributesWithRouterSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedSubscriptionsTerminatedAttributesWithRouterSelector"
             }
           },
           "required": [
