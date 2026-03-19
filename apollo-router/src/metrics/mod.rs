@@ -1285,7 +1285,22 @@ macro_rules! metric {
 
     ($ty:ident, $instrument:ident, $guard: ty, $mutation:ident, $name:expr, $description:literal, $value: expr, $attrs: expr) => {
         metric!($ty, $instrument, $guard, $mutation, $name, $description, "", $value, $attrs)
-    }
+    };
+
+    // metrics that do _not_ perform a mutation on instantiation
+    ($ty:ident, $instrument:ident, $guard: ty, $name:expr, $description:literal, $unit:literal, $attrs:expr) => {
+        paste::paste! {
+            {
+                let instrument = get_or_create_metric!($ty, $instrument, $name, $description, $unit);
+                let attrs: &[opentelemetry::KeyValue] = &$attrs;
+                $guard::new(instrument.clone(), $value, attrs)
+            }
+        }
+    };
+
+    ($ty:ident, $instrument:ident, $guard: ty, $name:expr, $description:literal, $attrs: expr) => {
+        metric!($ty, $instrument, $guard, $name, $description, "", $attrs)
+    };
 }
 
 #[cfg(test)]
