@@ -413,6 +413,14 @@ impl RedisCacheStorage {
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
                 config.max_command_buffer_len = 10_000;
                 config.reconnect_on_auth_error = true;
+                // NOTE: this defaults to true in fred but we're intentionally paying attention to
+                // errors becomes sometimes fred gets into a funky state with its redis
+                // connections. Sometimes, eg, a brief network outage in whatever cloud provider folks are
+                // using can destabilize what fred views as routeable nodes--ignoring errors can
+                // get us into a state where fred can't connect to those nodes and we don't know
+                // that we're unable to connect to them; it's much better to let fred abort and
+                // then recreate the client with a fresh view of the infrastructure
+                config.replica.ignore_reconnection_errors = false;
                 config.tcp = TcpConfig {
                     #[cfg(target_os = "linux")]
                     user_timeout: Some(self.redis_client_config.timeout),
@@ -425,6 +433,7 @@ impl RedisCacheStorage {
 
                 config.replica.filter = Some(Arc::new(RouteableReplicaFilter::default()));
 
+                // TODO: update comment
                 // PR-8405: must not use lazy connections or else commands will queue rather than being sent
                 // PR-8671: must only disable lazy connections in cluster mode. otherwise, fred will
                 //  try to connect to unreachable replicas and fall over.
@@ -436,7 +445,10 @@ impl RedisCacheStorage {
             .with_performance_config(|config| {
                 config.default_command_timeout = self.redis_client_config.timeout;
             })
-            .set_policy(ReconnectPolicy::new_exponential(0, 1, 2000, 5))
+            // NOTE: we give fred 15 attempts to reconnect; once reconnected, fred resets its
+            // counter and we have another 15 attempts. If reconnection fails, fred aborts and _we_
+            // recreate the redis client. Currently, we attempt recreation indefinitely
+            .set_policy(ReconnectPolicy::new_exponential(15, 1, 2000, 5))
             .build_pool(self.redis_client_config.pool_size)?;
 
         for client in client_pool.clients() {
