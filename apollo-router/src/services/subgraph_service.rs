@@ -64,9 +64,11 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventResponse;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
+use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphResponseBodySize;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::services::http::service::WireByteCount;
 use crate::services::layers::apq;
 use crate::services::router;
 use crate::services::subgraph;
@@ -978,6 +980,17 @@ pub(crate) async fn call_single_http(
                 &format!("Raw response from subgraph {service_name:?} received"),
             );
         }
+    }
+
+    if body.as_ref().is_some_and(|r| r.is_ok())
+        && let Some(wire_size) = parts
+            .extensions
+            .get::<WireByteCount>()
+            .map(|c| c.0.load(Relaxed))
+    {
+        context.extensions().with_lock(|lock| {
+            lock.insert::<SubgraphResponseBodySize>(SubgraphResponseBodySize(wire_size));
+        });
     }
 
     let graphql_response =
