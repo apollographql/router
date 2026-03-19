@@ -4,6 +4,7 @@ use apollo_compiler::parser::LineColumn;
 use indexmap::IndexMap;
 
 use crate::error::CompositionError;
+use crate::error::HasLocations;
 use crate::error::SingleFederationError;
 use crate::error::SubgraphLocation;
 use crate::merger::hints::HintCode;
@@ -166,7 +167,7 @@ impl ErrorReporter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn report_mismatch_hint<D, S>(
+    pub(crate) fn report_mismatch_hint<D: HasLocations, S>(
         &mut self,
         code: HintCode,
         message: String,

@@ -135,6 +135,18 @@ pub(crate) trait HasLocations {
     fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations;
 }
 
+impl<HL: HasLocations> HasLocations for &HL {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
+        HL::locations(self, subgraph)
+    }
+}
+
+impl HasLocations for Name {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
+        todo!()
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {
     #[error("[{subgraph}] {error}")]

@@ -26,6 +26,7 @@ use strum::IntoEnumIterator as _;
 use tracing::instrument;
 use tracing::trace;
 
+use crate::error::HasLocations;
 use crate::LinkSpecDefinition;
 use crate::api_schema;
 use crate::bail;
@@ -2202,7 +2203,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         dest: &T,
     ) -> Result<(), FederationError>
     where
-        T: HasDescription + Display,
+        T: HasLocations + HasDescription + Display,
     {
         let mut descriptions: IndexMap<&str, (usize, &str)> = Default::default();
         for (idx, source) in sources.iter() {

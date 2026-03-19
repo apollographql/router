@@ -14,6 +14,7 @@ use tracing::trace;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::HasLocations;
 use crate::error::Locations;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
@@ -78,7 +79,7 @@ impl Merger {
     ) -> Result<IndexSet<Name>, FederationError>
     where
         T: HasArguments + Debug + Display,
-        <T as HasArguments>::ArgumentPosition: Display,
+        <T as HasArguments>::ArgumentPosition: HasLocations + Display,
     {
         let mut arg_types: IndexMap<Name, Node<Type>> = Default::default();
         let mut removed_args = HashSet::new();
@@ -257,6 +258,7 @@ impl Merger {
     where
         T: Clone
             + Display
+            + HasLocations
             + HasDefaultValue
             + HasDescription
             + HasType
