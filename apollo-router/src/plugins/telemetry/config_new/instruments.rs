@@ -261,12 +261,7 @@ impl InstrumentsConfig {
             static_instruments.insert(name, instrument);
         }
 
-        if self
-            .router
-            .attributes
-            .subscriptions_terminated
-            .is_enabled()
-        {
+        if self.router.attributes.subscriptions_terminated.is_enabled() {
             static_instruments.insert(
                 APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED.to_string(),
                 StaticInstrument::CounterF64(
@@ -1242,10 +1237,7 @@ impl SubscriptionsTerminatedCounter {
     ) {
         let mut attrs = Vec::with_capacity(3);
         if self.reason_enabled {
-            attrs.push(opentelemetry::KeyValue::new(
-                "reason",
-                reason.to_string(),
-            ));
+            attrs.push(opentelemetry::KeyValue::new("reason", reason.to_string()));
         }
         if self.subgraph_name_enabled {
             attrs.push(opentelemetry::KeyValue::new(
