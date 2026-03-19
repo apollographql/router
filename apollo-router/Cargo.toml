@@ -108,7 +108,7 @@ futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"
 # Not used directly, but declared here to enforce a minimum version floor for this
 # transitive dependency and to allow Renovate to manage future version bumps.
-h2.workspace = true
+h2 = "0.4.13"
 hex.workspace = true
 http.workspace = true
 http-body = "1.0.1"
