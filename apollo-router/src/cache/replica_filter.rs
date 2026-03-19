@@ -7,7 +7,6 @@ use fred::types::config::Server;
 use parking_lot::RwLock;
 use tokio::time::Instant;
 use tracing::debug;
-use tracing::warn;
 
 /// Filters calls to replicas based on a filter() fn that returns true if there's a routeable
 /// replica in the replicas cache. Replicas are routeable when we're able to make a TCP Connection
