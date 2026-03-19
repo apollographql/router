@@ -1693,7 +1693,6 @@ mod test {
         async fn pool_shutdown_marks_inner_for_recreation(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let _guard = lock_for_static().lock().await;
             let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
             storage.create_client_pool().await?;
             assert!(storage.inner.read().is_some());
