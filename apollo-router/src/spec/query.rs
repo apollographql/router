@@ -12,6 +12,7 @@ use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
 use derivative::Derivative;
+use indexmap::IndexMap;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -344,14 +345,14 @@ impl Query {
         Ok((fragments, operation, defer_stats, hash))
     }
 
-    fn format_value<'a: 'b, 'b>(
-        &'a self,
+    fn format_value(
+        &self,
         parameters: &mut FormatParameters,
         field_type: &executable::Type,
         input: &mut Value,
         output: &mut Value,
-        path: &mut Vec<ResponsePathElement<'b>>,
-        selection_set: &'a [Selection],
+        path: &mut Vec<ResponsePathElement>,
+        selection_set: &[Selection],
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
         // and return Ok(()), because values are optional by default
@@ -396,14 +397,14 @@ impl Query {
     }
 
     #[inline]
-    fn format_non_nullable_value<'a: 'b, 'b>(
-        &'a self,
+    fn format_non_nullable_value(
+        &self,
         parameters: &mut FormatParameters,
         field_type: &executable::Type,
         input: &mut Value,
         output: &mut Value,
-        path: &mut Vec<ResponsePathElement<'b>>,
-        selection_set: &'a [Selection],
+        path: &mut Vec<ResponsePathElement>,
+        selection_set: &[Selection],
     ) -> Result<(), InvalidValue> {
         let inner_type = match field_type {
             executable::Type::NonNullList(ty) => ty.clone().list(),
@@ -441,14 +442,14 @@ impl Query {
     }
 
     #[inline]
-    fn format_list<'a: 'b, 'b>(
-        &'a self,
+    fn format_list(
+        &self,
         parameters: &mut FormatParameters,
         input: &mut Value,
         inner_type: &executable::Type,
         output: &mut Value,
-        path: &mut Vec<ResponsePathElement<'b>>,
-        selection_set: &'a [Selection],
+        path: &mut Vec<ResponsePathElement>,
+        selection_set: &[Selection],
     ) -> Result<(), InvalidValue> {
         let Value::Array(input_array) = input else {
             return Ok(());
@@ -495,15 +496,15 @@ impl Query {
 
     #[inline]
     #[allow(clippy::too_many_arguments)]
-    fn format_named_type<'a: 'b, 'b>(
-        &'a self,
+    fn format_named_type(
+        &self,
         parameters: &mut FormatParameters,
         field_type: &executable::Type,
         input: &mut Value,
         type_name: &Name,
         output: &mut Value,
-        path: &mut Vec<ResponsePathElement<'b>>,
-        selection_set: &'a [Selection],
+        path: &mut Vec<ResponsePathElement>,
+        selection_set: &[Selection],
     ) -> Result<(), InvalidValue> {
         // we cannot know about the expected format of custom scalars
         // so we must pass them directly to the client
@@ -586,7 +587,7 @@ impl Query {
     fn format_integer(
         &self,
         parameters: &mut FormatParameters,
-        path: &[ResponsePathElement<'_>],
+        path: &[ResponsePathElement],
         input: &mut Value,
         output: &mut Value,
     ) {
@@ -614,7 +615,7 @@ impl Query {
     fn format_float(
         &self,
         parameters: &mut FormatParameters,
-        path: &[ResponsePathElement<'_>],
+        path: &[ResponsePathElement],
         input: &mut Value,
         output: &mut Value,
     ) {
@@ -638,7 +639,7 @@ impl Query {
     fn format_boolean(
         &self,
         parameters: &mut FormatParameters,
-        path: &[ResponsePathElement<'_>],
+        path: &[ResponsePathElement],
         input: &mut Value,
         output: &mut Value,
     ) {
@@ -662,7 +663,7 @@ impl Query {
     fn format_string(
         &self,
         parameters: &mut FormatParameters,
-        path: &[ResponsePathElement<'_>],
+        path: &[ResponsePathElement],
         input: &mut Value,
         output: &mut Value,
     ) {
@@ -686,7 +687,7 @@ impl Query {
     fn format_id(
         &self,
         parameters: &mut FormatParameters,
-        path: &[ResponsePathElement<'_>],
+        path: &[ResponsePathElement],
         input: &mut Value,
         output: &mut Value,
     ) {
@@ -706,19 +707,25 @@ impl Query {
         }
     }
 
-    fn apply_selection_set<'a: 'b, 'b>(
-        &'a self,
-        selection_set: &'a [Selection],
-        parameters: &mut FormatParameters,
-        input: &mut Object,
-        output: &mut Object,
-        path: &mut Vec<ResponsePathElement<'b>>,
-        // the type under which we apply selections
-        current_type: &executable::Type,
-    ) -> Result<(), InvalidValue> {
-        // For skip and include, using .unwrap_or is legit here because
-        // validate_variables should have already checked that
-        // the variable is present and it is of the correct type
+    /// Spec §6.3.2 CollectFields + MergeSelectionSets.
+    ///
+    /// Traverses the selection set (recursing into fragments) and returns an ordered
+    /// map of response key → CollectedField.  Each entry holds the merged sub-selection
+    /// from all field occurrences with that response key across all applicable fragments.
+    ///
+    /// Fragment type conditions are evaluated against `runtime_type` (the concrete
+    /// __typename from the response, or the declared schema type as fallback).
+    /// `visited` prevents infinite loops from cyclic named-fragment references.
+    fn collect_fields(
+        &self,
+        selection_set: &[Selection],
+        runtime_type: &str,
+        schema: &ApiSchema,
+        variables: &Object,
+        visited: &mut HashSet<String>,
+    ) -> GroupedFields {
+        let mut grouped: GroupedFields = IndexMap::new();
+
         for selection in selection_set {
             match selection {
                 Selection::Field {
@@ -728,73 +735,29 @@ impl Query {
                     field_type,
                     include_skip,
                 } => {
-                    let field_name = alias.as_ref().unwrap_or(name);
-                    if include_skip.should_skip(parameters.variables) {
+                    if include_skip.should_skip(variables) {
                         continue;
                     }
-
-                    if name.as_str() == TYPENAME {
-                        let object_type = parameters
-                            .schema
-                            .get_object(current_type.inner_named_type())
-                            .or_else(|| {
-                                let input_value = input.get(field_name.as_str())?.as_str()?;
-                                parameters.schema.get_object(input_value)
+                    let response_key = alias.as_ref().unwrap_or(name);
+                    match grouped.entry(response_key.clone()) {
+                        indexmap::map::Entry::Vacant(e) => {
+                            e.insert(CollectedField {
+                                name: name.clone(),
+                                field_type: field_type.clone(),
+                                merged_selection: selection_set
+                                    .as_deref()
+                                    .map(|ss| ss.to_vec())
+                                    .unwrap_or_default(),
                             });
-
-                        if let Some(object_type) = object_type {
-                            output.insert((*field_name).clone(), object_type.name.as_str().into());
-                        } else {
-                            return Err(InvalidValue);
                         }
-                        continue;
-                    }
-
-                    if let Some(input_value) = input.get_mut(field_name.as_str()) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name.as_str()) {
-                            continue;
-                        }
-
-                        let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
-
-                        path.push(ResponsePathElement::Key(field_name.as_str()));
-                        let res = self.format_value(
-                            parameters,
-                            &field_type.0,
-                            input_value,
-                            output_value,
-                            path,
-                            selection_set,
-                        );
-                        path.pop();
-                        res?
-                    } else {
-                        if !output.contains_key(field_name.as_str()) {
-                            output.insert((*field_name).clone(), Value::Null);
-                        }
-                        if field_type.is_non_null() {
-                            parameters.errors.push(
-                                Error::builder()
-                                    .message(format!(
-                                        "Null value found for non-nullable type {}",
-                                        field_type.0.inner_named_type()
-                                    ))
-                                    .path(Path::from_response_slice(path))
-                                    .build(),
-                            );
-
-                            return Err(InvalidValue);
+                        indexmap::map::Entry::Occupied(mut e) => {
+                            if let Some(ss) = selection_set.as_deref() {
+                                e.get_mut().merged_selection.extend_from_slice(ss);
+                            }
                         }
                     }
                 }
+
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
@@ -803,95 +766,146 @@ impl Query {
                     defer_label: _,
                     known_type: _,
                 } => {
-                    if include_skip.should_skip(parameters.variables) {
+                    if include_skip.should_skip(variables) {
                         continue;
                     }
-
-                    // NOTE: The subtype logic is strange. We are trying to determine if a fragment
-                    // should be applied, but we don't have the __typename of the selection set
-                    // (otherwise, we would be on a different branch). Consider the following query
-                    // for a union Thing = Foo | Bar:
-                    // { thing { ... on Foo { foo }, ... on Bar { bar } } }
-                    //
-                    // As we process the `... on Foo` fragment, `Foo` is `type_condition` and
-                    // `Thing` is `current_type`, we *could* reverse the order in calling
-                    // `is_subtype` and apply the fragment; however, the same is true for the `Bar`
-                    // fragment. Without the type info of the data we have in our response, we
-                    // can't know which to apply (or if both should apply in the case of
-                    // interfaces).
-                    //
-                    // Without that information, this is the best we can do without construction a
-                    // much more complicated reformatting heuristic.
-                    let is_apply = current_type.inner_named_type().as_str()
-                        == type_condition.as_str()
-                        || parameters
-                            .schema
-                            .is_subtype(type_condition, current_type.inner_named_type().as_str());
-
-                    if is_apply {
-                        // if this is the filtered query, we must keep the __typename field because the original query must know the type
-                        if !self.is_original
-                            && let Some(input_type) = input.get(TYPENAME)
-                        {
-                            output.insert(TYPENAME, input_type.clone());
-                        }
-
-                        self.apply_selection_set(
-                            selection_set,
-                            parameters,
-                            input,
-                            output,
-                            path,
-                            current_type,
-                        )?;
+                    if !does_fragment_type_apply(runtime_type, type_condition, schema) {
+                        continue;
                     }
+                    let inner = self.collect_fields(
+                        selection_set,
+                        runtime_type,
+                        schema,
+                        variables,
+                        visited,
+                    );
+                    merge_grouped_fields(&mut grouped, inner);
                 }
+
                 Selection::FragmentSpread {
                     name,
-                    known_type: _,
                     include_skip,
                     defer: _,
                     defer_label: _,
+                    known_type: _,
                 } => {
-                    if include_skip.should_skip(parameters.variables) {
+                    if include_skip.should_skip(variables) {
                         continue;
                     }
-
-                    if let Some(Fragment {
+                    // Cycle guard: named fragments may reference each other.
+                    if !visited.insert(name.clone()) {
+                        continue;
+                    }
+                    let Some(Fragment {
                         type_condition,
                         selection_set,
                     }) = self.fragments.get(name)
-                    {
-                        // NOTE: This subtype logic is a bit strange. See the InlineFragment
-                        // branch for why its done this way.
-                        let is_apply = current_type.inner_named_type().as_str()
-                            == type_condition.as_str()
-                            || parameters.schema.is_subtype(
-                                type_condition,
-                                current_type.inner_named_type().as_str(),
-                            );
-
-                        if is_apply {
-                            // if this is the filtered query, we must keep the __typename field because the original query must know the type
-                            if !self.is_original
-                                && let Some(input_type) = input.get(TYPENAME)
-                            {
-                                output.insert(TYPENAME, input_type.clone());
-                            }
-
-                            self.apply_selection_set(
-                                selection_set,
-                                parameters,
-                                input,
-                                output,
-                                path,
-                                current_type,
-                            )?;
-                        }
-                    } else {
-                        // the fragment should have been already checked with the schema
+                    else {
                         failfast_debug!("missing fragment named: {}", name);
+                        continue;
+                    };
+                    if !does_fragment_type_apply(runtime_type, type_condition, schema) {
+                        continue;
                     }
+                    let inner = self.collect_fields(
+                        selection_set,
+                        runtime_type,
+                        schema,
+                        variables,
+                        visited,
+                    );
+                    merge_grouped_fields(&mut grouped, inner);
+                }
+            }
+        }
+
+        grouped
+    }
+
+    fn apply_selection_set(
+        &self,
+        selection_set: &[Selection],
+        parameters: &mut FormatParameters,
+        input: &mut Object,
+        output: &mut Object,
+        path: &mut Vec<ResponsePathElement>,
+        // the type under which we apply selections
+        current_type: &executable::Type,
+    ) -> Result<(), InvalidValue> {
+        // Determine the runtime concrete type for fragment discrimination
+        // (spec §6.3.2 DoesFragmentTypeApply uses the actual __typename, not the declared type).
+        let runtime_type = input
+            .get(TYPENAME)
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| current_type.inner_named_type().as_str());
+
+        // For filtered (non-original) queries, propagate __typename into the output so
+        // downstream processing retains type information when reconstructing responses.
+        if !self.is_original
+            && let Some(input_type) = input.get(TYPENAME)
+        {
+            output.insert(TYPENAME, input_type.clone());
+        }
+
+        // Phase 1 — CollectFields (spec §6.3.2): traverse the entire selection set,
+        // resolve all fragments, apply type conditions against runtime_type, and merge
+        // sub-selections for fields sharing a response key.
+        let grouped = self.collect_fields(
+            selection_set,
+            runtime_type,
+            parameters.schema,
+            parameters.variables,
+            &mut HashSet::new(),
+        );
+
+        // Phase 2 — ExecuteSelectionSet: iterate the grouped map and process each
+        // response key exactly once.  Because every key is visited at most once there
+        // is no risk of a later fragment overwriting null-propagation applied by an
+        // earlier one (ROUTER-1598).
+        for (response_key, field) in grouped {
+            if field.name.as_str() == TYPENAME {
+                let object_type = parameters
+                    .schema
+                    .get_object(current_type.inner_named_type())
+                    .or_else(|| {
+                        let input_value = input.get(response_key.as_str())?.as_str()?;
+                        parameters.schema.get_object(input_value)
+                    });
+
+                if let Some(object_type) = object_type {
+                    output.insert(response_key.clone(), object_type.name.as_str().into());
+                } else {
+                    return Err(InvalidValue);
+                }
+                continue;
+            }
+
+            if let Some(input_value) = input.get_mut(response_key.as_str()) {
+                let output_value = output.entry(response_key.clone()).or_insert(Value::Null);
+                path.push(ResponsePathElement::Key(response_key.clone()));
+                let res = self.format_value(
+                    parameters,
+                    &field.field_type.0,
+                    input_value,
+                    output_value,
+                    path,
+                    &field.merged_selection,
+                );
+                path.pop();
+                res?
+            } else {
+                output.entry(response_key.clone()).or_insert(Value::Null);
+                if field.field_type.is_non_null() {
+                    parameters.errors.push(
+                        Error::builder()
+                            .message(format!(
+                                "Null value found for non-nullable type {}",
+                                field.field_type.0.inner_named_type()
+                            ))
+                            .path(Path::from_response_slice(path))
+                            .build(),
+                    );
+                    return Err(InvalidValue);
                 }
             }
         }
@@ -899,136 +913,59 @@ impl Query {
         Ok(())
     }
 
-    fn apply_root_selection_set<'a: 'b, 'b>(
-        &'a self,
+    fn apply_root_selection_set(
+        &self,
         root_type_name: &str,
-        selection_set: &'a [Selection],
+        selection_set: &[Selection],
         parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
-        path: &mut Vec<ResponsePathElement<'b>>,
+        path: &mut Vec<ResponsePathElement>,
     ) -> Result<(), InvalidValue> {
-        for selection in selection_set {
-            match selection {
-                Selection::Field {
-                    name,
-                    alias,
-                    selection_set,
-                    field_type,
-                    include_skip,
-                } => {
-                    if include_skip.should_skip(parameters.variables) {
-                        continue;
-                    }
+        // Phase 1 — CollectFields: root types (Query/Mutation/Subscription) are always
+        // concrete, so runtime_type == root_type_name — no __typename lookup required.
+        let grouped = self.collect_fields(
+            selection_set,
+            root_type_name,
+            parameters.schema,
+            parameters.variables,
+            &mut HashSet::new(),
+        );
 
-                    let field_name = alias.as_ref().unwrap_or(name);
-                    let field_name_str = field_name.as_str();
+        // Phase 2 — ExecuteSelectionSet: one pass, each response key processed exactly once.
+        for (response_key, field) in grouped {
+            let response_key_str = response_key.as_str();
 
-                    if name.as_str() == TYPENAME {
-                        if !output.contains_key(field_name_str) {
-                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
-                        }
-                    } else if let Some(input_value) = input.get_mut(field_name_str) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name_str) {
-                            continue;
-                        }
+            if field.name.as_str() == TYPENAME {
+                output.insert(response_key.clone(), Value::String(root_type_name.into()));
+                continue;
+            }
 
-                        let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
-                        path.push(ResponsePathElement::Key(field_name_str));
-                        let res = self.format_value(
-                            parameters,
-                            &field_type.0,
-                            input_value,
-                            output_value,
-                            path,
-                            selection_set,
-                        );
-                        path.pop();
-                        res?
-                    } else if field_type.is_non_null() {
-                        parameters.errors.push(
-                            Error::builder()
-                                .message(format!(
-                                    "Cannot return null for non-nullable field {root_type_name}.{field_name_str}"
-                                ))
-                                .path(Path::from_response_slice(path))
-                                .build(),
-                        );
-                        return Err(InvalidValue);
-                    } else {
-                        output.insert(field_name.clone(), Value::Null);
-                    }
-                }
-                Selection::InlineFragment {
-                    type_condition,
-                    selection_set,
-                    include_skip,
-                    ..
-                } => {
-                    if include_skip.should_skip(parameters.variables) {
-                        continue;
-                    }
-
-                    // check if the fragment matches the input type directly, and if not, check if the
-                    // input type is a subtype of the fragment's type condition (interface, union)
-                    let is_apply = (root_type_name == type_condition.as_str())
-                        || parameters.schema.is_subtype(type_condition, root_type_name);
-
-                    if is_apply {
-                        self.apply_root_selection_set(
-                            root_type_name,
-                            selection_set,
-                            parameters,
-                            input,
-                            output,
-                            path,
-                        )?;
-                    }
-                }
-                Selection::FragmentSpread {
-                    name,
-                    known_type: _,
-                    include_skip,
-                    defer: _,
-                    defer_label: _,
-                } => {
-                    if include_skip.should_skip(parameters.variables) {
-                        continue;
-                    }
-
-                    if let Some(Fragment {
-                        type_condition,
-                        selection_set,
-                    }) = self.fragments.get(name)
-                    {
-                        // check if the fragment matches the input type directly, and if not, check if the
-                        // input type is a subtype of the fragment's type condition (interface, union)
-                        let is_apply = (root_type_name == type_condition.as_str())
-                            || parameters.schema.is_subtype(type_condition, root_type_name);
-
-                        if is_apply {
-                            self.apply_root_selection_set(
-                                root_type_name,
-                                selection_set,
-                                parameters,
-                                input,
-                                output,
-                                path,
-                            )?;
-                        }
-                    } else {
-                        // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
-                    }
-                }
+            if let Some(input_value) = input.get_mut(response_key_str) {
+                let output_value = output.entry(response_key.clone()).or_insert(Value::Null);
+                path.push(ResponsePathElement::Key(response_key.clone()));
+                let res = self.format_value(
+                    parameters,
+                    &field.field_type.0,
+                    input_value,
+                    output_value,
+                    path,
+                    &field.merged_selection,
+                );
+                path.pop();
+                res?
+            } else if field.field_type.is_non_null() {
+                parameters.errors.push(
+                    Error::builder()
+                        .message(format!(
+                            "Cannot return null for non-nullable field {root_type_name}.{response_key_str}"
+                        ))
+                        .path(Path::from_response_slice(path))
+                        .build(),
+                );
+                return Err(InvalidValue);
+            } else {
+                output.insert(response_key.clone(), Value::Null);
             }
         }
 
@@ -1178,6 +1115,66 @@ impl Query {
         self.defer_stats.has_unconditional_defer || defer_conditions.bits != 0
     }
 }
+
+// ---------------------------------------------------------------------------
+// CollectFields — spec §6.3.2
+// ---------------------------------------------------------------------------
+
+/// A single response key's merged representation after CollectFields.
+///
+/// When a field appears in multiple fragments with the same response key, the spec
+/// requires their sub-selections to be concatenated (MergeSelectionSets §6.3.2) and
+/// the field executed exactly once with the merged sub-selection.
+struct CollectedField {
+    name: ByteString,
+    field_type: FieldType,
+    /// Merged sub-selection across all occurrences of this response key (MergeSelectionSets).
+    merged_selection: Vec<Selection>,
+}
+
+/// GroupedFields maps response key → CollectedField, preserving selection-set order.
+/// Uses IndexMap so that iteration order matches the query document (spec requirement).
+type GroupedFields = IndexMap<ByteString, CollectedField>;
+
+/// Spec §6.3.2 DoesFragmentTypeApply(objectType, fragmentType).
+///
+/// Returns true when the runtime concrete type satisfies the fragment's type condition:
+/// - Object: exact name match
+/// - Interface: runtime type implements the interface
+/// - Union: runtime type is a member of the union
+///
+/// `runtime_type` is the concrete __typename read from the response object (or the
+/// declared schema type when __typename is absent).
+/// `fragment_type` is the type condition of the inline fragment or named fragment.
+fn does_fragment_type_apply(runtime_type: &str, fragment_type: &str, schema: &ApiSchema) -> bool {
+    if runtime_type == fragment_type {
+        return true;
+    }
+    // is_subtype(abstract_type, maybe_subtype) → "does maybe_subtype belong to abstract_type?"
+    // We ask: does the runtime type belong to the fragment's type condition?
+    schema.is_subtype(fragment_type, runtime_type)
+}
+
+/// Merge an incoming GroupedFields map into a base map.
+///
+/// For matching response keys, concatenates merged_selection vecs (MergeSelectionSets).
+/// For new keys, inserts directly.
+fn merge_grouped_fields(base: &mut GroupedFields, incoming: GroupedFields) {
+    for (key, incoming_field) in incoming {
+        match base.entry(key) {
+            indexmap::map::Entry::Occupied(mut e) => {
+                e.get_mut()
+                    .merged_selection
+                    .extend(incoming_field.merged_selection);
+            }
+            indexmap::map::Entry::Vacant(e) => {
+                e.insert(incoming_field);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 /// Intermediate structure for arguments passed through the entire formatting
 struct FormatParameters<'a> {

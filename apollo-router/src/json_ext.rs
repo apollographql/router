@@ -811,12 +811,12 @@ pub enum PathElement {
 type TypeConditions = Vec<String>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ResponsePathElement<'a> {
+pub enum ResponsePathElement {
     /// An index path element.
     Index(usize),
 
     /// A key path element.
-    Key(&'a str),
+    Key(ByteString),
 }
 
 fn deserialize_flatten<'de, D>(deserializer: D) -> Result<Option<TypeConditions>, D::Error>
@@ -993,7 +993,7 @@ impl Path {
             s.iter()
                 .map(|x| match x {
                     ResponsePathElement::Index(index) => PathElement::Index(*index),
-                    ResponsePathElement::Key(s) => PathElement::Key(s.to_string(), None),
+                    ResponsePathElement::Key(s) => PathElement::Key(s.as_str().to_string(), None),
                 })
                 .collect(),
         )
