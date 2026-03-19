@@ -163,6 +163,10 @@ pub(crate) struct Merger {
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
     pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
     pub(in crate::merger) join_directive_identities: HashSet<Identity>,
+    /// Directives that are composed via `@join__directive` in the supergraph. Populated by
+    /// `validate_and_maybe_add_specs` from composition spec `use_join_directive`. Matches JS
+    /// `directivesUsingJoinDirective` (federation PR #3274).
+    pub(in crate::merger) directives_using_join_directive: HashSet<Name>,
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
     pub(in crate::merger) latest_federation_version_used: Version,
     pub(in crate::merger) applied_directives_to_merge: AppliedDirectivesToMerge,
@@ -237,6 +241,7 @@ impl Merger {
             schema_to_import_to_feature_url,
             link_spec_definition,
             join_directive_identities,
+            directives_using_join_directive: HashSet::new(),
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
             latest_federation_version_used,
@@ -960,14 +965,14 @@ impl Merger {
         if self
             .link_spec_definition
             .is_spec_type_name(&self.merged, name)
-            .unwrap_or(false)
+            .is_ok_and(|b| b)
         {
             return false;
         }
         if self
             .join_spec_definition
             .is_spec_type_name(&self.merged, name)
-            .unwrap_or(false)
+            .is_ok_and(|b| b)
         {
             return false;
         }
@@ -1696,11 +1701,11 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             if self
                 .link_spec_definition
                 .is_spec_directive_name(&self.merged, &directive_name)
-                .unwrap_or(false)
+                .is_ok_and(|b| b)
                 || self
                     .join_spec_definition
                     .is_spec_directive_name(&self.merged, &directive_name)
-                    .unwrap_or(false)
+                    .is_ok_and(|b| b)
             {
                 continue;
             }
@@ -2338,6 +2343,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         should_include_as_join_directive =
                             self.should_use_join_directive_for_url(&link.url);
 
+                        // Persist link when the spec uses @join__directive and the feature
+                        // identity is one of the known join-directive feature definitions.
                         if should_include_as_join_directive
                             && SPEC_REGISTRY.get_definition(&link.url).is_some()
                         {
@@ -2349,6 +2356,13 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 {
                     should_include_as_join_directive =
                         self.should_use_join_directive_for_url(&url_for_directive.link.url);
+                    if !should_include_as_join_directive
+                        && self
+                            .directives_using_join_directive
+                            .contains(&directive.name)
+                    {
+                        should_include_as_join_directive = true;
+                    }
                 }
 
                 if should_include_as_join_directive {

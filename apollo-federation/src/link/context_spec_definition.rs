@@ -29,6 +29,7 @@ use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveCompositionOptions;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
@@ -169,17 +170,17 @@ impl SpecDefinition for ContextSpecDefinition {
                 DirectiveLocation::Object,
                 DirectiveLocation::Union,
             ],
-            true,
-            Some(&|v| CONTEXT_VERSIONS.get_dyn_minimum_required_version(v)),
-            Some(Rc::new(Self::static_argument_transform)),
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|v| CONTEXT_VERSIONS.get_dyn_minimum_required_version(v),
+                static_argument_transform: Some(Rc::new(Self::static_argument_transform)),
+                use_join_directive: false,
+            }),
         );
         let from_context_spec = DirectiveSpecification::new(
             FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
             &[Self::field_argument_specification()],
             false,
             &[DirectiveLocation::ArgumentDefinition],
-            false,
-            None,
             None,
         );
         vec![Box::new(context_spec), Box::new(from_context_spec)]

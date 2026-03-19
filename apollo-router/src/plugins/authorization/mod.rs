@@ -140,6 +140,56 @@ pub(crate) struct UnauthorizedPaths {
     pub(crate) errors: ErrorConfig,
 }
 
+impl UnauthorizedPaths {
+    pub(crate) fn log_unauthorized_paths(&self) {
+        // nothing to do if we have no paths or we're not supposed to log
+        if self.paths.is_empty() || !self.errors.log {
+            return;
+        }
+
+        tracing::Span::current().in_scope(|| {
+            let unauthorized_paths = self
+                .paths
+                .iter()
+                .map(|path| path.to_string())
+                .collect::<Vec<_>>();
+
+            tracing::event!(tracing_core::Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
+        })
+    }
+
+    pub(crate) fn update_response_with_unauthorized_path_errors(
+        &self,
+        response: &mut graphql::Response,
+    ) {
+        let unauthorized_path_errors = self.paths.iter().map(|path| {
+            graphql::Error::builder()
+                .message("Unauthorized field or type")
+                .path(path.clone())
+                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
+                .build()
+        });
+
+        match self.errors.response {
+            ErrorLocation::Errors => {
+                response.errors.extend(unauthorized_path_errors);
+            }
+            ErrorLocation::Extensions => {
+                let serialized_auth_errors = unauthorized_path_errors
+                    .map(|err| {
+                        serde_json_bytes::to_value(err)
+                            .expect("error serialization should not fail")
+                    })
+                    .collect();
+                response
+                    .extensions
+                    .insert("authorizationErrors", Value::Array(serialized_auth_errors));
+            }
+            ErrorLocation::Disabled => {}
+        }
+    }
+}
+
 fn default_enable_directives() -> bool {
     true
 }

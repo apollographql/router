@@ -291,7 +291,7 @@ ryu = "1.0.15"
 apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 scopeguard = "1.2.0"
-tokio-tar = { package = "astral-tokio-tar", version = "0.5.3" }
+tokio-tar = { package = "astral-tokio-tar", version = "0.6.0" }
 blake3 = { version = "1.8.2", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
