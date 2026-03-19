@@ -73,6 +73,7 @@ use std::marker::PhantomData;
 #[cfg(test)]
 use std::pin::Pin;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 #[cfg(test)]
 use futures::FutureExt;
@@ -140,13 +141,60 @@ where
     }
 }
 
-/// Noop guard won't do anything. it serves to unify the logic UpDownCounterGuard
+/// A RAII guard for an f64 histogram that automatically records elapsed time on drop.
+///
+/// This guard implements the RAII (Resource Acquisition Is Initialization) pattern
+/// to measure the duration of an operation. The start time is recorded when the
+/// guard is created; when the guard is dropped, it records the elapsed duration
+/// in seconds to the underlying histogram.
+///
+/// `f64` is used (rather than an integer type) so that sub-second durations are
+/// captured with full precision rather than being rounded to the nearest second.
+///
+/// It is essential that the same instrument is used throughout the lifetime of
+/// the guard; otherwise measurement drift can occur.
+#[doc(hidden)]
+#[must_use = "without holding the guard the timer records nothing"]
+pub struct HistogramTimerGuard {
+    histogram: opentelemetry::metrics::Histogram<f64>,
+    attributes: Vec<opentelemetry::KeyValue>,
+    start: Instant,
+}
+
+impl HistogramTimerGuard {
+    #[doc(hidden)]
+    pub fn new(
+        histogram: std::sync::Arc<opentelemetry::metrics::Histogram<f64>>,
+        attributes: &[opentelemetry::KeyValue],
+    ) -> Self {
+        // It is essential that we take the histogram out of the arc rather than cloning the arc.
+        // Instruments rely on weak references to allow callsite invalidation on config reload.
+        // Holding the Arc directly would keep a strong reference and prevent invalidation.
+        Self {
+            histogram: (*histogram).clone(),
+            attributes: attributes.to_vec(),
+            start: Instant::now(),
+        }
+    }
+}
+
+impl Drop for HistogramTimerGuard {
+    /// Records the elapsed time in seconds when the guard is dropped.
+    ///
+    /// The duration is measured from when the guard was created to when it is dropped.
+    fn drop(&mut self) {
+        self.histogram
+            .record(self.start.elapsed().as_secs_f64(), &self.attributes);
+    }
+}
+
+/// Noop guard won't do anything. it serves to unify the logic with UpDownCounterGuard and HistogramTimerGuard
 #[doc(hidden)]
 pub struct NoopGuard<I, T> {
     _phantom: PhantomData<(I, T)>,
 }
 impl<I, T> NoopGuard<I, T> {
-    /// Noop guard won't do anything. it serves to unify the logic UpDownCounterGuard
+    /// Noop guard won't do anything. it serves to unify the logic with UpDownCounterGuard and HistogramTimerGuard
     #[doc(hidden)]
     pub fn new(_instrument: I, _value: T, _attributes: &[opentelemetry::KeyValue]) -> Self {
         NoopGuard {
@@ -1193,6 +1241,69 @@ macro_rules! u64_histogram_with_unit {
 
     ($name:literal, $description:literal, $unit:literal, $value: expr) => {
         metric!(u64, histogram, crate::metrics::NoopGuard, record, $name, $description, $unit, $value, []);
+    };
+}
+
+/// Get or create an f64 histogram timer metric and return a guard that records elapsed time on drop.
+///
+/// The metric must include a description. Unlike other histogram macros, no value is passed
+/// directly — instead, the macro returns a [`HistogramTimerGuard`] that starts a timer on
+/// creation and records the elapsed duration in seconds (`"s"`) when dropped.
+///
+/// **Deprecated:** This macro does not record an explicit unit. Use
+/// [`f64_histogram_timer_with_unit!`] instead, which explicitly records the unit as `"s"`.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `f64_histogram_timer_with_unit` instead")]
+macro_rules! f64_histogram_timer {
+    ($($name:ident).+, $description:literal, $($attrs:tt)*) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, stringify!($($name).+), $description, parse_attributes!($($attrs)*))
+    };
+
+    ($name:literal, $description:literal, $($attrs:tt)*) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, $name, $description, parse_attributes!($($attrs)*))
+    };
+
+    ($name:literal, $description:literal) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, $name, $description, [])
+    };
+}
+
+/// Get or create an f64 histogram timer metric and return a guard that records elapsed time on drop.
+///
+/// The metric must include a description. No value is passed directly — instead, the macro
+/// returns a [`HistogramTimerGuard`] that starts a timer on creation and records the elapsed
+/// duration in seconds when dropped. The unit is always `"s"` (seconds) per the
+/// [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+///
+/// # Example
+///
+/// ```ignore
+/// let _timer = f64_histogram_timer_with_unit!(
+///     "apollo.router.operation.duration",
+///     "Time to process an operation",
+///     "attr" = "val"
+/// );
+/// // ... do work ...
+/// // elapsed seconds are recorded to the histogram when _timer is dropped
+/// ```
+#[allow(unused_macros)]
+macro_rules! f64_histogram_timer_with_unit {
+    ($($name:ident).+, $description:literal, $($attrs:tt)*) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, stringify!($($name).+), $description, "s", parse_attributes!($($attrs)*))
+    };
+
+    ($name:literal, $description:literal, $($attrs:tt)*) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, $name, $description, "s", parse_attributes!($($attrs)*))
+    };
+
+    ($name:literal, $description:literal) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, $name, $description, "s", [])
     };
 }
 
