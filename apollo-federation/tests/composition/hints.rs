@@ -837,14 +837,14 @@ mod description_inconsistencies {
         assert_has_hint(
             &result,
             "INCONSISTENT_DESCRIPTION",
-            r#"The schema definition has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Subgraph2"):
-  """
-  Entry point for the API
-  """
-In subgraph "Subgraph1", the description is:
+            r#"The schema definition has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Subgraph1"):
   """
   Queries to the API
     - a: gives you a int
+  """
+In subgraph "Subgraph2", the description is:
+  """
+  Entry point for the API
   """"#,
         );
     }
@@ -893,13 +893,13 @@ In subgraph "Subgraph1", the description is:
         assert_has_hint(
             &result,
             "INCONSISTENT_DESCRIPTION",
-            r#"Element "T.f" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraphs "Subgraph2" and "Subgraph3"):
-  """
-  Return a super secret integer
-  """
-In subgraph "Subgraph1", the description is:
+            r#"Element "T.f" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Subgraph1"):
   """
   I don't know what I'm doing
+  """
+In subgraphs "Subgraph2" and "Subgraph3", the description is:
+  """
+  Return a super secret integer
   """"#,
         );
     }
@@ -944,17 +944,16 @@ In subgraph "Subgraph1", the description is:
         assert_has_hint(
             &result,
             "INCONSISTENT_DESCRIPTION",
-            r#"Element "Order" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Orders"):
-  """
-  Reference type to order entity in ONE GRAPH
-  """
-In subgraph "Users", the description is:
+            r#"Element "Order" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Users"):
   """
   Represents a user order
+  """
+In subgraph "Orders", the description is:
+  """
+  Reference type to order entity in ONE GRAPH
   """"#,
         );
 
-        // Supergraph should have chosen the lexicographically first description text.
         let api_schema = result
             .to_api_schema(Default::default())
             .expect("api schema");
@@ -966,15 +965,14 @@ In subgraph "Users", the description is:
         let desc = order_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
             desc.trim(),
-            "Reference type to order entity in ONE GRAPH",
-            "supergraph should use lexicographically first description text"
+            "Represents a user order",
+            "supergraph should use chosen description"
         );
     }
 
     #[test]
     fn hints_on_inconsistent_description_for_merged_type_three_subgraphs_determinism() {
         // Three subgraphs define type Product with different descriptions (each count 1).
-        // The chosen description must be lexicographically first by description text.
         let catalog_subgraph = ServiceDefinition {
             name: "Catalog",
             type_defs: r#"
@@ -1018,8 +1016,6 @@ In subgraph "Users", the description is:
             compose_as_fed2_subgraphs(&[catalog_subgraph, inventory_subgraph, reviews_subgraph])
                 .unwrap();
 
-        // Lexicographically by description text:
-        // "Inventory product entity" < "Product for reviews" < "Product in the catalog".
         let api_schema = result
             .to_api_schema(Default::default())
             .expect("api schema");
@@ -1031,8 +1027,8 @@ In subgraph "Users", the description is:
         let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
             desc.trim(),
-            "Inventory product entity",
-            "supergraph should use lexicographically first description text"
+            "Product in the catalog",
+            "supergraph should use chosen description"
         );
     }
 
@@ -1095,7 +1091,7 @@ In subgraph "Users", the description is:
         let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
             desc.trim(),
-            "Inventory product entity",
+            "Product in the catalog",
             "supergraph description must be deterministic regardless of subgraph order"
         );
     }
