@@ -434,6 +434,16 @@ impl PluginPrivate for Telemetry {
                     .and_then(|v| v.to_str().ok())
                     .is_none_or(is_valid_client_library_value);
                 if !library_name_valid || !library_version_valid {
+                    if !library_name_valid {
+                        ::tracing::warn!(
+                            "Rejecting request: invalid client library name header value"
+                        );
+                    }
+                    if !library_version_valid {
+                        ::tracing::warn!(
+                            "Rejecting request: invalid client library version header value"
+                        );
+                    }
                     Ok(ControlFlow::Break(
                         router::Response::error_builder()
                             .status_code(StatusCode::BAD_REQUEST)

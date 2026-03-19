@@ -49,6 +49,9 @@ impl Plugin for EnhancedClientAwareness {
                         .and_then(|value| value.as_str())
                     {
                         if !is_valid_client_library_value(client_library_name) {
+                            tracing::warn!(
+                                "Rejecting request: invalid client library name extension value"
+                            );
                             return Ok(ControlFlow::Break(
                                 supergraph::Response::error_builder()
                                     .status_code(StatusCode::BAD_REQUEST)
@@ -66,6 +69,9 @@ impl Plugin for EnhancedClientAwareness {
                         .and_then(|value| value.as_str())
                     {
                         if !is_valid_client_library_value(client_library_version) {
+                            tracing::warn!(
+                                "Rejecting request: invalid client library version extension value"
+                            );
                             return Ok(ControlFlow::Break(
                                 supergraph::Response::error_builder()
                                     .status_code(StatusCode::BAD_REQUEST)
