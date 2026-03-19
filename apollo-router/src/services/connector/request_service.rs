@@ -26,12 +26,12 @@ use parking_lot::Mutex;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 use tower::ServiceExt;
-use tower::buffer::Buffer;
 
 use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
@@ -150,7 +150,8 @@ impl Response {
 
 #[derive(Clone)]
 pub(crate) struct ConnectorRequestServiceFactory {
-    pub(crate) services: Arc<HashMap<String, Buffer<Request, BoxFuture<'static, ServiceResult>>>>,
+    pub(crate) services:
+        Arc<HashMap<String, UnconstrainedBuffer<Request, BoxFuture<'static, ServiceResult>>>>,
 }
 
 impl ConnectorRequestServiceFactory {
@@ -161,7 +162,7 @@ impl ConnectorRequestServiceFactory {
     ) -> Self {
         let mut map = HashMap::with_capacity(connector_sources.len());
         for source in connector_sources.iter() {
-            let service = Buffer::new(
+            let service = UnconstrainedBuffer::new(
                 plugins
                     .iter()
                     .rev()
