@@ -39,31 +39,26 @@ impl<T: Debug> Debug for RetryMetricExporter<T> {
 }
 
 impl<T: PushMetricExporter> PushMetricExporter for RetryMetricExporter<T> {
-    fn export(
-        &self,
-        metrics: &ResourceMetrics,
-    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        async move {
-            let mut last_err = None;
-            for attempt in 0..self.max_retries {
-                match self.inner.export(metrics).await {
-                    Ok(()) => return Ok(()),
-                    Err(err) => {
-                        tracing::debug!(
-                            attempt = attempt + 1,
-                            max_retries = self.max_retries,
-                            error = %err,
-                            "metric export attempt failed, will retry"
-                        );
-                        last_err = Some(err);
-                        if attempt + 1 < self.max_retries {
-                            tokio::time::sleep(BASE_BACKOFF * 2u32.pow(attempt as u32)).await;
-                        }
+    async fn export(&self, metrics: &ResourceMetrics) -> OTelSdkResult {
+        let mut last_err = None;
+        for attempt in 0..self.max_retries {
+            match self.inner.export(metrics).await {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    tracing::debug!(
+                        attempt = attempt + 1,
+                        max_retries = self.max_retries,
+                        error = %err,
+                        "metric export attempt failed, will retry"
+                    );
+                    last_err = Some(err);
+                    if attempt + 1 < self.max_retries {
+                        tokio::time::sleep(BASE_BACKOFF * 2u32.pow(attempt as u32)).await;
                     }
                 }
             }
-            Err(last_err.expect("max_retries must be >= 1"))
         }
+        Err(last_err.expect("max_retries must be >= 1"))
     }
 
     fn force_flush(&self) -> OTelSdkResult {
