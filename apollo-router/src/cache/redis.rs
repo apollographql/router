@@ -448,10 +448,14 @@ impl RedisCacheStorage {
         // is called by us (it's never called within fred)
         //
         // Don't mistake connections for clients. This is a pool of clients that handles
-        // connections, and if a connection breaks, fred will internally (attempt to) recreate it
+        // connections, and if a connection breaks, fred will internally (attempt to) recreate it.
+        // Configuration for that is governed below in the ReconnectPolicy struct
+        let client_pool = self.inner.clone();
         tokio::spawn(async move {
             let results = join_all(client_handles).await;
             ACTIVE_CLIENT_COUNT.fetch_sub(results.len() as u64, Ordering::Relaxed);
+            // mark the client for recreation by setting `inner` to None
+            client_pool.write().take();
         });
 
         let heartbeat_clients = pooled_client.clone();
