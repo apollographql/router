@@ -1201,8 +1201,9 @@ thread_local! {
     #[cfg(test)]
     pub(crate) static CACHE_CALLSITE: std::sync::atomic::AtomicBool = const {std::sync::atomic::AtomicBool::new(false)};
 }
-macro_rules! metric {
-    ($ty:ident, $instrument:ident, $guard: ty, $mutation:ident, $name:expr, $description:literal, $unit:literal, $value:expr, $attrs:expr) => {
+
+macro_rules! get_or_create_metric {
+    ($ty:ident, $instrument:ident, $name:expr, $description:literal, $unit:literal) => {
         // The way this works is that we have a static at each call site that holds a weak reference to the instrument.
         // We make a call we try to upgrade the weak reference. If it succeeds we use the instrument.
         // Otherwise we create a new instrument and update the static.
@@ -1242,7 +1243,7 @@ macro_rules! metric {
                             parking_lot::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
                         })
                         .lock();
-                    let instrument = if let Some(instrument) = instrument_guard.upgrade() {
+                    if let Some(instrument) = instrument_guard.upgrade() {
                         // Fast path, we got the instrument, drop the mutex guard immediately.
                         drop(instrument_guard);
                         instrument
@@ -1254,10 +1255,7 @@ macro_rules! metric {
                         // We've updated the instrument and got a strong reference to it. We can drop the mutex guard now.
                         drop(instrument_guard);
                         instrument_ref
-                    };
-                    let attrs : &[opentelemetry::KeyValue] = &$attrs;
-                    instrument.$mutation($value, attrs);
-                    $guard::new(instrument.clone(), $value, attrs)
+                    }
                 }
                 else {
                     // This is only for testing.
@@ -1266,10 +1264,21 @@ macro_rules! metric {
                     let meter_provider = crate::metrics::meter_provider();
                     let meter = opentelemetry::metrics::MeterProvider::meter(&meter_provider, "apollo/router");
                     let instrument = create_instrument_fn(meter);
-                    let attrs : &[opentelemetry::KeyValue] = &$attrs;
-                    instrument.$mutation($value, attrs);
-                    $guard::new(std::sync::Arc::new(instrument.clone()), $value, attrs)
+                    std::sync::Arc::new(instrument)
                 }
+            }
+        }
+    };
+}
+
+macro_rules! metric {
+    ($ty:ident, $instrument:ident, $guard: ty, $mutation:ident, $name:expr, $description:literal, $unit:literal, $value:expr, $attrs:expr) => {
+        paste::paste! {
+            {
+                let instrument = get_or_create_metric!($ty, $instrument, $name, $description, $unit);
+                let attrs: &[opentelemetry::KeyValue] = &$attrs;
+                instrument.$mutation($value, attrs);
+                $guard::new(instrument.clone(), $value, attrs)
             }
         }
     };
