@@ -623,7 +623,7 @@ impl RedisCacheStorage {
                 // next attempt, so this should be a temporary failure
                 let error = RedisError::new(
                     RedisErrorKind::Unknown,
-                    "client being recreated after connection interrupt, retry command",
+                    "client being recreated after connection interrupt",
                 );
                 record_redis_error(&error, self.redis_client_config.caller, "client");
                 Err(error)
@@ -668,7 +668,7 @@ impl RedisCacheStorage {
                 // next attempt, so this should be a temporary failure
                 let error = RedisError::new(
                     RedisErrorKind::Unknown,
-                    "client being recreated after connection interrupt, retry command",
+                    "client being recreated after connection interrupt",
                 );
                 record_redis_error(&error, self.redis_client_config.caller, "client");
                 Err(error)
@@ -1178,6 +1178,7 @@ mod test {
     mod test_against_redis {
         use std::collections::HashMap;
 
+        use fred::interfaces::ClientLike;
         use fred::types::cluster::ClusterRouting;
         use itertools::Itertools;
         use rand::Rng as _;
@@ -1471,31 +1472,6 @@ mod test {
             Ok(())
         }
 
-        #[tokio::test]
-        #[rstest::rstest]
-        async fn create_client_replaces_existing_inner(
-            #[values(true, false)] clustered: bool,
-        ) -> Result<(), BoxError> {
-            let storage = create_and_connect(clustered).await?;
-
-            let old_heartbeat = storage
-                .inner
-                .read()
-                .as_ref()
-                .unwrap()
-                .heartbeat_abort_handle
-                .clone();
-            assert!(!old_heartbeat.is_finished());
-
-            let storage = storage.create_client().await?;
-            tokio::task::yield_now().await;
-
-            assert!(old_heartbeat.is_finished());
-            assert!(storage.inner.read().is_some());
-            assert!(storage.client().await.is_ok());
-            Ok(())
-        }
-
         #[tokio::test(flavor = "multi_thread")]
         #[rstest::rstest]
         async fn concurrent_recreation_does_not_panic_or_deadlock(
@@ -1606,6 +1582,38 @@ mod test {
                 assert_eq!(value.0, expected_value);
             }
 
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn pool_shutdown_marks_inner_for_recreation(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+            assert!(storage.inner.read().is_some());
+
+            let pool_clone = {
+                let guard = storage.inner.read();
+                guard.as_ref().unwrap().pool.clone()
+            };
+            pool_clone.quit().await?;
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            assert!(
+                storage.inner.read().is_none(),
+                "inner should be None after pool shutdown"
+            );
+
+            let result = storage.client().await;
+
+            assert!(result.is_err(), "first call after abort should error");
+            assert!(
+                storage.inner.read().is_some(),
+                "inner should be repopulated after recreation"
+            );
+            assert!(storage.client().await.is_ok());
             Ok(())
         }
 
