@@ -1,6 +1,6 @@
 ### Pin transitive `h2` dependency at minimum v0.4.13 to pick up critical flow-control, deadlock, and tracing fixes ([PR #9033](https://github.com/apollographql/router/pull/9033))
 
-Updates the transitive `h2` dependency `0.4.12 → 0.4.13`. Because `h2` is pulled in via `hyper` and not declared directly, Renovate does not manage it — this PR adds `h2` to `[workspace.dependencies]` and declares it in `apollo-router` with `h2.workspace = true` to enforce the minimum version floor and allow Renovate to manage future bumps. There are no API or behavioral changes to router code; only the `Cargo.toml` declarations and `Cargo.lock` pin are affected.
+Updates the transitive `h2` dependency `0.4.12 → 0.4.13`. Because `h2` is pulled in via `hyper` and not declared directly, Renovate does not manage it — this PR adds an explicit `h2 = "0.4.13"` declaration to `apollo-router/Cargo.toml` to enforce the minimum version floor and allow Renovate to manage future bumps. There are no API or behavioral changes to router code; only the `Cargo.toml` declaration and `Cargo.lock` pin are affected.
 
 `h2` 0.4.13 (released January 5, 2026) contains three fixes directly relevant to the router, which uses h2 exclusively as a client when connecting to subgraphs:
 
