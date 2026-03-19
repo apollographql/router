@@ -7095,3 +7095,576 @@ fn filtered_defer_fragment() {
 
     assert_json_snapshot!(response);
 }
+
+// ---------------------------------------------------------------------------
+// ROUTER-1598 regression: null propagation must survive fragment merging
+// ---------------------------------------------------------------------------
+//
+// The CollectFields fix works differently from a guard-based approach:
+// instead of short-circuiting during a second sequential pass, CollectFields
+// pre-merges all fragment selections for a given response key before any
+// execution begins.  Each key is then processed exactly once — so there is
+// no second pass that could overwrite nullification applied by the first.
+
+// Schema and query shared across the union-type nullification tests below.
+// The key shape: two named fragments on Thing (the parent), both selecting
+// the same nested field `collection: U` but through different sub-selections.
+// Because both fragments are on Thing (not on union members A/B), the
+// old sequential formatter would encounter `collection` twice in the same
+// apply_selection_set call — exactly the condition ROUTER-1598 exposed.
+const NULLIFICATION_SCHEMA: &str = "
+    type Query {
+        thing: Thing
+    }
+    type Thing {
+        collection: U
+    }
+    union U = A | B
+    type A {
+        id: ID!
+        a: String
+    }
+    type B {
+        b: String
+    }
+";
+
+// BThingFrag selects __typename so the bug output is the recognisable
+// {"__typename":"A"} rather than {}.
+const NULLIFICATION_QUERY: &str = "
+    query TestQuery {
+        thing {
+            ...AThingFrag
+            ...BThingFrag
+        }
+    }
+    fragment AThingFrag on Thing {
+        collection {
+            ... on A { id a }
+        }
+    }
+    fragment BThingFrag on Thing {
+        collection {
+            __typename
+            ... on B { b }
+        }
+    }
+";
+
+#[test]
+fn null_not_propagated_when_nonnull_field_is_null_across_fragments() {
+    // FragA selects product.review { body } (body is String! — non-null).
+    // body is null in the response, so review propagates to null.
+    // FragB also selects product.review { rating } (nullable).
+    // CollectFields merges both fragments before execution, so review is nullified
+    // exactly once.  FragB must NOT un-nullify review after the fact.
+    FormatTest::builder()
+        .schema(
+            "type Query { product: Product }
+             type Product { review: Review }
+             type Review { body: String! rating: Int }",
+        )
+        .fed2()
+        .query(
+            "{ product { ...WithBody ...WithRating } }
+             fragment WithBody on Product { review { body } }
+             fragment WithRating on Product { review { rating } }",
+        )
+        .response(json! {{
+            "product": { "review": { "__typename": "Review", "body": null, "rating": 5 } }
+        }})
+        .expected(json! {{
+            "product": { "review": null }
+        }})
+        .test();
+}
+
+#[test]
+fn null_propagation_result_is_independent_of_fragment_order() {
+    // Same scenario as above with fragments in reverse order — result must be identical.
+    FormatTest::builder()
+        .schema(
+            "type Query { product: Product }
+             type Product { review: Review }
+             type Review { body: String! rating: Int }",
+        )
+        .fed2()
+        .query(
+            "{ product { ...WithRating ...WithBody } }
+             fragment WithBody on Product { review { body } }
+             fragment WithRating on Product { review { rating } }",
+        )
+        .response(json! {{
+            "product": { "review": { "__typename": "Review", "body": null, "rating": 5 } }
+        }})
+        .expected(json! {{
+            "product": { "review": null }
+        }})
+        .test();
+}
+
+// --- union + __typename scenario (the originally reported shape) ---
+
+#[test]
+fn reformat_response_data_nested_fragment_spread_with_unions() {
+    // Happy path — id is present.
+    // CollectFields merges AThingFrag's `... on A { id a }` and BThingFrag's
+    // `__typename` + `... on B { b }` into a single grouped entry for
+    // `collection`.  Processing happens once; output gets { id, a, __typename }.
+    // Null propagation is never triggered so the single-pass guarantee is not
+    // exercised here — but the merge itself must produce the correct output.
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(NULLIFICATION_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A", "id": "a1", "a": null }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": { "id": "a1", "a": null, "__typename": "A" }
+            }
+        }))
+        .test();
+
+    // Primary bug — __typename is "A" but required `id: ID!` is absent.
+    //
+    // Without the fix (old sequential loop):
+    //   AThingFrag pass: collection = null  (null propagation from missing id)
+    //   BThingFrag pass: input["collection"] is non-null {"__typename":"A"},
+    //                    format_named_type overwrote null with {"__typename":"A"}.
+    //   Final output: {"collection": {"__typename": "A"}}  ← spec-incorrect
+    //
+    // With CollectFields:
+    //   Both fragments' sub-selections for `collection` are merged in Phase 1.
+    //   Phase 2 processes `collection` exactly once — null propagation from the
+    //   missing `id` field nullifies the whole object; there is no second pass.
+    //   Final output: {"collection": null}  ← correct
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(NULLIFICATION_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A" }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type ID",
+                    "path": ["thing", "collection"]
+                }
+            ]
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_data_fragment_nullification_inline() {
+    // Same bug exercised via inline fragments on the parent type instead of
+    // named fragment spreads.  Exercises the InlineFragment branch of
+    // collect_fields.
+    const INLINE_QUERY: &str = "
+        query TestQuery {
+            thing {
+                ... on Thing {
+                    collection {
+                        ... on A { id a }
+                    }
+                }
+                ... on Thing {
+                    collection {
+                        __typename
+                        ... on B { b }
+                    }
+                }
+            }
+        }
+    ";
+
+    // Happy path.
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(INLINE_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A", "id": "a1", "a": null }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": { "id": "a1", "a": null, "__typename": "A" }
+            }
+        }))
+        .test();
+
+    // Bug case — missing id must propagate null despite the second `... on Thing`
+    // inline fragment selecting the same `collection` field.
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(INLINE_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A" }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_data_fragment_nullification_non_null_parent() {
+    // Regression guard for propagation through a non-null parent field.
+    // When `collection` is `U!`, the InvalidValue from the missing `id` field
+    // propagates all the way up through apply_selection_set, causing
+    // format_named_type for `thing` to set thing = null.
+    // CollectFields does not change this propagation chain.
+    const NON_NULL_SCHEMA: &str = "
+        type Query {
+            thing: Thing
+        }
+        type Thing {
+            collection: U!
+        }
+        union U = A | B
+        type A {
+            id: ID!
+            a: String
+        }
+        type B {
+            b: String
+        }
+    ";
+
+    FormatTest::builder()
+        .schema(NON_NULL_SCHEMA)
+        .query(NULLIFICATION_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A" }
+            }
+        }))
+        .expected(json!({
+            "thing": null
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_data_fragment_nullification_reverse_order() {
+    // Regression guard: BThingFrag first, AThingFrag second.
+    //
+    // CollectFields processes the selection set in document order.  With B first,
+    // the `collection` entry is created from BThingFrag's sub-selection; then
+    // AThingFrag's sub-selection is appended (MergeSelectionSets).  Phase 2
+    // executes the merged selection exactly once.  The `... on A { id a }`
+    // sub-selection applies (runtime __typename = "A"), id is absent → null
+    // propagation fires → collection = null.  Result must equal forward order.
+    const REVERSED_QUERY: &str = "
+        query TestQuery {
+            thing {
+                ...BThingFrag
+                ...AThingFrag
+            }
+        }
+        fragment AThingFrag on Thing {
+            collection {
+                ... on A { id a }
+            }
+        }
+        fragment BThingFrag on Thing {
+            collection {
+                __typename
+                ... on B { b }
+            }
+        }
+    ";
+
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(REVERSED_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A" }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_data_fragment_merge_still_works() {
+    // Regression guard: two fragments on the same parent type that each
+    // contribute a different leaf field of the same nested object, with no
+    // non-null violation.  CollectFields merges the sub-selections; both fields
+    // must appear in the output — confirming MergeSelectionSets works correctly
+    // and does not lose fields from the second fragment.
+    const MERGE_SCHEMA: &str = "
+        type Query {
+            thing: Thing
+        }
+        type Thing {
+            review: Review
+        }
+        type Review {
+            id: ID!
+            body: String
+        }
+    ";
+    const MERGE_QUERY: &str = "
+        query TestQuery {
+            thing {
+                ...IdThingFrag
+                ...BodyThingFrag
+            }
+        }
+        fragment IdThingFrag   on Thing { review { id   } }
+        fragment BodyThingFrag on Thing { review { body } }
+    ";
+
+    FormatTest::builder()
+        .schema(MERGE_SCHEMA)
+        .query(MERGE_QUERY)
+        .response(json!({
+            "thing": {
+                "review": { "id": "r1", "body": "Great!" }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "review": { "id": "r1", "body": "Great!" }
+            }
+        }))
+        .test();
+}
+
+// --- CollectFields edge-case coverage (tasks 2, 3, 4, 5, 6) ---
+
+#[test]
+fn collect_fields_typename_absent_concrete_type_fragments_still_apply() {
+    // Task 2: __typename absent from response, concrete type field.
+    //
+    // `format_named_type` sets current_type = field_type (e.g. "Review") for
+    // concrete fields, regardless of whether __typename is in the response.
+    // In apply_selection_set the runtime_type fallback resolves to "Review".
+    // does_fragment_type_apply("Review", "Review") is an exact match → TRUE.
+    // All fragments on that concrete type must therefore apply even when the
+    // subgraph omits __typename.
+    FormatTest::builder()
+        .schema(
+            "type Query { product: Product }
+             type Product { review: Review }
+             type Review { id: ID! body: String }",
+        )
+        .fed2()
+        .query(
+            "{ product { ...F1 ...F2 } }
+             fragment F1 on Product { review { id   } }
+             fragment F2 on Product { review { body } }",
+        )
+        // No __typename in review — non-compliant subgraph.
+        .response(json!({ "product": { "review": { "id": "r1", "body": "hello" } } }))
+        .expected(json!({ "product": { "review": { "id": "r1", "body": "hello" } } }))
+        .test();
+}
+
+#[test]
+fn collect_fields_typename_absent_union_type_behavior() {
+    // Task 3: __typename absent from response, abstract (union) type field.
+    // Non-compliant subgraph behavior — the query planner always requests
+    // __typename for union/interface fields, so this path is only reachable
+    // when a subgraph omits it.
+    //
+    // Two sub-cases depending on whether the query itself selects __typename:
+    //
+    // Case A — query DOES select __typename on the union field (common):
+    //   Phase 2 encounters __typename as a response key.  current_type is the
+    //   abstract union name "U" (since format_named_type fell back to field_type).
+    //   get_object("U") is None (union, not an Object) and input has no
+    //   __typename to fall back on → Err(InvalidValue) → field nullified.
+    //   Behavior: collection = null.
+    //
+    // Case B — query does NOT select __typename on the union field:
+    //   runtime_type fallback = "U".  does_fragment_type_apply("U", "A") and
+    //   ("U", "B") both return false — no member fragments apply.
+    //   Phase 2 iterates an empty grouped map.
+    //   Behavior: collection = {} (empty object).
+    //
+    // Both match pre-refactor behavior.  The "null" outcome in Case A is
+    // arguably more correct — if the client asked for __typename and the
+    // subgraph didn't provide it, returning null avoids a partially-shaped
+    // response leaking through.
+
+    // Case A: query selects __typename — result is null.
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(NULLIFICATION_QUERY) // BThingFrag selects __typename on collection
+        .response(json!({ "thing": { "collection": { "id": "a1", "a": "x" } } }))
+        .expected(json!({ "thing": { "collection": null } }))
+        .test();
+
+    // Case B: query does not select __typename — result is empty object.
+    const NO_TYPENAME_QUERY: &str = "
+        query TestQuery {
+            thing {
+                collection {
+                    ... on A { id a }
+                    ... on B { b }
+                }
+            }
+        }
+    ";
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(NO_TYPENAME_QUERY)
+        .response(json!({ "thing": { "collection": { "id": "a1", "a": "x" } } }))
+        .expected(json!({ "thing": { "collection": {} } }))
+        .test();
+}
+
+#[test]
+fn collect_fields_merge_selection_deduplicates_same_field_from_two_fragments() {
+    // Task 4 (additional): a field selected by both fragments should appear
+    // exactly once in the output (MergeSelectionSets deduplication).
+    // If the same response key were processed twice, the second write would
+    // either clobber or duplicate the value.
+    FormatTest::builder()
+        .schema(
+            "type Query { thing: Thing }
+             type Thing { name: String }",
+        )
+        .fed2()
+        .query(
+            "{ thing { ...F1 ...F2 } }
+             fragment F1 on Thing { name }
+             fragment F2 on Thing { name }",
+        )
+        .response(json!({ "thing": { "name": "widget" } }))
+        .expected(json!({ "thing": { "name": "widget" } }))
+        .test();
+}
+
+#[test]
+fn collect_fields_skip_include_on_fragment_spreads() {
+    // Task 5: @skip/@include on fragment spreads are evaluated during
+    // CollectFields Phase 1, not at execution time.  A skipped spread must
+    // contribute nothing to the grouped map — as if it were absent from the
+    // query entirely.
+
+    // @skip(if: true) — spread must be fully absent from output.
+    FormatTest::builder()
+        .schema(
+            "type Query { thing: Thing }
+             type Thing { a: String b: String }",
+        )
+        .fed2()
+        .query(
+            "{ thing { ...FA @skip(if: true) ...FB } }
+             fragment FA on Thing { a }
+             fragment FB on Thing { b }",
+        )
+        .response(json!({ "thing": { "a": "hello", "b": "world" } }))
+        // FA is fully skipped; only FB's field `b` appears.
+        .expected(json!({ "thing": { "b": "world" } }))
+        .test();
+
+    // @include(if: false) — same result, opposite directive.
+    FormatTest::builder()
+        .schema(
+            "type Query { thing: Thing }
+             type Thing { a: String b: String }",
+        )
+        .fed2()
+        .query(
+            "{ thing { ...FA @include(if: false) ...FB } }
+             fragment FA on Thing { a }
+             fragment FB on Thing { b }",
+        )
+        .response(json!({ "thing": { "a": "hello", "b": "world" } }))
+        .expected(json!({ "thing": { "b": "world" } }))
+        .test();
+
+    // Variable-driven @skip — the variable must be consulted.
+    FormatTest::builder()
+        .schema(
+            "type Query { thing: Thing }
+             type Thing { a: String b: String }",
+        )
+        .fed2()
+        .query(
+            "query Q($s: Boolean!) { thing { ...FA @skip(if: $s) ...FB } }
+             fragment FA on Thing { a }
+             fragment FB on Thing { b }",
+        )
+        .variables(json!({ "s": true }))
+        .response(json!({ "thing": { "a": "hello", "b": "world" } }))
+        .expected(json!({ "thing": { "b": "world" } }))
+        .test();
+}
+
+#[test]
+fn collect_fields_unknown_typename_produces_null() {
+    // Task 6: a subgraph returns __typename that is not in the supergraph schema.
+    //
+    // format_named_type validates __typename against schema.types and nullifies
+    // the object when the type is unknown (not an Object or Interface).
+    // apply_selection_set is never reached — the null is set before CollectFields
+    // runs.  This means:
+    //   - output field = null
+    //   - no valueCompletion error (the nullification path pushes to `nullified`
+    //     but does not emit a spec error)
+    //   - if the field is non-null, null propagates to the nearest nullable parent
+    //
+    // This matches old-code behavior: the __typename guard in format_named_type
+    // predates the CollectFields refactor and is unchanged.
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(NULLIFICATION_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "NotARealType", "id": "x" }
+            }
+        }))
+        // Unknown __typename → format_named_type nullifies the object.
+        .expected(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        .test();
+
+    // Non-null union field: nullification propagates upward.
+    // Use a schema with collection: U! — same member types so NULLIFICATION_QUERY is valid.
+    const NON_NULL_U_SCHEMA: &str = "
+        type Query { thing: Thing }
+        type Thing { collection: U! }
+        union U = A | B
+        type A { id: ID! a: String }
+        type B { b: String }
+    ";
+    FormatTest::builder()
+        .schema(NON_NULL_U_SCHEMA)
+        .query(NULLIFICATION_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "NotARealType", "id": "x" }
+            }
+        }))
+        // collection: U! — null propagates up through thing.
+        .expected(json!({ "thing": null }))
+        .test();
+}
