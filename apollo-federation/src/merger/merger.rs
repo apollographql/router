@@ -2229,11 +2229,14 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 } else {
                     // Sort deterministically: by count (desc), then description lex (asc = pick first),
                     // then subgraph name (asc). First element is the chosen one.
-                    let chosen = descriptions.iter().max_by(|description_a, a), (description_b, b)| {
-                        b.0.cmp(&a.0)
-                            .then_with(|| description_a.cmp(description_b))
-                            .then_with(|| a.1.cmp(b.1))
-                    });
+                    let chosen =
+                        descriptions
+                            .iter()
+                            .max_by(|(description_a, a), (description_b, b)| {
+                                b.0.cmp(&a.0)
+                                    .then_with(|| description_a.cmp(description_b))
+                                    .then_with(|| a.1.cmp(b.1))
+                            });
                     (
                         chosen.map(|(description, _)| (*description).to_string()),
                         false,
