@@ -131,6 +131,7 @@ struct DropSafeRedisPool {
     // metrics and so on
     caller: &'static str,
     heartbeat_abort_handle: AbortHandle,
+    watcher_abort_handle: AbortHandle,
     // Metrics collector handles its own abort and spawns a background task for gauge updates
     metrics_collector: RedisMetricsCollector,
 }
@@ -155,6 +156,7 @@ impl Drop for DropSafeRedisPool {
         let inner = self.pool.clone();
         let caller = self.caller;
         self.heartbeat_abort_handle.abort();
+        self.watcher_abort_handle.abort();
         tokio::spawn(async move {
             let _ = inner
                 .quit()
@@ -450,12 +452,23 @@ impl RedisCacheStorage {
         // Don't mistake connections for clients. This is a pool of clients that handles
         // connections, and if a connection breaks, fred will internally (attempt to) recreate it.
         // Configuration for that is governed below in the ReconnectPolicy struct
-        let client_pool = self.inner.clone();
-        tokio::spawn(async move {
+
+        // WARN: we need a weak reference to the data (ie, Weak), not one that keeps the data around
+        // as long as it's being referenced (ie, Arc). This matters because when a config reload
+        // happens via hot-reload and the watcher holds a strong reference (Arc), the total
+        // refcount can be 2 for the previous config's pool; when RedisCacheStorage is dropped,
+        // that refcount goes down to 1, but that's not 0--it leaks the old pool. When using a weak
+        // reference, we don't increment the refcount by 1 for what's held in the watcher; rather,
+        // we have to upgrade() to see if that data still exists; this means that we can drop the
+        // RedisCacheStorage from the previous config without leaking it
+        let client_pool = Arc::downgrade(&self.inner);
+        let watcher_handle = tokio::spawn(async move {
             let results = join_all(client_handles).await;
             ACTIVE_CLIENT_COUNT.fetch_sub(results.len() as u64, Ordering::Relaxed);
-            // mark the client for recreation by setting `inner` to None
-            client_pool.write().take();
+            if let Some(inner) = client_pool.upgrade() {
+                inner.write().take();
+                tracing::info!("redis client aborted; marking for recreation");
+            }
         });
 
         let heartbeat_clients = pooled_client.clone();
@@ -476,6 +489,7 @@ impl RedisCacheStorage {
             pool: pooled_client_arc,
             caller: self.redis_client_config.caller,
             heartbeat_abort_handle: heartbeat_handle.abort_handle(),
+            watcher_abort_handle: watcher_handle.abort_handle(),
             metrics_collector,
         }))
     }
@@ -1582,6 +1596,70 @@ mod test {
                 assert_eq!(value.0, expected_value);
             }
 
+            Ok(())
+        }
+
+        /// Calling create_client() on an already-connected storage replaces the pool. The old
+        /// pool's watcher must not clear the new pool from `inner`.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn create_client_replaces_existing_inner(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            let (old_heartbeat, old_watcher) = {
+                let guard = storage.inner.read();
+                let inner = guard.as_ref().unwrap();
+                (
+                    inner.heartbeat_abort_handle.clone(),
+                    inner.watcher_abort_handle.clone(),
+                )
+            };
+            assert!(!old_heartbeat.is_finished());
+            assert!(!old_watcher.is_finished());
+
+            let storage = storage.create_client().await?;
+            tokio::task::yield_now().await;
+
+            assert!(old_heartbeat.is_finished());
+            assert!(old_watcher.is_finished());
+            assert!(
+                storage.inner.read().is_some(),
+                "new pool should not have been cleared by old watcher"
+            );
+            assert!(storage.client().await.is_ok());
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn independent_storages_simulate_config_reload(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let old_storage = create_and_connect(clustered).await?;
+            let (old_heartbeat, old_watcher) = {
+                let guard = old_storage.inner.read();
+                let inner = guard.as_ref().unwrap();
+                (
+                    inner.heartbeat_abort_handle.clone(),
+                    inner.watcher_abort_handle.clone(),
+                )
+            };
+
+            let new_storage = create_and_connect(clustered).await?;
+
+            // drop the old storage, simulating the router swapping to a new config
+            drop(old_storage);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            // old pool's tasks should be cleaned up (no leak)
+            assert!(old_heartbeat.is_finished());
+            assert!(old_watcher.is_finished());
+
+            // new storage is unaffected and can still operate
+            assert!(new_storage.inner.read().is_some());
+            assert!(new_storage.client().await.is_ok());
             Ok(())
         }
 
