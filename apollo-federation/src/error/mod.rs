@@ -830,6 +830,21 @@ pub enum SingleFederationError {
     ListSizeInvalidSizedField { message: String },
     #[error("{message}")]
     InvalidTagName { message: String },
+    /// `@cacheTag` directive validation errors (subgraph)
+    #[error("cacheTag format is invalid: {message}")]
+    CacheTagInvalidFormat { message: String },
+    #[error(
+        "error on field \"{field_name}\" on type \"{type_name}\": cacheTag can only apply on root fields or entity types"
+    )]
+    CacheTagAppliedToNonRootField { type_name: Name, field_name: Name },
+    #[error("cacheTag applied on root fields can only reference arguments in format using $args")]
+    CacheTagInvalidFormatArgumentOnRootField,
+    #[error("cacheTag applied on types can only reference arguments in format using $key")]
+    CacheTagInvalidFormatArgumentOnEntity { type_name: Name, format: String },
+    #[error(
+        "Object \"{0}\" is not an entity. cacheTag can only apply on resolvable entities, object containing at least 1 @key directive and resolvable"
+    )]
+    CacheTagEntityNotResolvable(Name),
     #[error("{message}")]
     QueryRootMissing { message: String },
     #[error(
@@ -1066,6 +1081,19 @@ impl SingleFederationError {
             #[allow(unused)]
             SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
+            SingleFederationError::CacheTagInvalidFormat { .. } => ErrorCode::CacheTagInvalidFormat,
+            SingleFederationError::CacheTagAppliedToNonRootField { .. } => {
+                ErrorCode::CacheTagAppliedToNonRootField
+            }
+            SingleFederationError::CacheTagInvalidFormatArgumentOnRootField => {
+                ErrorCode::CacheTagInvalidFormatArgumentOnRootField
+            }
+            SingleFederationError::CacheTagInvalidFormatArgumentOnEntity { .. } => {
+                ErrorCode::CacheTagInvalidFormatArgumentOnEntity
+            }
+            SingleFederationError::CacheTagEntityNotResolvable { .. } => {
+                ErrorCode::CacheTagEntityNotResolvable
+            }
             SingleFederationError::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
             SingleFederationError::AuthRequirementsAppliedOnInterface { .. } => {
                 ErrorCode::AuthRequirementsAppliedOnInterface
@@ -2369,6 +2397,66 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static CACHE_TAG_INVALID_FORMAT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CACHE_TAG_INVALID_FORMAT".to_owned(),
+        "Invalid format string in @cacheTag directive.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.12.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CACHE_TAG_APPLIED_TO_NON_ROOT_FIELD: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CACHE_TAG_APPLIED_TO_NON_ROOT_FIELD".to_owned(),
+        "@cacheTag on a field can only be applied on root fields.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.12.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| {
+        ErrorCodeDefinition::new(
+            "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD".to_owned(),
+            "@cacheTag on root fields can only reference arguments using $args in format."
+                .to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.12.0",
+                replaces: &[],
+            }),
+        )
+    });
+
+static CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
+            "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY".to_owned(),
+            "cacheTag applied on types can only reference arguments in format using $key, and each referenced field must be a member of every @key field set.".to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.12.0",
+                replaces: &[],
+            }),
+        )
+    },
+);
+
+static CACHE_TAG_ENTITY_NOT_RESOLVABLE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CACHE_TAG_ENTITY_NOT_RESOLVABLE".to_owned(),
+        "@cacheTag can only apply on resolvable entities (object with at least one @key directive)."
+            .to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.12.0",
+            replaces: &[],
+        }),
+    )
+});
+
 static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<ErrorCodeDefinition> =
     LazyLock::new(|| {
         ErrorCodeDefinition::new(
@@ -2515,6 +2603,11 @@ pub enum ErrorCode {
     ContextNoResolvableKey,
     ContextSelectionInvalid,
     InvalidTagName,
+    CacheTagInvalidFormat,
+    CacheTagAppliedToNonRootField,
+    CacheTagInvalidFormatArgumentOnRootField,
+    CacheTagInvalidFormatArgumentOnEntity,
+    CacheTagEntityNotResolvable,
     OverrideLabelInvalid,
     ContextualArgumentNotContextualInAllSubgraphs,
     QueryRootMissing,
@@ -2637,6 +2730,15 @@ impl ErrorCode {
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
             ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
             ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
+            ErrorCode::CacheTagInvalidFormat => &CACHE_TAG_INVALID_FORMAT,
+            ErrorCode::CacheTagAppliedToNonRootField => &CACHE_TAG_APPLIED_TO_NON_ROOT_FIELD,
+            ErrorCode::CacheTagInvalidFormatArgumentOnRootField => {
+                &CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD
+            }
+            ErrorCode::CacheTagInvalidFormatArgumentOnEntity => {
+                &CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY
+            }
+            ErrorCode::CacheTagEntityNotResolvable => &CACHE_TAG_ENTITY_NOT_RESOLVABLE,
             ErrorCode::ErrorCodeMissing => &ERROR_CODE_MISSING,
             ErrorCode::OverrideLabelInvalid => &OVERRIDE_LABEL_INVALID,
             ErrorCode::ContextualArgumentNotContextualInAllSubgraphs => {

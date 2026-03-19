@@ -568,45 +568,47 @@ mod tls {
 
 mod h2c_cleartext {
     use super::*;
+    use crate::configuration::shared::Client;
 
     // Starts a local server that responds with a default GraphQL response over plain HTTP.
     async fn emulate_h2c_server(listener: TcpListener) {
-        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            Ok(http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .status(StatusCode::OK)
-                .body(
-                    serde_json::to_string(&Response {
+        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            let response_builder =
+                http::Response::builder().header(CONTENT_TYPE, APPLICATION_JSON.essence_str());
+
+            let response = match request.version() {
+                Version::HTTP_2 => {
+                    let response_body = serde_json::to_string(&Response {
                         data: Some(Value::default()),
                         ..Response::default()
-                    })
-                    .expect("always valid")
-                    .into(),
-                )
-                .unwrap())
+                    });
+                    response_builder
+                        .status(StatusCode::OK)
+                        .body(response_body.unwrap().into())
+                }
+                Version::HTTP_11 => response_builder
+                    .status(StatusCode::HTTP_VERSION_NOT_SUPPORTED)
+                    .body(Body::empty()),
+                version => panic!("unexpected version {version:?}"),
+            };
+
+            Ok(response.unwrap())
         }
 
-        // XXX(@goto-bus-stop): ideally this server would *only* support HTTP 2 and not HTTP 1
         serve(listener, handle).await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_subgraph_h2c() {
+    async fn test_subgraph_h2c_works_with_http2only() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_h2c_server(listener));
 
-        let subgraph_service = HttpClientService::test_new(
-            "test",
-            rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("read native TLS root certificates")
-                .with_no_client_auth(),
-            crate::configuration::shared::Client::builder()
-                .experimental_http2(Http2Config::Http2Only)
-                .build(),
-        )
-        .expect("can create a HttpService");
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .build();
+        let subgraph_service =
+            HttpClientService::from_client_config(client_config).expect("can create a HttpService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = send_request(
@@ -615,7 +617,37 @@ mod h2c_cleartext {
             r#"{"query":"{ me { name username } }"#,
         )
         .await;
+
         assert_response_body(response, r#"{"data":null}"#).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_h2c_not_used_with_enable() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_h2c_server(listener));
+
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Enable)
+            .build();
+        let subgraph_service =
+            HttpClientService::from_client_config(client_config).expect("can create a HttpService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = send_request(
+            subgraph_service,
+            url,
+            r#"{"query":"{ me { name username } }"#,
+        )
+        .await;
+
+        // h2c only works with `Http2Config::Http2Only` - hyper only supports HTTP/2 with TLS or
+        // with 'prior knowledge'
+        // https://github.com/hyperium/hyper/issues/2411
+        assert_eq!(
+            response.http_response.status(),
+            StatusCode::HTTP_VERSION_NOT_SUPPORTED
+        );
     }
 }
 

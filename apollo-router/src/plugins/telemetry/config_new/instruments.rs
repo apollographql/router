@@ -423,6 +423,8 @@ impl InstrumentsConfig {
                                     )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
+                            // Compressed sizes are not yet known at the time on_response is called,
+                            // so this will always be the uncompressed size.
                             selector: Some(Arc::new(RouterSelector::ResponseSizeHint { response_size_hint: true })),
                             selectors,
                             updated: false,
@@ -759,10 +761,8 @@ impl InstrumentsConfig {
                                 )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(SubgraphSelector::SubgraphResponseHeader {
-                                subgraph_response_header: "content-length".to_string(),
-                                redact: None,
-                                default: None,
+                            selector: Some(Arc::new(SubgraphSelector::SubgraphResponseBodySize {
+                                subgraph_response_body_size: true,
                             })),
                             selectors,
                             updated: false,
@@ -2681,6 +2681,7 @@ mod tests {
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
+    use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphResponseBodySize;
     use crate::plugins::telemetry::config_new::supergraph::instruments::SupergraphCustomInstruments;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
@@ -3143,12 +3144,12 @@ mod tests {
                                         .subgraph_request(http_request)
                                         .build();
 
-                                        let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
-                                        let body_size = body.len();
-                                        request.context.extensions()
-                                            .with_lock(|lock| {
-                                                lock.insert(SubgraphRequestBodySize(body_size as u64));
-                                            });
+                                    let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
+                                    let body_size = body.len();
+                                    request.context.extensions()
+                                        .with_lock(|lock| {
+                                            lock.insert(SubgraphRequestBodySize(body_size as u64));
+                                        });
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
                                     apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
@@ -3172,6 +3173,14 @@ mod tests {
                                         .headers(convert_headers(headers))
                                         .build()
                                         .unwrap();
+
+                                    let body = serde_json::to_string(response.response.body()).expect("failed to serialize subgraph response body");
+                                    let body_size = body.len();
+                                    response.context.extensions()
+                                        .with_lock(|lock| {
+                                            lock.insert(SubgraphResponseBodySize(body_size as u64));
+                                        });
+
                                     subgraph_instruments
                                         .take()
                                         .expect("subgraph request must have been made first")
