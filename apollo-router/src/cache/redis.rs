@@ -442,6 +442,7 @@ impl RedisCacheStorage {
         }
 
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
+        let client_handles = pooled_client.connect_pool();
         if self.redis_client_config.required_to_start {
             pooled_client.wait_for_connect().await?;
             tracing::trace!("redis connections established");
@@ -454,7 +455,7 @@ impl RedisCacheStorage {
         // Don't mistake connections for clients. This is a pool of clients that handles
         // connections, and if a connection breaks, fred will internally (attempt to) recreate it.
         // Configuration for that is governed below in the ReconnectPolicy struct
-
+        //
         // WARN: we need a weak reference to the data (ie, Weak), not one that keeps the data around
         // as long as it's being referenced (ie, Arc). This matters because when a config reload
         // happens via hot-reload and the watcher holds a strong reference (Arc), the total
@@ -465,6 +466,10 @@ impl RedisCacheStorage {
         // RedisCacheStorage from the previous config without leaking it
         let client_pool = Arc::downgrade(&self.inner);
         let watcher_handle = tokio::spawn(async move {
+            // WARN: the client_handles returning is the signal that fred has been aborted; don't
+            // remove it!
+            let results = join_all(client_handles).await;
+            ACTIVE_CLIENT_COUNT.fetch_sub(results.len() as u64, Ordering::Relaxed);
             if let Some(inner) = client_pool.upgrade() {
                 inner.write().take();
                 tracing::info!("redis client aborted; marking for recreation");
