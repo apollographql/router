@@ -332,6 +332,7 @@ dependencies = [
  "futures",
  "futures-test",
  "graphql_client",
+ "h2",
  "heck 0.5.0",
  "hex",
  "hickory-resolver",
