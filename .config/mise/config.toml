@@ -2,15 +2,9 @@
 rust = "1.85.0"
 "aqua:cargo-bins/cargo-binstall" = "1.12.3"
 "cargo:cargo-nextest" = "0.9.70"
-<<<<<<< HEAD
-"cargo:cargo-deny" = "0.14.21"
+"cargo:cargo-deny" = "0.18.9"
 "cargo:cargo-edit" = "0.12.2"
 "cargo:cargo-about" = "0.6.6"
-=======
-"cargo:cargo-deny" = "0.18.9"
-"cargo:cargo-edit" = "0.13.0"
-"cargo:cargo-about" = "0.8.0"
->>>>>>> 4a26abb2 (config: update cargo-deny version (#8778))
 "cargo:cargo-insta" = "1.38.0"
 "cargo:htmlq" = "0.4.0"
 "cargo:cargo-watch" = "8.5.3"
