@@ -157,11 +157,14 @@ impl Drop for DropSafeRedisPool {
         let caller = self.caller;
         self.heartbeat_abort_handle.abort();
         self.watcher_abort_handle.abort();
+
         tokio::spawn(async move {
+            let clients_aborted = inner.clients().len() as u64;
             let _ = inner
                 .quit()
                 .await
                 .inspect_err(|err| record_redis_error(err, caller, "shutdown"));
+            ACTIVE_CLIENT_COUNT.fetch_sub(clients_aborted, Ordering::Relaxed);
         });
         // Metrics collector will be dropped automatically and its Drop impl will abort the task
     }
@@ -439,7 +442,6 @@ impl RedisCacheStorage {
         }
 
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
-        let client_handles = pooled_client.connect_pool();
         if self.redis_client_config.required_to_start {
             pooled_client.wait_for_connect().await?;
             tracing::trace!("redis connections established");
@@ -463,8 +465,6 @@ impl RedisCacheStorage {
         // RedisCacheStorage from the previous config without leaking it
         let client_pool = Arc::downgrade(&self.inner);
         let watcher_handle = tokio::spawn(async move {
-            let results = join_all(client_handles).await;
-            ACTIVE_CLIENT_COUNT.fetch_sub(results.len() as u64, Ordering::Relaxed);
             if let Some(inner) = client_pool.upgrade() {
                 inner.write().take();
                 tracing::info!("redis client aborted; marking for recreation");
