@@ -964,7 +964,7 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     trace!("expand_links: add_federation_operations");
     schema.add_federation_operations()?;
 
-    schema.add_implicit_root_operations();
+    schema.add_implicit_root_operations()?;
     Ok(schema)
 }
 
@@ -1109,29 +1109,33 @@ impl FederationSchema {
     // PORT_NOTE: JS incorrectly adds mutation and subscription root operation even if schema
     //   definition does not specify it. We are keeping this behavior to avoid breaking some
     //   (invalid) customer schemas.
-    fn add_implicit_root_operations(&mut self) {
-        if self.schema().schema_definition.mutation.is_none()
-            && self.try_get_type(GRAPHQL_MUTATION_TYPE_NAME).is_some()
-            && self
-                .referencers()
-                .object_types
-                .get(&GRAPHQL_MUTATION_TYPE_NAME)
-                .is_some_and(|r| r.len() == 0)
-        {
-            self.schema_mut().schema_definition.make_mut().mutation =
-                Some(GRAPHQL_MUTATION_TYPE_NAME.into());
-        };
-        if self.schema().schema_definition.subscription.is_none()
-            && self.try_get_type(GRAPHQL_SUBSCRIPTION_TYPE_NAME).is_some()
-            && self
-                .referencers()
-                .object_types
-                .get(&GRAPHQL_SUBSCRIPTION_TYPE_NAME)
-                .is_some_and(|r| r.len() == 0)
-        {
-            self.schema_mut().schema_definition.make_mut().subscription =
-                Some(GRAPHQL_SUBSCRIPTION_TYPE_NAME.into());
-        };
+    fn add_implicit_root_operations(&mut self) -> Result<(), FederationError> {
+        for (root_kind, default_name) in [
+            (
+                SchemaRootDefinitionKind::Mutation,
+                GRAPHQL_MUTATION_TYPE_NAME,
+            ),
+            (
+                SchemaRootDefinitionKind::Subscription,
+                GRAPHQL_SUBSCRIPTION_TYPE_NAME,
+            ),
+        ] {
+            let root_pos = SchemaRootDefinitionPosition { root_kind };
+            let object_pos = ObjectTypeDefinitionPosition {
+                type_name: default_name,
+            };
+            if root_pos.try_get(self.schema()).is_none()
+                && object_pos.try_get(self.schema()).is_some()
+                && self
+                    .referencers()
+                    .object_types
+                    .get(&object_pos.type_name)
+                    .is_some_and(|r| r.len() == 0)
+            {
+                root_pos.insert(self, object_pos.type_name.into())?;
+            };
+        }
+        Ok(())
     }
 }
 
@@ -1961,5 +1965,35 @@ mod tests {
           sdl: String
         }
         ");
+    }
+
+    #[test]
+    fn doesnt_add_non_object_mutation_as_root_operation() {
+        let sdl = r#"
+            schema {
+              query: Query
+            }
+
+            type Query {
+              hello(id: ID!): Mutation
+            }
+
+            scalar Mutation
+        "#;
+        let subgraph = Subgraph::parse("s1", "http://s1/graphql", sdl)
+            .expect("parses schema")
+            .expand_links()
+            .expect("valid schema");
+
+        assert!(subgraph.schema().schema().schema_definition.query.is_some());
+        assert!(
+            subgraph
+                .schema()
+                .schema()
+                .schema_definition
+                .mutation
+                .is_none()
+        );
+        assert!(subgraph.schema().schema().get_scalar("Mutation").is_some());
     }
 }
