@@ -7,6 +7,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
@@ -33,13 +34,13 @@ pub(crate) struct SubgraphMetadata {
     external_metadata: ExternalMetadata,
     context_fields: IndexSet<FieldDefinitionPosition>,
     interface_constraint_fields: IndexSet<FieldDefinitionPosition>,
+    interface_object_types: IndexSet<apollo_compiler::Name>,
     key_fields: IndexSet<FieldDefinitionPosition>,
     provided_fields: IndexSet<FieldDefinitionPosition>,
     required_fields: IndexSet<FieldDefinitionPosition>,
     shareable_fields: IndexSet<FieldDefinitionPosition>,
 }
 
-#[allow(dead_code)]
 impl SubgraphMetadata {
     pub(super) fn new(
         schema: &FederationSchema,
@@ -49,6 +50,8 @@ impl SubgraphMetadata {
         let context_fields = Self::collect_fields_used_by_context_directive(schema)?;
         let interface_constraint_fields =
             Self::collect_fields_used_to_satisfy_interface_constraints(schema)?;
+        let interface_object_types =
+            Self::collect_interface_object_types(schema, federation_spec_definition)?;
         let key_fields = Self::collect_key_fields(schema)?;
         let provided_fields = Self::collect_provided_fields(schema)?;
         let required_fields = Self::collect_required_fields(schema)?;
@@ -64,6 +67,7 @@ impl SubgraphMetadata {
             external_metadata,
             context_fields,
             interface_constraint_fields,
+            interface_object_types,
             key_fields,
             provided_fields,
             required_fields,
@@ -121,8 +125,23 @@ impl SubgraphMetadata {
             || self.required_fields.contains(field)
     }
 
+    pub(crate) fn is_interface_object_type(&self, type_name: &apollo_compiler::Name) -> bool {
+        self.interface_object_types.contains(type_name)
+    }
+
     pub(crate) fn remove_external_field(&mut self, field: &FieldDefinitionPosition) {
         self.external_metadata.external_fields.shift_remove(field);
+    }
+
+    pub(crate) fn remove_external_type_fields(
+        &mut self,
+        fields: Vec<ObjectFieldDefinitionPosition>,
+    ) {
+        for field in fields {
+            self.external_metadata
+                .fields_on_external_types
+                .shift_remove(&FieldDefinitionPosition::Object(field));
+        }
     }
 
     /// Update field coordinates in metadata after a type has been renamed.
@@ -147,6 +166,7 @@ impl SubgraphMetadata {
             .update_type_references(old_type_name, new_type_name);
     }
 
+    #[allow(unused)]
     pub(crate) fn selection_selects_any_external_field(&self, selection: &SelectionSet) -> bool {
         self.external_metadata()
             .selects_any_external_field(selection)
@@ -220,9 +240,8 @@ impl SubgraphMetadata {
         else {
             return Ok(shareable_fields);
         };
-        let shareable_directive_referencers = schema
-            .referencers
-            .get_directive(&shareable_directive_name)?;
+        let shareable_directive_referencers =
+            schema.referencers.get_directive(&shareable_directive_name);
 
         // Fields of shareable object types are shareable
         for object_type_position in &shareable_directive_referencers.object_types {
@@ -325,6 +344,28 @@ impl SubgraphMetadata {
 
         Ok(interface_constraint_fields)
     }
+
+    fn collect_interface_object_types(
+        schema: &FederationSchema,
+        federation_spec_definition: &'static FederationSpecDefinition,
+    ) -> Result<IndexSet<apollo_compiler::Name>, FederationError> {
+        let mut interface_object_types = IndexSet::default();
+
+        let Some(interface_object_directive_name) = federation_spec_definition
+            .directive_name_in_schema(schema, &FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            return Ok(interface_object_types);
+        };
+
+        let interface_object_directive_referencers = schema
+            .referencers
+            .get_directive(&interface_object_directive_name);
+        for object_type_position in &interface_object_directive_referencers.object_types {
+            interface_object_types.insert(object_type_position.type_name.clone());
+        }
+
+        Ok(interface_object_types)
+    }
 }
 
 // PORT_NOTE: The JS codebase called this `ExternalTester`, but this naming didn't make it
@@ -409,7 +450,7 @@ impl ExternalMetadata {
         };
 
         let external_directive_referencers =
-            schema.referencers.get_directive(&external_directive_name)?;
+            schema.referencers.get_directive(&external_directive_name);
 
         let mut external_fields = IndexSet::default();
 
@@ -480,7 +521,7 @@ impl ExternalMetadata {
         };
 
         let external_directive_referencers =
-            schema.referencers.get_directive(&external_directive_name)?;
+            schema.referencers.get_directive(&external_directive_name);
 
         let mut fields_on_external_types = IndexSet::default();
         for object_type_position in &external_directive_referencers.object_types {

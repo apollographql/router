@@ -25,11 +25,19 @@ When you use the router's [authorization directives](/router/configuration/autho
 
 ### How do schema updates affect my cache?
 
-Cached data remains valid across schema updates. When a new schema is deployed, the router immediately invalidates cache entries that depend on changed portions of the schema, ensuring responses always match the current schema. Cache entries for unchanged schema portions remain available.
+The router doesn't remove cache entries when you update a schema. However, if a schema change affects the queries sent to subgraphs, the router generates new cache keys for those queries. As a result, old cache entries stop serving cache hits. They're effectively expired, although the data might still exist in storage until its TTL expires. Cache entries for unchanged query patterns remain available and continue to serve cache hits normally.
 
 ### Does the router cache error responses?
 
 No. Responses containing errors aren't cached—this prevents transient errors from being served repeatedly from the cache.
+
+### Can I use compound `@key`s?
+
+Yes. Compound `@key`s, including lists, are supported. However, their complexity introduces overhead. Prioritize simplicity in your cache key design.
+
+### Can `@key`s represent nullable data in `@cacheTag`?
+
+Yes. However, `null` data is interpolated as an empty string. For example, consider an entity key with fields `id` and `name`, where `name` is nullable. If you specify `@cacheTag(format: "user-{$key.id}-{$key.name}")` and the entity key is `{"id": 1, "name": null}`, the generated cache tag is `user-1-`.
 
 ### What if one of my subgraphs is unavailable?
 
@@ -63,7 +71,7 @@ Operations without tags eventually expire based on their TTL. You can invalidate
 
 ### How does caching work for operations with multiple root fields?
 
-The router caches the entire operation response as a single unit. This means operations with overlapping root fields don't currently share cache entries—each unique operation gets its own entry.
+The router caches the entire response from each subgraph request as a single unit. When an operation queries multiple root fields from the same subgraph, the router caches the complete response (containing all root fields) under a single cache entry. Operations with overlapping root fields don't share cache entries. The router creates a unique entry for each subgraph request based on the full query sent to the subgraph. This behavior does not apply to entity requests.
 
 ### When should I use invalidation vs. TTL-based caching?
 

@@ -12,6 +12,9 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::link::Import;
 use crate::link::Link;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec_definition::SPEC_REGISTRY;
@@ -65,7 +68,7 @@ impl Merger {
                 let Some(linked_elem) = features.source_link_of_directive(directive) else {
                     continue;
                 };
-                if referencers.len() == 0 {
+                if referencers.is_empty() {
                     continue;
                 }
                 let source = linked_elem.link;
@@ -233,11 +236,23 @@ impl Merger {
                     spec_in_supergraph.url()
                 )
             }
+
+            if subgraph_core_directive.composition_spec.use_join_directive {
+                self.directives_using_join_directive
+                    .insert(name_in_supergraph.clone());
+            }
         }
 
         for supergraph_core_directives in supergraph_info_by_identity.values() {
             let mut imports = Vec::new();
             for supergraph_core_directive in supergraph_core_directives {
+                // Directives composed via @join__directive are not imported in the supergraph schema.
+                if supergraph_core_directive
+                    .composition_spec
+                    .use_join_directive
+                {
+                    continue;
+                }
                 let default_name_in_supergraph = Link::directive_name_in_schema_for_core_arguments(
                     supergraph_core_directive.spec_in_supergraph.url(),
                     &supergraph_core_directive
@@ -317,6 +332,49 @@ impl Merger {
                 {
                     self.inaccessible_directive_name_in_supergraph =
                         Some(supergraph_core_directive.name_in_supergraph.clone());
+                }
+
+                if *supergraph_core_directive.spec_in_supergraph.identity()
+                    == Identity::authenticated_identity()
+                    && supergraph_core_directive.name_in_feature
+                        == supergraph_core_directive
+                            .spec_in_supergraph
+                            .url()
+                            .identity
+                            .name
+                {
+                    self.access_control_directives_in_supergraph.push((
+                        AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
+                        supergraph_core_directive.name_in_supergraph.clone(),
+                    ));
+                }
+                if *supergraph_core_directive.spec_in_supergraph.identity()
+                    == Identity::requires_scopes_identity()
+                    && supergraph_core_directive.name_in_feature
+                        == supergraph_core_directive
+                            .spec_in_supergraph
+                            .url()
+                            .identity
+                            .name
+                {
+                    self.access_control_directives_in_supergraph.push((
+                        REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
+                        supergraph_core_directive.name_in_supergraph.clone(),
+                    ));
+                }
+                if *supergraph_core_directive.spec_in_supergraph.identity()
+                    == Identity::policy_identity()
+                    && supergraph_core_directive.name_in_feature
+                        == supergraph_core_directive
+                            .spec_in_supergraph
+                            .url()
+                            .identity
+                            .name
+                {
+                    self.access_control_directives_in_supergraph.push((
+                        POLICY_DIRECTIVE_NAME_IN_SPEC,
+                        supergraph_core_directive.name_in_supergraph.clone(),
+                    ));
                 }
             }
         }

@@ -115,6 +115,21 @@ expression: "&schema"
         }
       ]
     },
+    "ActualCostMode": {
+      "oneOf": [
+        {
+          "const": "by_subgraph",
+          "description": "Computes the cost of each subgraph response and sums them to get the total query cost.",
+          "type": "string"
+        },
+        {
+          "const": "by_response_shape",
+          "deprecated": true,
+          "description": "Computes the cost based on the final structure of the composed response, not including any\ninterim structures from subgraph responses that did not make it to the composed response.",
+          "type": "string"
+        }
+      ]
+    },
     "All": {
       "enum": [
         "all"
@@ -225,6 +240,22 @@ expression: "&schema"
             }
           ],
           "description": "Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses."
+        },
+        "library_name_header": {
+          "default": "apollographql-library-name",
+          "description": "The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.\nValid values must match the regex `^[ a-zA-Z0-9.@/_\\-]{1,60}$`. Invalid values result in a `400` response.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "library_version_header": {
+          "default": "apollographql-library-version",
+          "description": "The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.\nValid values must match the regex `^[ a-zA-Z0-9.@/_\\-]{1,60}$`. Invalid values result in a `400` response.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "metrics": {
           "allOf": [
@@ -872,7 +903,7 @@ expression: "&schema"
     },
     "Client": {
       "additionalProperties": false,
-      "description": "HTTP client configuration for coprocessors.",
+      "description": "HTTP client configuration",
       "properties": {
         "dns_resolution_strategy": {
           "anyOf": [
@@ -895,6 +926,14 @@ expression: "&schema"
             }
           ],
           "description": "Use HTTP/2 to communicate with the coprocessor."
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         }
       },
       "type": "object"
@@ -2145,6 +2184,113 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorRequestConf": {
+      "additionalProperties": false,
+      "description": "What information is passed to a connector request stage",
+      "properties": {
+        "body": {
+          "default": false,
+          "description": "Send the body",
+          "type": "boolean"
+        },
+        "condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionConnectorSelector"
+            }
+          ],
+          "description": "Condition to trigger this stage"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContextConf"
+            }
+          ],
+          "description": "Send the context"
+        },
+        "headers": {
+          "default": false,
+          "description": "Send the headers",
+          "type": "boolean"
+        },
+        "method": {
+          "default": false,
+          "description": "Send the method",
+          "type": "boolean"
+        },
+        "service_name": {
+          "default": false,
+          "description": "Send the service name",
+          "type": "boolean"
+        },
+        "uri": {
+          "default": false,
+          "description": "Send the connector URI",
+          "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorResponseConf": {
+      "additionalProperties": false,
+      "description": "What information is passed to a connector response stage",
+      "properties": {
+        "body": {
+          "default": false,
+          "description": "Send the body",
+          "type": "boolean"
+        },
+        "condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionConnectorSelector"
+            }
+          ],
+          "description": "Condition to trigger this stage"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContextConf"
+            }
+          ],
+          "description": "Send the context"
+        },
+        "headers": {
+          "default": false,
+          "description": "Send the headers",
+          "type": "boolean"
+        },
+        "service_name": {
+          "default": false,
+          "description": "Send the service name",
+          "type": "boolean"
+        },
+        "status_code": {
+          "default": false,
+          "description": "Send the http status",
+          "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ConnectorSelector": {
       "anyOf": [
         {
@@ -2231,6 +2377,19 @@ expression: "&schema"
           },
           "required": [
             "connector_http_response_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_http_response_body_size": {
+              "description": "The connector HTTP response body size (wire bytes before decompression).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_http_response_body_size"
           ],
           "type": "object"
         },
@@ -2475,6 +2634,14 @@ expression: "&schema"
           ],
           "description": "Enable global rate limiting"
         },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
+        },
         "timeout": {
           "default": null,
           "description": "Enable timeout for connectors requests",
@@ -2502,6 +2669,38 @@ expression: "&schema"
             }
           ],
           "description": "Custom attributes that are attached to the connector span."
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorStage": {
+      "additionalProperties": false,
+      "description": "The connector stage request/response configuration",
+      "properties": {
+        "request": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorRequestConf"
+            }
+          ],
+          "description": "The request configuration"
+        },
+        "response": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorResponseConf"
+            }
+          ],
+          "description": "The response configuration"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorStages": {
+      "description": "Configures the connector coprocessor stages",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/ConnectorStage"
         }
       },
       "type": "object"
@@ -2630,6 +2829,14 @@ expression: "&schema"
           "description": "When true, cooperative cancellation is enabled.",
           "type": "boolean"
         },
+        "memory_limit": {
+          "default": null,
+          "description": "Enable memory limit for query planning.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "mode": {
           "allOf": [
             {
@@ -2663,6 +2870,14 @@ expression: "&schema"
               "type": "null"
             }
           ]
+        },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorStages"
+            }
+          ],
+          "description": "The connector stage request/response configuration"
         },
         "execution": {
           "allOf": [
@@ -2710,7 +2925,7 @@ expression: "&schema"
           "type": "string"
         },
         "url": {
-          "description": "The url you'd like to offload processing to (can be overridden per-stage)",
+          "description": "The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs",
           "type": "string"
         }
       },
@@ -4537,7 +4752,7 @@ expression: "&schema"
               "$ref": "#/definitions/StandardInstrumentExtendedRouterOverheadAttributesWithRouterSelector"
             }
           ],
-          "description": "Histogram of router overhead (time not spent in subgraph requests)"
+          "description": "Histogram of router overhead (time not spent in subgraph requests). The default unit is\nseconds, but this can be changed with selectors"
         },
         "http.server.active_requests": {
           "allOf": [
@@ -5480,6 +5695,18 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "HoistOrphanErrors": {
+      "additionalProperties": false,
+      "description": "Per-subgraph configuration for hoisting orphan errors.\n\n\"Orphan errors\" are errors from entity fetches that lack a valid `_entities` path.\nWhen hoisting is enabled, these errors are assigned to the nearest non-array\nancestor in the response path, preventing them from being duplicated across\nevery element in an array.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable hoisting of orphan errors for this subgraph.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
     },
     "Homepage": {
       "additionalProperties": false,
@@ -7581,6 +7808,7 @@ expression: "&schema"
           ],
           "default": {
             "enabled": true,
+            "memory_limit": null,
             "mode": "measure",
             "timeout": null
           },
@@ -8334,7 +8562,7 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
-          "description": "The size hint of the body.\nThis is used as the Content-Length header has not yet been populated\nwhen selectors are evaluated",
+          "description": "The size hint of the body.\nIf compression is enabled, this will be the uncompressed size.\nIts not possible to get the compressed size in selector as the\nbody has not yet been compressed at the time on_response is called.",
           "properties": {
             "response_size_hint": {
               "description": "Extract response size hint in bytes",
@@ -8580,6 +8808,10 @@ expression: "&schema"
             "header_read_timeout": {
               "nanos": 0,
               "secs": 10
+            },
+            "tls_handshake_timeout": {
+              "nanos": 0,
+              "secs": 10
             }
           },
           "description": "The server http configuration"
@@ -8597,6 +8829,14 @@ expression: "&schema"
             "secs": 10
           },
           "description": "Header read timeout in human-readable format; defaults to 10s",
+          "type": "string"
+        },
+        "tls_handshake_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "TLS handshake timeout in human-readable format; defaults to 10s",
           "type": "string"
         }
       },
@@ -9100,6 +9340,14 @@ expression: "&schema"
             "static_estimated": {
               "additionalProperties": false,
               "properties": {
+                "actual_cost_mode": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/ActualCostMode"
+                    }
+                  ],
+                  "description": "The strategy used to calculate the actual cost incurred by an operation.\n\n* `by_subgraph` (default) computes the cost of each subgraph response and sums them\n  to get the total query cost.\n* `by_response_shape` computes the cost based on the final structure of the composed\n  response, not including any interim structures from subgraph responses that did not\n  make it to the composed response."
+                },
                 "list_size": {
                   "description": "The assumed length of lists returned by the operation.",
                   "format": "uint32",
@@ -9110,6 +9358,21 @@ expression: "&schema"
                   "description": "The maximum cost of a query",
                   "format": "double",
                   "type": "number"
+                },
+                "subgraph": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/SubgraphSubgraphStrategyConfigConfiguration"
+                    }
+                  ],
+                  "default": {
+                    "all": {
+                      "list_size": null,
+                      "max": null
+                    },
+                    "subgraphs": {}
+                  },
+                  "description": "Cost control by subgraph"
                 }
               },
               "required": [
@@ -9471,6 +9734,31 @@ expression: "&schema"
             "$ref": "#/definitions/ErrorConfiguration"
           },
           "description": "Handling of errors coming from specified subgraphs",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphHoistOrphanErrorsConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HoistOrphanErrors"
+            }
+          ],
+          "default": {
+            "enabled": false
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HoistOrphanErrors"
+          },
+          "default": {},
+          "description": "per subgraph options",
           "type": "object"
         }
       },
@@ -9879,6 +10167,19 @@ expression: "&schema"
           },
           "required": [
             "subgraph_response_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "subgraph_response_body_size": {
+              "description": "The subgraph response body size.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_response_body_size"
           ],
           "type": "object"
         },
@@ -10336,6 +10637,14 @@ expression: "&schema"
           ],
           "description": "Enable global rate limiting"
         },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
+        },
         "timeout": {
           "default": null,
           "description": "Enable timeout for incoming requests",
@@ -10377,6 +10686,28 @@ expression: "&schema"
       "properties": {
         "all": {
           "$ref": "#/definitions/SubgraphStage"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphStrategyConfig": {
+      "properties": {
+        "list_size": {
+          "description": "The assumed length of lists returned by the operation for this subgraph.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max": {
+          "description": "The maximum query cost routed to this subgraph.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10456,6 +10787,32 @@ expression: "&schema"
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/Subgraph2"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphSubgraphStrategyConfigConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphStrategyConfig"
+            }
+          ],
+          "default": {
+            "list_size": null,
+            "max": null
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphStrategyConfig"
           },
           "default": {},
           "description": "per subgraph options",
@@ -10655,6 +11012,7 @@ expression: "&schema"
             },
             "experimental_cooperative_cancellation": {
               "enabled": true,
+              "memory_limit": null,
               "mode": "measure",
               "timeout": null
             },
@@ -10664,6 +11022,20 @@ expression: "&schema"
             "warmed_up_queries": null
           },
           "description": "Query planning options"
+        },
+        "redact_query_validation_errors": {
+          "default": false,
+          "description": "Redact query validation errors to prevent potential information disclosure about the schema structure.\nWhen enabled, detailed validation errors are replaced with a generic \"invalid query\" message.\nDefault: false",
+          "type": "boolean"
+        },
+        "strict_variable_validation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Mode"
+            }
+          ],
+          "default": "enforce",
+          "description": "Determines how to handle queries which include additional fields of an input object.\n- `enforce` (default): rejects query\n- `measure`: permits query and the logs unknown fields"
         }
       },
       "type": "object"
@@ -12065,6 +12437,20 @@ expression: "&schema"
     "experimental_diagnostics": {
       "$ref": "#/definitions/Config5"
     },
+    "experimental_hoist_orphan_errors": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/SubgraphHoistOrphanErrorsConfiguration"
+        }
+      ],
+      "default": {
+        "all": {
+          "enabled": false
+        },
+        "subgraphs": {}
+      },
+      "description": "When enabled for specific subgraphs, orphan errors (those without a valid\n`_entities` path) are assigned to the nearest non-array ancestor in the\nresponse path, preventing them from being duplicated across every array\nelement."
+    },
     "experimental_type_conditioned_fetching": {
       "default": false,
       "description": "Type conditioned fetching configuration.",
@@ -12171,6 +12557,10 @@ expression: "&schema"
           "header_read_timeout": {
             "nanos": 0,
             "secs": 10
+          },
+          "tls_handshake_timeout": {
+            "nanos": 0,
+            "secs": 10
           }
         }
       },
@@ -12207,6 +12597,7 @@ expression: "&schema"
           },
           "experimental_cooperative_cancellation": {
             "enabled": true,
+            "memory_limit": null,
             "mode": "measure",
             "timeout": null
           },
@@ -12214,7 +12605,9 @@ expression: "&schema"
           "experimental_plans_limit": null,
           "experimental_reuse_query_plans": false,
           "warmed_up_queries": null
-        }
+        },
+        "redact_query_validation_errors": false,
+        "strict_variable_validation": "enforce"
       },
       "description": "Configuration for the supergraph"
     },

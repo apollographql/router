@@ -1,0 +1,20 @@
+---
+source: apollo-federation/src/connectors/expand/visitors/selection.rs
+assertion_line: 974
+expression: target.schema().serialize().to_string()
+---
+enum Category {
+  ELECTRONICS
+  CLOTHING
+  FOOD
+}
+
+type Product {
+  id: ID!
+  name: String!
+  category: Category
+}
+
+type Query {
+  product: Product
+}

@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
@@ -74,15 +75,12 @@ impl ExecutionStage {
         response_validation: bool,
     ) -> execution::BoxService
     where
-        C: Service<
-                http::Request<RouterBody>,
-                Response = http::Response<RouterBody>,
-                Error = BoxError,
-            > + Clone
+        C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
+            + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+        <C as tower::Service<HttpRequest>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -98,6 +96,7 @@ impl ExecutionStage {
 
                 async move {
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_execution_request_stage(
                         http_client,
                         coprocessor_url,
@@ -105,6 +104,7 @@ impl ExecutionStage {
                         request,
                         request_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -112,14 +112,9 @@ impl ExecutionStage {
                         tracing::error!("coprocessor: execution request stage error: {error}");
                         error
                     });
-
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::ExecutionRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::ExecutionRequest, succeeded);
+                    }
                     result
                 }
             })
@@ -139,6 +134,7 @@ impl ExecutionStage {
                     let response: execution::Response = fut.await?;
 
                     let mut succeeded = true;
+                    let mut executed = false;
                     let result = process_execution_response_stage(
                         http_client,
                         coprocessor_url,
@@ -146,6 +142,7 @@ impl ExecutionStage {
                         response,
                         response_config,
                         response_validation,
+                        &mut executed,
                     )
                     .await
                     .map_err(|error| {
@@ -153,14 +150,9 @@ impl ExecutionStage {
                         tracing::error!("coprocessor: execution response stage error: {error}");
                         error
                     });
-
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::ExecutionResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
+                    if executed {
+                        record_coprocessor_operation(PipelineStep::ExecutionResponse, succeeded);
+                    }
                     result
                 }
             })
@@ -186,6 +178,13 @@ impl ExecutionStage {
     }
 }
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_execution_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -193,14 +192,15 @@ async fn process_execution_request_stage<C>(
     mut request: execution::Request,
     request_config: ExecutionRequestConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<ControlFlow<execution::Response, execution::Request>, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
@@ -210,8 +210,7 @@ where
 
     let headers_to_send = request_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
 
     let body_to_send = request_config
         .body
@@ -238,7 +237,15 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+
+    // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
+    // we don't intend for coprocessor calls; if in the future we change it, make sure to
+    // understand what could be sent to coprocessors and how that might affect their behavior
+    let co_processor_result = payload
+        .call(http_client, &coprocessor_url, Context::new())
+        .await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::ExecutionRequest, duration);
 
@@ -324,6 +331,13 @@ where
     Ok(ControlFlow::Continue(request))
 }
 
+/// This function receives a mutable `executed` flag so the caller can know
+/// whether this stage actually ran before an early return or error. This is
+/// required because metric recording happens outside this function.
+///
+/// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
+/// least intrusive way to expose this information without refactoring all
+/// router stage processing functions.
 async fn process_execution_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -331,14 +345,15 @@ async fn process_execution_response_stage<C>(
     response: execution::Response,
     response_config: ExecutionResponseConf,
     response_validation: bool,
+    executed: &mut bool,
 ) -> Result<execution::Response, BoxError>
 where
-    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
+    C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
+    <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
     // split the response into parts + body
     let (mut parts, body) = response.response.into_parts();
@@ -357,8 +372,7 @@ where
     // Encode headers, body, status, context, sdl to create a payload
     let headers_to_send = response_config
         .headers
-        .then(|| externalize_header_map(&parts.headers))
-        .transpose()?;
+        .then(|| externalize_header_map(&parts.headers));
     let body_to_send = response_config
         .body
         .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));
@@ -380,7 +394,14 @@ where
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
+    // we don't intend for coprocessor calls; if in the future we change it, make sure to
+    // understand what could be sent to coprocessors and how that might affect their behavior
+    let co_processor_result = payload
+        .call(http_client.clone(), &coprocessor_url, Context::new())
+        .await;
+    // Indicate the stage was executed to raise execution metric on parent
+    *executed = true;
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::ExecutionResponse, duration);
 
@@ -452,7 +473,11 @@ where
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
                 let co_processor_result = payload
-                    .call(generator_client, &generator_coprocessor_url)
+                    .call(
+                        generator_client,
+                        &generator_coprocessor_url,
+                        generator_map_context.clone(),
+                    )
                     .await;
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
@@ -546,7 +571,19 @@ mod tests {
 
             mock_http_client.expect_clone().returning(move || {
                 let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_call().returning(callback);
+                mock_http_client.expect_call().returning(
+                    move |req: crate::services::http::HttpRequest| {
+                        let context = req.context.clone();
+                        let fut = callback(req.http_request);
+                        Box::pin(async move {
+                            let response = fut.await?;
+                            Ok(crate::services::http::HttpResponse {
+                                http_response: response,
+                                context,
+                            })
+                        })
+                    },
+                );
                 mock_http_client
             });
             mock_http_client
@@ -568,7 +605,19 @@ mod tests {
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
                     let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client.expect_call().returning(callback);
+                    mock_http_client.expect_call().returning(
+                        move |req: crate::services::http::HttpRequest| {
+                            let context = req.context.clone();
+                            let fut = callback(req.http_request);
+                            Box::pin(async move {
+                                let response = fut.await?;
+                                Ok(crate::services::http::HttpResponse {
+                                    http_response: response,
+                                    context,
+                                })
+                            })
+                        },
+                    );
                     mock_http_client
                 });
                 mock_http_client

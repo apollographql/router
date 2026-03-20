@@ -64,7 +64,6 @@ pub(crate) struct CacheKeyMetadata {
 
 /// Authorization plugin
 #[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
-#[allow(dead_code)]
 #[schemars(rename = "AuthorizationConfig")]
 pub(crate) struct Conf {
     /// Reject unauthenticated requests
@@ -75,8 +74,13 @@ pub(crate) struct Conf {
     directives: Directives,
 }
 
-#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
-#[allow(dead_code)]
+impl Conf {
+    pub(crate) fn error_config(&self) -> ErrorConfig {
+        self.directives.errors
+    }
+}
+
+#[derive(Copy, Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[schemars(rename = "AuthorizationDirectivesConfig")]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
@@ -94,9 +98,16 @@ pub(crate) struct Directives {
 }
 
 #[derive(
-    Clone, Debug, serde_derive_default::Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+    Copy,
+    Clone,
+    Debug,
+    serde_derive_default::Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
-#[allow(dead_code)]
 #[schemars(rename = "AuthorizationErrorConfig")]
 pub(crate) struct ErrorConfig {
     /// log authorization errors
@@ -111,7 +122,7 @@ fn enable_log_errors() -> bool {
     true
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ErrorLocation {
     /// store authorization errors in the response errors
@@ -129,6 +140,56 @@ pub(crate) struct UnauthorizedPaths {
     pub(crate) errors: ErrorConfig,
 }
 
+impl UnauthorizedPaths {
+    pub(crate) fn log_unauthorized_paths(&self) {
+        // nothing to do if we have no paths or we're not supposed to log
+        if self.paths.is_empty() || !self.errors.log {
+            return;
+        }
+
+        tracing::Span::current().in_scope(|| {
+            let unauthorized_paths = self
+                .paths
+                .iter()
+                .map(|path| path.to_string())
+                .collect::<Vec<_>>();
+
+            tracing::event!(tracing_core::Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
+        })
+    }
+
+    pub(crate) fn update_response_with_unauthorized_path_errors(
+        &self,
+        response: &mut graphql::Response,
+    ) {
+        let unauthorized_path_errors = self.paths.iter().map(|path| {
+            graphql::Error::builder()
+                .message("Unauthorized field or type")
+                .path(path.clone())
+                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
+                .build()
+        });
+
+        match self.errors.response {
+            ErrorLocation::Errors => {
+                response.errors.extend(unauthorized_path_errors);
+            }
+            ErrorLocation::Extensions => {
+                let serialized_auth_errors = unauthorized_path_errors
+                    .map(|err| {
+                        serde_json_bytes::to_value(err)
+                            .expect("error serialization should not fail")
+                    })
+                    .collect();
+                response
+                    .extensions
+                    .insert("authorizationErrors", Value::Array(serialized_auth_errors));
+            }
+            ErrorLocation::Disabled => {}
+        }
+    }
+}
+
 fn default_enable_directives() -> bool {
     true
 }
@@ -142,13 +203,7 @@ impl AuthorizationPlugin {
         configuration: &Configuration,
         schema: &Schema,
     ) -> Result<bool, ServiceBuildError> {
-        let has_config = configuration
-            .apollo_plugins
-            .plugins
-            .iter()
-            .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| v.get("directives").and_then(|v| v.as_object()))
-            .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
+        let has_config = Self::configuration(configuration).directives.enabled;
 
         let has_authorization_directives = schema.has_spec(
             &Identity::authenticated_identity(),
@@ -159,20 +214,15 @@ impl AuthorizationPlugin {
         ) || schema
             .has_spec(&Identity::policy_identity(), POLICY_SPEC_VERSION_RANGE);
 
-        Ok(has_config.unwrap_or(true) && has_authorization_directives)
+        Ok(has_config && has_authorization_directives)
     }
 
-    pub(crate) fn log_errors(configuration: &Configuration) -> ErrorConfig {
+    pub(crate) fn configuration(configuration: &Configuration) -> Conf {
         configuration
             .apollo_plugins
             .plugins
-            .iter()
-            .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| v.get("directives").and_then(|v| v.as_object()))
-            .and_then(|v| {
-                v.get("errors")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-            })
+            .get("authorization")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default()
     }
 
@@ -326,29 +376,12 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn filter_query(
-        configuration: &Configuration,
+        configuration: &Conf,
         key: &QueryKey,
         schema: &Schema,
     ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
-        let (reject_unauthorized, dry_run) = configuration
-            .apollo_plugins
-            .plugins
-            .iter()
-            .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| v.get("directives").and_then(|v| v.as_object()))
-            .map(|config| {
-                (
-                    config
-                        .get("reject_unauthorized")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
-                    config
-                        .get("dry_run")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
-                )
-            })
-            .unwrap_or((false, false));
+        let reject_unauthorized = configuration.directives.reject_unauthorized;
+        let dry_run = configuration.directives.dry_run;
 
         // The filtered query will then be used
         // to generate selections for response formatting, to execute introspection and

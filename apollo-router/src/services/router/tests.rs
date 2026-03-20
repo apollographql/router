@@ -767,3 +767,106 @@ async fn invalid_input_enum() {
 
     insta::assert_json_snapshot!(response);
 }
+
+#[tokio::test]
+async fn unredacted_validation_errors() {
+    use futures::StreamExt;
+    let service = crate::TestHarness::builder()
+        .schema(include_str!("../../../testing_schema.graphql"))
+        .configuration_json(serde_json::json!({
+            "supergraph": {
+                // this is the default value
+                // "redact_query_validation_errors": false
+            }
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+    let request = crate::services::supergraph::Request::canned_builder()
+        .query("query ExampleQuery { foo topProducts(ack: 5) {name} }")
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "errors": [
+        {
+          "message": "Cannot query field \"foo\" on type \"Query\".",
+          "locations": [
+            {
+              "line": 1,
+              "column": 22
+            }
+          ],
+          "extensions": {
+            "code": "GRAPHQL_VALIDATION_FAILED"
+          }
+        },
+        {
+          "message": "Unknown argument \"ack\" on field \"Query.topProducts\".",
+          "locations": [
+            {
+              "line": 1,
+              "column": 38
+            }
+          ],
+          "extensions": {
+            "code": "GRAPHQL_VALIDATION_FAILED"
+          }
+        }
+      ]
+    }
+    "###);
+}
+
+#[tokio::test]
+async fn redacted_validation_errors() {
+    use futures::StreamExt;
+    let service = crate::TestHarness::builder()
+        .schema(include_str!("../../../testing_schema.graphql"))
+        .configuration_json(serde_json::json!({
+            "supergraph": {
+                "redact_query_validation_errors": true
+            }
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+    let request = crate::services::supergraph::Request::canned_builder()
+        .query("query ExampleQuery { foo topProducts(ack: 5) {name} }")
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "errors": [
+        {
+          "message": "invalid query",
+          "extensions": {
+            "code": "UNKNOWN_ERROR"
+          }
+        }
+      ]
+    }
+    "###);
+}

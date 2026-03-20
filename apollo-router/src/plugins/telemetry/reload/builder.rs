@@ -99,11 +99,16 @@ impl<'a> Builder<'a> {
             let mut builder = MetricsBuilder::new(self.config);
             builder.configure(&self.config.exporters.metrics.prometheus)?;
             builder.configure(&self.config.exporters.metrics.otlp)?;
-            builder.configure_views(MeterProviderType::Public)?;
+            // Register memory allocation views with custom buckets
+            crate::plugins::telemetry::metrics::allocation::register_memory_allocation_views(
+                &mut builder,
+            );
+            builder.configure_views(MeterProviderType::Public);
 
             let (prometheus_registry, meter_providers, _) = builder.build();
             self.activation
                 .with_prometheus_registry(prometheus_registry);
+
             self.activation.add_meter_providers(meter_providers);
         }
         // Always create Prometheus endpoint if we have a registry (either new or existing).
@@ -167,7 +172,7 @@ impl<'a> Builder<'a> {
                     aggregation: Some(crate::plugins::telemetry::config::MetricAggregation::Drop),
                     allowed_attribute_keys: None,
                 }
-                .try_into()?,
+                .into_view_fn(),
             );
         }
 
@@ -419,10 +424,14 @@ mod tests {
             instr.logging_layer_set,
             "First run should set logging layer"
         );
-        // But no meter providers get added if nothing is configured
+        // A noop Public provider is always set when metrics config changes,
+        // even without exporters. This ensures any previous provider is replaced
+        // during hot reload when exporters are disabled.
         assert!(
-            instr.meter_providers_added.is_empty(),
-            "No meter providers added on first run when nothing enabled"
+            instr
+                .meter_providers_added
+                .contains(&MeterProviderType::Public),
+            "Public meter provider (noop) should be set on first run"
         );
     }
 

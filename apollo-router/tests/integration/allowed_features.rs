@@ -450,6 +450,7 @@ async fn canned_response_when_license_halted_with_valid_config_and_schema() {
 
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
+    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
 
     /*
      * THEN
@@ -495,6 +496,7 @@ async fn canned_response_when_license_halted_with_restricted_config_and_valid_sc
 
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
+    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
 
     /*
      * THEN
@@ -537,6 +539,7 @@ async fn canned_response_when_license_halted_with_valid_config_and_invalid_schem
 
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
+    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
 
     /*
      * THEN
@@ -584,6 +587,7 @@ async fn router_starts_when_license_past_warn_at_but_not_expired_allowed_feature
 
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
+    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
 
     router.start().await;
     router.assert_started().await;
@@ -649,6 +653,12 @@ async fn feature_violation_when_license_past_warn_at_but_not_expired_allowed_fea
         )
         .build()
         .await;
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "5000");
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "5001");
+    router.replace_config_string("http://localhost:{{COPROCESSOR_PORT}}", "5002");
+
+    router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", "localhost:4001");
+    router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", "localhost:4002");
 
     router.start().await;
     router

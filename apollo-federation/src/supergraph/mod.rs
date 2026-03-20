@@ -111,7 +111,7 @@ impl Supergraph<Merged> {
     }
 
     pub fn assume_satisfiable(self) -> Supergraph<Satisfiable> {
-        todo!("unimplemented")
+        Supergraph::new(self.state.schema, vec![])
     }
 
     /// Supergraph schema
@@ -188,6 +188,10 @@ impl Supergraph<Satisfiable> {
 
     pub fn hints(&self) -> &Vec<CompositionHint> {
         &self.state.hints
+    }
+
+    pub fn hints_mut(&mut self) -> &mut Vec<CompositionHint> {
+        &mut self.state.hints
     }
 }
 

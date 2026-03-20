@@ -33,6 +33,8 @@ use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::registry::OciConfig;
+use crate::registry::should_use_ssl;
+use crate::registry::validate_oci_reference;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -47,8 +49,17 @@ pub(crate) static APOLLO_ROUTER_LICENCE_IS_SET: AtomicBool = AtomicBool::new(fal
 pub(crate) static APOLLO_ROUTER_LICENCE_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
+pub(crate) static APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE: Mutex<Option<String>> = Mutex::new(None);
+pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(false);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
+const INITIAL_OCI_POLL_INTERVAL: Duration = Duration::from_secs(30);
+
+const FORBIDDEN_OTEL_VARS: [&str; 3] = [
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+];
 
 /// Subcommands
 #[derive(Subcommand, Debug)]
@@ -237,30 +248,35 @@ impl Opt {
     }
 
     pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        let graph_artifact_reference = self
+            .graph_artifact_reference
+            .clone()
+            .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
+        let (validated_reference, _) = validate_oci_reference(&graph_artifact_reference)?;
+
+        // Allow test-only override of poll interval via TEST_APOLLO_OCI_POLL_INTERVAL environment variable
+        let poll_interval = std::env::var("TEST_APOLLO_OCI_POLL_INTERVAL")
+            .ok()
+            .and_then(|s| {
+                s.parse::<u64>()
+                    .ok()
+                    .filter(|&val| (1..=60).contains(&val))
+                    .map(Duration::from_secs)
+            })
+            .unwrap_or(INITIAL_OCI_POLL_INTERVAL);
+
+        let use_ssl = should_use_ssl(&validated_reference);
+
         Ok(OciConfig {
             apollo_key: self
                 .apollo_key
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
-            reference: Self::validate_oci_reference(
-                &self
-                    .graph_artifact_reference
-                    .clone()
-                    .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?,
-            )?,
+            reference: validated_reference,
+            hot_reload: self.hot_reload,
+            poll_interval,
+            use_ssl,
         })
-    }
-
-    pub fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
-        // Currently only shas are allowed to be passed as graph artifact references
-        // TODO Update when tag reloading is implemented
-        let valid_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
-        if valid_regex.is_match(reference) {
-            tracing::debug!("validated OCI configuration");
-            Ok(reference.to_string())
-        } else {
-            Err(anyhow!("invalid graph artifact reference: {reference}"))
-        }
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -275,6 +291,10 @@ impl Opt {
 
     fn err_require_opt(env_var: &str) -> anyhow::Error {
         anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
+    }
+
+    fn prohibit_env_vars(env_vars: &[&'static str]) -> Result<(), anyhow::Error> {
+        reject_environment_variables(&env_variables_set(env_vars))
     }
 }
 
@@ -372,6 +392,11 @@ impl Executable {
         *crate::services::APOLLO_KEY.lock() = opt.apollo_key.clone();
         *crate::services::APOLLO_GRAPH_REF.lock() = opt.apollo_graph_ref.clone();
         *APOLLO_ROUTER_LISTEN_ADDRESS.lock() = opt.listen_address;
+        *APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE.lock() = opt.graph_artifact_reference.clone();
+        // Only set hot_reload if explicitly true
+        if opt.hot_reload {
+            APOLLO_ROUTER_HOT_RELOAD_CLI.store(true, Ordering::Relaxed);
+        }
         APOLLO_ROUTER_DEV_MODE.store(opt.dev, Ordering::Relaxed);
         APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET
             .store(opt.supergraph_path.is_some(), Ordering::Relaxed);
@@ -441,8 +466,13 @@ impl Executable {
         if apollo_telemetry_initialized {
             // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
             tokio::task::spawn_blocking(move || {
-                opentelemetry::global::shutdown_tracer_provider();
-                meter_provider_internal().shutdown();
+                // Setting a new default provider causes the old one to be dropped and shut down
+                opentelemetry::global::set_tracer_provider(
+                    opentelemetry_sdk::trace::SdkTracerProvider::default(),
+                );
+                if let Err(error) = meter_provider_internal().shutdown() {
+                    tracing::error!(%error, "Failed to shut down OTel meter provider cleanly");
+                }
             })
             .await?;
         }
@@ -459,6 +489,9 @@ impl Executable {
         let current_directory = std::env::current_dir()?;
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
+
+        // ROUTER-1609: prevent router from starting if OTEL environment variables are set.
+        Opt::prohibit_env_vars(&FORBIDDEN_OTEL_VARS)?;
 
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
@@ -498,15 +531,29 @@ impl Executable {
         );
 
         // Schema source will be in order of precedence:
-        // 1. Cli --supergraph
+        // 1. CLI --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE
-        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF
+        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE (CLI/env only)
+        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF (CLI/env only)
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
         #[cfg(not(unix))]
         let akp: &Option<PathBuf> = &None;
+
+        // Validate that schema sources are not conflicting
+        // Check both builder API schema and CLI supergraph_path (both map to -s/--supergraph)
+        let has_supergraph_file = schema.is_some() || opt.supergraph_path.is_some();
+        if has_supergraph_file && opt.graph_artifact_reference.is_some() {
+            return Err(anyhow!(
+                "--supergraph (-s) and --graph-artifact-reference cannot be used together. Please specify only one schema source."
+            ));
+        }
+        if opt.supergraph_urls.is_some() && opt.graph_artifact_reference.is_some() {
+            return Err(anyhow!(
+                "APOLLO_ROUTER_SUPERGRAPH_URLS and --graph-artifact-reference cannot be used together. Please specify only one schema source."
+            ));
+        }
 
         let schema_source = match (
             schema,
@@ -731,6 +778,27 @@ fn graph_os() -> bool {
         && crate::services::APOLLO_GRAPH_REF.lock().is_some()
 }
 
+/// Of the environment variable names provided, return a list of those which are set in the environment.
+fn env_variables_set(variables: &[&'static str]) -> Vec<&'static str> {
+    variables
+        .iter()
+        .filter(|v| !matches!(std::env::var(v), Err(std::env::VarError::NotPresent)))
+        .cloned()
+        .collect()
+}
+
+/// Return an error if the list of environment variables provided is not empty
+fn reject_environment_variables(variables: &[&str]) -> Result<(), anyhow::Error> {
+    if variables.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "the following environment variables must not be set: {}",
+            variables.join(", ")
+        ))
+    }
+}
+
 fn setup_panic_handler() {
     // Redirect panics to the logs.
     let backtrace_env = std::env::var("RUST_BACKTRACE");
@@ -759,6 +827,8 @@ fn setup_panic_handler() {
 #[cfg(test)]
 mod tests {
     use crate::executable::add_log_filter;
+    use crate::executable::env_variables_set;
+    use crate::executable::reject_environment_variables;
 
     #[test]
     fn simplest_logging_modifications() {
@@ -822,77 +892,207 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_validate_oci_reference_valid_cases() {
-        // Test valid OCI references with different hash values
-        let valid_hashes = vec![
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha256:ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
-            "@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-            "@sha256:0000000000000000000000000000000000000000000000000000000000000000",
-            "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-        ];
+    mod validation_tests {
+        use tokio::time::Duration;
 
-        for hash in valid_hashes {
-            let result = super::Opt::validate_oci_reference(hash);
-            assert!(result.is_ok(), "Hash '{}' should be valid", hash);
-            assert_eq!(result.unwrap(), hash);
+        use super::super::Executable;
+        use super::super::Opt;
+        use crate::router::SchemaSource;
+
+        #[tokio::test]
+        async fn test_conflicting_supergraph_file_and_graph_artifact_reference() {
+            // Test that --supergraph and --graph-artifact-reference cannot be used together
+            let temp_dir = tempfile::tempdir().unwrap();
+            let supergraph_path = temp_dir.path().join("supergraph.graphql");
+            std::fs::File::create(&supergraph_path).unwrap();
+
+            let schema = Some(SchemaSource::File {
+                path: supergraph_path,
+                watch: false,
+            });
+
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: Some("test-key".to_string()),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            // Provide an explicit minimal config to avoid default Configuration parsing issues
+            use crate::router::ConfigurationSource;
+            let supergraph = crate::configuration::Supergraph::builder().build();
+            let config = ConfigurationSource::Static(Box::new(crate::Configuration {
+                supergraph,
+                health_check: Default::default(),
+                sandbox: Default::default(),
+                homepage: Default::default(),
+                server: Default::default(),
+                cors: Default::default(),
+                tls: Default::default(),
+                apq: Default::default(),
+                persisted_queries: Default::default(),
+                limits: Default::default(),
+                experimental_chaos: Default::default(),
+                batching: Default::default(),
+                experimental_type_conditioned_fetching: false,
+                experimental_hoist_orphan_errors: Default::default(),
+                plugins: Default::default(),
+                apollo_plugins: Default::default(),
+                notify: Default::default(),
+                uplink: None,
+                validated_yaml: None,
+                raw_yaml: None,
+            }));
+
+            let result = Executable::inner_start(
+                None,
+                schema,
+                Some(config),
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            assert!(result.is_err(), "Should fail with conflicting options");
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
+            );
+            assert!(
+                error_msg.contains("--supergraph")
+                    || error_msg.contains("--graph-artifact-reference"),
+                "Error should mention the conflicting options"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_conflicting_supergraph_urls_and_graph_artifact_reference() {
+            // Test that APOLLO_ROUTER_SUPERGRAPH_URLS and --graph-artifact-reference cannot be used together
+            use url::Url;
+            let test_url = Url::parse("https://example.com/schema.graphql").unwrap();
+            let schema = Some(SchemaSource::URLs {
+                urls: vec![test_url],
+            });
+
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: Some(vec![Url::parse("https://example.com/schema.graphql").unwrap()]),
+                command: None,
+                apollo_key: Some("test-key".to_string()),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            // Provide an explicit minimal config to avoid default Configuration parsing issues
+            use crate::router::ConfigurationSource;
+            let supergraph = crate::configuration::Supergraph::builder().build();
+            let config = ConfigurationSource::Static(Box::new(crate::Configuration {
+                supergraph,
+                health_check: Default::default(),
+                sandbox: Default::default(),
+                homepage: Default::default(),
+                server: Default::default(),
+                cors: Default::default(),
+                tls: Default::default(),
+                apq: Default::default(),
+                persisted_queries: Default::default(),
+                limits: Default::default(),
+                experimental_chaos: Default::default(),
+                batching: Default::default(),
+                experimental_type_conditioned_fetching: false,
+                experimental_hoist_orphan_errors: Default::default(),
+                plugins: Default::default(),
+                apollo_plugins: Default::default(),
+                notify: Default::default(),
+                uplink: None,
+                validated_yaml: None,
+                raw_yaml: None,
+            }));
+
+            let result = Executable::inner_start(
+                None,
+                schema,
+                Some(config),
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            assert!(result.is_err(), "Should fail with conflicting options");
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
+            );
+            assert!(
+                error_msg.contains("APOLLO_ROUTER_SUPERGRAPH_URLS")
+                    || error_msg.contains("--graph-artifact-reference"),
+                "Error should mention the conflicting options"
+            );
         }
     }
 
     #[test]
-    fn test_validate_oci_reference_invalid_cases() {
-        let invalid_references = vec![
-            // Missing @sha256: prefix
-            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Wrong prefix
-            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Too short
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
-            // Too long
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
-            // Invalid characters
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
-            // Empty string
-            "",
-            // Just the prefix
-            "@sha256:",
-            // Hash with spaces
-            "@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ",
-            // Hash with dashes
-            "@sha256:12345678-90abcdef-12345678-90abcdef-12345678-90abcdef-12345678-90abcdef",
-            // Hash with colons
-            "@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef",
-            // Missing hash entirely
-            "@sha256",
-            // Wrong format entirely
-            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Extra characters at the end
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef:latest",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
-        ];
+    fn it_observes_environment_variables() {
+        const VALID_ENV_VAR: &str = "CARGO_HOME";
 
-        for reference in invalid_references {
-            let result = super::Opt::validate_oci_reference(reference);
-            assert!(
-                result.is_err(),
-                "Reference '{}' should be invalid",
-                reference
-            );
-            let error_msg = result.unwrap_err().to_string();
-            assert!(
-                error_msg.contains("invalid graph artifact reference"),
-                "Error message should contain 'invalid graph artifact reference' for '{}'",
-                reference
-            );
-            assert!(
-                error_msg.contains(reference),
-                "Error message should contain the invalid reference '{}'",
-                reference
-            );
-        }
+        // if we're running tests, we should have a CARGO_HOME env variable present
+        assert!(std::env::var(VALID_ENV_VAR).is_ok());
+
+        // make sure the env_variables_set function can see that, both alone and in a list
+        assert!(env_variables_set(&[VALID_ENV_VAR]).contains(&VALID_ENV_VAR));
+        assert!(
+            env_variables_set(&[VALID_ENV_VAR, "ANOTHER_ENV_VARIABLE"]).contains(&VALID_ENV_VAR)
+        );
+
+        // make sure the env_variables_set variable doesn't find not-present environment variables
+        assert!(env_variables_set(&["AN_EXTREMELY_UNLIKELY_TO_BE_SET_VARIABLE"]).is_empty());
+    }
+
+    #[test]
+    fn it_returns_an_error_when_env_variable_provided() {
+        assert!(reject_environment_variables(&[]).is_ok());
+
+        let err = reject_environment_variables(&["env1"]).unwrap_err();
+        assert!(err.to_string().contains("env1"));
+
+        let err = reject_environment_variables(&["env1", "env2"]).unwrap_err();
+        assert!(err.to_string().contains("env1"));
+        assert!(err.to_string().contains("env2"));
     }
 }

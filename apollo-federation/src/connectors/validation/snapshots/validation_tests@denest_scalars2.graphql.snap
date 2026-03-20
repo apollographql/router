@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+expression: result.errors
 input_file: apollo-federation/src/connectors/validation/test_data/denest_scalars2.graphql
 ---
 [

@@ -427,7 +427,7 @@ async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Cannot decode JWT: InvalidSignature")
+        .message("Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.")
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -758,7 +758,10 @@ async fn it_inserts_failure_jwt_status_into_context() {
     match error {
         Some(err) => {
             assert_eq!(err.code, "CANNOT_DECODE_JWT");
-            assert_eq!(err.message, "Cannot decode JWT: InvalidSignature");
+            assert_eq!(
+                err.message,
+                "Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42."
+            );
         }
         None => panic!("expected an error"),
     }
@@ -775,7 +778,7 @@ async fn it_inserts_failure_jwt_status_into_context() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Cannot decode JWT: InvalidSignature")
+        .message("Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.")
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -823,7 +826,10 @@ async fn it_moves_on_after_jwt_errors_when_configured() {
     match error {
         Some(err) => {
             assert_eq!(err.code, "CANNOT_DECODE_JWT");
-            assert_eq!(err.message, "Cannot decode JWT: InvalidSignature");
+            assert_eq!(
+                err.message,
+                "Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42."
+            );
         }
         None => panic!("expected an error"),
     }
@@ -1776,4 +1782,249 @@ async fn jwks_send_headers() {
     .unwrap();
 
     assert!(got_header.load(Ordering::Acquire));
+}
+
+mod common {
+    use base64::Engine as _;
+    use base64::prelude::BASE64_URL_SAFE_NO_PAD;
+    use jsonwebtoken::Algorithm;
+    use jsonwebtoken::EncodingKey;
+    use jsonwebtoken::encode;
+    use jsonwebtoken::jwk::AlgorithmParameters;
+    use jsonwebtoken::jwk::CommonParameters;
+    use jsonwebtoken::jwk::EllipticCurve;
+    use jsonwebtoken::jwk::EllipticCurveKeyParameters;
+    use jsonwebtoken::jwk::EllipticCurveKeyType;
+    use jsonwebtoken::jwk::Jwk;
+    use jsonwebtoken::jwk::KeyAlgorithm;
+    use jsonwebtoken::jwk::KeyOperations;
+    use jsonwebtoken::jwk::PublicKeyUse;
+    use p256::ecdsa::SigningKey;
+    use p256::pkcs8::EncodePrivateKey;
+
+    use crate::plugins::authentication::JWTConf;
+    use crate::plugins::authentication::Source;
+    use crate::plugins::authentication::default_header_name;
+    use crate::plugins::authentication::default_header_value_prefix;
+    use crate::services::router;
+    use crate::services::supergraph;
+
+    pub(super) fn jwk(signing_key: &SigningKey) -> Jwk {
+        let verifying_key = signing_key.verifying_key();
+        let point = verifying_key.to_encoded_point(false);
+        Jwk {
+            common: CommonParameters {
+                public_key_use: Some(PublicKeyUse::Signature),
+                key_operations: Some(vec![KeyOperations::Verify]),
+                key_algorithm: Some(KeyAlgorithm::ES256),
+                key_id: Some("hello".to_string()),
+                ..Default::default()
+            },
+            algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+                key_type: EllipticCurveKeyType::EC,
+                curve: EllipticCurve::P256,
+                x: BASE64_URL_SAFE_NO_PAD.encode(point.x().unwrap()),
+                y: BASE64_URL_SAFE_NO_PAD.encode(point.y().unwrap()),
+            }),
+        }
+    }
+
+    fn encoding_key(signing_key: &SigningKey) -> EncodingKey {
+        EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes())
+    }
+
+    pub(super) fn jwt_conf_with_header_source() -> JWTConf {
+        let mut config = JWTConf::default();
+        config.sources.push(Source::Header {
+            name: default_header_name(),
+            value_prefix: default_header_value_prefix(),
+        });
+        config
+    }
+
+    pub(super) fn build_request_with_header_token(
+        signing_key: SigningKey,
+        token_claims: serde_json::Value,
+    ) -> router::Request {
+        let token = encode(
+            &jsonwebtoken::Header::new(Algorithm::ES256),
+            &token_claims,
+            &encoding_key(&signing_key),
+        )
+        .unwrap();
+
+        supergraph::Request::canned_builder()
+            .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+}
+
+mod audience_validation {
+    use std::ops::ControlFlow;
+
+    use http::StatusCode;
+    use jsonwebtoken::get_current_timestamp;
+    use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::rand_core::OsRng;
+
+    use super::common::build_request_with_header_token;
+    use super::common::jwk;
+    use super::common::jwt_conf_with_header_source;
+    use super::make_manager;
+    use crate::plugins::authentication::authenticate;
+    use crate::services::router;
+
+    fn authenticate_request(
+        manager_aud: &[&str],
+        token_aud: serde_json::Value,
+    ) -> ControlFlow<router::Response, router::Request> {
+        let signing_key = SigningKey::random(&mut OsRng);
+        let manager_audiences = if manager_aud.is_empty() {
+            None
+        } else {
+            Some(manager_aud.iter().map(ToString::to_string).collect())
+        };
+        let manager = make_manager(&jwk(&signing_key), None, manager_audiences);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+            "aud": token_aud
+        });
+
+        let request = build_request_with_header_token(signing_key, token_claims);
+        authenticate(&jwt_conf_with_header_source(), &manager, request)
+    }
+
+    #[rstest::rstest]
+    #[case::multiple_auds(&["hello", "world"], serde_json::json!(["hello", "world"]))]
+    #[case::multiple_with_array_accepted(&["hello", "world", "goodbye"], serde_json::json!(["hello"]))]
+    #[case::multiple_with_str_accepted(&["hello", "world"], serde_json::json!("hello"))]
+    #[case::multiple_with_str_accepted(&["hello", "world"], serde_json::json!("world"))]
+    #[case::single_with_array_accepted_any_of(&["hello"], serde_json::json!(["hello", "world"]))]
+    #[case::single_with_array_accepted(&["hello"], serde_json::json!(["hello"]))]
+    #[case::single_aud(&["hello"], serde_json::json!("hello"))]
+    #[case::multiple_with_single_intersection(&["hello", "world", "goodbye"], serde_json::json!(["hola", "bonjour", "hello"]))]
+    #[case::null_mgr_aud(&[], serde_json::Value::Null)]
+    #[case::null_mgr_aud_with_token_aud(&[], serde_json::json!("hello"))]
+    fn it_accepts_jwt(#[case] manager_aud: &[&str], #[case] token_aud: serde_json::Value) {
+        match authenticate_request(manager_aud, token_aud.clone()) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(response) => {
+                panic!(
+                    "Request should be permitted: manager_aud = {manager_aud:?}, token_aud = {token_aud}, response = {response:?}"
+                );
+            }
+        }
+    }
+
+    #[rstest::rstest]
+    #[case::missing_token_aud(&["hello", "world"], serde_json::json!(""))]
+    #[case::mismatched_single_aud(&["hello"], serde_json::json!("world"))]
+    #[case::mismatched_single_aud_array(&["hello"], serde_json::json!(["world", "planet"]))]
+    #[case::mismatched_multiple_aud(&["hello", "world"], serde_json::json!(["goodbye", "planet"]))]
+    fn it_rejects_jwt(#[case] manager_aud: &[&str], #[case] token_aud: serde_json::Value) {
+        match authenticate_request(manager_aud, token_aud.clone()) {
+            ControlFlow::Continue(_) => {
+                panic!(
+                    "Request should be rejected: manager_aud = {manager_aud:?}, token_aud = {token_aud}"
+                );
+            }
+            ControlFlow::Break(response) => {
+                assert_eq!(
+                    response.response.status(),
+                    StatusCode::UNAUTHORIZED,
+                    "manager_aud = {manager_aud:?}, token_aud = {token_aud}, response = {response:?}"
+                );
+            }
+        }
+    }
+}
+
+mod issuer_validation {
+    use std::ops::ControlFlow;
+
+    use http::StatusCode;
+    use jsonwebtoken::get_current_timestamp;
+    use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::rand_core::OsRng;
+
+    use super::common::build_request_with_header_token;
+    use super::common::jwk;
+    use super::common::jwt_conf_with_header_source;
+    use super::make_manager;
+    use crate::plugins::authentication::authenticate;
+    use crate::services::router;
+
+    fn authenticate_request(
+        manager_iss: &[&str],
+        token_iss: serde_json::Value,
+    ) -> ControlFlow<router::Response, router::Request> {
+        let signing_key = SigningKey::random(&mut OsRng);
+
+        let manager_issuers = if manager_iss.is_empty() {
+            None
+        } else {
+            Some(manager_iss.iter().map(ToString::to_string).collect())
+        };
+        let manager = make_manager(&jwk(&signing_key), manager_issuers, None);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+            "iss": token_iss
+        });
+
+        let request = build_request_with_header_token(signing_key, token_claims);
+        authenticate(&jwt_conf_with_header_source(), &manager, request)
+    }
+
+    #[rstest::rstest]
+    #[case::multiple_with_str_accepted(&["hello", "world"], serde_json::json!("hello"))]
+    #[case::multiple_with_str_accepted(&["hello", "world"], serde_json::json!("world"))]
+    #[case::single_iss(&["hello"], serde_json::json!("hello"))]
+    #[case::null_mgr_iss_with_token_iss(&[], serde_json::json!("hello"))]
+    #[case::null_mgr_iss_with_empty_token_iss(&[], serde_json::Value::Null)]
+    #[case::empty_token_iss(&["hello", "world"], serde_json::Value::Null)]
+    #[case::empty_token_iss(&["hello"], serde_json::Value::Null)]
+    fn it_accepts_jwt(#[case] manager_iss: &[&str], #[case] token_iss: serde_json::Value) {
+        match authenticate_request(manager_iss, token_iss.clone()) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(response) => {
+                panic!(
+                    "Request should be permitted: manager_iss = {manager_iss:?}, token_iss = {token_iss}, response = {response:?}"
+                );
+            }
+        }
+    }
+
+    #[rstest::rstest]
+    #[case::multiple_iss(&["hello", "world"], serde_json::json!(["hello", "world"]))]
+    #[case::multiple_with_array_accepted(&["hello", "world", "goodbye"], serde_json::json!(["hello"]))]
+    #[case::single_with_array_accepted_any_of(&["hello"], serde_json::json!(["hello", "world"]))]
+    #[case::single_with_array_accepted(&["hello"], serde_json::json!(["hello"]))]
+    #[case::missing_token_iss(&["hello", "world"], serde_json::json!(""))]
+    #[case::mismatched_single_iss(&["hello"], serde_json::json!("world"))]
+    #[case::mismatched_single_iss_array(&["hello"], serde_json::json!(["world"]))]
+    #[case::mismatched_single_iss_array(&["hello"], serde_json::json!(["world", "planet"]))]
+    #[case::mismatched_multiple_iss(&["hello", "world"], serde_json::json!(["goodbye", "planet"]))]
+    fn it_rejects_jwt(#[case] manager_iss: &[&str], #[case] token_iss: serde_json::Value) {
+        match authenticate_request(manager_iss, token_iss.clone()) {
+            ControlFlow::Continue(_) => {
+                panic!(
+                    "Request should be rejected: manager_iss = {manager_iss:?}, token_iss = {token_iss}"
+                );
+            }
+            ControlFlow::Break(response) => {
+                assert_eq!(
+                    response.response.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "manager_iss = {manager_iss:?}, token_iss = {token_iss}, response = {response:?}"
+                );
+            }
+        }
+    }
 }

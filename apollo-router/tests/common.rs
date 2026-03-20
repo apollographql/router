@@ -29,17 +29,14 @@ use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TracerProvider as OtherTracerProvider;
-use opentelemetry_otlp::HttpExporterBuilder;
-use opentelemetry_otlp::Protocol;
-use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::testing::trace::NoopSpanExporter;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
-use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::Config;
-use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use parking_lot::Mutex;
 use prost::Message;
@@ -73,6 +70,18 @@ use wiremock::http::Method;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
+
+/// Redact the query hash in cache debug keys so snapshots are stable.
+/// Uses the next `:` after `:hash:` as the end marker (e.g. `:hash:[^:]*`) so it remains
+/// correct if additional fields are added between hash and data.
+#[allow(dead_code)] // used by integration/response_cache and integration/coprocessor test binaries
+pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
+    static REDACT_HASH_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r":hash:[^:]*").expect("redact regex"));
+    REDACT_HASH_RE
+        .replace(key, ":hash:[query-hash]")
+        .into_owned()
+}
 
 /// Global registry to keep track of allocated ports across all tests
 /// This helps avoid port conflicts between concurrent tests
@@ -201,6 +210,7 @@ pub struct IntegrationTest {
     router_location: PathBuf,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
+    stderr_tx: tokio::sync::mpsc::Sender<String>,
     apollo_otlp_metrics_rx: tokio::sync::mpsc::Receiver<ExportMetricsServiceRequest>,
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
@@ -208,8 +218,8 @@ pub struct IntegrationTest {
     telemetry: Telemetry,
     extra_propagator: Telemetry,
 
-    pub _tracer_provider_client: TracerProvider,
-    pub _tracer_provider_subgraph: TracerProvider,
+    pub _tracer_provider_client: SdkTracerProvider,
+    pub _tracer_provider_subgraph: SdkTracerProvider,
     subscriber_client: Dispatch,
 
     _subgraph_overrides: HashMap<String, String>,
@@ -222,6 +232,8 @@ pub struct IntegrationTest {
     port_replacements: HashMap<String, u16>,
     jwt: Option<String>,
     env: Option<HashMap<String, OsString>>,
+    hot_reload: bool,
+    reqwest_client: reqwest::Client,
 }
 
 impl IntegrationTest {
@@ -372,27 +384,24 @@ pub enum Telemetry {
 }
 
 impl Telemetry {
-    fn tracer_provider(&self, service_name: &str) -> TracerProvider {
-        let config = Config::default().with_resource(Resource::new(vec![KeyValue::new(
-            SERVICE_NAME,
-            service_name.to_string(),
-        )]));
+    fn tracer_provider(&self, service_name: &str) -> SdkTracerProvider {
+        let resource = Resource::builder_empty()
+            .with_attributes([KeyValue::new(SERVICE_NAME, service_name.to_string())])
+            .build();
 
         match self {
             Telemetry::Otlp {
                 endpoint: Some(endpoint),
-            } => TracerProvider::builder()
-                .with_config(config)
+            } => SdkTracerProvider::builder()
+                .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        SpanExporterBuilder::Http(
-                            HttpExporterBuilder::default()
-                                .with_endpoint(endpoint)
-                                .with_protocol(Protocol::HttpBinary),
-                        )
-                        .build_span_exporter()
-                        .expect("otlp pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
+                        opentelemetry_otlp::SpanExporter::builder()
+                            .with_http()
+                            .with_endpoint(endpoint)
+                            .build()
+                            .expect("otlp pipeline failed"),
+                        runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -402,15 +411,15 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Datadog => TracerProvider::builder()
-                .with_config(config)
+            Telemetry::Datadog => SdkTracerProvider::builder()
+                .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
                         opentelemetry_datadog::new_pipeline()
                             .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
+                        runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -420,15 +429,15 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::Zipkin => TracerProvider::builder()
-                .with_config(config)
+            Telemetry::Zipkin => SdkTracerProvider::builder()
+                .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        opentelemetry_zipkin::new_pipeline()
-                            .with_service_name(service_name)
-                            .init_exporter()
+                        opentelemetry_zipkin::ZipkinExporter::builder()
+                            .with_collector_endpoint("http://127.0.0.1:9411/api/v2/spans")
+                            .build()
                             .expect("zipkin pipeline failed"),
-                        opentelemetry_sdk::runtime::Tokio,
+                        runtime::Tokio,
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()
@@ -438,8 +447,8 @@ impl Telemetry {
                     .build(),
                 )
                 .build(),
-            Telemetry::None | Telemetry::Otlp { endpoint: None } => TracerProvider::builder()
-                .with_config(config)
+            Telemetry::None | Telemetry::Otlp { endpoint: None } => SdkTracerProvider::builder()
+                .with_resource(resource)
                 .with_simple_exporter(NoopSpanExporter::default())
                 .build(),
         }
@@ -565,6 +574,8 @@ impl IntegrationTest {
         jwt: Option<String>,
         env: Option<HashMap<String, OsString>>,
         redis_namespace: Option<String>,
+        hot_reload: Option<bool>,
+        reqwest_client: Option<reqwest::Client>,
     ) -> Self {
         let redis_namespace = redis_namespace.unwrap_or_else(|| Uuid::new_v4().to_string());
         let telemetry = telemetry.unwrap_or_default();
@@ -660,6 +671,16 @@ impl IntegrationTest {
         fs::copy(&supergraph, &test_schema_location).expect("could not write schema");
 
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
+        // we separate stderr and stdio (previously they were both just handled by a single
+        // channel) to avoid congestion in one to contend the other
+
+        let (stderr_tx, mut stderr_rx) = tokio::sync::mpsc::channel::<String>(2000);
+        // we want to continually drain stderr, not let it build up backpressure
+        task::spawn(async move {
+            while stderr_rx.recv().await.is_some() {
+                // we discard stderr to prevent backpressure
+            }
+        });
         let collect_stdio = collect_stdio.map(|sender| {
             let version_line_re = regex::Regex::new("Apollo Router v[^ ]+ ").unwrap();
             (sender, version_line_re)
@@ -673,12 +694,12 @@ impl IntegrationTest {
         Mock::given(method(Method::POST))
             .and(path("/v1/metrics"))
             .and(move |req: &wiremock::Request| {
-                // Decode the OTLP request
+                // Decode the OTLP request and forward to the channel
                 if let Ok(msg) = ExportMetricsServiceRequest::decode(req.body.as_ref()) {
-                    // We don't care about the result of send here
                     let _ = apollo_otlp_metrics_tx.try_send(msg);
                 }
-                false
+                // Always match so we return 200 OK
+                true
             })
             .respond_with(ResponseTemplate::new(200))
             .mount(&apollo_otlp_server)
@@ -691,6 +712,7 @@ impl IntegrationTest {
             test_schema_location,
             stdio_tx,
             stdio_rx,
+            stderr_tx,
             apollo_otlp_metrics_rx,
             collect_stdio,
             _subgraphs: subgraphs,
@@ -710,10 +732,12 @@ impl IntegrationTest {
             port_replacements: HashMap::new(),
             jwt,
             env,
+            hot_reload: hot_reload.unwrap_or(true),
+            reqwest_client: reqwest_client.unwrap_or_default(),
         }
     }
 
-    fn dispatch(tracer_provider: &TracerProvider) -> Dispatch {
+    fn dispatch(tracer_provider: &SdkTracerProvider) -> Dispatch {
         let tracer = tracer_provider.tracer("tracer");
         let tracing_layer = tracing_opentelemetry::layer()
             .with_tracer(tracer)
@@ -776,7 +800,10 @@ impl IntegrationTest {
 
         // Build arguments conditionally based on APOLLO_GRAPH_ARTIFACT_REGISTRY
         let config_path = self.test_config_location.to_string_lossy();
-        let mut args = vec!["--hr", "--config", &config_path, "--log", &self.log];
+        let mut args = vec!["--config", &config_path, "--log", &self.log];
+        if self.hot_reload {
+            args.insert(0, "--hr");
+        }
 
         // Add --supergraph if launch env vars are not set
         let schema_path = self.test_schema_location.to_string_lossy();
@@ -841,12 +868,14 @@ impl IntegrationTest {
             }
         });
 
-        // Also read from stderr to capture error messages
-        let stderr_tx = self.stdio_tx.clone();
+        // we separate out stderr to avoid congestion there affecting stdout; previous to this, we
+        // had both stdout and stderr in the same channel, allowing one's congestion to swamp the other
+        let stderr_tx = self.stderr_tx.clone();
         task::spawn(async move {
             let mut lines = stderr_reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let _ = stderr_tx.send(line).await;
+                // try_send to never block - if the channel is full, just drop the line
+                let _ = stderr_tx.try_send(line);
             }
         });
         self.router = Some(router);
@@ -940,12 +969,13 @@ impl IntegrationTest {
 
         let url = format!("http://{}", self.bind_address());
         let subgraph_context = self.subgraph_context.clone();
+
+        let client = self.reqwest_client.clone();
+
         async move {
             let span = info_span!("client_request");
             let trace_id = span.context().span().span_context().trace_id();
             async move {
-                let client = reqwest::Client::new();
-
                 let mut builder = client.post(url).header(CONTENT_TYPE, query.content_type);
 
                 for (name, value) in query.headers {
@@ -1001,12 +1031,13 @@ impl IntegrationTest {
         );
 
         let url = format!("http://{}", self.bind_address());
+        let client = self.reqwest_client.clone();
+
         async move {
             let span = info_span!("client_raw_request");
             let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
-                let client = reqwest::Client::new();
                 let mut request = client
                     .post(url)
                     .header("apollographql-client-name", "custom_name")
@@ -1045,12 +1076,12 @@ impl IntegrationTest {
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        let client = reqwest::Client::new();
         let id = Uuid::new_v4().to_string();
         let span = info_span!("client_request", unit_test = id.as_str());
         let _span_guard = span.enter();
 
-        let mut request = client
+        let mut request = self
+            .reqwest_client
             .post(format!("http://{}", self.bind_address()))
             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .header(ACCEPT, "multipart/mixed;subscriptionSpec=1.0")
@@ -1067,7 +1098,7 @@ impl IntegrationTest {
             );
         });
 
-        match client.execute(request).await {
+        match self.reqwest_client.execute(request).await {
             Ok(response) => (id, response),
             Err(err) => {
                 panic!("unable to send successful request to router, {err}")
@@ -1077,16 +1108,15 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn get_metrics_response(&self) -> reqwest::Result<reqwest::Response> {
-        let client = reqwest::Client::new();
-
-        let request = client
+        let request = self
+            .reqwest_client
             .get(format!("http://{}/metrics", self.bind_address()))
             .header("apollographql-client-name", "custom_name")
             .header("apollographql-client-version", "1.0")
             .build()
             .unwrap();
 
-        client.execute(request).await
+        self.reqwest_client.execute(request).await
     }
 
     /// Waits for any metrics to be emitted for the given duration. This will return as soon as the
@@ -1100,19 +1130,27 @@ impl IntegrationTest {
         let mut metrics = Vec::new();
 
         while Instant::now() < deadline {
-            if let Some(msg) = self.apollo_otlp_metrics_rx.recv().await {
-                // Only break once we see a batch with metrics in it
-                if msg
-                    .resource_metrics
-                    .iter()
-                    .any(|rm| !rm.scope_metrics.is_empty())
-                {
-                    metrics.push(msg);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match tokio::time::timeout(remaining, self.apollo_otlp_metrics_rx.recv()).await {
+                Ok(Some(msg)) => {
+                    // Only break once we see a batch with metrics in it
+                    if msg
+                        .resource_metrics
+                        .iter()
+                        .any(|rm| !rm.scope_metrics.is_empty())
+                    {
+                        metrics.push(msg);
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    // channel closed
                     break;
                 }
-            } else {
-                // channel closed
-                break;
+                Err(_) => {
+                    // timeout elapsed
+                    break;
+                }
             }
         }
 
@@ -1190,6 +1228,7 @@ impl IntegrationTest {
         );
     }
 
+    /// Sync fn using a loop to println!() each log
     #[allow(dead_code)]
     pub fn logs(&mut self) -> Vec<String> {
         self.read_logs();
@@ -1547,16 +1586,12 @@ impl IntegrationTest {
     pub(crate) fn force_flush(&self) {
         let tracer_provider_client = self._tracer_provider_client.clone();
         let tracer_provider_subgraph = self._tracer_provider_subgraph.clone();
-        for r in tracer_provider_subgraph.force_flush() {
-            if let Err(e) = r {
-                eprintln!("failed to flush subgraph tracer: {e}");
-            }
+        if let Err(e) = tracer_provider_subgraph.force_flush() {
+            eprintln!("failed to flush subgraph tracer: {e}");
         }
 
-        for r in tracer_provider_client.force_flush() {
-            if let Err(e) = r {
-                eprintln!("failed to flush client tracer: {e}");
-            }
+        if let Err(e) = tracer_provider_client.force_flush() {
+            eprintln!("failed to flush client tracer: {e}");
         }
     }
 
@@ -1611,7 +1646,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_redis_cache_contains(&self, key: &str, ignore: Option<&str>) -> String {
+    pub async fn assert_redis_cache_contains(&self, key: &str) -> String {
         let url = self.redis_url().expect("no redis urls");
         let config = RedisConfig::from_url(&url).unwrap();
         let client = RedisClient::new(config, None, None, None);
@@ -1622,17 +1657,6 @@ impl IntegrationTest {
         let s = match client.get(&namespaced_key).await {
             Ok(s) => s,
             Err(e) => {
-                println!("non-ignored keys in the same namespace in Redis:");
-                for key in self
-                    .scan(&client)
-                    .await
-                    .expect("couldn't get keys from redis")
-                {
-                    let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
-                    if Some(unnamespaced_key.as_str()) != ignore {
-                        println!("\t{unnamespaced_key}");
-                    }
-                }
                 panic!(
                     "key {key} not found: {e}\n This may be caused by a number of things including federation version changes"
                 );
@@ -1643,6 +1667,33 @@ impl IntegrationTest {
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
         s
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_redis_cache_contains_key_matching(&self, pattern: &str) {
+        let url = self.redis_url().expect("no redis urls");
+        let config = RedisConfig::from_url(&url).unwrap();
+        let client = RedisClient::new(config, None, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await.unwrap();
+
+        let keys = self
+            .scan(&client)
+            .await
+            .expect("couldn't get keys from redis");
+        let redis_namespace = &self.redis_namespace;
+
+        let matching_key = keys.iter().find(|key| {
+            let unnamespaced = key.replace(&format!("{redis_namespace}:"), "");
+            unnamespaced.contains(pattern)
+        });
+
+        if matching_key.is_none() {
+            panic!("no key matching pattern '{pattern}' found in Redis cache");
+        }
+
+        client.quit().await.unwrap();
+        let _ = connection_task.await;
     }
 
     /// Return the first URL in `self.redis_urls`.

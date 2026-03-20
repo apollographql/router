@@ -47,11 +47,24 @@ mod test {
     #[case::arrow_method_missing_optional("missingField?->first { name }", None, "0.3")]
     #[case::optional_subselection           ("user: user? { firstName lastName }",  Some(json!({"user": { "firstName": "Alice", "lastName": "InChains" }})),      "0.3" )]
     #[case::optional_subselection_short     ("user? { firstName lastName }",        Some(json!({"user": { "firstName": "Alice", "lastName": "InChains" }})),      "0.3" )]
+    // Spread syntax tests (v0.4+)
+    #[case::spread_with_match               ("rootField ... rootField->match(['hello', { matched: $(true) }])", Some(json!({"rootField": "hello", "matched": true})), "0.4")]
+    #[case::spread_with_match_no_match      ("rootField ... rootField->match(['goodbye', { matched: $(true) }], [@, null])", Some(json!(null)), "0.4")]
+    #[case::spread_literal_object           ("rootField ... $({ extra: $('value') })", Some(json!({"rootField": "hello", "extra": "value"})), "0.4")]
+    #[case::spread_with_subselection        ("... user->match([@, { name: @.firstName }])", Some(json!({"name": "Alice"})), "0.4")]
+    #[case::spread_multiple_match_arms      ("... rootField->match(['hello', { greeting: $('hi') }], ['goodbye', { greeting: $('bye') }], [@, {}])", Some(json!({"greeting": "hi"})), "0.4")]
+    #[case::spread_nested_object            ("... $({ nested: { a: $(1), b: $(2) } })", Some(json!({"nested": {"a": 1, "b": 2}})), "0.4")]
+    #[case::spread_with_path_expr           ("... $({ count: results->size })", Some(json!({"count": 2})), "0.4")]
+    #[case::spread_after_fields             ("rootField user { firstName } ... $({ appended: $(true) })", Some(json!({"rootField": "hello", "user": {"firstName": "Alice"}, "appended": true})), "0.4")]
+    #[case::spread_before_fields            ("... $({ prepended: $(true) }) rootField", Some(json!({"prepended": true, "rootField": "hello"})), "0.4")]
+    #[case::spread_match_with_default       ("... rootField->match(['nomatch', { x: $(1) }], [@, { default: $(true) }])", Some(json!({"default": true})), "0.4")]
+    #[case::spread_multiple_spreads         ("rootField ... $({ first: $(1) }) ... $({ second: $(2) })", Some(json!({"rootField": "hello", "first": 1, "second": 2})), "0.4")]
+    #[case::spread_multiple_with_match      ("... rootField->match(['hello', { a: $(1) }]) ... $({ b: $(2) })", Some(json!({"a": 1, "b": 2})), "0.4")]
     fn kitchen_sink(
         #[case] selection: &str,
         #[case] expected: Option<Value>,
         #[case] minimum_version: &str,
-        #[values(ConnectSpec::V0_2, ConnectSpec::V0_3)] version: ConnectSpec,
+        #[values(ConnectSpec::V0_2, ConnectSpec::V0_3, ConnectSpec::V0_4)] version: ConnectSpec,
     ) {
         // We're effectively skipping the test but it will be reported as passed because Rust has no runtime "mark as skipped" capability
         if version.as_str() < minimum_version {

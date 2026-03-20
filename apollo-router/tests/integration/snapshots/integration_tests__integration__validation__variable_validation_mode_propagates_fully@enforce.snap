@@ -1,0 +1,15 @@
+---
+source: apollo-router/tests/integration/validation.rs
+expression: response_body
+---
+{
+  "errors": [
+    {
+      "extensions": {
+        "code": "VALIDATION_INVALID_TYPE_VARIABLE",
+        "name": "msg"
+      },
+      "message": "unknown field input value at `$msg.canvas[0].innput` found for GraphQL type `input CanvasInput @join__type(graph: TEST) {\n  input: Int!\n}\n`"
+    }
+  ]
+}
