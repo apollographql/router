@@ -53,7 +53,7 @@ pub(crate) struct ComposeDirectiveManager {
 }
 
 #[derive(Clone)]
-struct MergeDirectiveItem {
+pub(crate) struct MergeDirectiveItem {
     subgraph_name: String,
     definition: DirectiveDefinition,
     link: LinkedElement,
@@ -622,12 +622,13 @@ impl ErrorReporter {
                 (idx, item_in_this_subgraph.cloned())
             })
             .collect();
-        self.report_mismatch_error_without_supergraph::<MergeDirectiveItem>(
+        self.report_mismatch_error_without_supergraph::<MergeDirectiveItem, _>(
             CompositionError::DirectiveCompositionError {
                 message: "Composed directive is not named consistently in all subgraphs"
                     .to_string(),
             },
             &sources,
+            subgraphs,
             |elt, _| Some(format!("\"@{}\"", elt.aliased_directive_name())),
         );
     }

@@ -26,12 +26,12 @@ use strum::IntoEnumIterator as _;
 use tracing::instrument;
 use tracing::trace;
 
-use crate::error::HasLocations;
 use crate::LinkSpecDefinition;
 use crate::api_schema;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::HasLocations;
 use crate::error::SubgraphLocation;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
@@ -804,7 +804,7 @@ impl Merger {
             Some(type_kind_description)
         };
         self.error_reporter
-            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition>(
+            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition, _>(
                 CompositionError::TypeKindMismatch {
                     message: format!(
                         "Type \"{}\" has mismatched kind: it is defined as ",
@@ -813,6 +813,7 @@ impl Merger {
                 },
                 mismatched_type,
                 &sources,
+                &self.subgraphs,
                 |ty| Some(ty.kind().replace("Type", " Type")),
                 |ty, idx| type_kind_to_string(idx, ty),
             );
@@ -1580,7 +1581,8 @@ impl Merger {
             {
                 self.error_reporter.report_mismatch_hint::<
                     ObjectOrInterfaceTypeDefinitionPosition,
-                    ObjectOrInterfaceTypeDefinitionPosition>(
+                    ObjectOrInterfaceTypeDefinitionPosition,
+                    _>(
                         hint_id.clone(),
 format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\": ",
                             type_description,
@@ -1589,6 +1591,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         ),
                         dest,
                         sources,
+                        &self.subgraphs,
                         |_| Some("yes".to_string()),
                         |pos, idx| pos.field(field.field_name().clone())
                             .try_get(self.subgraphs[idx].schema().schema())
@@ -1627,13 +1630,14 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             }
         }
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize>(
+            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize, _>(
                 HintCode::InconsistentEntity,
                 format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
                     &obj.type_name,
                 ),
                 obj,
                 &sources,
+                &self.subgraphs,
                 // Categorize whether the source has a @key or not.
                 |_| Some("no".to_string()),
                 |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
@@ -1892,7 +1896,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         is_input_position: bool,
     ) -> Result<bool, FederationError>
     where
-        T: Display + HasType + Debug,
+        T: HasLocations + Display + HasType + Debug,
     {
         if sources.is_empty() {
             self.error_reporter_mut()
@@ -1967,10 +1971,11 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 }
             };
 
-            self.error_reporter.report_mismatch_error::<Type, T>(
+            self.error_reporter.report_mismatch_error::<Type, T, _>(
                 error,
                 &ty,
                 sources,
+                &self.subgraphs,
                 |d| Some(format!("type \"{d}\"")),
                 |s, idx| {
                     s.get_type(self.subgraphs[idx].schema())
@@ -2000,13 +2005,14 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 "subtype"
             };
 
-            self.error_reporter.report_mismatch_hint::<Type, T>(
+            self.error_reporter.report_mismatch_hint::<Type, T, _>(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs: ",
                 ),
                 &ty,
                 sources,
+                &self.subgraphs,
                 |d| Some(d.to_string()),
                 |s, idx| {
                     s.get_type(self.subgraphs[idx].schema())
@@ -2266,33 +2272,34 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     } else {
                         format!("Element \"{dest}\"")
                     };
-                    self.error_reporter.report_mismatch_hint::<T, T>(
-                        HintCode::InconsistentDescription,
-                        format!("{name} has inconsistent descriptions across subgraphs. "),
-                        dest,
-                        sources,
-                        |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
-                        |elem, idx| {
-                            elem.description(self.subgraphs[idx].schema())
-                                .map(|desc| desc.to_string())
-                        },
-                        |desc, subgraphs| {
-                            format!(
-                                "The supergraph will use description (from {}):\n{}",
-                                subgraphs.unwrap_or_else(|| "undefined".to_string()),
-                                Self::description_string(desc, "  ")
-                            )
-                        },
-                        |desc, subgraphs| {
-                            format!(
-                                "\nIn {}, the description is:\n{}",
-                                subgraphs,
-                                Self::description_string(desc, "  ")
-                            )
-                        },
-                        false,
-                        true,
-                    );
+                self.error_reporter.report_mismatch_hint::<T, T, _>(
+                    HintCode::InconsistentDescription,
+                    format!("{name} has inconsistent descriptions across subgraphs. "),
+                    dest,
+                    sources,
+                    &self.subgraphs,
+                    |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
+                    |elem, idx| {
+                        elem.description(self.subgraphs[idx].schema())
+                            .map(|desc| desc.to_string())
+                    },
+                    |desc, subgraphs| {
+                        format!(
+                            "The supergraph will use description (from {}):\n{}",
+                            subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                            Self::description_string(desc, "  ")
+                        )
+                    },
+                    |desc, subgraphs| {
+                        format!(
+                            "\nIn {}, the description is:\n{}",
+                            subgraphs,
+                            Self::description_string(desc, "  ")
+                        )
+                    },
+                    false,
+                    true,
+                );
                 }
             }
         }

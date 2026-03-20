@@ -141,11 +141,6 @@ impl<HL: HasLocations> HasLocations for &HL {
     }
 }
 
-impl HasLocations for Name {
-    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
-        todo!()
-    }
-}
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {

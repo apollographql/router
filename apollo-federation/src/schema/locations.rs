@@ -1,12 +1,17 @@
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveDefinition;
+use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Type;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::HasLocations;
 use crate::error::Locations;
 use crate::error::SubgraphLocation;
+use crate::merger::compose_directive_manager::MergeDirectiveItem;
 use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -41,7 +46,19 @@ impl HasLocations for Type {
 }
 
 impl HasLocations for Directive {
-    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
+    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
+        todo!()
+    }
+}
+
+impl HasLocations for FieldDefinition {
+    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
+        todo!()
+    }
+}
+
+impl HasLocations for DirectiveDefinition {
+    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
         todo!()
     }
 }
@@ -291,5 +308,35 @@ impl HasLocations for DirectiveArgumentDefinitionPosition {
         self.get(schema.schema())
             .map(|node| subgraph.node_locations(node))
             .unwrap_or_default()
+    }
+}
+
+impl HasLocations for Name {
+    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
+        todo!()
+    }
+}
+
+impl HasLocations for String {
+    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
+        Locations::default()
+    }
+}
+
+impl HasLocations for usize {
+    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
+        todo!()
+    }
+}
+
+impl HasLocations for DirectiveTargetPosition {
+    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
+        todo!()
+    }
+}
+
+impl HasLocations for MergeDirectiveItem {
+    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
+        todo!()
     }
 }

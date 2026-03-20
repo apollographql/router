@@ -219,7 +219,7 @@ impl Merger {
                         })
                         .collect();
 
-                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, &Node<InputValueDefinition>>(
+                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, &Node<InputValueDefinition>, _>(
                         HintCode::InconsistentArgumentPresence,
                         format!(
                             "Optional argument \"{}\" will not be included in the supergraph as it does not appear in all subgraphs: ",
@@ -227,6 +227,7 @@ impl Merger {
                         ),
                         &dest_arg_pos,
                         &arg_sources,
+                        &self.subgraphs,
                         |_elt| Some("yes".to_string()),
                         |_elt, _| Some("yes".to_string()),
                         |_, subgraphs| format!("it is defined in {}", subgraphs.unwrap_or_default()),
@@ -279,7 +280,7 @@ impl Merger {
         dest: &T,
     ) -> Result<(), FederationError>
     where
-        T: Display + HasDefaultValue + HasType,
+        T: Display + HasLocations + HasDefaultValue + HasType,
     {
         trace!("Merging default value for \"{dest}\"");
         let mut dest_default: Option<Node<Value>> = None;
@@ -348,7 +349,7 @@ impl Merger {
         };
 
         if is_incompatible {
-            self.error_reporter.report_mismatch_error::<Node<Value>, T>(
+            self.error_reporter.report_mismatch_error::<Node<Value>, T, _>(
                 if T::is_input_field() {
                     CompositionError::InputFieldDefaultMismatch {
                         message: format!("Input field \"{dest}\" has incompatible default values across subgraphs: it has "),
@@ -362,6 +363,7 @@ impl Merger {
                 },
                 dest_default,
                 sources,
+                &self.subgraphs,
                 |v| Some(format!("default value {v}")),
                 |pos, idx| {
                     Some(pos.get_default_value(self.subgraphs[idx].schema())
@@ -370,11 +372,12 @@ impl Merger {
                 },
             );
         } else if is_inconsistent {
-            self.error_reporter.report_mismatch_hint::<Node<Value>, T>(
+            self.error_reporter.report_mismatch_hint::<Node<Value>, T, _>(
                 HintCode::InconsistentDefaultValuePresence,
                 format!("Argument \"{dest}\" has a default value in only some subgraphs: "),
                 dest_default,
                 sources,
+                        &self.subgraphs,
                 // When inconsistent, we set no default. So, the supergraph element should always
                 // be "no default value". The matching strings drive the ordering in the message.
                 |_| Some("no default value".to_string()),
