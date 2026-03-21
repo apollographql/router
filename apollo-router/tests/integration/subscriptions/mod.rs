@@ -121,9 +121,8 @@ pub async fn start_subscription_server_with_payloads(
         axum::serve(listener, app).await.unwrap();
     });
 
-    // Wait a moment for the server to start
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
+    // The listener is already bound above, so the OS accepts TCP connections
+    // immediately regardless of when the serve loop runs.
     info!("Axum server running on {}", ws_addr);
 
     // Start HTTP mock server for regular GraphQL queries
@@ -692,7 +691,8 @@ pub async fn start_callback_server() -> (SocketAddr, CallbackTestState) {
         axum::serve(listener, app).await.unwrap();
     });
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // The listener is already bound above, so the OS accepts TCP connections
+    // immediately regardless of when the serve loop runs.
     info!("Callback server running on {}", addr);
 
     (addr, state)

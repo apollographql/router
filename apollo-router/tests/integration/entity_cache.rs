@@ -475,10 +475,8 @@ async fn test_cache_metrics() {
         assert_eq!(response.status(), 200);
     }
 
-    // Wait a bit to ensure metrics are collected and Redis connections are established
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
     // Assert basic Redis connection metrics (these are emitted immediately when connections are established)
+    // (assert_metrics_contains polls for up to 15s, so no sleep needed here)
     // We expect exactly 1 Redis client for the entity cache
     router
         .assert_metrics_contains(

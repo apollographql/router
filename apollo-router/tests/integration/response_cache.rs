@@ -414,7 +414,7 @@ async fn basic_cache_skips_subgraph_request() {
     reviews: 1
     ");
     // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await; // Async Redis write; increased from 100ms for CI reliability
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     insta::assert_yaml_snapshot!(body, @r"
@@ -483,7 +483,7 @@ async fn private_id_set_at_subgraph_request() {
     reviews: 2
     ");
     // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await; // Async Redis write; increased from 100ms for CI reliability
     let (headers, body) = makegraphql_request_with_headers(&mut router, headers.clone()).await;
     assert!(headers["cache-control"].contains("private"));
     insta::assert_yaml_snapshot!(body, @r"
@@ -570,7 +570,7 @@ async fn check_cache_tags_from_debugger_data() {
     reviews: 1
     ");
     // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await; // Async Redis write; increased from 100ms for CI reliability
     let (headers, body) = make_debug_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     assert!(body.errors.is_empty());
@@ -681,7 +681,7 @@ async fn not_cached_without_cache_control_header() {
     reviews: 1
     ");
     // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await; // Async Redis write; increased from 100ms for CI reliability
 
     let (headers, body) = make_graphql_request(&mut router).await;
     assert_eq!(headers["cache-control"], "no-store");

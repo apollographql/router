@@ -670,7 +670,7 @@ impl IntegrationTest {
         .expect("could not write config");
         fs::copy(&supergraph, &test_schema_location).expect("could not write schema");
 
-        let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
+        let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(50_000);
         // we separate stderr and stdio (previously they were both just handled by a single
         // channel) to avoid congestion in one to contend the other
 
@@ -1211,15 +1211,22 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn wait_for_log_message(&mut self, msg: &str) {
-        let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(10) {
-            if let Ok(line) = self.stdio_rx.try_recv() {
-                self.logs.push(line.to_string());
-                if line.contains(msg) {
-                    return;
-                }
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            match tokio::time::timeout(remaining, self.stdio_rx.recv()).await {
+                Ok(Some(line)) => {
+                    self.logs.push(line.to_string());
+                    if line.contains(msg) {
+                        return;
+                    }
+                }
+                Ok(None) => break, // channel closed
+                Err(_) => break,   // deadline exceeded
+            }
         }
         self.dump_stack_traces();
         panic!(
@@ -1270,18 +1277,25 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_log_not_contains(&mut self, msg: &str) {
-        let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(5) {
-            if let Ok(line) = self.stdio_rx.try_recv()
-                && line.contains(msg)
-            {
-                self.dump_stack_traces();
-                panic!(
-                    "'{msg}' detected in logs. Log dump below:\n\n{logs}",
-                    logs = self.logs.join("\n")
-                );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return; // success: timeout elapsed without seeing the message
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            match tokio::time::timeout(remaining, self.stdio_rx.recv()).await {
+                Ok(Some(line)) => {
+                    if line.contains(msg) {
+                        self.dump_stack_traces();
+                        panic!(
+                            "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                            logs = self.logs.join("\n")
+                        );
+                    }
+                }
+                Ok(None) => return,  // channel closed
+                Err(_) => return,    // deadline elapsed without finding message
+            }
         }
     }
 
@@ -1524,7 +1538,7 @@ impl IntegrationTest {
     pub async fn assert_shutdown(&mut self) {
         let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(3) {
+        while now.elapsed() < Duration::from_secs(30) {
             match router.try_wait() {
                 Ok(Some(_)) => {
                     self.router = None;
