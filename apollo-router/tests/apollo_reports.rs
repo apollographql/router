@@ -172,6 +172,71 @@ async fn get_batch_router_service(
     )
 }
 
+// Variant of config() that installs the slow handler with a configurable delay.
+async fn config_with_delay(
+    use_legacy_request_span: bool,
+    reports: Arc<Mutex<Vec<Report>>>,
+    delay_ms: u64,
+) -> (JoinHandle<()>, serde_json::Value) {
+    *apollo_router::_private::APOLLO_KEY.lock() = Some("test".to_string());
+    *apollo_router::_private::APOLLO_GRAPH_REF.lock() = Some("test".to_string());
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = SlowReportHandlerState { reports, delay_ms };
+    let app = axum::Router::new()
+        .route("/", post(report_slow))
+        .layer(DecompressionLayer::new())
+        .layer(tower_http::add_extension::AddExtensionLayer::new(state));
+
+    let task = ROUTER_SERVICE_RUNTIME.spawn(async move {
+        axum::serve(listener, app.into_make_service())
+            .await
+            .expect("could not start axum server")
+    });
+
+    let mut config = serde_yaml::from_str(include_str!(
+        "fixtures/reports/apollo_reports.router.yaml"
+    ))
+    .expect("config yaml was invalid");
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
+        Some(serde_json::Value::String(format!("http://{addr}")))
+    })
+    .expect("Could not sub in endpoint");
+    config =
+        jsonpath_lib::replace_with(config, "$.telemetry.spans.legacy_request_span", &mut |_| {
+            Some(serde_json::Value::Bool(use_legacy_request_span))
+        })
+        .expect("Could not sub in endpoint");
+    (task, config)
+}
+
+// Mocked-subgraph router service with a slow report handler.
+// Used by test_non_defer_slow_export to demonstrate the timing fix.
+async fn get_router_service_mocked_slow(
+    reports: Arc<Mutex<Vec<Report>>>,
+    use_legacy_request_span: bool,
+    _mocked: bool,
+    _demand_control: bool,
+    _experimental_local_field_metrics: bool,
+    _config_str: Option<&'static str>,
+    delay_ms: u64,
+) -> (JoinHandle<()>, BoxCloneService) {
+    let (task, config) = config_with_delay(use_legacy_request_span, reports, delay_ms).await;
+    (
+        task,
+        TestHarness::builder()
+            .try_log_level("INFO")
+            .configuration_json(config)
+            .expect("test harness had config errors")
+            .schema(include_str!("fixtures/supergraph.graphql"))
+            .subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
+            .build_router()
+            .await
+            .expect("could create router test harness"),
+    )
+}
+
 macro_rules! assert_report {
         ($report: expr)=> {
             insta::with_settings!({sort_maps => true}, {
@@ -235,6 +300,28 @@ async fn report(
     let report = Report::decode(&*buf).expect("could not deserialize report");
 
     state.lock().await.push(report);
+    Ok(Json(()))
+}
+
+// Handler variant with a configurable delay, used to reproduce and verify the fix for the
+// timing bug where the old 10×100ms polling budget was insufficient under load.
+#[derive(Clone)]
+struct SlowReportHandlerState {
+    reports: Arc<Mutex<Vec<Report>>>,
+    delay_ms: u64,
+}
+
+async fn report_slow(
+    Extension(state): Extension<SlowReportHandlerState>,
+    bytes: Bytes,
+) -> Result<Json<()>, http::StatusCode> {
+    tokio::time::sleep(Duration::from_millis(state.delay_ms)).await;
+    let mut gz = GzDecoder::new(&*bytes);
+    let mut buf = Vec::new();
+    gz.read_to_end(&mut buf)
+        .expect("could not decompress bytes");
+    let r = Report::decode(&*buf).expect("could not deserialize report");
+    state.reports.lock().await.push(r);
     Ok(Json(()))
 }
 
@@ -410,8 +497,11 @@ where
         _ => Err(anyhow!("error retrieving response")),
     };
 
-    // We must always try to find the report regardless of if the response had failures
-    for _ in 0..10 {
+    // We must always try to find the report regardless of if the response had failures.
+    // Use a deadline-based loop instead of a fixed iteration count so that slow exports
+    // (e.g. under CI load, or with an artificially delayed handler) don't cause false failures.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         let my_reports = reports.lock().await;
         let report = my_reports.iter().find(filter);
         if report.is_some() && matches!(found_report, Ok(None)) {
@@ -985,4 +1075,53 @@ async fn test_persisted_query_by_safelist_body_logging_pq_only_stats() {
     .await;
 
     assert_report!(report);
+}
+
+
+/// Reproduction test for the timing bug tracked in nextest.toml.
+///
+/// The Apollo report exporter runs asynchronously: after a request completes, reports are flushed
+/// on the batch processor's schedule (10ms in these fixtures). Under CI load the flush can
+/// arrive after the old fixed budget of 10 × 100ms = 1 second.
+///
+/// This test injects a 1.5 second artificial delay into the mock report handler to make that
+/// scenario deterministic.  It uses mocked subgraphs so no network access is needed.
+///
+/// With the old `for _ in 0..10` loop this test always panics with "failed to find report".
+/// With the deadline-based fix (10 second window) it reliably passes.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_non_defer_slow_export() {
+    // 1.5 s delay: deterministically exceeds the old 1 s budget but fits the 10 s deadline.
+    const EXPORT_DELAY_MS: u64 = 1500;
+
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report = get_report(
+            |reports, legacy, mocked, dc, lf, cfg| {
+                get_router_service_mocked_slow(reports, legacy, mocked, dc, lf, cfg, EXPORT_DELAY_MS)
+            },
+            reports,
+            use_legacy_request_span,
+            true,
+            req,
+            false,
+            false,
+            |r| {
+                !r.traces_per_query
+                    .values()
+                    .next()
+                    .expect("traces and stats required")
+                    .trace
+                    .is_empty()
+            },
+            None,
+        )
+        .await;
+        assert_report!(report);
+    }
 }
