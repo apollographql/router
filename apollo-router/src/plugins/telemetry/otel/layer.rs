@@ -816,12 +816,14 @@ where
                 span_builder: &mut builder,
                 exception_config: self.exception_config,
             });
+            let tracing_metadata_name = attrs.metadata().name().to_string();
             extensions.insert(OtelData {
                 builder,
                 parent_cx,
                 event_attributes: None,
                 forced_status: None,
                 forced_span_name: None,
+                tracing_metadata_name,
             });
         } else {
             eprintln!("OpenTelemetryLayer::on_new_span: Span not found, this is a bug");
@@ -1034,6 +1036,7 @@ where
                 parent_cx,
                 forced_status,
                 forced_span_name,
+                tracing_metadata_name,
                 ..
             }) = extensions.remove::<OtelData>()
             {
@@ -1055,10 +1058,17 @@ where
                 }
                 if let Some(forced_span_name) = forced_span_name {
                     // Insert the original span name as an attribute so that we can map it later
+                    // (e.g. Datadog `resource_mapping`). Use the tracing static name, not
+                    // `builder.name`, which may already reflect `otel.name` (e.g. `query ExampleQuery`).
                     let attributes = builder
                         .attributes
                         .get_or_insert_with(|| Vec::with_capacity(1));
-                    attributes.push(KeyValue::new(OTEL_ORIGINAL_NAME, builder.name));
+                    let original_name = if !tracing_metadata_name.is_empty() {
+                        tracing_metadata_name
+                    } else {
+                        builder.name.as_ref().to_string()
+                    };
+                    attributes.push(KeyValue::new(OTEL_ORIGINAL_NAME, original_name));
                     builder.name = forced_span_name.into();
                 }
                 // Assign end time, build and start span, drop span to export
@@ -1127,6 +1137,7 @@ mod tests {
 
     use super::*;
     use crate::plugins::telemetry::OTEL_NAME;
+    use crate::plugins::telemetry::consts::OTEL_ORIGINAL_NAME;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 
     #[derive(Debug, Clone)]
@@ -1156,6 +1167,7 @@ mod tests {
                 event_attributes: None,
                 forced_status: None,
                 forced_span_name: None,
+                tracing_metadata_name: String::new(),
             });
             noop::NoopSpan::DEFAULT
         }
@@ -1268,6 +1280,35 @@ mod tests {
 
         let recorded_name = tracer.0.lock().as_ref().map(|b| b.builder.name.clone());
         assert_eq!(recorded_name, Some(Cow::Owned(forced_dynamic_name)))
+    }
+
+    /// `map_response` records `otel.name` then calls `set_span_dyn_attribute(otel.name)`. That sequence
+    /// must not make `otel.original_name` the semantic name, or Datadog `resource_mapping` breaks.
+    #[test]
+    fn otel_original_name_uses_tracing_metadata_after_otel_name_record() {
+        let tracer = TestTracer(Arc::new(Mutex::new(None)));
+        let subscriber = tracing_subscriber::registry()
+            .with(layer().force_sampling().with_tracer(tracer.clone()));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::debug_span!(ROUTER_SPAN_NAME);
+            let _entered = span.enter();
+            span.record(OTEL_NAME, "query ExampleQuery");
+            span.set_span_dyn_attribute(
+                Key::from_static_str(OTEL_NAME),
+                opentelemetry::Value::String(String::from("query ExampleQuery").into()),
+            );
+        });
+
+        let original = tracer.with_data(|data| {
+            data.builder.attributes.as_ref().and_then(|attrs| {
+                attrs
+                    .iter()
+                    .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
+                    .map(|kv| kv.value.as_str().to_string())
+            })
+        });
+        assert_eq!(original.as_deref(), Some(ROUTER_SPAN_NAME));
     }
 
     #[test]

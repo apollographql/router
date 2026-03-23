@@ -12,6 +12,11 @@ use apollo_router::services::supergraph;
 use async_trait::async_trait;
 use axum::handler::HandlerWithoutStateExt;
 use futures::FutureExt;
+use http::HeaderValue;
+use http::Method;
+use http::Request as HttpRequest;
+use http::header::ACCEPT;
+use http::header::HeaderName;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -332,9 +337,13 @@ async fn test_plugin_ordering() {
                 },
                 "coprocessor": {
                     "url": coprocessor_url,
+                    "router_http": {
+                        "request": { "context": "all" },
+                        "response": { "context": "all" },
+                    },
                     "router": {
-                        "request": { "context": true },
-                        "response": { "context": true },
+                        "request": { "context": "all" },
+                        "response": { "context": "all" },
                     }
                 },
             }))
@@ -358,9 +367,17 @@ async fn test_plugin_ordering() {
             .get(TEST_PLUGIN_ORDERING_CONTEXT_KEY)
             .unwrap()
             .unwrap();
+        // Execution order: RouterHttp (top-level) first, then Router pipeline. Plugin fold order
+        // puts coprocessor RouterHttp after Rhai. See request-lifecycle docs for full path.
+        // and before test_ordering plugins. Then router pipeline (coprocessor Router, etc.).
         assert_eq!(
             trace,
             [
+                "router_http Rhai map_request",
+                "coprocessor RouterHttpRequest",
+                "router_http Rust test_ordering_1 map_request",
+                "router_http Rust test_ordering_2 map_request",
+                "router_http Rust test_ordering_3 map_request",
                 "coprocessor RouterRequest",
                 "router_service Rust test_ordering_1 map_request",
                 "router_service Rust test_ordering_2 map_request",
@@ -377,9 +394,248 @@ async fn test_plugin_ordering() {
                 "router_service Rust test_ordering_2 map_response",
                 "router_service Rust test_ordering_1 map_response",
                 "coprocessor RouterResponse",
+                "router_http Rust test_ordering_3 map_response",
+                "router_http Rust test_ordering_2 map_response",
+                "router_http Rust test_ordering_1 map_response",
+                "coprocessor RouterHttpResponse",
+                "router_http Rhai map_response",
             ]
         );
     }
+}
+
+/// Asserts that request/response modifications at RouterHttp are visible downstream and to the client.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_http_request_response_modification() {
+    const CONTEXT_KEY: &str = "router_http_request_modified";
+    const RESPONSE_HEADER: &str = "x-router-http-response";
+
+    let mut service = TestHarness::builder()
+        .router_http_hook(|service| {
+            ServiceBuilder::new()
+                .map_request(|request: router::Request| {
+                    request.context.insert(CONTEXT_KEY, true).unwrap();
+                    request
+                })
+                .map_response(|mut response: router::Response| {
+                    response.response.headers_mut().insert(
+                        HeaderName::from_static(RESPONSE_HEADER),
+                        HeaderValue::from_static("ok"),
+                    );
+                    response
+                })
+                .service(service)
+                .boxed()
+        })
+        .router_hook(|service| {
+            ServiceBuilder::new()
+                .map_request(|request: router::Request| {
+                    // Downstream visibility: router_service sees the context set by router_http
+                    let seen = request
+                        .context
+                        .get::<&str, bool>(CONTEXT_KEY)
+                        .ok()
+                        .flatten()
+                        .unwrap_or(false);
+                    assert!(seen, "router_service must see context set by router_http");
+                    request
+                })
+                .service(service)
+                .boxed()
+        })
+        .configuration_json(json!({}))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::canned_builder().build().unwrap();
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(request.try_into().unwrap())
+        .await
+        .unwrap();
+
+    // Client receives the response header set by router_http map_response
+    let value = response
+        .response
+        .headers()
+        .get(RESPONSE_HEADER)
+        .expect("response must have header set by router_http");
+    assert_eq!(value, "ok");
+}
+
+/// Asserts that Rhai router_http hook runs in isolation and can set context.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_rhai_router_http_in_isolation() {
+    let rhai_main = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("rhai_router_http_only.rhai");
+
+    let mut service = TestHarness::builder()
+        .configuration_json(json!({
+            "rhai": { "main": rhai_main.to_string_lossy().to_string() },
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::canned_builder().build().unwrap();
+    let mut response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(request.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let _body = response.next_response().await.unwrap().unwrap();
+    let ran: bool = response
+        .context
+        .get::<&str, bool>("rhai_router_http_ran")
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+    assert!(ran, "router_http Rhai hook must have run and set context");
+}
+
+/// Asserts that coprocessor RouterHttp stage can set context and response headers, visible downstream and to the client.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_router_http_request_response_modification() {
+    const CONTEXT_KEY: &str = "coprocessor_router_http_ran";
+    const RESPONSE_HEADER: &str = "x-coprocessor-router-http";
+
+    async fn coprocessor(mut json: axum::Json<serde_json::Value>) -> axum::Json<serde_json::Value> {
+        let stage = json["stage"].as_str().unwrap_or("").to_string();
+        if stage == "RouterHttpRequest" {
+            json["context"]["entries"]
+                .as_object_mut()
+                .unwrap()
+                .insert(CONTEXT_KEY.to_string(), json!(true));
+        }
+        if stage == "RouterHttpResponse" {
+            json["headers"]
+                .as_object_mut()
+                .unwrap()
+                .insert(RESPONSE_HEADER.to_string(), json!(["ok"]));
+        }
+        json
+    }
+
+    let (_tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let coprocessor_url = format!("http://{}", listener.local_addr().unwrap());
+    let server = axum::serve(listener, coprocessor.into_make_service());
+    let server = server.with_graceful_shutdown(async {
+        let _ = rx.await;
+    });
+    tokio::spawn(async move {
+        if let Err(e) = server.await {
+            eprintln!("coprocessor server error: {e}");
+        }
+    });
+
+    let mut service = TestHarness::builder()
+        .configuration_json(json!({
+            "coprocessor": {
+                "url": coprocessor_url,
+                "router_http": {
+                    "request": { "context": "all" },
+                    "response": { "context": "all", "headers": true },
+                }
+            }
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::canned_builder().build().unwrap();
+    let mut response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(request.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let _body = response.next_response().await.unwrap().unwrap();
+    let ran: bool = response
+        .context
+        .get::<&str, bool>(CONTEXT_KEY)
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+    assert!(
+        ran,
+        "coprocessor RouterHttpRequest must have run and set context"
+    );
+
+    let value = response
+        .response
+        .headers()
+        .get(RESPONSE_HEADER)
+        .expect("response must have header set by coprocessor RouterHttpResponse");
+    assert_eq!(value, "ok");
+}
+
+/// Asserts that static landing requests (GET + Accept: text/html) do not go through RouterHttp.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_static_landing_does_not_go_through_router_http() {
+    const ROUTER_HTTP_RAN_KEY: &str = "router_http_ran_for_request";
+
+    let mut service = TestHarness::builder()
+        .router_http_hook(|service| {
+            ServiceBuilder::new()
+                .map_request(|request: router::Request| {
+                    let _ = request.context.insert(ROUTER_HTTP_RAN_KEY, true);
+                    request
+                })
+                .service(service)
+                .boxed()
+        })
+        .configuration_json(json!({
+            "homepage": { "enabled": true }
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+
+    let mut http_req = HttpRequest::builder()
+        .method(Method::GET)
+        .uri("http://example.com/")
+        .header(ACCEPT, "text/html")
+        .body(router::body::from_bytes(vec![]))
+        .unwrap();
+    http_req.extensions_mut().insert(Context::new());
+    let static_landing_request = router::Request::from(http_req);
+
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(static_landing_request)
+        .await
+        .unwrap();
+
+    let ran: bool = response
+        .context
+        .get::<&str, bool>(ROUTER_HTTP_RAN_KEY)
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+    assert!(!ran, "router_http must not run for static landing requests");
+
+    assert_eq!(response.response.status(), 200);
+    assert_eq!(
+        response.response.headers().get(http::header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static("text/html; charset=utf-8"))
+    );
 }
 
 macro_rules! make_plugin {
@@ -404,6 +660,26 @@ macro_rules! make_plugin {
                     Self: Sized,
                 {
                     Ok(Self)
+                }
+
+                fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+                    ServiceBuilder::new()
+                        .map_request(|request: router::Request| {
+                            test_plugin_ordering_push_trace(
+                                &request.context,
+                                format!("router_http Rust {} map_request", $str_name),
+                            );
+                            request
+                        })
+                        .map_response(|response: router::Response| {
+                            test_plugin_ordering_push_trace(
+                                &response.context,
+                                format!("router_http Rust {} map_response", $str_name),
+                            );
+                            response
+                        })
+                        .service(service)
+                        .boxed()
                 }
 
                 fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -613,4 +889,32 @@ telemetry:
 
     router.graceful_shutdown().await;
     Ok(())
+}
+
+/// When coprocessor has router_http configured, the router logs a one-time warning at startup.
+/// Skipped when GraphOS is not enabled (coprocessor requires a GraphOS license).
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_http_customization_warning_logged() {
+    if !graph_os_enabled() {
+        return;
+    }
+    let config = r#"
+coprocessor:
+  url: http://127.0.0.1:9999
+  router_http:
+    request:
+      headers: true
+"#;
+
+    let mut router = IntegrationTest::builder()
+        .config(config.to_string())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.assert_log_contained("RouterHttp customizations are in use");
+
+    router.graceful_shutdown().await;
 }

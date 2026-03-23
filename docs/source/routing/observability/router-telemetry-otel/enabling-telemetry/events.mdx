@@ -23,7 +23,7 @@ You can configure events for each service in `router.yaml`. Events can be standa
 
 <RouterServices />
 
-The `router`, `supergraph`, `subgraph` and `connector` sections are used to define custom event configuration for each service:
+The `router`, `supergraph`, `subgraph` and `connector` sections are used to define custom event configuration for each service. Configure request-level events at the **router** layer; they apply to the top-level router span (created at the Axum HTTP boundary). **Router HTTP** is a customization hook only (Rust plugins, coprocessor, Rhai); it does not have its own telemetry configuration—use the **router** layer for span attributes and events.
 
 ```yaml title="future.router.yaml"
 telemetry:

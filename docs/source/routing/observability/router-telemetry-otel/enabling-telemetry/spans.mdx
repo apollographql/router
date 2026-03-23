@@ -41,6 +41,12 @@ telemetry:
           # ...      
 ```
 
+### Router span
+
+The **router** span in OpenTelemetry is the **top-level span** for the entire request: it is created when an HTTP request is received (at the Axum HTTP boundary) and is the **parent** of all other router spans (supergraph, subgraph, etc.). Configure span attributes via `spans.router.attributes` and custom events via [events](/router/configuration/telemetry/instrumentation/events) under `events.router`; they apply to this top-level router span.
+
+**Router HTTP** is a customization hook only (where [Rust plugins](/graphos/routing/customization/plugins), the [coprocessor](/graphos/routing/customization/coprocessor), and Rhai scripts run). It does not have its own span or telemetry configuration. Use the **router** layer for all request-level span attributes and events; they apply to the top-level router span.
+
 ### `attributes`
 
 Spans may have attributes attached to them from the router pipeline. These attributes are used to filter and group spans in your APM.
@@ -247,7 +253,6 @@ telemetry:
           "static_attribute":
             static: "my_static_value"
             # ...
-          
       supergraph:
         attributes: {}
           # ...

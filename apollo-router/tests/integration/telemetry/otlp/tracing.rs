@@ -96,6 +96,106 @@ async fn test_basic() -> Result<(), BoxError> {
     Ok(())
 }
 
+/// With OTLP telemetry, a request that passes through the router pipeline (e.g. with Rhai at the
+/// router layer) must still produce a valid trace. The router_http OTel span was removed, so we
+/// do not assert the "router" span here.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_http_observable_in_telemetry() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("../fixtures/otlp_router_http.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .operation_name("ExampleQuery")
+        .services(["client", "router", "subgraph"].into())
+        .span_names(
+            [
+                "query_planning",
+                "client_request",
+                "ExampleQuery__products__0",
+                "fetch",
+                "execution",
+                "query ExampleQuery",
+                "subgraph server",
+                "parse_query",
+                "http_request",
+            ]
+            .into(),
+        )
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(&mut router, &mock_server, Query::default())
+        .await?;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+/// Reproduces the CI failure from the Datadog resource_mapping_override test: the trace contains
+/// the router span as "query ExampleQuery" (otel.name) but consumers that expect the operation
+/// name only (e.g. Datadog resource_mapping router: graphql.operation.name) expect "ExampleQuery".
+/// Asserts the router_http OTLP config produces the same span names as other tests (e.g. "query ExampleQuery").
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_http_span_name_reproduces_datadog_ci_failure() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("../fixtures/otlp_router_http.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Router exports "query ExampleQuery" for the request span; match other OTLP tests.
+    TraceSpec::builder()
+        .operation_name("ExampleQuery")
+        .services(["client", "router", "subgraph"].into())
+        .span_names(
+            [
+                "query_planning",
+                "client_request",
+                "ExampleQuery__products__0",
+                "fetch",
+                "execution",
+                "query ExampleQuery",
+                "subgraph server",
+                "parse_query",
+                "http_request",
+            ]
+            .into(),
+        )
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(&mut router, &mock_server, Query::default())
+        .await?;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_resources() -> Result<(), BoxError> {
     if !graph_os_enabled() {

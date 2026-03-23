@@ -229,6 +229,8 @@ impl RedisMetricsCollector {
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry::KeyValue;
+
     use super::*;
     use crate::cache::redis::RedisCacheStorage;
     use crate::cache::redis::RedisKey;
@@ -325,9 +327,6 @@ mod tests {
             assert!(retrieved.is_ok(), "Should have retrieved value from mock");
             assert_eq!(retrieved.unwrap().0.data, "test_value");
 
-            // Pause to ensure that queue length is zero & metrics have been exported
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
             // Verify Redis connection metrics are emitted.
             // Since this metric is based on a global AtomicU64, it's not unique across tests - so
             // we can only reliably check for metric existence, rather than a specific value.
@@ -337,11 +336,25 @@ mod tests {
                 &[],
             ));
 
-            // Verify Redis gauge metrics are available (observables are created immediately)
-            assert_gauge!(
-                "apollo.router.cache.redis.command_queue_length",
-                0.0,
-                kind = "test"
+            // Queue length may lag briefly after work completes; poll (slow CI / Windows).
+            let queue_attrs = &[KeyValue::new("kind", "test")];
+            let mut queue_drained = false;
+            for _ in 0..50 {
+                if crate::metrics::collect_metrics().assert(
+                    "apollo.router.cache.redis.command_queue_length",
+                    MetricType::Gauge,
+                    0.0_f64,
+                    false,
+                    queue_attrs,
+                ) {
+                    queue_drained = true;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+            assert!(
+                queue_drained,
+                "apollo.router.cache.redis.command_queue_length did not reach 0 for kind=test within ~2s"
             );
 
             // Verify Redis average metrics are available (may be 0 initially)

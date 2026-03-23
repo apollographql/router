@@ -14,11 +14,18 @@ This reference documents the symbols and behaviors that are specific to [Rhai cu
 Your Rhai script's [main file](/graphos/routing/customization/rhai/#the-main-file) hooks into the individual services of the router's [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
+fn router_http(service) {}
 fn router_service(service) {}
 fn supergraph_service(service) {}
 fn execution_service(service) {}
 fn subgraph_service(service, subgraph) {}
 ```
+
+The `router_http` hook runs at the raw HTTP layer before the Router pipeline; it receives the same `service` object and supports `map_request` and `map_response` like the other hooks. `router_http` runs only for **GraphQL requests** to the supergraph path; it doesn't run for the static landing page (Apollo Sandbox or homepage when enabled) or the health check endpoint, which is a separate route.
+
+<Caution>
+Using the `router_http` hook means your script runs *before* traffic shaping, limits, CSRF, and other router protections. Only use the `router_http` hook if you can accept that risk.
+</Caution>
 
 Within each hook, you define custom logic to interact with the current active request and/or response as needed. This most commonly involves using methods of the provided `service` object to [register service callbacks](/graphos/routing/customization/rhai/#service-callbacks), like so:
 

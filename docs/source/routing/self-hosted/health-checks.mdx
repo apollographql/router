@@ -6,7 +6,8 @@ description: Learn how to run health checks to determine whether an Apollo Graph
 
 Health checks are often used by load balancers to determine whether a server is available and ready to start serving traffic.
 
-GraphOS Router and Apollo Router Core support a basic HTTP-level health check. This is enabled by default and is served on port `8088` at the URL path `/health`. This returns a `200` status code if the HTTP server is successfully serving.
+GraphOS Router and Apollo Router Core support a basic HTTP-level health check. It is enabled by default and is served on port `8088` at the URL path `/health`. A `200` status code is returned if the HTTP server is successfully serving. The health check is a **separate route** and doesn't pass through the [RouterHttp pipeline](/graphos/routing/request-lifecycle#request-path), so [Rhai](/graphos/routing/customization/rhai/) scripts, native plugins, and license enforcement don't run on health requests.
+
 You can change this by setting `health_check`:
 ```yaml title="router.yaml"
 health_check:

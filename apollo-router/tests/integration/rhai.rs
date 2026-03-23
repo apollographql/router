@@ -7,15 +7,21 @@ use crate::integration::common::Query;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn all_rhai_callbacks_are_invoked() {
-    let config = r#"
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scripts_dir = manifest.join("tests/fixtures");
+    let supergraph_path = manifest.join("tests/fixtures/supergraph.graphql");
+    let scripts_yaml = scripts_dir.to_string_lossy().replace('\\', "/");
+    let config = format!(
+        r#"
 rhai:
-  scripts: tests/fixtures
+  scripts: '{scripts_yaml}'
   main: test_callbacks.rhai
-"#;
+"#
+    );
 
     let mut router = IntegrationTest::builder()
-        .config(config)
-        .supergraph(PathBuf::from("tests/fixtures/supergraph.graphql"))
+        .config(&config)
+        .supergraph(supergraph_path)
         .build()
         .await;
 

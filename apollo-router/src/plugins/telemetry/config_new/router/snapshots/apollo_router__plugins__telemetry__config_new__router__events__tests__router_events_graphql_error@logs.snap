@@ -6,3 +6,17 @@ expression: yaml
     kind: router.response
   level: INFO
   message: ""
+  span:
+    apollo_private.duration_ns: "[duration]"
+    apollo_private.request: true
+    http.request.method: GET
+    http.route: /
+    name: router
+    otel.kind: SERVER
+  spans:
+    - apollo_private.duration_ns: "[duration]"
+      apollo_private.request: true
+      http.request.method: GET
+      http.route: /
+      name: router
+      otel.kind: SERVER
