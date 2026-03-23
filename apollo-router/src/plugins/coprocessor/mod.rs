@@ -477,6 +477,7 @@ impl Default for BodyConf {
 
 impl BodyConf {
     /// Returns true if any body content should be sent
+    #[cfg(test)]
     pub(super) fn should_send_any(&self) -> bool {
         match self {
             BodyConf::All(send) => *send,

@@ -4379,10 +4379,17 @@ mod tests {
                 // Verify errors field is sent even though it's empty
                 assert!(body.get("body").is_some());
                 let response_body = body.get("body").unwrap();
-                assert!(response_body.get("errors").is_some(), "errors field should be present");
+                assert!(
+                    response_body.get("errors").is_some(),
+                    "errors field should be present"
+                );
                 let errors = response_body.get("errors").unwrap();
                 assert!(errors.is_array(), "errors should be an array");
-                assert_eq!(errors.as_array().unwrap().len(), 0, "errors array should be empty");
+                assert_eq!(
+                    errors.as_array().unwrap().len(),
+                    0,
+                    "errors array should be empty"
+                );
                 // data and extensions should not be sent since not configured
                 assert!(response_body.get("data").is_none());
                 assert!(response_body.get("extensions").is_none());
@@ -4463,9 +4470,18 @@ mod tests {
                 // Verify only extensions are sent, not data or errors
                 assert!(body.get("body").is_some());
                 let response_body = body.get("body").unwrap();
-                assert!(response_body.get("extensions").is_some(), "extensions should be present");
-                assert!(response_body.get("data").is_none(), "data should not be sent");
-                assert!(response_body.get("errors").is_none(), "errors should not be sent");
+                assert!(
+                    response_body.get("extensions").is_some(),
+                    "extensions should be present"
+                );
+                assert!(
+                    response_body.get("data").is_none(),
+                    "data should not be sent"
+                );
+                assert!(
+                    response_body.get("errors").is_none(),
+                    "errors should not be sent"
+                );
 
                 // Coprocessor modifies extensions only
                 Ok(http::Response::builder()
@@ -4793,8 +4809,15 @@ mod tests {
         );
         assert!(result.is_some());
         let body = result.unwrap();
-        assert!(body.get("errors").is_some(), "errors field should be included even when empty");
-        assert_eq!(body.get("errors").unwrap().as_array().unwrap().len(), 0, "errors should be empty array");
+        assert!(
+            body.get("errors").is_some(),
+            "errors field should be included even when empty"
+        );
+        assert_eq!(
+            body.get("errors").unwrap().as_array().unwrap().len(),
+            0,
+            "errors should be empty array"
+        );
         assert!(body.get("data").is_none(), "data should not be included");
 
         // When extensions are configured but not present, should send extensions: {}
@@ -4808,8 +4831,15 @@ mod tests {
         );
         assert!(result.is_some());
         let body = result.unwrap();
-        assert!(body.get("extensions").is_some(), "extensions field should be included even when empty");
-        assert_eq!(body.get("extensions").unwrap().as_object().unwrap().len(), 0, "extensions should be empty object");
+        assert!(
+            body.get("extensions").is_some(),
+            "extensions field should be included even when empty"
+        );
+        assert_eq!(
+            body.get("extensions").unwrap().as_object().unwrap().len(),
+            0,
+            "extensions should be empty object"
+        );
 
         // When data is configured but is None, should send data: null
         let response_no_data = graphql::Response::builder()
@@ -4828,9 +4858,15 @@ mod tests {
         );
         assert!(result.is_some());
         let body = result.unwrap();
-        assert!(body.get("data").is_some(), "data field should be included even when null");
+        assert!(
+            body.get("data").is_some(),
+            "data field should be included even when null"
+        );
         assert!(body.get("data").unwrap().is_null(), "data should be null");
-        assert!(body.get("errors").is_none(), "errors should not be included");
+        assert!(
+            body.get("errors").is_none(),
+            "errors should not be included"
+        );
     }
 
     #[test]
