@@ -36,6 +36,6 @@ coprocessor:
 
 The boolean syntax (`body: true` or `body: false`) continues to work for backward compatibility. When using selective filtering, the coprocessor can only modify the fields that were sent to it; other fields are preserved from the original response.
 
-This feature is available for all response stages: supergraph, execution, and subgraph.
+This feature is available for the supergraph, execution, and subgraph response stages.
 
 By [@zachfettersmoore](https://github.com/zachfettersmoore) in https://github.com/apollographql/router/issues/5020
