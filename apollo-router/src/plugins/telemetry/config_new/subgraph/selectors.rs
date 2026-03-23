@@ -58,6 +58,7 @@ pub(crate) enum SubgraphQuery {
 }
 
 pub(crate) struct SubgraphRequestBodySize(pub u64);
+pub(crate) struct SubgraphResponseBodySize(pub u64);
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
@@ -156,6 +157,10 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseStatus {
         /// The subgraph http response status code.
         subgraph_response_status: ResponseStatus,
+    },
+    SubgraphResponseBodySize {
+        /// The subgraph response body size.
+        subgraph_response_body_size: bool,
     },
     SubgraphResendCount {
         /// The subgraph http resend count
@@ -517,6 +522,14 @@ impl Selector for SubgraphSelector {
                     .canonical_reason()
                     .map(|reason| reason.into()),
             },
+            SubgraphSelector::SubgraphResponseBodySize {
+                subgraph_response_body_size,
+                ..
+            } if *subgraph_response_body_size => response
+                .context
+                .extensions()
+                .with_lock(|lock| lock.get::<SubgraphResponseBodySize>().map(|bs| bs.0))
+                .map(|size| opentelemetry::Value::I64(size as i64)),
             SubgraphSelector::SubgraphOperationKind { .. } => response
                 .context
                 .get::<_, String>(OPERATION_KIND)

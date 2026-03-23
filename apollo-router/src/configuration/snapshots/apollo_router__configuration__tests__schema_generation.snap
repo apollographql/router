@@ -243,7 +243,7 @@ expression: "&schema"
         },
         "library_name_header": {
           "default": "apollographql-library-name",
-          "description": "The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.\nValid values must match the regex `^[ a-zA-Z0-9.@/_\\-]{1,60}$`. Invalid values result in a `400` response.",
           "type": [
             "string",
             "null"
@@ -251,7 +251,7 @@ expression: "&schema"
         },
         "library_version_header": {
           "default": "apollographql-library-version",
-          "description": "The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.\nValid values must match the regex `^[ a-zA-Z0-9.@/_\\-]{1,60}$`. Invalid values result in a `400` response.",
           "type": [
             "string",
             "null"
@@ -2377,6 +2377,19 @@ expression: "&schema"
           },
           "required": [
             "connector_http_response_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_http_response_body_size": {
+              "description": "The connector HTTP response body size (wire bytes before decompression).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_http_response_body_size"
           ],
           "type": "object"
         },
@@ -8563,7 +8576,7 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
-          "description": "The size hint of the body.\nThis is used as the Content-Length header has not yet been populated\nwhen selectors are evaluated",
+          "description": "The size hint of the body.\nIf compression is enabled, this will be the uncompressed size.\nIts not possible to get the compressed size in selector as the\nbody has not yet been compressed at the time on_response is called.",
           "properties": {
             "response_size_hint": {
               "description": "Extract response size hint in bytes",
@@ -10182,6 +10195,19 @@ expression: "&schema"
           },
           "required": [
             "subgraph_response_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "subgraph_response_body_size": {
+              "description": "The subgraph response body size.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_response_body_size"
           ],
           "type": "object"
         },

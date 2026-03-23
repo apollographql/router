@@ -10,6 +10,8 @@ use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
+const PROMETHEUS_RESPONSE_BODY_SIZE_CONFIG: &str =
+    include_str!("fixtures/prometheus_response_body_size.router.yaml");
 const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
 const RESPONSE_CACHE_CONFIG: &str = include_str!("fixtures/response_cache.router.yaml");
 
@@ -567,6 +569,48 @@ async fn test_metric_rename_on_reload() {
         !metrics.contains(r#"custom_http_duration_seconds"#),
         "Old renamed metric should not exist after reload with different rename"
     );
+
+    router.graceful_shutdown().await;
+}
+
+/// Verifies that when a client sends `Accept-Encoding: gzip`, the
+/// `http.server.response.body.size` histogram records the compressed byte count
+/// rather than the uncompressed body size.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_response_body_size_records_compressed_size_with_gzip() {
+    let mut router = IntegrationTest::builder()
+        .config(PROMETHEUS_RESPONSE_BODY_SIZE_CONFIG)
+        .reqwest_client(reqwest::Client::builder().gzip(false).build().unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = Query::builder()
+        .body(json!({"query":"{ topProducts { name reviews { id body author { name } } } }"}))
+        .header("accept-encoding", "gzip")
+        .build();
+
+    let (_, response) = router.execute_query(query).await;
+    let content_encoding = response.headers().get("content-encoding").unwrap().to_str();
+    assert_eq!(content_encoding.unwrap(), "gzip");
+
+    let response_body_size = response.bytes().await.unwrap().len();
+    assert_eq!(response_body_size, 103);
+
+    router
+        .assert_metrics_contains(
+            r#"http_server_response_body_size_bytes_count{<any>} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"http_server_response_body_size_bytes_sum{<any>} 103"#,
+            None,
+        )
+        .await;
 
     router.graceful_shutdown().await;
 }
