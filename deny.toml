@@ -43,6 +43,14 @@ ignore = [
     "RUSTSEC-2026-0007",
     "RUSTSEC-2026-0008",
     "RUSTSEC-2026-0009",
+
+    # rustls-webpki 0.101.x is used transitively via the older rustls 0.21.x
+    # stack (fred, hyper-rustls, tonic, etc.).  Upgrading to the patched
+    # rustls-webpki >=0.103.10 requires a full rustls 0.23.x migration that
+    # is out of scope for the 1.x LTS branch.  The CRL matching bug requires
+    # a compromised trusted CA to exploit, and the router does not enable CRL
+    # revocation checking, so this code path is not reachable in practice.
+    "RUSTSEC-2026-0049",
 ]
 
 # This section is considered when running `cargo deny check licenses`
