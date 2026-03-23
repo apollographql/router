@@ -14,6 +14,7 @@ use wiremock::matchers::path;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::redact_cache_debug_query_hash;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
@@ -706,6 +707,9 @@ async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError>
 
     let mut cache_keys = cache_keys;
     for entry in cache_keys.as_array_mut().unwrap() {
+        if let Some(key) = entry.get_mut("key").and_then(|v| v.as_str()) {
+            entry["key"] = json!(redact_cache_debug_query_hash(key));
+        }
         if let Some(cache_control) = entry
             .get_mut("cacheControl")
             .and_then(|v| v.as_object_mut())
@@ -715,7 +719,7 @@ async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError>
     }
 
     // NOTE: `created` removed from this block
-    let expected = json!([{"key":"version:1.1:subgraph:products:type:Query:hash:a41f028306ba19f5a29b1474ef621a8cb18236cf8476b43d4863820fdd9d1398:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6","invalidationKeys":[],"kind":{"rootFields":["topProducts"]},"subgraphName":"products","subgraphRequest":{"query":"query ExampleQuery__products__0 { topProducts { name } }","operationName":"ExampleQuery__products__0"},"source":"subgraph","cacheControl":{"maxAge":60,"public":true},"shouldStore":true,"data":{"data":{"topProducts":[{"name":"Table","__typename":"Product","reviews":[{"id":"1","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}],"reviewsForAuthor":[{"id":"2","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}]}]}},"warnings":[{"code":"NO_CACHE_TAG_ON_ROOT_FIELD","links":[{"url":"https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods","title":"Add '@cacheTag' in your schema"}],"message":"No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."}]}]);
+    let expected = json!([{"key":"version:1.2:subgraph:products:type:Query:hash:[query-hash]:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6","invalidationKeys":[],"kind":{"rootFields":["topProducts"]},"subgraphName":"products","subgraphRequest":{"query":"query ExampleQuery__products__0 { topProducts { name } }","operationName":"ExampleQuery__products__0"},"source":"subgraph","cacheControl":{"maxAge":60,"public":true},"shouldStore":true,"data":{"data":{"topProducts":[{"name":"Table","__typename":"Product","reviews":[{"id":"1","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}],"reviewsForAuthor":[{"id":"2","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}]}]}},"warnings":[{"code":"NO_CACHE_TAG_ON_ROOT_FIELD","links":[{"url":"https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods","title":"Add '@cacheTag' in your schema"}],"message":"No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."}]}]);
 
     assert_eq!(cache_keys, expected);
 

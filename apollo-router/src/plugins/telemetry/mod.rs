@@ -2,7 +2,9 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use std::time::Instant;
@@ -46,6 +48,7 @@ use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rand::Rng;
+use regex::Regex;
 use reload::activation::Activation;
 use reload::tracing::TracingConfigurator;
 use serde_json_bytes::ByteString;
@@ -99,7 +102,9 @@ use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphIn
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
+use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
+use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
@@ -363,6 +368,7 @@ impl PluginPrivate for Telemetry {
         let supergraph_schema_id = self.supergraph_schema_id.clone();
         let config_later = self.config.clone();
         let config_request = self.config.clone();
+        let config_checkpoint = self.config.clone();
         let span_mode = config.instrumentation.spans.mode;
         let use_legacy_request_span =
             matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
@@ -414,6 +420,40 @@ impl PluginPrivate for Telemetry {
                     span_mode.create_router(&request.router_request)
                 })
             }))
+            .checkpoint(move |req: router::Request| {
+                let library_name_valid = req
+                    .router_request
+                    .headers()
+                    .get(&config_checkpoint.apollo.library_name_header)
+                    .and_then(|v| v.to_str().ok())
+                    .is_none_or(is_valid_client_library_value);
+                let library_version_valid = req
+                    .router_request
+                    .headers()
+                    .get(&config_checkpoint.apollo.library_version_header)
+                    .and_then(|v| v.to_str().ok())
+                    .is_none_or(is_valid_client_library_value);
+                if !library_name_valid || !library_version_valid {
+                    if !library_name_valid {
+                        ::tracing::warn!(
+                            "Rejecting request: invalid client library name header value"
+                        );
+                    }
+                    if !library_version_valid {
+                        ::tracing::warn!(
+                            "Rejecting request: invalid client library version header value"
+                        );
+                    }
+                    Ok(ControlFlow::Break(
+                        router::Response::error_builder()
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .context(req.context)
+                            .build()?,
+                    ))
+                } else {
+                    Ok(ControlFlow::Continue(req))
+                }
+            })
             .map_future_with_request_data(
                 move |request: &router::Request| {
                     let _ = request.context.insert(
@@ -542,6 +582,26 @@ impl PluginPrivate for Telemetry {
                             KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or_default()),
                             KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or_default()),
                         ]);
+
+                        if let Some(http_server_response_body_size) =
+                            &custom_instruments.http_server_response_body_size
+                        {
+                            let CustomHistogramInner {
+                                histogram,
+                                attributes,
+                                ..
+                            } = &*http_server_response_body_size.inner.lock();
+                            // Clone the histogram (which uses an Arc internally) and store
+                            // in ResponseBodySizeRecording so that we can later record the
+                            // final byte count after the body stream is fully sent.
+                            if let Some(histogram) = &histogram {
+                                let recording = ResponseBodySizeRecording::new(
+                                    histogram.clone(),
+                                    attributes.clone(),
+                                );
+                                ctx.extensions().with_lock(|lock| lock.insert(recording));
+                            }
+                        }
 
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
@@ -1802,6 +1862,14 @@ impl Telemetry {
                 .unwrap_or(false),
         }
     }
+}
+
+// Regex for allowed values for client library names and versions
+static VALID_CLIENT_LIBRARY_VALUE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[ a-zA-Z0-9.@/_\-]{1,60}$").unwrap());
+
+pub(crate) fn is_valid_client_library_value(value: &str) -> bool {
+    VALID_CLIENT_LIBRARY_VALUE_REGEX.is_match(value)
 }
 
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
