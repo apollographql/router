@@ -2,6 +2,7 @@
 name = "supergraph_sdl"
 version = "0.1.0"
 edition = "2021"
+license-file = "../../../LICENSE"
 
 [dependencies]
 anyhow = "1"
