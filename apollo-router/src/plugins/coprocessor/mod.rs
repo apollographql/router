@@ -485,7 +485,7 @@ impl BodyConf {
     }
 
     /// Returns true if the data field should be sent
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn should_send_data(&self) -> bool {
         match self {
             BodyConf::All(send) => *send,
@@ -494,7 +494,7 @@ impl BodyConf {
     }
 
     /// Returns true if the errors field should be sent
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn should_send_errors(&self) -> bool {
         match self {
             BodyConf::All(send) => *send,
@@ -503,11 +503,20 @@ impl BodyConf {
     }
 
     /// Returns true if the extensions field should be sent
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn should_send_extensions(&self) -> bool {
         match self {
             BodyConf::All(send) => *send,
             BodyConf::Selective(fields) => fields.extensions,
+        }
+    }
+
+    /// Returns true if data or errors fields should be sent
+    /// Used to determine if GraphQL spec validation is needed
+    pub(super) fn should_send_data_or_errors(&self) -> bool {
+        match self {
+            BodyConf::All(send) => *send,
+            BodyConf::Selective(fields) => fields.data || fields.errors,
         }
     }
 }
@@ -1715,16 +1724,17 @@ pub(super) fn is_graphql_response_minimally_valid(response: &graphql::Response) 
 }
 
 /// Check if the incoming payload was valid for conditional validation purposes.
-/// Returns true if body was not sent to coprocessor OR if the response is minimally valid.
+/// Returns true if data/errors were not sent to coprocessor OR if the response is minimally valid.
+/// Note: Extensions-only configurations skip GraphQL spec validation since extensions don't affect validity.
 pub(super) fn was_incoming_payload_valid(
     response: &graphql::Response,
     body_conf: &BodyConf,
 ) -> bool {
-    if body_conf.should_send_any() {
-        // If we sent any body fields to the coprocessor, check if it was minimally valid
+    if body_conf.should_send_data_or_errors() {
+        // If we sent data or errors to the coprocessor, check if it was minimally valid per GraphQL spec
         is_graphql_response_minimally_valid(response)
     } else {
-        // If we didn't send any body fields, assume it was valid
+        // If we only sent extensions (or nothing), skip GraphQL spec validation
         true
     }
 }
@@ -1745,19 +1755,21 @@ pub(super) fn filter_graphql_response_body(
                 return None;
             }
             let mut obj = serde_json_bytes::Map::new();
-            if fields.data
-                && let Some(data) = &response.data
-            {
-                obj.insert("data", data.clone());
+            if fields.data {
+                if let Some(data) = &response.data {
+                    obj.insert("data", data.clone());
+                } else {
+                    obj.insert("data", Value::Null);
+                }
             }
-            if fields.errors && !response.errors.is_empty() {
+            if fields.errors {
                 obj.insert(
                     "errors",
                     serde_json_bytes::to_value(&response.errors)
                         .expect("serialization will not fail"),
                 );
             }
-            if fields.extensions && !response.extensions.is_empty() {
+            if fields.extensions {
                 obj.insert("extensions", Value::Object(response.extensions.clone()));
             }
             Some(Value::Object(obj))
