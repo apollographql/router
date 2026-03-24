@@ -22,6 +22,7 @@ use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
 use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadTracker;
 use crate::plugins::telemetry::config_new::selectors::ActiveSubgraphRequests;
+use crate::plugins::telemetry::config_new::selectors::DurationUnit;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
@@ -133,6 +134,22 @@ pub(crate) enum RouterSelector {
         #[serde(deserialize_with = "deserialize_jsonpath")]
         response_errors: JsonPathInst,
     },
+    /// Count of response errors matching a JSONPath filter
+    ResponseErrorsCount {
+        /// JSONPath filter for response errors. Use "$[*]" to count all errors.
+        #[schemars(with = "String")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[serde(deserialize_with = "deserialize_jsonpath")]
+        response_errors_count: JsonPathInst,
+    },
+    /// Extract a specific field from each error in the response
+    ResponseErrorsField {
+        /// JSONPath to extract from each error. E.g., "$.message" or "$.extensions.code"
+        #[schemars(with = "String")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[serde(deserialize_with = "deserialize_jsonpath")]
+        response_errors_field: JsonPathInst,
+    },
     /// A header from the response
     ResponseHeader {
         /// The name of the request header.
@@ -172,6 +189,11 @@ pub(crate) enum RouterSelector {
     RouterOverhead {
         /// Extract router overhead duration in seconds
         router_overhead: bool,
+    },
+    /// Total request duration from when the request was received
+    RequestDuration {
+        /// The unit for the duration (milliseconds, seconds, nanoseconds)
+        request_duration: DurationUnit,
     },
     /// Number of active subgraph requests at the time of overhead calculation
     ActiveSubgraphRequests {
@@ -261,7 +283,9 @@ impl Selector for RouterSelector {
                 insert_display_router_response(request);
                 None
             }
-            RouterSelector::ResponseErrors { .. } => {
+            RouterSelector::ResponseErrors { .. }
+            | RouterSelector::ResponseErrorsCount { .. }
+            | RouterSelector::ResponseErrorsField { .. } => {
                 insert_display_router_response(request);
                 None
             }
@@ -300,6 +324,83 @@ impl Selector for RouterSelector {
                             val.maybe_to_otel_value()
                         })
                 }),
+            RouterSelector::ResponseErrorsCount {
+                response_errors_count,
+            } => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterResponseBodyExtensionType>().cloned())
+                .and_then(|v| {
+                    from_str::<serde_json::Value>(&v.0)
+                        .ok()
+                        .and_then(|body_json| {
+                            let errors = body_json.get("errors");
+
+                            let data: serde_json_bytes::Value =
+                                serde_json_bytes::to_value(errors).ok()?;
+
+                            let result = response_errors_count.find(&data);
+                            // JSONPath find returns:
+                            // - Array if multiple matches
+                            // - Single value (unwrapped) if one match
+                            // - Null if no matches
+                            let count = if let Some(arr) = result.as_array() {
+                                arr.len()
+                            } else if result.is_null() {
+                                0
+                            } else {
+                                // Single matched element (returned unwrapped)
+                                1
+                            };
+
+                            Some(opentelemetry::Value::I64(count as i64))
+                        })
+                }),
+            RouterSelector::ResponseErrorsField {
+                response_errors_field,
+            } => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterResponseBodyExtensionType>().cloned())
+                .and_then(|v| {
+                    from_str::<serde_json::Value>(&v.0)
+                        .ok()
+                        .and_then(|body_json| {
+                            let errors = body_json.get("errors")?.as_array()?;
+
+                            // Extract the specified field from each error
+                            let extracted: Vec<String> = errors
+                                .iter()
+                                .filter_map(|error| {
+                                    let error_bytes: serde_json_bytes::Value =
+                                        serde_json_bytes::to_value(error).ok()?;
+                                    let result = response_errors_field.find(&error_bytes);
+
+                                    // Convert the result to a string representation
+                                    if result.is_null() {
+                                        None
+                                    } else if let Some(s) = result.as_str() {
+                                        Some(s.to_string())
+                                    } else {
+                                        // For non-string values, serialize to JSON string
+                                        Some(result.to_string())
+                                    }
+                                })
+                                .collect();
+
+                            if extracted.is_empty() {
+                                None
+                            } else {
+                                Some(opentelemetry::Value::Array(
+                                    extracted
+                                        .into_iter()
+                                        .map(opentelemetry::StringValue::from)
+                                        .collect::<Vec<_>>()
+                                        .into(),
+                                ))
+                            }
+                        })
+                }),
             RouterSelector::ResponseHeader {
                 response_header,
                 default,
@@ -334,6 +435,22 @@ impl Selector for RouterSelector {
                 .map(|tracker| {
                     let result = tracker.calculate_overhead();
                     opentelemetry::Value::F64(result.overhead.as_secs_f64())
+                }),
+            RouterSelector::RequestDuration { request_duration } => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterOverheadTracker>().cloned())
+                .map(|tracker| {
+                    let duration = tracker.total_duration();
+                    match request_duration {
+                        DurationUnit::Milliseconds => {
+                            opentelemetry::Value::I64(duration.as_millis() as i64)
+                        }
+                        DurationUnit::Seconds => opentelemetry::Value::F64(duration.as_secs_f64()),
+                        DurationUnit::Nanoseconds => {
+                            opentelemetry::Value::I64(duration.as_nanos() as i64)
+                        }
+                    }
                 }),
             RouterSelector::ActiveSubgraphRequests {
                 active_subgraph_requests,
@@ -1047,6 +1164,74 @@ mod test {
         assert_eq!(
             selector.on_response(res).unwrap().as_str(),
             r#"{"message":"Something went wrong","locations":[{"line":1,"column":1}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}"#
+        );
+    }
+
+    #[test]
+    fn router_response_errors_count() {
+        // Test counting all errors
+        let selector = RouterSelector::ResponseErrorsCount {
+            response_errors_count: JsonPathInst::new("$[*]").unwrap(),
+        };
+        let res = &crate::services::RouterResponse::fake_builder()
+            .status_code(StatusCode::BAD_REQUEST)
+            .data("some data")
+            .errors(vec![
+                crate::graphql::Error::builder()
+                    .message("First error")
+                    .extension_code("ERROR_ONE")
+                    .build(),
+                crate::graphql::Error::builder()
+                    .message("Second error")
+                    .extension_code("ERROR_TWO")
+                    .build(),
+                crate::graphql::Error::builder()
+                    .message("Third error")
+                    .extension_code("NOT_FOUND")
+                    .build(),
+            ])
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(res),
+            Some(opentelemetry::Value::I64(3))
+        );
+
+        // Test counting filtered errors (exclude NOT_FOUND)
+        let selector_filtered = RouterSelector::ResponseErrorsCount {
+            response_errors_count: JsonPathInst::new("$[?(!(@.extensions.code == 'NOT_FOUND'))]")
+                .unwrap(),
+        };
+        assert_eq!(
+            selector_filtered.on_response(res),
+            Some(opentelemetry::Value::I64(2))
+        );
+
+        // Test with no errors
+        let res_no_errors = &crate::services::RouterResponse::fake_builder()
+            .status_code(StatusCode::OK)
+            .data("some data")
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(res_no_errors),
+            Some(opentelemetry::Value::I64(0))
+        );
+
+        // Test with single error (mimics timeout scenario)
+        let res_single_error = &crate::services::RouterResponse::fake_builder()
+            .status_code(StatusCode::GATEWAY_TIMEOUT)
+            .errors(vec![
+                crate::graphql::Error::builder()
+                    .message("Your request has been timed out")
+                    .extension_code("GATEWAY_TIMEOUT")
+                    .build(),
+            ])
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(res_single_error),
+            Some(opentelemetry::Value::I64(1))
         );
     }
 }
