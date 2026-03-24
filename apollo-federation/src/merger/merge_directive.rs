@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
@@ -6,13 +8,17 @@ use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
-use indexmap::IndexSet;
+use apollo_compiler::collections::IndexSet;
 use itertools::Itertools;
 use tracing::instrument;
 use tracing::trace;
 
 use crate::bail;
 use crate::error::FederationError;
+use crate::link::authenticated_spec_definition::AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::spec_definition::SpecDefinition;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
@@ -20,6 +26,7 @@ use crate::merger::merge::map_sources;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::HasAppliedDirectives;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
@@ -36,7 +43,9 @@ pub(crate) struct AppliedDirectiveToMergeEntry {
 
 pub(crate) type AppliedDirectivesToMerge = Vec<AppliedDirectiveToMergeEntry>;
 
-#[allow(dead_code)]
+pub(in crate::merger) type AdditionalDirectiveSources =
+    IndexMap<usize, IndexSet<DirectiveTargetPosition>>;
+
 impl Merger {
     pub(in crate::merger) fn record_applied_directives_to_merge<T>(
         &mut self,
@@ -49,7 +58,7 @@ impl Merger {
         let inaccessible_name = self.inaccessible_directive_name_in_supergraph.clone();
         let mut directive_sources: Sources<DirectiveTargetPosition> =
             IndexMap::with_capacity_and_hasher(sources.len(), Default::default());
-        let mut names = IndexSet::with_capacity(sources.len());
+        let mut names = IndexSet::with_capacity_and_hasher(sources.len(), Default::default());
 
         // This loop corresponds to `gatherAppliedDirectivesToMerge` in the JS implementation.
         for (idx, source) in sources {
@@ -74,6 +83,32 @@ impl Merger {
             names.shift_remove(inaccessible);
         }
 
+        // PORT NOTE: in JS we were capturing additional sources in record_applied_directives_to_merge.
+        // JS was recording an array/vec of FieldDefinition/ObjectTypeDefinition/InterfaceTypeDefinition
+        // but this doesn't work in RS implementations as we record lightweight references to the target
+        // directive positions instead. Since we cannot just update source map with additional sources
+        // (as it would overwrite the existing entries for the subgraphs), we make sure that target access
+        // control directive will be merged.
+        if matches!(
+            dest,
+            DirectiveTargetPosition::InterfaceField(_)
+                | DirectiveTargetPosition::ObjectField(_)
+                | DirectiveTargetPosition::InterfaceType(_)
+        ) {
+            for (name, name_in_supergraph) in &self.access_control_directives_in_supergraph {
+                if names.contains(name_in_supergraph) {
+                    // access control directive is already in the list of directives to be merged
+                    continue;
+                } else if self
+                    .access_control_additional_sources()?
+                    .contains_key(&format!("{dest}_{name}"))
+                {
+                    // need to add access control directive to the list of directives to be merged
+                    names.insert(name_in_supergraph.clone());
+                }
+            }
+        }
+
         if names.is_empty() {
             trace!("No applied directives to merge at {dest}");
         } else {
@@ -95,7 +130,7 @@ impl Merger {
     /// Note that this logic relies on the fact that the directive must have the same name across
     /// all subgraphs.
     #[instrument(skip(self, sources))]
-    fn merge_applied_directive(
+    pub(in crate::merger) fn merge_applied_directive(
         &mut self,
         name: &Name,
         sources: &Sources<DirectiveTargetPosition>,
@@ -117,7 +152,7 @@ impl Merger {
             .merged_federation_directive_in_supergraph_by_directive_name
             .get(name);
 
-        let directive_counts: IndexMap<Directive, usize> = sources
+        let mut directive_counts: IndexMap<Directive, usize> = sources
             .iter()
             .flat_map(|(idx, source)| {
                 let Some(source) = source else {
@@ -155,6 +190,61 @@ impl Merger {
                 }
                 acc
             });
+
+        // PORT NOTE: in JS version we were populating additional sources for access control in record_applied_directives_to_merge
+        // without any changes in the merge_applied_directive_logic.
+        // We need to explicitly look up the target schema element in RS so we handle this logic here directly
+        if matches!(
+            dest,
+            DirectiveTargetPosition::InterfaceField(_)
+                | DirectiveTargetPosition::ObjectField(_)
+                | DirectiveTargetPosition::InterfaceType(_)
+        ) {
+            for (access_control_directive_name, access_control_directive_name_in_supergraph) in
+                &self.access_control_directives_in_supergraph
+            {
+                if name == access_control_directive_name_in_supergraph
+                    && let Some(additional_sources_for_position) = self
+                        .access_control_additional_sources()?
+                        .get(&format!("{dest}_{access_control_directive_name}"))
+                {
+                    // we need to propagate access control
+                    // - upwards from object types to interfaces
+                    // - upwards from object fields to interface fields
+                    // - downwards from interface object fields to object fields
+                    additional_sources_for_position
+                        .iter()
+                        .flat_map(|(index, sources)| {
+                            let subgraph = &self.subgraphs[*index];
+                            let mut applications = sources
+                                .iter()
+                                .flat_map(|source| {
+                                    source
+                                        .get_applied_directives(subgraph.schema(), name)
+                                        .into_iter()
+                                        .map(|d| (**d).clone())
+                                })
+                                .collect_vec();
+                            if let Some(transform) = &directive_in_supergraph
+                                .and_then(|d| d.static_argument_transform.as_ref())
+                            {
+                                for application in &mut applications {
+                                    self.transform_arguments(
+                                        application,
+                                        subgraph,
+                                        transform.as_ref(),
+                                    );
+                                }
+                            }
+                            applications
+                        })
+                        .for_each(|d| {
+                            // access control directives don't have default args so we don't need to transform them
+                            *directive_counts.entry(d).or_insert(0) += 1;
+                        });
+                }
+            }
+        }
 
         if definition.repeatable {
             trace!(
@@ -540,6 +630,125 @@ impl Merger {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn access_control_additional_sources(
+        &self,
+    ) -> Result<&HashMap<String, AdditionalDirectiveSources>, FederationError> {
+        self.access_control_additional_sources.get_or_try_init(|| {
+            let mut sources: HashMap<String, AdditionalDirectiveSources> = HashMap::default();
+            for (index, subgraph) in self.subgraphs.iter().enumerate() {
+                let metadata = subgraph.metadata();
+                let federation_spec = metadata.federation_spec_definition();
+                let subgraph_referencers = subgraph.schema().referencers();
+                for access_control_directive in [
+                    &AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
+                    &REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
+                    &POLICY_DIRECTIVE_NAME_IN_SPEC,
+                ] {
+                    if let Some(directive) = federation_spec
+                        .directive_definition(subgraph.schema(), access_control_directive)?
+                    {
+                        let referencers = subgraph_referencers.get_directive(&directive.name);
+                        for type_position in &referencers.object_types {
+                            // we will be propagating access control from objects up to the interfaces
+                            let object_type = type_position.get(self.merged.schema())?;
+                            for interface in &object_type.implements_interfaces {
+                                let key = format!("{}_{}", interface, access_control_directive);
+                                let existing_sources = sources.entry(key).or_default();
+                                existing_sources.entry(index).or_default().insert(
+                                    DirectiveTargetPosition::ObjectType(type_position.clone()),
+                                );
+                            }
+                        }
+                        for field_definition_position in &referencers.object_fields {
+                            if metadata.is_field_external(&field_definition_position.clone().into())
+                            {
+                                continue;
+                            }
+
+                            if metadata
+                                .is_interface_object_type(&field_definition_position.type_name)
+                            {
+                                // we need to propagate field access control downwards from interface object fields to object fields
+                                // we need to look up the interface in the merged supergraph to find all its implementations
+                                let supergraph_type: InterfaceTypeDefinitionPosition =
+                                    InterfaceTypeDefinitionPosition {
+                                        type_name: field_definition_position.type_name.clone(),
+                                    };
+                                for implementation in
+                                    self.merged.all_implementation_types(&supergraph_type)?
+                                {
+                                    let key = format!(
+                                        "{}.{}_{}",
+                                        implementation,
+                                        &field_definition_position.field_name,
+                                        access_control_directive
+                                    );
+                                    sources
+                                        .entry(key)
+                                        .or_default()
+                                        .entry(index)
+                                        .or_default()
+                                        .insert(DirectiveTargetPosition::ObjectField(
+                                            field_definition_position.clone(),
+                                        ));
+
+                                    // we now need to propagate field access control upwards from @interfaceObject fields to any
+                                    // other interfaces implemented by the given implementation type
+                                    for other_interface in
+                                        implementation.implemented_interfaces(&self.merged)?
+                                    {
+                                        if other_interface.name
+                                            == field_definition_position.type_name
+                                        {
+                                            // skip current @interfaceObject
+                                            continue;
+                                        }
+                                        let key = format!(
+                                            "{}.{}_{}",
+                                            other_interface,
+                                            &field_definition_position.field_name,
+                                            access_control_directive
+                                        );
+                                        sources
+                                            .entry(key)
+                                            .or_default()
+                                            .entry(index)
+                                            .or_default()
+                                            .insert(DirectiveTargetPosition::ObjectField(
+                                                field_definition_position.clone(),
+                                            ));
+                                    }
+                                }
+                            } else {
+                                // we need to propagate field access control upwards from object fields to the interface fields
+                                let merged_object_type = field_definition_position
+                                    .parent()
+                                    .get(self.merged.schema())?;
+                                for interface in &merged_object_type.implements_interfaces {
+                                    let key = format!(
+                                        "{}.{}_{}",
+                                        interface,
+                                        field_definition_position.field_name,
+                                        access_control_directive
+                                    );
+                                    sources
+                                        .entry(key)
+                                        .or_default()
+                                        .entry(index)
+                                        .or_default()
+                                        .insert(DirectiveTargetPosition::ObjectField(
+                                            field_definition_position.clone(),
+                                        ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(sources)
+        })
     }
 }
 

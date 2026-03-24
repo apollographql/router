@@ -236,11 +236,23 @@ impl Merger {
                     spec_in_supergraph.url()
                 )
             }
+
+            if subgraph_core_directive.composition_spec.use_join_directive {
+                self.directives_using_join_directive
+                    .insert(name_in_supergraph.clone());
+            }
         }
 
         for supergraph_core_directives in supergraph_info_by_identity.values() {
             let mut imports = Vec::new();
             for supergraph_core_directive in supergraph_core_directives {
+                // Directives composed via @join__directive are not imported in the supergraph schema.
+                if supergraph_core_directive
+                    .composition_spec
+                    .use_join_directive
+                {
+                    continue;
+                }
                 let default_name_in_supergraph = Link::directive_name_in_schema_for_core_arguments(
                     supergraph_core_directive.spec_in_supergraph.url(),
                     &supergraph_core_directive

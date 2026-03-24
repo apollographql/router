@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::LazyLock;
 
@@ -8,6 +7,7 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
@@ -16,7 +16,6 @@ use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::ty;
-use indexmap::IndexMap;
 use itertools::Itertools;
 
 use super::argument::directive_optional_list_argument;
@@ -534,8 +533,6 @@ impl JoinSpecDefinition {
             ],
             false,
             &[DirectiveLocation::EnumValue],
-            false,
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -611,8 +608,6 @@ impl JoinSpecDefinition {
                 DirectiveLocation::InputObject,
                 DirectiveLocation::Scalar,
             ],
-            false,
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -811,8 +806,6 @@ impl JoinSpecDefinition {
                 DirectiveLocation::FieldDefinition,
                 DirectiveLocation::InputFieldDefinition,
             ],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -849,8 +842,6 @@ impl JoinSpecDefinition {
             ],
             true, // repeatable
             &[DirectiveLocation::Object, DirectiveLocation::Interface],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -914,8 +905,6 @@ impl JoinSpecDefinition {
             ],
             true, // repeatable
             &[DirectiveLocation::Union],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -942,8 +931,6 @@ impl JoinSpecDefinition {
             }],
             true, // repeatable
             &[DirectiveLocation::EnumValue],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -999,8 +986,6 @@ impl JoinSpecDefinition {
                 DirectiveLocation::Interface,
                 DirectiveLocation::FieldDefinition,
             ],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -1070,8 +1055,6 @@ impl JoinSpecDefinition {
             }],
             false, // not repeatable
             &[DirectiveLocation::Object],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -1082,10 +1065,10 @@ impl JoinSpecDefinition {
         &self,
         schema: &mut FederationSchema,
         subgraphs: &[Subgraph<Validated>],
-    ) -> Result<HashMap<String, Name>, FederationError> {
+    ) -> Result<IndexMap<String, Name>, FederationError> {
         // Collect sanitized names and group subgraphs by sanitized name (like JS MultiMap)
         let mut sanitized_name_to_subgraphs: IndexMap<String, Vec<&Subgraph<Validated>>> =
-            IndexMap::with_capacity(subgraphs.len());
+            IndexMap::with_capacity_and_hasher(subgraphs.len(), Default::default());
 
         for subgraph in subgraphs {
             let sanitized = sanitize_graphql_name(&subgraph.name);
@@ -1096,7 +1079,7 @@ impl JoinSpecDefinition {
         }
 
         // Create mapping from subgraph names to enum names (matches JS subgraphToEnumName)
-        let mut subgraph_to_enum_name = HashMap::new();
+        let mut subgraph_to_enum_name = IndexMap::default();
 
         // Get the graph directive name once (used for all enum values)
         let graph_directive_name = self

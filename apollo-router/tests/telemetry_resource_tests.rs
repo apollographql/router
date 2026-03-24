@@ -9,7 +9,6 @@ use apollo_router::_private::telemetry::ConfigResource;
 use libtest_mimic::Arguments;
 use libtest_mimic::Failed;
 use libtest_mimic::Trial;
-use opentelemetry::Key;
 
 fn main() {
     let mut args = Arguments::from_args();
@@ -53,7 +52,7 @@ fn test_empty() -> Result<(), Failed> {
     };
     let resource = test_config.to_resource();
     let service_name = resource
-        .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into())
+        .get(&opentelemetry_semantic_conventions::resource::SERVICE_NAME.into())
         .unwrap();
     assert!(
         service_name
@@ -63,17 +62,17 @@ fn test_empty() -> Result<(), Failed> {
     );
     assert!(
         resource
-            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.into())
+            .get(&opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.into())
             .is_none()
     );
     assert_eq!(
-        resource.get(opentelemetry_semantic_conventions::resource::SERVICE_VERSION.into()),
+        resource.get(&opentelemetry_semantic_conventions::resource::SERVICE_VERSION.into()),
         Some(std::env!("CARGO_PKG_VERSION").into())
     );
 
     assert!(
         resource
-            .get(opentelemetry_semantic_conventions::resource::PROCESS_EXECUTABLE_NAME.into())
+            .get(&opentelemetry_semantic_conventions::resource::PROCESS_EXECUTABLE_NAME.into())
             .expect("expected excutable name")
             .as_str()
             .contains("telemetry_resources")
@@ -102,15 +101,15 @@ fn test_config_resources() -> Result<(), Failed> {
     };
     let resource = test_config.to_resource();
     assert_eq!(
-        resource.get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
+        resource.get(&opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
         Some("override-service-name".into())
     );
     assert_eq!(
-        resource.get(opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.into()),
+        resource.get(&opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.into()),
         Some("override-namespace".into())
     );
     assert_eq!(
-        resource.get(Key::from_static_str("extra-key")),
+        resource.get(&"extra-key".into()),
         Some("extra-value".into())
     );
     Ok(())
@@ -124,11 +123,11 @@ fn test_service_name_service_namespace() -> Result<(), Failed> {
     };
     let resource = test_config.to_resource();
     assert_eq!(
-        resource.get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
+        resource.get(&opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
         Some("override-service-name".into())
     );
     assert_eq!(
-        resource.get(opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.into()),
+        resource.get(&opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.into()),
         Some("override-namespace".into())
     );
     Ok(())
@@ -150,7 +149,7 @@ fn test_service_name_override() -> Result<(), Failed> {
             resources: Default::default(),
         }
         .to_resource()
-        .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into())
+        .get(&opentelemetry_semantic_conventions::resource::SERVICE_NAME.into())
         .unwrap()
         .as_str()
         .starts_with("unknown_service:telemetry_resources-")
@@ -166,7 +165,7 @@ fn test_service_name_override() -> Result<(), Failed> {
             )]),
         }
         .to_resource()
-        .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
+        .get(&opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
         Some("yaml-resource".into())
     );
 
@@ -180,7 +179,7 @@ fn test_service_name_override() -> Result<(), Failed> {
             )]),
         }
         .to_resource()
-        .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
+        .get(&opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
         Some("yaml-service-name".into())
     );
 
@@ -198,7 +197,7 @@ fn test_service_name_override() -> Result<(), Failed> {
             )]),
         }
         .to_resource()
-        .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
+        .get(&opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
         Some("env-resource".into())
     );
 
@@ -216,7 +215,7 @@ fn test_service_name_override() -> Result<(), Failed> {
             )]),
         }
         .to_resource()
-        .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
+        .get(&opentelemetry_semantic_conventions::resource::SERVICE_NAME.into()),
         Some("env-service-name".into())
     );
 

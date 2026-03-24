@@ -31,6 +31,7 @@ use tower::timeout::error::Elapsed;
 
 use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
+use crate::configuration::shared::default_pool_idle_timeout;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
@@ -70,6 +71,13 @@ struct Shaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_pool_idle_timeout"
+    )]
+    #[schemars(with = "String", default = "default_pool_idle_timeout")]
+    pool_idle_timeout: Option<Duration>,
 }
 
 #[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
@@ -106,6 +114,11 @@ impl Merge for Shaping {
                     .dns_resolution_strategy
                     .as_ref()
                     .or(fallback.dns_resolution_strategy.as_ref())
+                    .cloned(),
+                pool_idle_timeout: self
+                    .pool_idle_timeout
+                    .as_ref()
+                    .or(fallback.pool_idle_timeout.as_ref())
                     .cloned(),
             },
         }
@@ -155,6 +168,13 @@ struct ConnectorShaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for connectors
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_pool_idle_timeout"
+    )]
+    #[schemars(with = "String", default = "default_pool_idle_timeout")]
+    pool_idle_timeout: Option<Duration>,
 }
 
 impl Merge for ConnectorShaping {
@@ -178,6 +198,11 @@ impl Merge for ConnectorShaping {
                     .dns_resolution_strategy
                     .as_ref()
                     .or(fallback.dns_resolution_strategy.as_ref())
+                    .cloned(),
+                pool_idle_timeout: self
+                    .pool_idle_timeout
+                    .as_ref()
+                    .or(fallback.pool_idle_timeout.as_ref())
                     .cloned(),
             },
         }
@@ -318,7 +343,7 @@ impl PluginPrivate for TrafficShaping {
                     let response: Result<RouterResponse, BoxError> = future.await;
                     if matches!(response, Err(ref err) if err.is::<Overloaded>()) {
                         Ok(RouterResponse::error_builder()
-                            .status_code(StatusCode::TOO_MANY_REQUESTS)
+                            .status_code(StatusCode::SERVICE_UNAVAILABLE)
                             .error(rate_limit_error())
                             .context(ctx)
                             .build()
@@ -382,7 +407,7 @@ impl PluginPrivate for TrafficShaping {
                                 Err(err) if err.is::<Overloaded>() => {
                                     // TODO add metrics
                                     Ok(SubgraphResponse::error_builder()
-                                        .status_code(StatusCode::TOO_MANY_REQUESTS)
+                                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
                                         .subgraph_name(subgraph_name)
                                         .error(rate_limit_error())
                                         .context(ctx)
@@ -445,22 +470,24 @@ impl PluginPrivate for TrafficShaping {
 
             ServiceBuilder::new()
                 .map_future_with_request_data(
-                    |req: &Request| req.key.clone(),
-                    move |response_key, future| {
+                    |req: &Request| (req.context.clone(), req.key.clone()),
+                    move |(context, response_key), future| {
                         async {
                             let response: Result<Response, BoxError> = future.await;
                             match response {
                                 Ok(ok) => Ok(ok),
                                 Err(err) if err.is::<Elapsed>() => {
                                     let response = Response::error_new(
+                                        context,
                                         Error::GatewayTimeout,
                                         "Your request has been timed out",
                                         response_key,
                                     );
                                     Ok(response)
                                 }
-                               Err(err) if err.is::<Overloaded>() => {
+                                Err(err) if err.is::<Overloaded>() => {
                                     let response = Response::error_new(
+                                        context,
                                         Error::RateLimited,
                                         "Your request has been rate limited",
                                         response_key,
@@ -514,6 +541,7 @@ impl TrafficShaping {
         .map(|config| crate::configuration::shared::Client {
             experimental_http2: config.shaping.experimental_http2,
             dns_resolution_strategy: config.shaping.dns_resolution_strategy,
+            pool_idle_timeout: config.shaping.pool_idle_timeout,
         })
         .unwrap_or_default()
     }
@@ -527,6 +555,7 @@ impl TrafficShaping {
             .map(|config| crate::configuration::shared::Client {
                 experimental_http2: config.experimental_http2,
                 dns_resolution_strategy: config.dns_resolution_strategy,
+                pool_idle_timeout: config.pool_idle_timeout,
             })
             .unwrap_or_default()
     }
@@ -995,6 +1024,7 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Enable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6ThenIpv4),
+                pool_idle_timeout: default_pool_idle_timeout()
             },
         );
         assert_eq!(
@@ -1002,6 +1032,7 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Disable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv4Only),
+                pool_idle_timeout: default_pool_idle_timeout()
             },
         );
         assert_eq!(
@@ -1009,6 +1040,7 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Disable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6Only),
+                pool_idle_timeout: default_pool_idle_timeout()
             },
         );
     }
@@ -1055,7 +1087,7 @@ mod test {
             .await
             .expect("it responded");
 
-        assert_eq!(StatusCode::TOO_MANY_REQUESTS, response.response.status());
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
 
         tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -1186,7 +1218,7 @@ mod test {
             .call(RouterRequest::fake_builder().build().unwrap())
             .await
             .unwrap();
-        assert_eq!(StatusCode::TOO_MANY_REQUESTS, response.response.status());
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
         let j: serde_json::Value = serde_json::from_slice(
             &router::body::into_bytes(response.response)
                 .await
@@ -1250,6 +1282,124 @@ mod test {
         assert_eq!("Your request has been timed out", j["errors"][0]["message"]);
     }
 
+    #[tokio::test]
+    async fn test_subgraph_pool_idle_timeout_override_and_fallback() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          pool_idle_timeout: 10s
+        subgraphs:
+          fast:
+            pool_idle_timeout: 2s
+          explicit_null:
+            pool_idle_timeout: null
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("fast")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(2)),
+            "subgraph-specific override should win"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_null")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(10)),
+            "explicit null falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("unknown")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(10)),
+            "unknown subgraph falls back to all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_connector_pool_idle_timeout_override_and_fallback() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        connector:
+          all:
+            pool_idle_timeout: 20s
+          sources:
+            my_source:
+              pool_idle_timeout: 3s
+            explicit_null:
+              pool_idle_timeout: null
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("my_source")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(3)),
+            "source-specific override should win"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("explicit_null")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(20)),
+            "explicit null falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("unknown")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(20)),
+            "unknown source falls back to all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pool_idle_timeout_uses_default_when_not_configured() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          experimental_http2: disable
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("any")
+                .pool_idle_timeout,
+            default_pool_idle_timeout(),
+            "when pool_idle_timeout is not in the config, it should use the default"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn it_raises_different_errors_for_timeouts_and_rate_limits() {
         // expected behavior: the first request sent will timeout, the second request will return
@@ -1284,7 +1434,7 @@ mod test {
         let mut results = tasks.join_all().await.into_iter();
 
         let response = results.next().unwrap().unwrap().response;
-        assert_eq!(StatusCode::TOO_MANY_REQUESTS, response.status());
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.status());
 
         let response = results.next().unwrap().unwrap().response;
         assert_eq!(StatusCode::GATEWAY_TIMEOUT, response.status());

@@ -110,8 +110,8 @@ mod tests {
     }
 
     #[test]
-    fn works_for_union_argument_merge_strategy() {
-        // NOTE: @requiresScopes uses the UNION strategy for merging arguments
+    fn works_for_dnf_conjunction_merge_strategy() {
+        // NOTE: @requiresScopes uses the DNF_CONJUNCTION strategy for merging arguments
 
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
@@ -151,14 +151,14 @@ mod tests {
             CompositionHint {
                 code: String::from("MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS"),
                 message: String::from(
-                    r#"Directive @requiresScopes is applied to "T" in multiple subgraphs with different arguments. Merging strategies used by arguments: { scopes: UNION }"#,
+                    r#"Directive @requiresScopes is applied to "T" in multiple subgraphs with different arguments. Merging strategies used by arguments: { scopes: DNF_CONJUNCTION }"#,
                 ),
                 locations: Vec::new(),
             },
             CompositionHint {
                 code: String::from("MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS"),
                 message: String::from(
-                    r#"Directive @requiresScopes is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { scopes: UNION }"#,
+                    r#"Directive @requiresScopes is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { scopes: DNF_CONJUNCTION }"#,
                 ),
                 locations: Vec::new(),
             },
@@ -182,7 +182,7 @@ mod tests {
             .expect("@requiresScopes directive should be present on T");
         assert_eq!(
             t_requires_scopes_directive.to_string(),
-            r#"@requiresScopes(scopes: [["foo"], ["bar"]])"#
+            r#"@requiresScopes(scopes: [["foo"]])"#
         );
 
         let k = coord!(T.k)

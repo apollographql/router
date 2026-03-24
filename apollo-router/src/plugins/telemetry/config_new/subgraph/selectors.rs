@@ -58,6 +58,7 @@ pub(crate) enum SubgraphQuery {
 }
 
 pub(crate) struct SubgraphRequestBodySize(pub u64);
+pub(crate) struct SubgraphResponseBodySize(pub u64);
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
@@ -156,6 +157,10 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseStatus {
         /// The subgraph http response status code.
         subgraph_response_status: ResponseStatus,
+    },
+    SubgraphResponseBodySize {
+        /// The subgraph response body size.
+        subgraph_response_body_size: bool,
     },
     SubgraphResendCount {
         /// The subgraph http resend count
@@ -288,6 +293,11 @@ pub(crate) enum SubgraphSelector {
     ResponseCacheControl {
         /// Select data you want from the computed cache control from response caching
         response_cache_control: CacheControlSelector,
+    },
+    /// The context ID of the request (unique per request).
+    ContextId {
+        /// The context ID
+        context_id: bool,
     },
 }
 
@@ -468,6 +478,9 @@ impl Selector for SubgraphSelector {
             }
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SubgraphSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(request.context.id.clone()))
+            }
 
             // For response
             _ => None,
@@ -509,6 +522,14 @@ impl Selector for SubgraphSelector {
                     .canonical_reason()
                     .map(|reason| reason.into()),
             },
+            SubgraphSelector::SubgraphResponseBodySize {
+                subgraph_response_body_size,
+                ..
+            } if *subgraph_response_body_size => response
+                .context
+                .extensions()
+                .with_lock(|lock| lock.get::<SubgraphResponseBodySize>().map(|bs| bs.0))
+                .map(|size| opentelemetry::Value::I64(size as i64)),
             SubgraphSelector::SubgraphOperationKind { .. } => response
                 .context
                 .get::<_, String>(OPERATION_KIND)
@@ -742,6 +763,9 @@ impl Selector for SubgraphSelector {
                     }
                 })
             }
+            SubgraphSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(response.context.id.clone()))
+            }
             // For request
             _ => None,
         }
@@ -788,6 +812,9 @@ impl Selector for SubgraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(ctx.id.clone()))
+            }
             _ => None,
         }
     }
@@ -820,6 +847,7 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::Env { .. }
                     | SubgraphSelector::Static(_)
                     | SubgraphSelector::StaticField { .. }
+                    | SubgraphSelector::ContextId { .. }
             ),
             Stage::Response => matches!(
                 self,
@@ -838,6 +866,7 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::Cache { .. }
                     | SubgraphSelector::ResponseCache { .. }
                     | SubgraphSelector::ResponseCacheControl { .. }
+                    | SubgraphSelector::ContextId { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
@@ -850,6 +879,7 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::Static(_)
                     | SubgraphSelector::StaticField { .. }
                     | SubgraphSelector::ResponseContext { .. }
+                    | SubgraphSelector::ContextId { .. }
             ),
             Stage::Drop => matches!(
                 self,
@@ -909,6 +939,8 @@ mod test {
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
     use crate::plugins::telemetry::otel;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
     use crate::services::subgraph::SubgraphRequestId;
 
     #[test]
@@ -1235,8 +1267,8 @@ mod test {
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
+                TraceId::from(42),
+                SpanId::from(42),
                 // Make sure it's sampled if not, it won't create anything at the otel layer
                 TraceFlags::default().with_sampled(true),
                 false,
@@ -2173,5 +2205,37 @@ mod test {
             selector.on_request(&crate::services::SubgraphRequest::fake_builder().build(),),
             Some("default".into())
         );
+    }
+
+    #[test]
+    fn subgraph_context_id() {
+        let selector = SubgraphSelector::ContextId { context_id: true };
+        let context = crate::context::Context::new();
+        let expected_id: opentelemetry::Value = context.id.clone().into();
+
+        // Test on_request
+        let request = SubgraphRequest::fake_builder()
+            .context(context.clone())
+            .build();
+        assert_eq!(selector.on_request(&request).unwrap(), expected_id);
+
+        // Test on_response
+        let response = SubgraphResponse::fake_builder()
+            .context(context.clone())
+            .build();
+        assert_eq!(selector.on_response(&response).unwrap(), expected_id);
+
+        // Test on_error
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from(String::from("test error")), &context)
+                .unwrap(),
+            expected_id
+        );
+
+        // Test that context_id: false returns None
+        let selector_disabled = SubgraphSelector::ContextId { context_id: false };
+        let request = SubgraphRequest::fake_builder().context(context).build();
+        assert!(selector_disabled.on_request(&request).is_none());
     }
 }

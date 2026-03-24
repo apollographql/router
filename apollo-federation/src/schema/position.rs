@@ -651,7 +651,6 @@ pub(crate) trait HasAppliedDirectives {
     type AppliedDirective: AsRef<Directive>;
 
     fn filter_directives<'dir, T: AsRef<Directive>>(
-        &self,
         directives: impl IntoIterator<Item = &'dir T>,
         name: &Name,
     ) -> Vec<&'dir T> {
@@ -677,7 +676,7 @@ impl HasAppliedDirectives for SchemaDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         let schema_def = self.get(&schema.schema);
-        self.filter_directives(schema_def.directives.iter(), directive_name)
+        Self::filter_directives(schema_def.directives.iter(), directive_name)
     }
 }
 
@@ -797,7 +796,7 @@ impl HasAppliedDirectives for ScalarTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|scalar| self.filter_directives(scalar.directives.iter(), directive_name))
+            .map(|scalar| Self::filter_directives(scalar.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -811,7 +810,7 @@ impl HasAppliedDirectives for ObjectTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|object| self.filter_directives(object.directives.iter(), directive_name))
+            .map(|object| Self::filter_directives(object.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -825,7 +824,7 @@ impl HasAppliedDirectives for ObjectFieldDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|field| self.filter_directives(field.directives.iter(), directive_name))
+            .map(|field| Self::filter_directives(field.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -839,7 +838,7 @@ impl HasAppliedDirectives for ObjectFieldArgumentDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .map(|input| Self::filter_directives(input.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -853,7 +852,7 @@ impl HasAppliedDirectives for InterfaceTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|intf| self.filter_directives(intf.directives.iter(), directive_name))
+            .map(|intf| Self::filter_directives(intf.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -867,7 +866,7 @@ impl HasAppliedDirectives for InterfaceFieldDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|field| self.filter_directives(field.directives.iter(), directive_name))
+            .map(|field| Self::filter_directives(field.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -880,7 +879,7 @@ impl HasAppliedDirectives for InterfaceFieldArgumentDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .map(|input| Self::filter_directives(input.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -893,7 +892,7 @@ impl HasAppliedDirectives for UnionTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|union| self.filter_directives(union.directives.iter(), directive_name))
+            .map(|union| Self::filter_directives(union.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -906,7 +905,7 @@ impl HasAppliedDirectives for EnumTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|enum_type| self.filter_directives(enum_type.directives.iter(), directive_name))
+            .map(|enum_type| Self::filter_directives(enum_type.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -919,7 +918,7 @@ impl HasAppliedDirectives for EnumValueDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|value| self.filter_directives(value.directives.iter(), directive_name))
+            .map(|value| Self::filter_directives(value.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -932,7 +931,7 @@ impl HasAppliedDirectives for InputObjectTypeDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Component<Directive>> {
         self.try_get(&schema.schema)
-            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .map(|input| Self::filter_directives(input.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -945,7 +944,7 @@ impl HasAppliedDirectives for InputObjectFieldDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|field| self.filter_directives(field.directives.iter(), directive_name))
+            .map(|field| Self::filter_directives(field.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -958,7 +957,7 @@ impl HasAppliedDirectives for DirectiveArgumentDefinitionPosition {
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
-            .map(|input| self.filter_directives(input.directives.iter(), directive_name))
+            .map(|input| Self::filter_directives(input.directives.iter(), directive_name))
             .unwrap_or_default()
     }
 }
@@ -1289,6 +1288,7 @@ impl TypeDefinitionPosition {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<bool, FederationError> {
         let is_some = match self {
             TypeDefinitionPosition::Scalar(scalar_pos) => scalar_pos.remove(schema)?.is_some(),
@@ -2747,6 +2747,9 @@ impl ScalarTypeDefinitionPosition {
                 pos.rename_type(schema, new_name.clone())?;
             }
             for pos in scalar_type_referencers.input_object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in scalar_type_referencers.directive_arguments.iter() {
                 pos.rename_type(schema, new_name.clone())?;
             }
             schema
@@ -5068,12 +5071,7 @@ impl InterfaceFieldDefinitionPosition {
         new_name: Name,
     ) -> Result<(), FederationError> {
         let field = self.make_mut(&mut schema.schema)?.make_mut();
-        match field.ty.clone() {
-            ast::Type::Named(_) => field.ty = ast::Type::Named(new_name),
-            ast::Type::NonNullNamed(_) => field.ty = ast::Type::NonNullNamed(new_name),
-            ast::Type::List(_) => todo!(),
-            ast::Type::NonNullList(_) => todo!(),
-        }
+        rename_type(&mut field.ty, new_name);
         Ok(())
     }
 }
@@ -5393,14 +5391,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
         new_name: Name,
     ) -> Result<(), FederationError> {
         let argument = self.make_mut(&mut schema.schema)?.make_mut();
-        match argument.ty.as_ref() {
-            ast::Type::Named(_) => *argument.ty.make_mut() = ast::Type::Named(new_name),
-            ast::Type::NonNullNamed(_) => {
-                *argument.ty.make_mut() = ast::Type::NonNullNamed(new_name)
-            }
-            ast::Type::List(_) => todo!(),
-            ast::Type::NonNullList(_) => todo!(),
-        }
+        rename_type(argument.ty.make_mut(), new_name);
         Ok(())
     }
 }
@@ -7624,6 +7615,16 @@ impl DirectiveArgumentDefinitionPosition {
                 .shift_remove(self);
         }
     }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let input_value_definition = self.make_mut(&mut schema.schema)?.make_mut();
+        rename_type(input_value_definition.ty.make_mut(), new_name);
+        Ok(())
+    }
 }
 
 impl Display for DirectiveArgumentDefinitionPosition {
@@ -7821,6 +7822,25 @@ impl From<ObjectOrInterfaceFieldDefinitionPosition> for DirectiveTargetPosition 
             }
             ObjectOrInterfaceFieldDefinitionPosition::Interface(pos) => {
                 DirectiveTargetPosition::InterfaceField(pos)
+            }
+        }
+    }
+}
+
+impl From<ObjectFieldDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: ObjectFieldDefinitionPosition) -> Self {
+        DirectiveTargetPosition::ObjectField(pos)
+    }
+}
+
+impl From<ObjectOrInterfaceTypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: ObjectOrInterfaceTypeDefinitionPosition) -> Self {
+        match pos {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(pos) => {
+                DirectiveTargetPosition::ObjectType(pos)
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(pos) => {
+                DirectiveTargetPosition::InterfaceType(pos)
             }
         }
     }

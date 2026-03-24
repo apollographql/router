@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
@@ -25,6 +27,7 @@ use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationKind;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+use crate::services::http::service::WireByteCount;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -96,6 +99,10 @@ pub(crate) enum ConnectorSelector {
         /// The connector HTTP response status code.
         connector_http_response_status: ResponseStatus,
     },
+    ConnectorResponseBodySize {
+        /// The connector HTTP response body size (wire bytes before decompression).
+        connector_http_response_body_size: bool,
+    },
     ConnectorHttpMethod {
         /// The connector HTTP method.
         connector_http_method: bool,
@@ -150,6 +157,11 @@ pub(crate) enum ConnectorSelector {
         /// Boolean set to true if the response's `is_successful` condition is false. If this is not
         /// set, returns true when the response contains a non-200 status code
         connector_on_response_error: bool,
+    },
+    /// The context ID of the request (unique per request).
+    ContextId {
+        /// The context ID
+        context_id: bool,
     },
 }
 
@@ -249,6 +261,9 @@ impl Selector for ConnectorSelector {
                 .ok()
                 .flatten()
                 .map(opentelemetry::Value::from),
+            ConnectorSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(request.context.id.clone()))
+            }
             _ => None,
         }
     }
@@ -287,6 +302,19 @@ impl Selector for ConnectorSelector {
                     None
                 }
             }
+            ConnectorSelector::ConnectorResponseBodySize {
+                connector_http_response_body_size,
+            } if *connector_http_response_body_size => {
+                if let Ok(TransportResponse::Http(ref http_response)) = response.transport_result {
+                    http_response
+                        .inner
+                        .extensions
+                        .get::<WireByteCount>()
+                        .map(|c| Value::I64(c.0.load(Ordering::Relaxed) as i64))
+                } else {
+                    None
+                }
+            }
             ConnectorSelector::ResponseMappingProblems {
                 connector_response_mapping_problems: mapping_problems,
             } => {
@@ -314,14 +342,20 @@ impl Selector for ConnectorSelector {
             } if *connector_on_response_error => {
                 Some(matches!(response.mapped_response, MappedResponse::Error { .. }).into())
             }
+            ConnectorSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(response.context.id.clone()))
+            }
             _ => None,
         }
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) -> Option<Value> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<Value> {
         match self {
             ConnectorSelector::Error { .. } => Some(error.to_string().into()),
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            ConnectorSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(ctx.id.clone()))
+            }
             _ => None,
         }
     }
@@ -347,11 +381,13 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::RequestContext { .. }
                     | ConnectorSelector::SupergraphOperationName { .. }
                     | ConnectorSelector::SupergraphOperationKind { .. }
+                    | ConnectorSelector::ContextId { .. }
             ),
             Stage::Response => matches!(
                 self,
                 ConnectorSelector::ConnectorResponseHeader { .. }
                     | ConnectorSelector::ConnectorResponseStatus { .. }
+                    | ConnectorSelector::ConnectorResponseBodySize { .. }
                     | ConnectorSelector::SubgraphName { .. }
                     | ConnectorSelector::ConnectorSource { .. }
                     | ConnectorSelector::ConnectorHttpMethod { .. }
@@ -359,6 +395,7 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::StaticField { .. }
                     | ConnectorSelector::ResponseMappingProblems { .. }
                     | ConnectorSelector::OnResponseError { .. }
+                    | ConnectorSelector::ContextId { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
@@ -370,6 +407,7 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::ConnectorHttpMethod { .. }
                     | ConnectorSelector::ConnectorUrlTemplate { .. }
                     | ConnectorSelector::StaticField { .. }
+                    | ConnectorSelector::ContextId { .. }
             ),
             Stage::Drop => matches!(self, ConnectorSelector::StaticField { .. }),
         }
@@ -403,6 +441,7 @@ mod tests {
     use opentelemetry::Array;
     use opentelemetry::StringValue;
     use opentelemetry::Value;
+    use tower::BoxError;
 
     use super::ConnectorSelector;
     use super::ConnectorSource;
@@ -506,6 +545,7 @@ mod tests {
         mapping_problems: Vec<Problem>,
     ) -> Response {
         Response {
+            context: Context::new(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
@@ -526,6 +566,7 @@ mod tests {
 
     fn connector_response_with_mapped_error(status_code: StatusCode) -> Response {
         Response {
+            context: Context::new(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
@@ -544,6 +585,7 @@ mod tests {
 
     fn connector_response_with_header() -> Response {
         Response {
+            context: Context::new(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(200)
@@ -976,6 +1018,46 @@ mod tests {
         assert_eq!(
             selector.on_error(&err.into(), &Context::new()).unwrap(),
             Value::String("invalid digit found in string".into())
+        );
+    }
+
+    #[test]
+    fn connector_context_id() {
+        let selector = ConnectorSelector::ContextId { context_id: true };
+        let context = Context::new();
+        let expected_id: Value = context.id.clone().into();
+
+        // Test on_request
+        assert_eq!(
+            selector
+                .on_request(&connector_request(
+                    http_request(),
+                    Some(context.clone()),
+                    None
+                ))
+                .unwrap(),
+            expected_id
+        );
+
+        // Test on_response
+        let mut response = connector_response(StatusCode::OK);
+        response.context = context.clone();
+        assert_eq!(selector.on_response(&response).unwrap(), expected_id);
+
+        // Test on_error
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from("test error".to_string()), &context)
+                .unwrap(),
+            expected_id
+        );
+
+        // Test that context_id: false returns None
+        let selector_disabled = ConnectorSelector::ContextId { context_id: false };
+        assert!(
+            selector_disabled
+                .on_request(&connector_request(http_request(), Some(context), None))
+                .is_none()
         );
     }
 }
