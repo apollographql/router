@@ -596,7 +596,8 @@ mod inconsistent_imports {
     // first, the lower-version subgraph's directives failed the `satisfies` version check and the
     // entire spec was marked as wont-merge, silently dropping both directives from the supergraph.
     #[test]
-    fn allows_importing_different_directives_from_the_same_spec_in_different_subgraphs_higher_version_first() {
+    fn allows_importing_different_directives_from_the_same_spec_in_different_subgraphs_higher_version_first(
+    ) {
         let subgraph_a = generate_subgraph(
             "subgraphA",
             r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
@@ -618,7 +619,8 @@ mod inconsistent_imports {
         // subgraph_b (v1.1) is intentionally placed before subgraph_a (v1.0) to reproduce the
         // ordering bug: without the minor-version sort fix this would silently wont-merge the
         // entire spec.
-        let result = compose(vec![subgraph_b, subgraph_a]).expect("Composition should succeed regardless of argument order");
+        let result = compose(vec![subgraph_b, subgraph_a])
+            .expect("Composition should succeed regardless of argument order");
         assert_eq!(result.hints().len(), 0);
 
         assert_has_directive_definition(
@@ -656,8 +658,9 @@ mod inconsistent_imports {
             r#"@bar(name: "b")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b])
-            .expect("Composition should succeed when both directives come from the same spec version");
+        let result = compose(vec![subgraph_a, subgraph_b]).expect(
+            "Composition should succeed when both directives come from the same spec version",
+        );
         assert_eq!(result.hints().len(), 0);
 
         assert_has_directive_definition(
