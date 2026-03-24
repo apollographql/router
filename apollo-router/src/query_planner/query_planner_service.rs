@@ -299,6 +299,7 @@ impl QueryPlannerService {
             defer_stats,
             is_original: true,
             schema_aware_hash,
+            grouped_fields_cache: OnceLock::new(),
         })
     }
 

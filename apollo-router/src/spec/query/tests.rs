@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use apollo_compiler::parser::Parser;
 use insta::assert_json_snapshot;
 use serde_json_bytes::json;
@@ -7036,6 +7038,7 @@ fn filtered_defer_fragment() {
         is_original: true,
         unauthorized: UnauthorizedPaths::default(),
         schema_aware_hash,
+        grouped_fields_cache: OnceLock::new(),
     };
 
     let ast = Parser::new()
@@ -7063,6 +7066,7 @@ fn filtered_defer_fragment() {
         is_original: false,
         unauthorized: UnauthorizedPaths::default(),
         schema_aware_hash,
+        grouped_fields_cache: OnceLock::new(),
     };
 
     query.filtered_query = Some(Arc::new(filtered));

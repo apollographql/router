@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
@@ -40,6 +41,7 @@ use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::layers::query_analysis::get_operation;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
+use crate::spec::IncludeSkip;
 use crate::spec::InvalidValue;
 use crate::spec::Schema;
 use crate::spec::Selection;
@@ -82,6 +84,17 @@ pub(crate) struct Query {
     /// - the schema
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) schema_aware_hash: QueryHash,
+
+    /// Pre-computed grouped fields, keyed by
+    /// `outer: selection_set_ptr → inner: runtime_type_name → field_list`.
+    ///
+    /// Initialized lazily on the first call to `format_response` (which has access to
+    /// the schema).  After initialization the map is read-only, so no synchronisation
+    /// is needed at format time.
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    #[serde(skip)]
+    pub(crate) grouped_fields_cache:
+        OnceLock<HashMap<usize, HashMap<String, Arc<[CachedGroupedField]>>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -118,6 +131,7 @@ impl Query {
             },
             is_original: true,
             schema_aware_hash: QueryHash::default(),
+            grouped_fields_cache: OnceLock::new(),
         }
     }
 
@@ -135,6 +149,9 @@ impl Query {
         include_coercion_errors: bool,
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
+
+        // Initialize the grouped-fields cache on first use.
+        self.init_grouped_fields_cache(schema);
 
         match data {
             Some(Value::Object(mut input)) => {
@@ -321,6 +338,7 @@ impl Query {
             defer_stats,
             is_original: true,
             schema_aware_hash,
+            grouped_fields_cache: OnceLock::new(),
         })
     }
 
@@ -706,6 +724,24 @@ impl Query {
         }
     }
 
+    /// Initialise the grouped-fields cache on first use.
+    ///
+    /// Called at the start of every `format_response` invocation.  After the first
+    /// call the `OnceLock` is populated and subsequent calls are a no-op (a single
+    /// atomic load).
+    fn init_grouped_fields_cache(&self, schema: &ApiSchema) {
+        // Capture borrows of the individual fields we need so the closure does not
+        // capture `self` as a whole (which would conflict with the `&self.grouped_fields_cache`
+        // borrow that `OnceLock::get_or_init` holds).
+        let operation = &self.operation;
+        let fragments = &self.fragments;
+        let subselections = &self.subselections;
+
+        self.grouped_fields_cache.get_or_init(|| {
+            build_grouped_fields_cache(operation, fragments, subselections, schema)
+        });
+    }
+
     fn apply_selection_set<'a: 'b, 'b>(
         &'a self,
         selection_set: &'a [Selection],
@@ -716,182 +752,96 @@ impl Query {
         // the type under which we apply selections
         current_type: &executable::Type,
     ) -> Result<(), InvalidValue> {
-        // For skip and include, using .unwrap_or is legit here because
-        // validate_variables should have already checked that
-        // the variable is present and it is of the correct type
-        for selection in selection_set {
-            match selection {
-                Selection::Field {
-                    name,
-                    alias,
-                    selection_set,
-                    field_type,
-                    include_skip,
-                } => {
-                    let field_name = alias.as_ref().unwrap_or(name);
-                    if include_skip.should_skip(parameters.variables) {
-                        continue;
-                    }
+        // Determine the runtime type from __typename, falling back to the declared type
+        // when __typename is absent (e.g. for concrete object types).
+        let runtime_type = input
+            .get(TYPENAME)
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| current_type.inner_named_type().as_str());
 
-                    if name.as_str() == TYPENAME {
-                        let object_type = parameters
-                            .schema
-                            .get_object(current_type.inner_named_type())
-                            .or_else(|| {
-                                let input_value = input.get(field_name.as_str())?.as_str()?;
-                                parameters.schema.get_object(input_value)
-                            });
+        // For filtered (non-original) queries, propagate __typename into the output so
+        // downstream processing retains type information.
+        if !self.is_original {
+            if let Some(input_type) = input.get(TYPENAME) {
+                output.insert(TYPENAME, input_type.clone());
+            }
+        }
 
-                        if let Some(object_type) = object_type {
-                            output.insert((*field_name).clone(), object_type.name.as_str().into());
-                        } else {
-                            return Err(InvalidValue);
-                        }
-                        continue;
-                    }
+        // Look up the pre-computed field list for (selection_set_ptr, runtime_type).
+        // The `'a` lifetime flows: &'a self → &'a OnceLock → &'a HashMap → &'a Arc →
+        // &'a [CachedGroupedField], so all borrows below are valid for 'a ≥ 'b.
+        let ptr = selection_set.as_ptr() as usize;
+        let fields: &'a [CachedGroupedField] = self
+            .grouped_fields_cache
+            .get()
+            .and_then(|cache| cache.get(&ptr))
+            .and_then(|inner| inner.get(runtime_type))
+            .map(|arc| arc.as_ref())
+            .unwrap_or(&[]);
 
-                    if let Some(input_value) = input.get_mut(field_name.as_str()) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name.as_str()) {
-                            continue;
-                        }
+        for field in fields {
+            if field.should_skip(parameters.variables) {
+                continue;
+            }
 
-                        let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
+            let response_key = &field.response_key;
+            let response_key_str = response_key.as_str();
 
-                        path.push(ResponsePathElement::Key(field_name.as_str()));
-                        let res = self.format_value(
-                            parameters,
-                            &field_type.0,
-                            input_value,
-                            output_value,
-                            path,
-                            selection_set,
-                        );
-                        path.pop();
-                        res?
-                    } else {
-                        if !output.contains_key(field_name.as_str()) {
-                            output.insert((*field_name).clone(), Value::Null);
-                        }
-                        if field_type.is_non_null() {
-                            parameters.errors.push(
-                                Error::builder()
-                                    .message(format!(
-                                        "Null value found for non-nullable type {}",
-                                        field_type.0.inner_named_type()
-                                    ))
-                                    .path(Path::from_response_slice(path))
-                                    .build(),
-                            );
+            if field.name.as_str() == TYPENAME {
+                let object_type = parameters
+                    .schema
+                    .get_object(current_type.inner_named_type())
+                    .or_else(|| {
+                        let input_value = input.get(response_key_str)?.as_str()?;
+                        parameters.schema.get_object(input_value)
+                    });
 
-                            return Err(InvalidValue);
-                        }
-                    }
+                if let Some(object_type) = object_type {
+                    output.insert(response_key.clone(), object_type.name.as_str().into());
+                } else {
+                    return Err(InvalidValue);
                 }
-                Selection::InlineFragment {
-                    type_condition,
-                    selection_set,
-                    include_skip,
-                    defer: _,
-                    defer_label: _,
-                    known_type: _,
-                } => {
-                    if include_skip.should_skip(parameters.variables) {
-                        continue;
-                    }
+                continue;
+            }
 
-                    // NOTE: The subtype logic is strange. We are trying to determine if a fragment
-                    // should be applied, but we don't have the __typename of the selection set
-                    // (otherwise, we would be on a different branch). Consider the following query
-                    // for a union Thing = Foo | Bar:
-                    // { thing { ... on Foo { foo }, ... on Bar { bar } } }
-                    //
-                    // As we process the `... on Foo` fragment, `Foo` is `type_condition` and
-                    // `Thing` is `current_type`, we *could* reverse the order in calling
-                    // `is_subtype` and apply the fragment; however, the same is true for the `Bar`
-                    // fragment. Without the type info of the data we have in our response, we
-                    // can't know which to apply (or if both should apply in the case of
-                    // interfaces).
-                    //
-                    // Without that information, this is the best we can do without construction a
-                    // much more complicated reformatting heuristic.
-                    let is_apply = current_type.inner_named_type().as_str()
-                        == type_condition.as_str()
-                        || parameters
-                            .schema
-                            .is_subtype(type_condition, current_type.inner_named_type().as_str());
-
-                    if is_apply {
-                        // if this is the filtered query, we must keep the __typename field because the original query must know the type
-                        if !self.is_original
-                            && let Some(input_type) = input.get(TYPENAME)
-                        {
-                            output.insert(TYPENAME, input_type.clone());
-                        }
-
-                        self.apply_selection_set(
-                            selection_set,
-                            parameters,
-                            input,
-                            output,
-                            path,
-                            current_type,
-                        )?;
-                    }
+            if let Some(input_value) = input.get_mut(response_key_str) {
+                // ROUTER-1598 guard: a later fragment spread must not overwrite a null
+                // that was correctly propagated by an earlier fragment's non-null
+                // violation.  If the input is already null and the output already has
+                // a value for this key, skip.
+                if input_value.is_null() && output.contains_key(response_key_str) {
+                    continue;
                 }
-                Selection::FragmentSpread {
-                    name,
-                    known_type: _,
-                    include_skip,
-                    defer: _,
-                    defer_label: _,
-                } => {
-                    if include_skip.should_skip(parameters.variables) {
-                        continue;
-                    }
 
-                    if let Some(Fragment {
-                        type_condition,
-                        selection_set,
-                    }) = self.fragments.get(name)
-                    {
-                        // NOTE: This subtype logic is a bit strange. See the InlineFragment
-                        // branch for why its done this way.
-                        let is_apply = current_type.inner_named_type().as_str()
-                            == type_condition.as_str()
-                            || parameters.schema.is_subtype(
-                                type_condition,
-                                current_type.inner_named_type().as_str(),
-                            );
+                let output_value = output.entry(response_key.clone()).or_insert(Value::Null);
 
-                        if is_apply {
-                            // if this is the filtered query, we must keep the __typename field because the original query must know the type
-                            if !self.is_original
-                                && let Some(input_type) = input.get(TYPENAME)
-                            {
-                                output.insert(TYPENAME, input_type.clone());
-                            }
+                path.push(ResponsePathElement::Key(response_key_str));
+                let res = self.format_value(
+                    parameters,
+                    &field.field_type.0,
+                    input_value,
+                    output_value,
+                    path,
+                    &field.sub_selections,
+                );
+                path.pop();
+                res?
+            } else {
+                if !output.contains_key(response_key_str) {
+                    output.insert(response_key.clone(), Value::Null);
+                }
+                if field.field_type.is_non_null() {
+                    parameters.errors.push(
+                        Error::builder()
+                            .message(format!(
+                                "Null value found for non-nullable type {}",
+                                field.field_type.0.inner_named_type()
+                            ))
+                            .path(Path::from_response_slice(path))
+                            .build(),
+                    );
 
-                            self.apply_selection_set(
-                                selection_set,
-                                parameters,
-                                input,
-                                output,
-                                path,
-                                current_type,
-                            )?;
-                        }
-                    } else {
-                        // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
-                    }
+                    return Err(InvalidValue);
                 }
             }
         }
@@ -908,127 +858,64 @@ impl Query {
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
-        for selection in selection_set {
-            match selection {
-                Selection::Field {
-                    name,
-                    alias,
-                    selection_set,
-                    field_type,
-                    include_skip,
-                } => {
-                    if include_skip.should_skip(parameters.variables) {
-                        continue;
-                    }
+        let ptr = selection_set.as_ptr() as usize;
+        let fields: &'a [CachedGroupedField] = self
+            .grouped_fields_cache
+            .get()
+            .and_then(|cache| cache.get(&ptr))
+            .and_then(|inner| inner.get(root_type_name))
+            .map(|arc| arc.as_ref())
+            .unwrap_or(&[]);
 
-                    let field_name = alias.as_ref().unwrap_or(name);
-                    let field_name_str = field_name.as_str();
+        for field in fields {
+            if field.should_skip(parameters.variables) {
+                continue;
+            }
 
-                    if name.as_str() == TYPENAME {
-                        if !output.contains_key(field_name_str) {
-                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
-                        }
-                    } else if let Some(input_value) = input.get_mut(field_name_str) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name_str) {
-                            continue;
-                        }
+            let field_name_str = field.response_key.as_str();
 
-                        let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
-                        path.push(ResponsePathElement::Key(field_name_str));
-                        let res = self.format_value(
-                            parameters,
-                            &field_type.0,
-                            input_value,
-                            output_value,
-                            path,
-                            selection_set,
-                        );
-                        path.pop();
-                        res?
-                    } else if field_type.is_non_null() {
-                        parameters.errors.push(
-                            Error::builder()
-                                .message(format!(
-                                    "Cannot return null for non-nullable field {root_type_name}.{field_name_str}"
-                                ))
-                                .path(Path::from_response_slice(path))
-                                .build(),
-                        );
-                        return Err(InvalidValue);
-                    } else {
-                        output.insert(field_name.clone(), Value::Null);
-                    }
+            if field.name.as_str() == TYPENAME {
+                if !output.contains_key(field_name_str) {
+                    output.insert(
+                        field.response_key.clone(),
+                        Value::String(root_type_name.into()),
+                    );
                 }
-                Selection::InlineFragment {
-                    type_condition,
-                    selection_set,
-                    include_skip,
-                    ..
-                } => {
-                    if include_skip.should_skip(parameters.variables) {
-                        continue;
-                    }
+                continue;
+            }
 
-                    // check if the fragment matches the input type directly, and if not, check if the
-                    // input type is a subtype of the fragment's type condition (interface, union)
-                    let is_apply = (root_type_name == type_condition.as_str())
-                        || parameters.schema.is_subtype(type_condition, root_type_name);
-
-                    if is_apply {
-                        self.apply_root_selection_set(
-                            root_type_name,
-                            selection_set,
-                            parameters,
-                            input,
-                            output,
-                            path,
-                        )?;
-                    }
+            if let Some(input_value) = input.get_mut(field_name_str) {
+                // Same ROUTER-1598 guard as apply_selection_set.
+                if input_value.is_null() && output.contains_key(field_name_str) {
+                    continue;
                 }
-                Selection::FragmentSpread {
-                    name,
-                    known_type: _,
-                    include_skip,
-                    defer: _,
-                    defer_label: _,
-                } => {
-                    if include_skip.should_skip(parameters.variables) {
-                        continue;
-                    }
 
-                    if let Some(Fragment {
-                        type_condition,
-                        selection_set,
-                    }) = self.fragments.get(name)
-                    {
-                        // check if the fragment matches the input type directly, and if not, check if the
-                        // input type is a subtype of the fragment's type condition (interface, union)
-                        let is_apply = (root_type_name == type_condition.as_str())
-                            || parameters.schema.is_subtype(type_condition, root_type_name);
-
-                        if is_apply {
-                            self.apply_root_selection_set(
-                                root_type_name,
-                                selection_set,
-                                parameters,
-                                input,
-                                output,
-                                path,
-                            )?;
-                        }
-                    } else {
-                        // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
-                    }
-                }
+                let output_value = output
+                    .entry(field.response_key.clone())
+                    .or_insert(Value::Null);
+                path.push(ResponsePathElement::Key(field_name_str));
+                let res = self.format_value(
+                    parameters,
+                    &field.field_type.0,
+                    input_value,
+                    output_value,
+                    path,
+                    &field.sub_selections,
+                );
+                path.pop();
+                res?
+            } else if field.field_type.is_non_null() {
+                parameters.errors.push(
+                    Error::builder()
+                        .message(format!(
+                            "Cannot return null for non-nullable field {root_type_name}.{field_name_str}"
+                        ))
+                        .path(Path::from_response_slice(path))
+                        .build(),
+                );
+                return Err(InvalidValue);
+            } else {
+                output.insert(field.response_key.clone(), Value::Null);
             }
         }
 
@@ -1177,6 +1064,325 @@ impl Query {
     pub(crate) fn is_deferred(&self, defer_conditions: BooleanValues) -> bool {
         self.defer_stats.has_unconditional_defer || defer_conditions.bits != 0
     }
+}
+
+// ---------------------------------------------------------------------------
+// Pre-computed grouped fields cache
+// ---------------------------------------------------------------------------
+
+/// A pre-resolved field entry for a specific (selection_set_ptr, runtime_type) pair.
+///
+/// Produced by `build_grouped_fields_cache` at query-initialization time.  At
+/// response-format time, iterating cached entries replaces the per-object fragment
+/// traversal and type-condition evaluation that were the performance bottleneck in
+/// the spec-correct spike (`worktree-proper-refactor`).
+#[derive(Debug)]
+pub(crate) struct CachedGroupedField {
+    /// Response key — the alias if present, otherwise the field name.
+    response_key: ByteString,
+    /// Field name (used for `__typename` detection at format time).
+    name: ByteString,
+    /// GraphQL type of this field.
+    field_type: FieldType,
+    /// All skip conditions for this field occurrence.
+    ///
+    /// Index 0 (if present) is the field's own `@skip`/`@include`; subsequent entries
+    /// come from enclosing conditional fragment spreads.  An empty `Vec` means "always
+    /// include" (the common fast-path — avoids any allocation or iteration).
+    /// The field is skipped when *any* condition says skip.
+    skip_conditions: Vec<IncludeSkip>,
+    /// Sub-selections for this field occurrence.  Empty for scalar/enum fields.
+    ///
+    /// Cloned from the query document once during cache construction — no further
+    /// clones are needed at response-format time.
+    sub_selections: Arc<[Selection]>,
+}
+
+impl CachedGroupedField {
+    /// Returns `true` when this field should be skipped given the current variables.
+    #[inline]
+    fn should_skip(&self, variables: &Object) -> bool {
+        self.skip_conditions.iter().any(|c| c.should_skip(variables))
+    }
+}
+
+/// Build the grouped-fields cache for a complete query document.
+///
+/// Returns a two-level map: outer key = selection-set identity (pointer to first
+/// `Selection` as `usize`), inner key = concrete runtime type name, value = flat
+/// list of `CachedGroupedField` in DFS order (fragments resolved, type conditions
+/// evaluated).
+fn build_grouped_fields_cache(
+    operation: &Operation,
+    fragments: &Fragments,
+    subselections: &HashMap<SubSelectionKey, SubSelectionValue>,
+    schema: &ApiSchema,
+) -> HashMap<usize, HashMap<String, Arc<[CachedGroupedField]>>> {
+    let mut cache: HashMap<usize, HashMap<String, Arc<[CachedGroupedField]>>> = HashMap::new();
+
+    // Work queue: each entry is (ptr, len, declared_type_name) — the pointer and length
+    // together identify the selection-set slice; the type name is used to enumerate
+    // concrete runtime types.
+    let mut pending: std::collections::VecDeque<(usize, usize, String)> =
+        std::collections::VecDeque::new();
+
+    // Seed with the root operation selection set.
+    pending.push_back((
+        operation.selection_set.as_ptr() as usize,
+        operation.selection_set.len(),
+        operation.type_name.clone(),
+    ));
+
+    // Seed with all defer subselections.
+    for subsel in subselections.values() {
+        if !subsel.selection_set.is_empty() {
+            pending.push_back((
+                subsel.selection_set.as_ptr() as usize,
+                subsel.selection_set.len(),
+                subsel.type_name.clone(),
+            ));
+        }
+    }
+
+    while let Some((ptr, len, type_name)) = pending.pop_front() {
+        // Enumerate all concrete runtime types for this declared type.
+        let runtime_types = get_concrete_runtime_types(&type_name, schema);
+
+        for runtime_type in runtime_types {
+            // Check / insert into the inner map — skip if already computed.
+            let inner = cache.entry(ptr).or_default();
+            if inner.contains_key(&runtime_type) {
+                continue;
+            }
+            // Insert a placeholder to prevent cycles (a type referencing itself).
+            inner.insert(runtime_type.clone(), Arc::from([]));
+
+            // SAFETY: `ptr` and `len` were captured from a `Vec<Selection>` that
+            // lives either in `operation.selection_set`, in a subselection, or in a
+            // previously-built `Arc<[Selection]>` that is already stored in `cache`.
+            // All of these allocations remain valid for the lifetime of the `Query`.
+            let selection_set: &[Selection] =
+                unsafe { std::slice::from_raw_parts(ptr as *const Selection, len) };
+
+            // Build the flat field list for this (selection_set, runtime_type) pair.
+            let fields =
+                collect_fields_for_cache(selection_set, &runtime_type, fragments, schema, &[]);
+
+            // Enqueue sub-selections for processing.
+            for field in &fields {
+                let sub_ptr = field.sub_selections.as_ptr() as usize;
+                let sub_len = field.sub_selections.len();
+                if sub_len > 0 {
+                    let sub_type = field.field_type.0.inner_named_type().as_str().to_owned();
+                    pending.push_back((sub_ptr, sub_len, sub_type));
+                }
+            }
+
+            // Store the actual (non-placeholder) entry.
+            cache
+                .entry(ptr)
+                .or_default()
+                .insert(runtime_type, Arc::from(fields.into_boxed_slice()));
+        }
+    }
+
+    cache
+}
+
+/// Enumerate all concrete runtime type names that could appear for `type_name`.
+///
+/// For concrete object types, returns just the type itself.  For abstract types
+/// (interface / union), returns the type itself (as a fallback when `__typename` is
+/// absent) plus all concrete object types that implement or are members of the
+/// abstract type.
+fn get_concrete_runtime_types(type_name: &str, schema: &ApiSchema) -> Vec<String> {
+    match schema.types.get(type_name) {
+        Some(ExtendedType::Object(_)) => vec![type_name.to_owned()],
+        Some(ExtendedType::Interface(_) | ExtendedType::Union(_)) => {
+            // Include the abstract type itself as a fallback key for when `__typename`
+            // is absent, plus all concrete implementors / union members.
+            let mut types = vec![type_name.to_owned()];
+            types.extend(
+                schema
+                    .types
+                    .iter()
+                    .filter(|(_, ty)| matches!(ty, ExtendedType::Object(_)))
+                    .filter(|(name, _)| schema.is_subtype(type_name, name.as_str()))
+                    .map(|(name, _)| name.as_str().to_owned()),
+            );
+            types
+        }
+        _ => vec![type_name.to_owned()],
+    }
+}
+
+/// Build the flat `CachedGroupedField` list for a single (selection_set, runtime_type) pair.
+///
+/// This runs a depth-first traversal of `selection_set`, resolving all inline
+/// fragments and named fragment spreads using type-condition filtering against
+/// `runtime_type`.  The result is the same sequence of fields that the current
+/// `apply_selection_set` would visit, but computed once at query-initialisation
+/// time rather than on every response object.
+fn collect_fields_for_cache(
+    selection_set: &[Selection],
+    runtime_type: &str,
+    fragments: &Fragments,
+    schema: &ApiSchema,
+    parent_conditions: &[IncludeSkip],
+) -> Vec<CachedGroupedField> {
+    let mut result = Vec::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    collect_fields_for_cache_inner(
+        selection_set,
+        runtime_type,
+        fragments,
+        schema,
+        parent_conditions,
+        &mut visited,
+        &mut result,
+    );
+    result
+}
+
+fn collect_fields_for_cache_inner(
+    selection_set: &[Selection],
+    runtime_type: &str,
+    fragments: &Fragments,
+    schema: &ApiSchema,
+    parent_conditions: &[IncludeSkip],
+    visited: &mut HashSet<String>,
+    result: &mut Vec<CachedGroupedField>,
+) {
+    for selection in selection_set {
+        match selection {
+            Selection::Field {
+                name,
+                alias,
+                selection_set,
+                field_type,
+                include_skip,
+            } => {
+                // Build the effective skip conditions for this field occurrence.
+                // Start with the field's own condition (if it is not the trivial
+                // "always include" default), then append any inherited parent conditions.
+                let default_is = IncludeSkip::default();
+                let mut skip_conditions: Vec<IncludeSkip> = Vec::new();
+                if include_skip != &default_is {
+                    skip_conditions.push(include_skip.clone());
+                }
+                for parent in parent_conditions {
+                    if parent != &default_is {
+                        skip_conditions.push(parent.clone());
+                    }
+                }
+
+                // Clone sub-selections once.  An empty Arc is used for scalar fields.
+                let sub_sel: Arc<[Selection]> = match selection_set.as_deref() {
+                    Some(ss) if !ss.is_empty() => Arc::from(ss.to_vec().into_boxed_slice()),
+                    _ => Arc::from([]),
+                };
+
+                result.push(CachedGroupedField {
+                    response_key: alias.as_ref().unwrap_or(name).clone(),
+                    name: name.clone(),
+                    field_type: field_type.clone(),
+                    skip_conditions,
+                    sub_selections: sub_sel,
+                });
+            }
+
+            Selection::InlineFragment {
+                type_condition,
+                selection_set,
+                include_skip,
+                ..
+            } => {
+                // Apply type condition — only descend if the runtime type matches.
+                if !does_fragment_type_apply(runtime_type, type_condition, schema) {
+                    continue;
+                }
+
+                // Accumulate the spread's own condition into the parent conditions.
+                let default_is = IncludeSkip::default();
+                let new_parent: Vec<IncludeSkip> = if include_skip != &default_is {
+                    let mut v = parent_conditions.to_vec();
+                    v.push(include_skip.clone());
+                    v
+                } else {
+                    parent_conditions.to_vec()
+                };
+
+                collect_fields_for_cache_inner(
+                    selection_set,
+                    runtime_type,
+                    fragments,
+                    schema,
+                    &new_parent,
+                    visited,
+                    result,
+                );
+            }
+
+            Selection::FragmentSpread {
+                name,
+                include_skip,
+                ..
+            } => {
+                // Cycle guard: named fragments may reference each other.
+                if !visited.insert(name.clone()) {
+                    continue;
+                }
+
+                let Some(Fragment {
+                    type_condition,
+                    selection_set,
+                }) = fragments.get(name)
+                else {
+                    continue;
+                };
+
+                if !does_fragment_type_apply(runtime_type, type_condition, schema) {
+                    continue;
+                }
+
+                let default_is = IncludeSkip::default();
+                let new_parent: Vec<IncludeSkip> = if include_skip != &default_is {
+                    let mut v = parent_conditions.to_vec();
+                    v.push(include_skip.clone());
+                    v
+                } else {
+                    parent_conditions.to_vec()
+                };
+
+                collect_fields_for_cache_inner(
+                    selection_set,
+                    runtime_type,
+                    fragments,
+                    schema,
+                    &new_parent,
+                    visited,
+                    result,
+                );
+            }
+        }
+    }
+}
+
+/// Spec §6.3.2 DoesFragmentTypeApply.
+///
+/// Returns `true` when the runtime concrete type satisfies the fragment's type
+/// condition.  Used both during cache construction (to decide which fragments apply)
+/// and during `apply_selection_set` formatting (for the `is_original = false` guard).
+fn does_fragment_type_apply(
+    runtime_type: &str,
+    fragment_type: &str,
+    schema: &ApiSchema,
+) -> bool {
+    if runtime_type == fragment_type {
+        return true;
+    }
+    // is_subtype(abstract, candidate) → "does candidate belong to abstract?"
+    schema.is_subtype(fragment_type, runtime_type)
 }
 
 /// Intermediate structure for arguments passed through the entire formatting
