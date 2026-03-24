@@ -12,8 +12,9 @@ use crate::plugins::traffic_shaping::Http2Config;
 /// taste/adjust, but leave a comment giving justification for any new threshold
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// TODO: docs
-/// Default of 20s matches hyper_util's default keep-alive timeout
+/// Default timeout for HTTP/2 keep-alive pings in HttpClientService
+///
+/// NOTE: hyper_util's default keep-alive timeout is 20s, so we use the same value here
 pub(crate) const DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// HTTP client configuration
