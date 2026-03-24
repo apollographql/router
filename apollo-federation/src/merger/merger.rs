@@ -91,7 +91,6 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::FallibleOnceCell;
 use crate::utils::MultiIndexMap;
-use crate::utils::first_max_by_key;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
 use crate::utils::iter_into_single_item;
@@ -2205,83 +2204,95 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     where
         T: HasDescription + Display,
     {
-        let mut descriptions: IndexMap<String, usize> = sources
-            .iter()
-            .map(|(idx, source)| {
-                source
-                    .as_ref()
-                    .and_then(|s| s.description(self.subgraphs[*idx].schema()))
-                    .map(|d| d.trim().to_string())
-                    .unwrap_or_default()
-            })
-            .fold(Default::default(), |mut acc, desc| {
-                if !desc.is_empty() {
-                    *acc.entry(desc).or_insert(0) += 1;
-                }
-                acc
-            });
+        let mut descriptions: IndexMap<&str, (usize, &str)> = Default::default();
+        for (idx, source) in sources.iter() {
+            let desc = source
+                .as_ref()
+                .and_then(|s| s.description(self.subgraphs[*idx].schema()))
+                .map(|d| d.trim())
+                .unwrap_or("");
+            if desc.is_empty() {
+                continue;
+            }
+            descriptions
+                .entry(desc)
+                .and_modify(|(count, _)| *count += 1)
+                .or_insert_with(|| (1, self.names[*idx].as_str()));
+        }
         // we don't want to raise a hint if a description is ""
         descriptions.shift_remove("");
 
         if !descriptions.is_empty() {
-            if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
-                dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
-            } else {
-                // Find the description with the highest count
-                if let Some((idx, _)) =
-                    first_max_by_key(descriptions.iter().enumerate(), |(_, (_, counts))| *counts)
-                {
-                    // Get the description at the found index
-                    if let Some((description, _)) = descriptions.iter().nth(idx) {
-                        dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
-                    }
-                }
-                // TODO: Currently showing full descriptions in the hint
-                // messages, which is probably fine in some cases. However this
-                // might get less helpful if the description appears to differ
-                // by a very small amount (a space, a single character typo) and
-                // even more so the bigger the description is, and we could
-                // improve the experience here. For instance, we could print the
-                // supergraph description but then show other descriptions as
-                // diffs from that (using, say,
-                // https://www.npmjs.com/package/diff). And we could even switch
-                // between diff/non-diff modes based on the levenshtein
-                // distances between the description we found. That said, we
-                // should decide if we want to bother here: maybe we can leave
-                // it to studio so handle a better experience (as it can more UX
-                // wise).
-                let name = if T::is_schema_definition() {
-                    "The schema definition".to_string()
+            let (chosen_description, single) =
+                if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
+                    (Some((*description).to_string()), true)
                 } else {
-                    format!("Element \"{dest}\"")
+                    // Sort deterministically: by count (desc), then description lex (asc = pick first),
+                    // then subgraph name (asc). First element is the chosen one.
+                    let chosen =
+                        descriptions
+                            .iter()
+                            .max_by(|(description_a, a), (description_b, b)| {
+                                b.0.cmp(&a.0)
+                                    .then_with(|| description_a.cmp(description_b))
+                                    .then_with(|| a.1.cmp(b.1))
+                            });
+                    (
+                        chosen.map(|(description, _)| (*description).to_string()),
+                        false,
+                    )
                 };
-                self.error_reporter.report_mismatch_hint::<T, T>(
-                    HintCode::InconsistentDescription,
-                    format!("{name} has inconsistent descriptions across subgraphs. "),
-                    dest,
-                    sources,
-                    |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
-                    |elem, idx| {
-                        elem.description(self.subgraphs[idx].schema())
-                            .map(|desc| desc.to_string())
-                    },
-                    |desc, subgraphs| {
-                        format!(
-                            "The supergraph will use description (from {}):\n{}",
-                            subgraphs.unwrap_or_else(|| "undefined".to_string()),
-                            Self::description_string(desc, "  ")
-                        )
-                    },
-                    |desc, subgraphs| {
-                        format!(
-                            "\nIn {}, the description is:\n{}",
-                            subgraphs,
-                            Self::description_string(desc, "  ")
-                        )
-                    },
-                    false,
-                    true,
-                );
+            drop(descriptions);
+            if let Some(chosen_description) = chosen_description {
+                dest.set_description(&mut self.merged, Some(Node::new_str(&chosen_description)))?;
+                if !single {
+                    // TODO: Currently showing full descriptions in the hint
+                    // messages, which is probably fine in some cases. However this
+                    // might get less helpful if the description appears to differ
+                    // by a very small amount (a space, a single character typo) and
+                    // even more so the bigger the description is, and we could
+                    // improve the experience here. For instance, we could print the
+                    // supergraph description but then show other descriptions as
+                    // diffs from that (using, say,
+                    // https://www.npmjs.com/package/diff). And we could even switch
+                    // between diff/non-diff modes based on the levenshtein
+                    // distances between the description we found. That said, we
+                    // should decide if we want to bother here: maybe we can leave
+                    // it to studio so handle a better experience (as it can more UX
+                    // wise).
+                    let name = if T::is_schema_definition() {
+                        "The schema definition".to_string()
+                    } else {
+                        format!("Element \"{dest}\"")
+                    };
+                    self.error_reporter.report_mismatch_hint::<T, T>(
+                        HintCode::InconsistentDescription,
+                        format!("{name} has inconsistent descriptions across subgraphs. "),
+                        dest,
+                        sources,
+                        |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
+                        |elem, idx| {
+                            elem.description(self.subgraphs[idx].schema())
+                                .map(|desc| desc.to_string())
+                        },
+                        |desc, subgraphs| {
+                            format!(
+                                "The supergraph will use description (from {}):\n{}",
+                                subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                                Self::description_string(desc, "  ")
+                            )
+                        },
+                        |desc, subgraphs| {
+                            format!(
+                                "\nIn {}, the description is:\n{}",
+                                subgraphs,
+                                Self::description_string(desc, "  ")
+                            )
+                        },
+                        false,
+                        true,
+                    );
+                }
             }
         }
         Ok(())
