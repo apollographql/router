@@ -621,7 +621,7 @@ impl ErrorReporter {
                 (idx, item_in_this_subgraph.cloned())
             })
             .collect();
-        self.report_mismatch_error_without_supergraph::<MergeDirectiveItem, _>(
+        self.report_mismatch_error_without_supergraph(
             CompositionError::DirectiveCompositionError {
                 message: "Composed directive is not named consistently in all subgraphs"
                     .to_string(),

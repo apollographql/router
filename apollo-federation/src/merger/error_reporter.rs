@@ -82,7 +82,7 @@ impl ErrorReporter {
         supergraph_mismatch_accessor: impl Fn(&D) -> Option<String>,
         subgraph_mismatch_accessor: impl Fn(&S, usize) -> Option<String>,
     ) {
-        self.report_mismatch::<D, S, _>(
+        self.report_mismatch(
             Some(mismatched_element),
             subgraph_elements,
             subgraphs,
@@ -90,7 +90,7 @@ impl ErrorReporter {
             subgraph_mismatch_accessor,
             |elt, names| format!("{} in {}", elt, names.unwrap_or("undefined".to_string())),
             |elt, names| format!("{elt} in {names}"),
-            |myself, distribution, _| {
+            |myself, distribution, locations| {
                 let distribution_str = join_strings(
                     distribution.iter(),
                     JoinStringsOptions {
@@ -100,7 +100,11 @@ impl ErrorReporter {
                         output_length_limit: None,
                     },
                 );
-                myself.add_error(error.append_message(distribution_str));
+                myself.add_error(
+                    error
+                        .append_message(distribution_str)
+                        .append_locations(locations),
+                );
             },
             false,
         );
@@ -121,7 +125,7 @@ impl ErrorReporter {
             mismatch_accessor,
             |_, _| String::new(),
             |elt, names| format!("{elt} in {names}"),
-            |myself, distribution, _| {
+            |myself, distribution, locations| {
                 let distribution_str = join_strings(
                     distribution.iter(),
                     JoinStringsOptions {
@@ -131,7 +135,11 @@ impl ErrorReporter {
                         output_length_limit: None,
                     },
                 );
-                myself.add_error(error.append_message(distribution_str));
+                myself.add_error(
+                    error
+                        .append_message(distribution_str)
+                        .append_locations(locations),
+                );
             },
             false,
         );
@@ -150,7 +158,7 @@ impl ErrorReporter {
         other_elements_printer: impl Fn(&str, &str) -> String,
         include_missing_sources: bool,
     ) {
-        self.report_mismatch::<D, S, _>(
+        self.report_mismatch(
             Some(mismatched_element),
             subgraph_elements,
             subgraphs,
@@ -158,7 +166,7 @@ impl ErrorReporter {
             subgraph_mismatch_accessor,
             supergraph_element_printer,
             other_elements_printer,
-            |myself, mut distribution, _| {
+            |myself, mut distribution, locations| {
                 let mut distribution_str = distribution.remove(0);
                 distribution_str.push_str(&join_strings(
                     distribution.iter(),
@@ -169,7 +177,11 @@ impl ErrorReporter {
                         output_length_limit: None,
                     },
                 ));
-                myself.add_error(error.append_message(distribution_str));
+                myself.add_error(
+                    error
+                        .append_message(distribution_str)
+                        .append_locations(locations),
+                );
             },
             include_missing_sources,
         );
@@ -190,7 +202,7 @@ impl ErrorReporter {
         include_missing_sources: bool,
         no_end_of_message_dot: bool,
     ) {
-        self.report_mismatch::<D, S, _>(
+        self.report_mismatch(
             Some(supergraph_element),
             subgraph_elements,
             subgraphs,
