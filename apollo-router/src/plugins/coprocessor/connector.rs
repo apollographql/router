@@ -326,6 +326,7 @@ where
         }
 
         let res = request_service::Response {
+            context: request.context.clone(),
             transport_result: Err(ConnectorError::TransportFailure(message)),
             mapped_response: MappedResponse::Error {
                 error: runtime_error,

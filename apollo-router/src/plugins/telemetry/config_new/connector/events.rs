@@ -215,6 +215,7 @@ mod tests {
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
+                    context: request.context.clone(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
@@ -301,6 +302,7 @@ mod tests {
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
+                    context: request.context.clone(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
