@@ -169,7 +169,7 @@ impl Merger {
                 input_example,
                 output_example,
             } if violates_intersection_requirement => {
-                self.error_reporter.report_mismatch_error_with_specifics::<_, _, _>(
+                self.error_reporter.report_mismatch_error_with_specifics(
                     CompositionError::EnumValueMismatch {
                         message: format!(
                             "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
@@ -194,7 +194,7 @@ impl Merger {
                 );
             }
             EnumTypeUsage::Input { .. } if violates_intersection_requirement => {
-                self.error_reporter.report_mismatch_hint::<_, _, _>(
+                self.error_reporter.report_mismatch_hint(
                     HintCode::InconsistentEnumValueForInputEnum,
                     format!(
                         "Value \"{}\" of enum type \"{}\" will not be part of the supergraph as it is not defined in all the subgraphs defining \"{}\": ", value_pos.value_name, value_pos.type_name, value_pos.type_name
@@ -266,7 +266,7 @@ impl Merger {
         // As soon as we find a subgraph that has the type but not the member, we hint.
         for enum_type in sources.values().flatten() {
             if !enum_type.values.contains_key(value_name) {
-                self.error_reporter.report_mismatch_hint::<_, _, _>(
+                self.error_reporter.report_mismatch_hint(
                     HintCode::InconsistentEnumValueForOutputEnum,
                     format!(
                         "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": ",

@@ -803,20 +803,19 @@ impl Merger {
                 };
             Some(type_kind_description)
         };
-        self.error_reporter
-            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition, _>(
-                CompositionError::TypeKindMismatch {
-                    message: format!(
-                        "Type \"{}\" has mismatched kind: it is defined as ",
-                        mismatched_type.type_name()
-                    ),
-                },
-                mismatched_type,
-                &sources,
-                &self.subgraphs,
-                |ty| Some(ty.kind().replace("Type", " Type")),
-                |ty, idx| type_kind_to_string(idx, ty),
-            );
+        self.error_reporter.report_mismatch_error(
+            CompositionError::TypeKindMismatch {
+                message: format!(
+                    "Type \"{}\" has mismatched kind: it is defined as ",
+                    mismatched_type.type_name()
+                ),
+            },
+            mismatched_type,
+            &sources,
+            &self.subgraphs,
+            |ty| Some(ty.kind().replace("Type", " Type")),
+            |ty, idx| type_kind_to_string(idx, ty),
+        );
     }
 
     fn add_directives_shallow(&mut self) -> Result<(), FederationError> {
@@ -1579,10 +1578,7 @@ impl Merger {
                 && !self.are_all_fields_external(*idx, source)?
                 && !subgraph.is_interface_object_type(&source.clone().into())
             {
-                self.error_reporter.report_mismatch_hint::<
-                    ObjectOrInterfaceTypeDefinitionPosition,
-                    ObjectOrInterfaceTypeDefinitionPosition,
-                    _>(
+                self.error_reporter.report_mismatch_hint(
                         hint_id.clone(),
 format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\": ",
                             type_description,
@@ -1971,7 +1967,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 }
             };
 
-            self.error_reporter.report_mismatch_error::<Type, T, _>(
+            self.error_reporter.report_mismatch_error(
                 error,
                 &ty,
                 sources,
@@ -2005,7 +2001,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 "subtype"
             };
 
-            self.error_reporter.report_mismatch_hint::<Type, T, _>(
+            self.error_reporter.report_mismatch_hint(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs: ",
@@ -2272,7 +2268,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     } else {
                         format!("Element \"{dest}\"")
                     };
-                    self.error_reporter.report_mismatch_hint::<T, T, _>(
+                    self.error_reporter.report_mismatch_hint(
                         HintCode::InconsistentDescription,
                         format!("{name} has inconsistent descriptions across subgraphs. "),
                         dest,

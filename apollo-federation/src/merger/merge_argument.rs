@@ -219,7 +219,7 @@ impl Merger {
                         })
                         .collect();
 
-                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, &Node<InputValueDefinition>, _>(
+                    self.error_reporter.report_mismatch_hint(
                         HintCode::InconsistentArgumentPresence,
                         format!(
                             "Optional argument \"{}\" will not be included in the supergraph as it does not appear in all subgraphs: ",
@@ -349,7 +349,7 @@ impl Merger {
         };
 
         if is_incompatible {
-            self.error_reporter.report_mismatch_error::<Node<Value>, T, _>(
+            self.error_reporter.report_mismatch_error(
                 if T::is_input_field() {
                     CompositionError::InputFieldDefaultMismatch {
                         message: format!("Input field \"{dest}\" has incompatible default values across subgraphs: it has "),
@@ -372,7 +372,7 @@ impl Merger {
                 },
             );
         } else if is_inconsistent {
-            self.error_reporter.report_mismatch_hint::<Node<Value>, T, _>(
+            self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentDefaultValuePresence,
                 format!("Argument \"{dest}\" has a default value in only some subgraphs: "),
                 dest_default,
