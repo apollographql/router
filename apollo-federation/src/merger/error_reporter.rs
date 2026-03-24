@@ -259,7 +259,12 @@ impl ErrorReporter {
              subgraph_element: &S,
              distribution_map: &mut IndexMap<String, Vec<String>>| {
                 if let Some(element) = subgraph_mismatch_accessor(subgraph_element, idx) {
-                    locations.extend(subgraph_element.locations(&subgraphs[idx]));
+                    locations.extend(
+                        subgraphs
+                            .get(idx)
+                            .map(|sg| subgraph_element.locations(sg))
+                            .unwrap_or_default(),
+                    );
                     distribution_map
                         .entry(element)
                         .or_default()
