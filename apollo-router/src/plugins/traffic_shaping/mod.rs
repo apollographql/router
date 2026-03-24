@@ -78,6 +78,16 @@ struct Shaping {
     )]
     #[schemars(with = "String", default = "default_pool_idle_timeout")]
     pool_idle_timeout: Option<Duration>,
+    /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
+    /// unset (the default), keep-alive pings are disabled.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    experimental_http2_keep_alive_interval: Option<Duration>,
+    /// Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and
+    /// `experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    experimental_http2_keep_alive_timeout: Option<Duration>,
 }
 
 #[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
@@ -119,6 +129,16 @@ impl Merge for Shaping {
                     .pool_idle_timeout
                     .as_ref()
                     .or(fallback.pool_idle_timeout.as_ref())
+                    .cloned(),
+                experimental_http2_keep_alive_interval: self
+                    .experimental_http2_keep_alive_interval
+                    .as_ref()
+                    .or(fallback.experimental_http2_keep_alive_interval.as_ref())
+                    .cloned(),
+                experimental_http2_keep_alive_timeout: self
+                    .experimental_http2_keep_alive_timeout
+                    .as_ref()
+                    .or(fallback.experimental_http2_keep_alive_timeout.as_ref())
                     .cloned(),
             },
         }
@@ -175,6 +195,16 @@ struct ConnectorShaping {
     )]
     #[schemars(with = "String", default = "default_pool_idle_timeout")]
     pool_idle_timeout: Option<Duration>,
+    /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
+    /// unset (the default), keep-alive pings are disabled.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    experimental_http2_keep_alive_interval: Option<Duration>,
+    /// Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and
+    /// `experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    experimental_http2_keep_alive_timeout: Option<Duration>,
 }
 
 impl Merge for ConnectorShaping {
@@ -203,6 +233,16 @@ impl Merge for ConnectorShaping {
                     .pool_idle_timeout
                     .as_ref()
                     .or(fallback.pool_idle_timeout.as_ref())
+                    .cloned(),
+                experimental_http2_keep_alive_interval: self
+                    .experimental_http2_keep_alive_interval
+                    .as_ref()
+                    .or(fallback.experimental_http2_keep_alive_interval.as_ref())
+                    .cloned(),
+                experimental_http2_keep_alive_timeout: self
+                    .experimental_http2_keep_alive_timeout
+                    .as_ref()
+                    .or(fallback.experimental_http2_keep_alive_timeout.as_ref())
                     .cloned(),
             },
         }
@@ -540,6 +580,12 @@ impl TrafficShaping {
             experimental_http2: config.shaping.experimental_http2,
             dns_resolution_strategy: config.shaping.dns_resolution_strategy,
             pool_idle_timeout: config.shaping.pool_idle_timeout,
+            experimental_http2_keep_alive_interval: config
+                .shaping
+                .experimental_http2_keep_alive_interval,
+            experimental_http2_keep_alive_timeout: config
+                .shaping
+                .experimental_http2_keep_alive_timeout,
         })
         .unwrap_or_default()
     }
@@ -554,6 +600,9 @@ impl TrafficShaping {
                 experimental_http2: config.experimental_http2,
                 dns_resolution_strategy: config.dns_resolution_strategy,
                 pool_idle_timeout: config.pool_idle_timeout,
+                experimental_http2_keep_alive_interval: config
+                    .experimental_http2_keep_alive_interval,
+                experimental_http2_keep_alive_timeout: config.experimental_http2_keep_alive_timeout,
             })
             .unwrap_or_default()
     }
@@ -1022,7 +1071,8 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Enable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6ThenIpv4),
-                pool_idle_timeout: default_pool_idle_timeout()
+                pool_idle_timeout: default_pool_idle_timeout(),
+                ..Default::default()
             },
         );
         assert_eq!(
@@ -1030,7 +1080,8 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Disable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv4Only),
-                pool_idle_timeout: default_pool_idle_timeout()
+                pool_idle_timeout: default_pool_idle_timeout(),
+                ..Default::default()
             },
         );
         assert_eq!(
@@ -1038,7 +1089,8 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Disable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6Only),
-                pool_idle_timeout: default_pool_idle_timeout()
+                pool_idle_timeout: default_pool_idle_timeout(),
+                ..Default::default()
             },
         );
     }

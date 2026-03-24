@@ -12,14 +12,20 @@ use crate::plugins::traffic_shaping::Http2Config;
 /// taste/adjust, but leave a comment giving justification for any new threshold
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// TODO: docs
+/// Default of 20s matches hyper_util's default keep-alive timeout
+pub(crate) const DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// HTTP client configuration
 #[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema, buildstructor::Builder)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Client {
     /// Use HTTP/2 to communicate with the coprocessor.
     pub(crate) experimental_http2: Option<Http2Config>,
+
     /// Specify a DNS resolution strategy to use when resolving the coprocessor URL.
     pub(crate) dns_resolution_strategy: Option<DnsResolutionStrategy>,
+
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
         default = "default_pool_idle_timeout"
@@ -27,6 +33,20 @@ pub(crate) struct Client {
     #[schemars(with = "String", default = "default_pool_idle_timeout")]
     /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
     pub(crate) pool_idle_timeout: Option<Duration>,
+
+    /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
+    /// unset (the default), keep-alive pings are disabled.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) experimental_http2_keep_alive_interval: Option<Duration>,
+
+    /// Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and
+    /// `experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.
+    // NB: can't make this non-optional due to the builder, but this gets
+    // `unwrap_or(DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT)`'ed at the callsite.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) experimental_http2_keep_alive_timeout: Option<Duration>,
 }
 
 /// Returns the hardcoded default pool idle timeout for keep-alive sockets in a client's connection
