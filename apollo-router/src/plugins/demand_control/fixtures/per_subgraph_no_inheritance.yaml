@@ -1,0 +1,15 @@
+demand_control:
+  enabled: true
+  mode: enforce
+  strategy:
+    static_estimated:
+      list_size: 1
+      max: 10
+      subgraph:
+        all:
+          list_size: 3
+        subgraphs:
+          products:
+            list_size: 5
+          reviews:
+            max: 2

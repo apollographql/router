@@ -71,6 +71,8 @@ telemetry:
 You can also have [conditions](/router/configuration/telemetry/instrumentation/conditions) on custom attributes using [selectors](/router/configuration/telemetry/instrumentation/selectors). You can only have conditions on a selector at the same execution level.
 Example you can't have a condition on `response_header` if you want to set an attribute from `request_header`.
 
+Conditions and the `static` selector are supported for the `router`, `supergraph`, `subgraph`, and `connector` services. They are not supported for `http_client` span attributes. For details, see the [http_client span attributes](#http_client-span-attributes) section.
+
 ```yaml title="desc.router.yaml"
 telemetry:
   instrumentation:
@@ -256,8 +258,43 @@ telemetry:
         attributes: {}
           # ...      
       http_client:
-        attributes: {}
-          # ...      
+        attributes:
+          # Custom attributes from request headers
+          "acme.request_content_type":
+            request_header: "content-type"
+          # Custom attributes from response headers
+          "acme.response_content_type":
+            response_header: "content-type"
+            default: "unknown"
+```
+
+### `http_client` span attributes
+
+The `http_client` span is created for each HTTP request to a subgraph or REST service. It executes after any [Rhai scripts](/router/customizations/rhai) that modify subgraph requests, so its selectors can observe headers added by scripts.
+
+<Note>
+
+`http_client` span attributes support the `request_header` and `response_header` selectors. Use these selectors to configure your attributes. If you attempt to use conditions or the `static` selector, the router fails to start with an error similar to:
+
+```
+could not create router: failed to parse attribute '...': unknown field '...', there are no fields
+```
+
+</Note>
+
+Extract custom attributes from request and response headers using the `request_header` and `response_header` [selectors](/router/configuration/telemetry/instrumentation/selectors).
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      http_client:
+        attributes:
+          http.request.header.x-custom:
+            request_header: "x-custom"
+          http.response.header.x-custom:
+            response_header: "x-custom"
+            default: "none"
 ```
 
 ## Spans configuration reference

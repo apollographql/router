@@ -11,9 +11,11 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
+use apollo_compiler::schema;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputValueDefinition;
@@ -53,7 +55,7 @@ fn standardize_deprecated(directive: &mut Directive) {
 }
 
 /// Retain only semantic directives in a directive list from the high-level schema representation.
-fn retain_semantic_directives(directives: &mut apollo_compiler::schema::DirectiveList) {
+fn retain_semantic_directives(directives: &mut schema::DirectiveList) {
     directives
         .0
         .retain(|directive| is_semantic_directive_application(directive));
@@ -198,6 +200,9 @@ fn coerce_value(
         // Accept non-composite values if they match the type.
         (Value::String(_), Some(ExtendedType::Scalar(scalar)))
             if !scalar.is_built_in() || matches!(scalar.name.as_str(), "ID" | "String") => {}
+        (Value::String(value), Some(ExtendedType::Enum(_))) => {
+            *target.make_mut() = Value::Enum(Name::new_unchecked(value));
+        }
         (Value::Boolean(_), Some(ExtendedType::Scalar(scalar)))
             if !scalar.is_built_in() || scalar.name == "Boolean" => {}
         (Value::Int(_), Some(ExtendedType::Scalar(scalar)))
@@ -208,6 +213,11 @@ fn coerce_value(
         (Value::Object(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::List(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::Enum(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
+        (Value::Enum(value), Some(ExtendedType::Scalar(scalar)))
+            if scalar.is_built_in() && matches!(scalar.name.as_str(), "String") =>
+        {
+            *target.make_mut() = Value::String(value.to_string());
+        }
         // Enums must match the type.
         (Value::Enum(value), Some(ExtendedType::Enum(enum_)))
             if enum_.values.contains_key(value) => {}
@@ -287,6 +297,112 @@ pub(crate) fn coerce_schema_default_values(schema: &mut Schema) {
     }
 }
 
+pub(crate) fn coerce_schema_values(schema: &mut Schema) {
+    // Keep a copy of the types in the schema so we can mutate the schema while walking it.
+    let types = schema.types.clone();
+
+    let directive_definitions = schema.directive_definitions.clone();
+
+    for ty in schema.types.values_mut() {
+        match ty {
+            ExtendedType::Object(object) => {
+                let object = object.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut object.directives,
+                );
+                for field in object.fields.values_mut() {
+                    let field = field.make_mut();
+                    coerce_arguments_default_values(&types, &mut field.arguments);
+                    coerce_directive_application_values_ast(
+                        &directive_definitions,
+                        &types,
+                        &mut field.directives,
+                    );
+                }
+            }
+            ExtendedType::Interface(interface) => {
+                let interface = interface.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut interface.directives,
+                );
+                for field in interface.fields.values_mut() {
+                    let field = field.make_mut();
+                    coerce_arguments_default_values(&types, &mut field.arguments);
+                    coerce_directive_application_values_ast(
+                        &directive_definitions,
+                        &types,
+                        &mut field.directives,
+                    );
+                }
+            }
+            ExtendedType::InputObject(input_object) => {
+                let input_object = input_object.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut input_object.directives,
+                );
+                for field in input_object.fields.values_mut() {
+                    let field = field.make_mut();
+                    coerce_directive_application_values_ast(
+                        &directive_definitions,
+                        &types,
+                        &mut field.directives,
+                    );
+                    let Some(default_value) = &mut field.default_value else {
+                        continue;
+                    };
+
+                    if coerce_value(&types, default_value, &field.ty).is_err() {
+                        field.default_value = None;
+                    }
+                }
+            }
+            ExtendedType::Union(union_) => {
+                let union_ = union_.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut union_.directives,
+                );
+            }
+            ExtendedType::Scalar(scalar) => {
+                let scalar = scalar.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut scalar.directives,
+                );
+            }
+            ExtendedType::Enum(enum_) => {
+                let enum_ = enum_.make_mut();
+                coerce_directive_application_values_schema(
+                    &directive_definitions,
+                    &types,
+                    &mut enum_.directives,
+                );
+                for value in enum_.values.values_mut() {
+                    let value = value.make_mut();
+                    coerce_directive_application_values_ast(
+                        &directive_definitions,
+                        &types,
+                        &mut value.directives,
+                    );
+                }
+            }
+        }
+    }
+
+    for directive in schema.directive_definitions.values_mut() {
+        let directive = directive.make_mut();
+        coerce_arguments_default_values(&types, &mut directive.arguments);
+    }
+}
+
 fn coerce_directive_application_values(
     schema: &Valid<Schema>,
     directives: &mut executable::DirectiveList,
@@ -302,6 +418,46 @@ fn coerce_directive_application_values(
             };
             let arg = arg.make_mut();
             _ = coerce_value(&schema.types, &mut arg.value, &definition.ty);
+        }
+    }
+}
+
+fn coerce_directive_application_values_schema(
+    directive_definitions: &IndexMap<Name, Node<DirectiveDefinition>>,
+    type_definitions: &IndexMap<Name, ExtendedType>,
+    directives: &mut schema::DirectiveList,
+) {
+    for directive in directives {
+        let Some(definition) = directive_definitions.get(&directive.name) else {
+            continue;
+        };
+        let directive = directive.make_mut();
+        for arg in &mut directive.arguments {
+            let Some(definition) = definition.argument_by_name(&arg.name) else {
+                continue;
+            };
+            let arg = arg.make_mut();
+            _ = coerce_value(type_definitions, &mut arg.value, &definition.ty);
+        }
+    }
+}
+
+fn coerce_directive_application_values_ast(
+    directive_definitions: &IndexMap<Name, Node<DirectiveDefinition>>,
+    type_definitions: &IndexMap<Name, ExtendedType>,
+    directives: &mut apollo_compiler::ast::DirectiveList,
+) {
+    for directive in directives {
+        let Some(definition) = directive_definitions.get(&directive.name) else {
+            continue;
+        };
+        let directive = directive.make_mut();
+        for arg in &mut directive.arguments {
+            let Some(definition) = definition.argument_by_name(&arg.name) else {
+                continue;
+            };
+            let arg = arg.make_mut();
+            _ = coerce_value(type_definitions, &mut arg.value, &definition.ty);
         }
     }
 }
@@ -447,7 +603,7 @@ mod tests {
         }
         "#), @r###"
         {
-          test(string: enumVal1, strings: enumVal2, custom: enumVal1, customList: [enumVal2])
+          test(string: "enumVal1", strings: ["enumVal2"], custom: enumVal1, customList: [enumVal2])
         }
         "###);
     }

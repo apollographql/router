@@ -14,11 +14,13 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use serde_json_bytes::Value;
 
+use super::CostBySubgraph;
 use super::DemandControlError;
 use super::directives::IncludeDirective;
 use super::directives::SkipDirective;
 use super::schema::DemandControlledSchema;
 use super::schema::InputDefinition;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
@@ -31,6 +33,7 @@ use crate::spec::TYPENAME;
 
 pub(crate) struct StaticCostCalculator {
     list_size: u32,
+    subgraph_list_sizes: Arc<SubgraphConfiguration<Option<u32>>>,
     supergraph_schema: Arc<DemandControlledSchema>,
     subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
 }
@@ -148,13 +151,19 @@ impl StaticCostCalculator {
     pub(crate) fn new(
         supergraph_schema: Arc<DemandControlledSchema>,
         subgraph_schemas: Arc<HashMap<String, DemandControlledSchema>>,
+        subgraph_list_sizes: Arc<SubgraphConfiguration<Option<u32>>>,
         list_size: u32,
     ) -> Self {
         Self {
             list_size,
+            subgraph_list_sizes,
             supergraph_schema,
             subgraph_schemas,
         }
+    }
+
+    fn subgraph_list_size(&self, subgraph_name: &str) -> Option<u32> {
+        *self.subgraph_list_sizes.get(subgraph_name)
     }
 
     /// Scores a field within a GraphQL operation, handling some expected cases where
@@ -181,6 +190,8 @@ impl StaticCostCalculator {
         field: &Field,
         parent_type: &NamedType,
         list_size_from_upstream: Option<i32>,
+        inherited_list_sizes: &[ListSizeDirective],
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         // When we pre-process the schema, __typename isn't included. So, we short-circuit here to avoid failed lookups.
         if field.name == TYPENAME {
@@ -199,20 +210,34 @@ impl StaticCostCalculator {
                     field.name
                 ))
             })?;
-        let list_size_directive = match definition.list_size_directive() {
-            Some(dir) => ListSizeDirective::new(dir, field, ctx.variables).map(Some),
-            None => Ok(None),
-        }?;
+        let own_list_size_directives: Vec<ListSizeDirective> = definition
+            .list_size_directive_entries()
+            .iter()
+            .map(|entry| {
+                ListSizeDirective::new(
+                    &entry.directive,
+                    field,
+                    ctx.variables,
+                    entry.parsed_sized_fields.clone(),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let effective_expected_size = own_list_size_directives
+            .iter()
+            .chain(inherited_list_sizes)
+            .filter_map(|dir| dir.expected_size)
+            .max();
+
         let instance_count = if !field.ty().is_list() {
             1
         } else if let Some(value) = list_size_from_upstream {
             // This is a sized field whose length is defined by the `@listSize` directive on the parent field
             value
-        } else if let Some(expected_size) = list_size_directive
-            .as_ref()
-            .and_then(|dir| dir.expected_size)
-        {
+        } else if let Some(expected_size) = effective_expected_size {
             expected_size
+        } else if let Some(subgraph_list_size) = self.subgraph_list_size(subgraph) {
+            subgraph_list_size as i32
         } else {
             self.list_size as i32
         };
@@ -233,7 +258,9 @@ impl StaticCostCalculator {
             ctx,
             &field.selection_set,
             field.ty().inner_named_type(),
-            list_size_directive.as_ref(),
+            &own_list_size_directives,
+            inherited_list_sizes,
+            subgraph,
         )?;
 
         let mut arguments_cost = 0.0;
@@ -264,7 +291,9 @@ impl StaticCostCalculator {
                     ctx,
                     selection_set,
                     parent_type,
-                    list_size_directive.as_ref(),
+                    &own_list_size_directives,
+                    &[],
+                    subgraph,
                 )?;
             }
         }
@@ -287,7 +316,9 @@ impl StaticCostCalculator {
         &self,
         ctx: &ScoringContext,
         fragment_spread: &FragmentSpread,
-        list_size_directive: Option<&ListSizeDirective>,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
@@ -299,7 +330,9 @@ impl StaticCostCalculator {
             ctx,
             &fragment.selection_set,
             fragment.type_condition(),
-            list_size_directive,
+            list_size_directives,
+            inherited_list_sizes,
+            subgraph,
         )
     }
 
@@ -308,7 +341,9 @@ impl StaticCostCalculator {
         ctx: &ScoringContext,
         inline_fragment: &InlineFragment,
         parent_type: &NamedType,
-        list_size_directive: Option<&ListSizeDirective>,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         self.score_selection_set(
             ctx,
@@ -317,7 +352,9 @@ impl StaticCostCalculator {
                 .type_condition
                 .as_ref()
                 .unwrap_or(parent_type),
-            list_size_directive,
+            list_size_directives,
+            inherited_list_sizes,
+            subgraph,
         )
     }
 
@@ -325,6 +362,7 @@ impl StaticCostCalculator {
         &self,
         operation: &Operation,
         ctx: &ScoringContext,
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
 
@@ -335,7 +373,14 @@ impl StaticCostCalculator {
             )));
         };
 
-        cost += self.score_selection_set(ctx, &operation.selection_set, root_type_name, None)?;
+        cost += self.score_selection_set(
+            ctx,
+            &operation.selection_set,
+            root_type_name,
+            &[],
+            &[],
+            subgraph,
+        )?;
 
         Ok(cost)
     }
@@ -345,19 +390,57 @@ impl StaticCostCalculator {
         ctx: &ScoringContext,
         selection: &Selection,
         parent_type: &NamedType,
-        list_size_directive: Option<&ListSizeDirective>,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         match selection {
-            Selection::Field(f) => self.score_field(
-                ctx,
-                f,
-                parent_type,
-                list_size_directive.and_then(|dir| dir.size_of(f)),
-            ),
-            Selection::FragmentSpread(s) => self.score_fragment_spread(ctx, s, list_size_directive),
-            Selection::InlineFragment(i) => {
-                self.score_inline_fragment(ctx, i, parent_type, list_size_directive)
+            Selection::Field(f) => {
+                // We need two things for scoring this field: (1) the list size to use for
+                // instance_count if this field is a list (list_size_from_upstream), and (2) the
+                // directive(s) to pass to this field's selection set so nested lists (e.g. "page"
+                // under "results") get the right sizing (descended). With repeatable @listSize,
+                // multiple directives can descend to the same field, so we collect all of them.
+                let size_from_parent = list_size_directives
+                    .iter()
+                    .filter_map(|dir| dir.size_of(f))
+                    .max();
+                let size_from_inherited = inherited_list_sizes
+                    .iter()
+                    .filter_map(|dir| dir.size_of(f))
+                    .max();
+                let list_size_from_upstream = size_from_parent.or(size_from_inherited);
+
+                let descended: Vec<ListSizeDirective> = list_size_directives
+                    .iter()
+                    .chain(inherited_list_sizes.iter())
+                    .filter_map(|dir| dir.descend(f.name.as_str()))
+                    .collect();
+
+                self.score_field(
+                    ctx,
+                    f,
+                    parent_type,
+                    list_size_from_upstream,
+                    &descended,
+                    subgraph,
+                )
             }
+            Selection::FragmentSpread(s) => self.score_fragment_spread(
+                ctx,
+                s,
+                list_size_directives,
+                inherited_list_sizes,
+                subgraph,
+            ),
+            Selection::InlineFragment(i) => self.score_inline_fragment(
+                ctx,
+                i,
+                parent_type,
+                list_size_directives,
+                inherited_list_sizes,
+                subgraph,
+            ),
         }
     }
 
@@ -366,11 +449,20 @@ impl StaticCostCalculator {
         ctx: &ScoringContext,
         selection_set: &SelectionSet,
         parent_type_name: &NamedType,
-        list_size_directive: Option<&ListSizeDirective>,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
-            cost += self.score_selection(ctx, selection, parent_type_name, list_size_directive)?;
+            cost += self.score_selection(
+                ctx,
+                selection,
+                parent_type_name,
+                list_size_directives,
+                inherited_list_sizes,
+                subgraph,
+            )?;
         }
         Ok(cost)
     }
@@ -393,7 +485,7 @@ impl StaticCostCalculator {
         &self,
         plan_node: &PlanNode,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
+    ) -> Result<CostBySubgraph, DemandControlError> {
         match plan_node {
             PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, variables),
             PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, variables),
@@ -424,7 +516,7 @@ impl StaticCostCalculator {
         subgraph: &str,
         operation: &SerializableDocument,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
+    ) -> Result<CostBySubgraph, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
         let schema = self.subgraph_schemas.get(subgraph).ok_or_else(|| {
@@ -436,7 +528,8 @@ impl StaticCostCalculator {
         let operation = operation
             .as_parsed()
             .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
-        self.estimated(operation, schema, variables, false)
+        let cost = self.estimated(operation, schema, variables, false, subgraph)?;
+        Ok(CostBySubgraph::new(subgraph, cost))
     }
 
     fn max_score_of_nodes(
@@ -444,15 +537,15 @@ impl StaticCostCalculator {
         left: &Option<Box<PlanNode>>,
         right: &Option<Box<PlanNode>>,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
+    ) -> Result<CostBySubgraph, DemandControlError> {
         match (left, right) {
-            (None, None) => Ok(0.0),
+            (None, None) => Ok(CostBySubgraph::default()),
             (None, Some(right)) => self.score_plan_node(right, variables),
             (Some(left), None) => self.score_plan_node(left, variables),
             (Some(left), Some(right)) => {
                 let left_score = self.score_plan_node(left, variables)?;
                 let right_score = self.score_plan_node(right, variables)?;
-                Ok(left_score.max(right_score))
+                Ok(CostBySubgraph::maximum(left_score, right_score))
             }
         }
     }
@@ -462,8 +555,8 @@ impl StaticCostCalculator {
         primary: &Primary,
         deferred: &Vec<DeferredNode>,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
-        let mut score = 0.0;
+    ) -> Result<CostBySubgraph, DemandControlError> {
+        let mut score = CostBySubgraph::default();
         if let Some(node) = &primary.node {
             score += self.score_plan_node(node, variables)?;
         }
@@ -479,20 +572,22 @@ impl StaticCostCalculator {
         &self,
         nodes: &Vec<PlanNode>,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
-        let mut sum = 0.0;
+    ) -> Result<CostBySubgraph, DemandControlError> {
+        let mut sum = CostBySubgraph::default();
         for node in nodes {
             sum += self.score_plan_node(node, variables)?;
         }
         Ok(sum)
     }
 
+    /// Determine cost for a single-subgraph operation.
     pub(crate) fn estimated(
         &self,
         query: &ExecutableDocument,
         schema: &DemandControlledSchema,
         variables: &Object,
         should_estimate_requires: bool,
+        subgraph: &str,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         let ctx = ScoringContext {
@@ -502,19 +597,20 @@ impl StaticCostCalculator {
             should_estimate_requires,
         };
         if let Some(op) = &query.operations.anonymous {
-            cost += self.score_operation(op, &ctx)?;
+            cost += self.score_operation(op, &ctx, subgraph)?;
         }
         for (_name, op) in query.operations.named.iter() {
-            cost += self.score_operation(op, &ctx)?;
+            cost += self.score_operation(op, &ctx, subgraph)?;
         }
         Ok(cost)
     }
 
+    /// Determine cost for an operation which may span multiple subgraphs.
     pub(crate) fn planned(
         &self,
         query_plan: &QueryPlan,
         variables: &Object,
-    ) -> Result<f64, DemandControlError> {
+    ) -> Result<CostBySubgraph, DemandControlError> {
         self.score_plan_node(&query_plan.root, variables)
     }
 
@@ -553,53 +649,57 @@ impl<'schema> ResponseCostCalculator<'schema> {
         if field.name == TYPENAME {
             return;
         }
-        if let Some(definition) = self.schema.output_field_definition(parent_ty, &field.name) {
-            match value {
-                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                    self.cost += definition
-                        .cost_directive()
-                        .map_or(0.0, |cost| cost.weight());
-                }
-                Value::Array(items) => {
-                    for item in items {
-                        self.visit_list_item(request, variables, parent_ty, field, item);
-                    }
-                }
-                Value::Object(children) => {
-                    self.cost += definition
-                        .cost_directive()
-                        .map_or(1.0, |cost| cost.weight());
-                    self.visit_selections(request, variables, &field.selection_set, children);
-                }
-            }
 
-            if include_argument_score {
-                for argument in &field.arguments {
-                    if let Some(argument_definition) = definition.argument_by_name(&argument.name) {
-                        if let Ok(score) = score_argument(
-                            &argument.value,
-                            argument_definition,
-                            self.schema,
-                            variables,
-                        ) {
-                            self.cost += score;
-                        }
-                    } else {
-                        tracing::debug!(
-                            "Failed to get schema definition for argument {}.{}({}:). The resulting response cost will be a partial result.",
-                            parent_ty,
-                            field.name,
-                            argument.name,
-                        )
-                    }
-                }
-            }
-        } else {
+        let definition = self.schema.output_field_definition(parent_ty, &field.name);
+
+        // We need to have a field definition for later processing, unless the query is an
+        // `_entities` query. If the field should be there and isn't, return now.
+        let is_entities_query = parent_ty == "Query" && field.name == "_entities";
+        if definition.is_none() && !is_entities_query {
             tracing::debug!(
                 "Failed to get schema definition for field {}.{}. The resulting response cost will be a partial result.",
                 parent_ty,
                 field.name,
-            )
+            );
+            return;
+        }
+
+        match value {
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                self.cost += definition
+                    .and_then(|d| d.cost_directive())
+                    .map_or(0.0, |cost| cost.weight());
+            }
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_list_item(request, variables, parent_ty, field, item);
+                }
+            }
+            Value::Object(children) => {
+                self.cost += definition
+                    .and_then(|d| d.cost_directive())
+                    .map_or(1.0, |cost| cost.weight());
+                self.visit_selections(request, variables, &field.selection_set, children);
+            }
+        }
+
+        if include_argument_score && let Some(definition) = definition {
+            for argument in &field.arguments {
+                if let Some(argument_definition) = definition.argument_by_name(&argument.name) {
+                    if let Ok(score) =
+                        score_argument(&argument.value, argument_definition, self.schema, variables)
+                    {
+                        self.cost += score;
+                    }
+                } else {
+                    tracing::debug!(
+                        "Failed to get schema definition for argument {}.{}({}:). The resulting response cost will be a partial result.",
+                        parent_ty,
+                        field.name,
+                        argument.name,
+                    )
+                }
+            }
         }
     }
 }
@@ -660,7 +760,7 @@ mod tests {
             variables: &Object,
         ) -> Result<f64, DemandControlError> {
             let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
-            self.score_plan_node(&js_planner_node, variables)
+            Ok(self.score_plan_node(&js_planner_node, variables)?.total())
         }
     }
 
@@ -675,6 +775,9 @@ mod tests {
     }
 
     /// Estimate cost of an operation executed on a supergraph.
+    ///
+    /// Does not consider cost-by-subgraph or make use of `StaticCostCalculator::subgraph_list_size`,
+    /// which are only available when estimating the cost against a query plan.
     fn estimated_cost(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
@@ -685,7 +788,12 @@ mod tests {
             .unwrap_or_default();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
-        let calculator = StaticCostCalculator::new(Arc::new(schema), Default::default(), 100);
+        let calculator = StaticCostCalculator::new(
+            Arc::new(schema),
+            Default::default(),
+            Default::default(),
+            100,
+        );
 
         calculator
             .estimated(
@@ -693,11 +801,15 @@ mod tests {
                 &calculator.supergraph_schema,
                 &variables,
                 true,
+                "",
             )
             .unwrap()
     }
 
     /// Estimate cost of an operation on a plain, non-federated schema.
+    ///
+    /// Does not consider cost-by-subgraph or make use of `StaticCostCalculator::subgraph_list_size`,
+    /// which are only available when estimating the cost against a query plan.
     fn basic_estimated_cost(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let schema =
             apollo_compiler::Schema::parse_and_validate(schema_str, "schema.graphqls").unwrap();
@@ -713,10 +825,15 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
-        let calculator = StaticCostCalculator::new(Arc::new(schema), Default::default(), 100);
+        let calculator = StaticCostCalculator::new(
+            Arc::new(schema),
+            Default::default(),
+            Default::default(),
+            100,
+        );
 
         calculator
-            .estimated(&query, &calculator.supergraph_schema, &variables, true)
+            .estimated(&query, &calculator.supergraph_schema, &variables, true, "")
             .unwrap()
     }
 
@@ -746,6 +863,7 @@ mod tests {
                 CacheKeyMetadata::default(),
                 PlanOptions::default(),
                 ComputeJobType::QueryPlanning,
+                variables.clone(),
             ))
             .await
             .unwrap();
@@ -766,10 +884,11 @@ mod tests {
         let calculator = StaticCostCalculator::new(
             Arc::new(schema),
             Arc::new(demand_controlled_subgraph_schemas),
+            Default::default(),
             100,
         );
 
-        calculator.planned(&query_plan, &variables).unwrap()
+        calculator.planned(&query_plan, &variables).unwrap().total()
     }
 
     fn planned_cost_rust(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
@@ -801,6 +920,7 @@ mod tests {
         let calculator = StaticCostCalculator::new(
             Arc::new(schema),
             Arc::new(demand_controlled_subgraph_schemas),
+            Default::default(),
             100,
         );
 
@@ -823,9 +943,14 @@ mod tests {
         let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
-        StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
-            .actual(&query.executable, &response, &variables)
-            .unwrap()
+        StaticCostCalculator::new(
+            Arc::new(schema),
+            Default::default(),
+            Default::default(),
+            100,
+        )
+        .actual(&query.executable, &response, &variables)
+        .unwrap()
     }
 
     /// Actual cost of an operation on a plain, non-federated schema.
@@ -851,9 +976,14 @@ mod tests {
         let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
-        StaticCostCalculator::new(Arc::new(schema), Default::default(), 100)
-            .actual(&query, &response, &variables)
-            .unwrap()
+        StaticCostCalculator::new(
+            Arc::new(schema),
+            Default::default(),
+            Default::default(),
+            100,
+        )
+        .actual(&query, &response, &variables)
+        .unwrap()
     }
 
     #[test]
@@ -1043,6 +1173,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn federated_query_with_adjustable_list_cost() {
+        // NB: does not consider cost-by-subgraph or make use of `StaticCostCalculator::subgraph_list_size`,
+        // which are only available when estimating the cost against a query plan.
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
         let (schema, query) = parse_schema_and_operation(schema, query, &Default::default());
@@ -1050,23 +1182,27 @@ mod tests {
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap(),
         );
 
-        let calculator = StaticCostCalculator::new(schema.clone(), Default::default(), 100);
+        let calculator =
+            StaticCostCalculator::new(schema.clone(), Default::default(), Default::default(), 100);
         let conservative_estimate = calculator
             .estimated(
                 &query.executable,
                 &calculator.supergraph_schema,
                 &Default::default(),
                 true,
+                "",
             )
             .unwrap();
 
-        let calculator = StaticCostCalculator::new(schema.clone(), Default::default(), 5);
+        let calculator =
+            StaticCostCalculator::new(schema.clone(), Default::default(), Default::default(), 5);
         let narrow_estimate = calculator
             .estimated(
                 &query.executable,
                 &calculator.supergraph_schema,
                 &Default::default(),
                 true,
+                "",
             )
             .unwrap();
 
@@ -1174,5 +1310,273 @@ mod tests {
         assert_eq!(estimated_cost(schema, query, variables), 1.0);
         assert_eq!(planned_cost_js(schema, query, variables).await, 1.0);
         assert_eq!(planned_cost_rust(schema, query, variables), 1.0);
+    }
+
+    /// Tests to ensure Vec-based implementation (for supporting multiple @listSize directives)
+    /// maintains backward compatibility with existing single-directive behavior
+    mod backward_compatibility_tests {
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
+
+        #[rstest::rstest]
+        #[case::no_directive("query { enumWithCost }", "{}", 15.0)]
+        #[case::single_slicing_argument_with_array(
+            r#"query { itemsByIds(ids: ["a", "b"]) { id } }"#,
+            "{}",
+            2.0
+        )]
+        #[case::slicing_argument_with_variable(
+            r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
+            r#"{"ids": ["x", "y", "z"]}"#,
+            3.0
+        )]
+        #[case::nested_sized_fields(
+            r#"query { containerWithNestedList(first: 5) { page { id } } }"#,
+            "{}",
+            6.0
+        )]
+        #[case::assumed_size_fallback(
+            r#"query Q($ids: [ID!]) { itemsByIdsWithAssumedSize(ids: $ids) { id } }"#,
+            r#"{"ids": null}"#,
+            50.0
+        )]
+        #[case::sized_fields_propagate_to_nested_lists(
+            r#"query { fieldWithDynamicListSize { items { id } } }"#,
+            "{}",
+            11.0  // SizedField: 1, items: 10 * 1 = 10 (from default first: 10)
+        )]
+        fn vec_based_implementation_maintains_backward_compatibility(
+            #[case] query: &str,
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+    }
+
+    /// Tests for array-based slicing arguments in @listSize directive
+    mod array_slicing_argument_tests {
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
+
+        #[rstest::rstest]
+        #[case::inline_array_of_3(
+            r#"query { itemsByIds(ids: ["a", "b", "c"]) { id } }"#,
+            "{}",
+            3.0
+        )]
+        #[case::empty_inline_array(r#"query { itemsByIds(ids: []) { id } }"#, "{}", 0.0)]
+        #[case::variable_array_of_5(
+            r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
+            r#"{"ids": ["a", "b", "c", "d", "e"]}"#,
+            5.0
+        )]
+        #[case::variable_empty_array(
+            r#"query Q($ids: [ID!]!) { itemsByIds(ids: $ids) { id } }"#,
+            r#"{"ids": []}"#,
+            0.0
+        )]
+        fn array_length_determines_list_size(
+            #[case] query: &str,
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+
+        #[rstest::rstest]
+        #[case::null_variable(r#"{"ids": null}"#)]
+        #[case::missing_variable("{}")]
+        fn null_or_missing_array_falls_back_to_assumed_size(#[case] variables: &str) {
+            let query = r#"query Q($ids: [ID!]) { itemsByIdsWithAssumedSize(ids: $ids) { id } }"#;
+            // assumedSize is 50 in the schema
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 50.0);
+        }
+    }
+
+    /// Tests for nested input path resolution in @listSize slicingArguments
+    ///
+    /// Note: Expected costs include the cost of input objects (1 per nested object).
+    /// For inline objects: SearchInput (1) + PaginationInput (1) = 2 base cost
+    /// For variables: input objects are costed based on their nesting level
+    mod nested_input_path_tests {
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
+
+        // Input object costs:
+        // - SearchInput: 1
+        // - PaginationInput: 1
+        // Total input cost for search queries: 2
+
+        #[rstest::rstest]
+        #[case::inline_nested_first_10(
+            r#"query { search(input: {pagination: {first: 10}}) { id } }"#,
+            "{}",
+            12.0  // 10 (list size) + 2 (input objects: SearchInput + PaginationInput)
+        )]
+        #[case::inline_nested_first_5(
+            r#"query { search(input: {pagination: {first: 5}, query: "test"}) { id } }"#,
+            "{}",
+            7.0  // 5 (list size) + 2 (input objects)
+        )]
+        #[case::variable_nested_object(
+            r#"query Q($input: SearchInput!) { search(input: $input) { id } }"#,
+            r#"{"input": {"pagination": {"first": 7}, "query": "test"}}"#,
+            9.0  // 7 (list size) + 2 (input objects)
+        )]
+        #[case::variable_nested_first_only(
+            r#"query Q($input: SearchInput!) { search(input: $input) { id } }"#,
+            r#"{"input": {"pagination": {"first": 3}}}"#,
+            5.0  // 3 (list size) + 2 (input objects)
+        )]
+        fn nested_path_determines_list_size(
+            #[case] query: &str,
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+
+        // Input object costs for searchWithAssumedSize:
+        // - SearchInput: 1
+        // - PaginationInput: 1 (if present)
+        // When path not found, falls back to assumedSize (25)
+
+        #[rstest::rstest]
+        #[case::missing_nested_value(
+            r#"{"input": {"pagination": {}}}"#,
+            27.0  // 25 (assumed size) + 2 (SearchInput + PaginationInput)
+        )]
+        #[case::missing_pagination(
+            r#"{"input": {}}"#,
+            26.0  // 25 (assumed size) + 1 (SearchInput only)
+        )]
+        #[case::null_input(
+            r#"{"input": null}"#,
+            25.0  // 25 (assumed size) + 0 (null is not scored)
+        )]
+        fn missing_nested_path_falls_back_to_assumed_size(
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            let query =
+                r#"query Q($input: SearchInput) { searchWithAssumedSize(input: $input) { id } }"#;
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+
+        // DeeplyNestedInput has 3 levels: DeeplyNestedInput(1) + NestedLevel1Input(1) + NestedLevel2Input(1) = 3
+
+        #[test]
+        fn deeply_nested_path_inline() {
+            let query = r#"query { deeplyNested(input: {level1: {level2: {count: 15}}}) { id } }"#;
+            // 15 (list size) + 3 (input objects: DeeplyNestedInput + NestedLevel1Input + NestedLevel2Input)
+            assert_eq!(estimated_cost(SCHEMA, query, "{}"), 18.0);
+        }
+
+        #[test]
+        fn deeply_nested_path_variable() {
+            let query =
+                r#"query Q($input: DeeplyNestedInput!) { deeplyNested(input: $input) { id } }"#;
+            let variables = r#"{"input": {"level1": {"level2": {"count": 12}}}}"#;
+            // 12 (list size) + 3 (input objects)
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 15.0);
+        }
+
+        #[test]
+        fn inline_nested_object_with_other_fields() {
+            // Ensure other fields in the nested object don't affect the size resolution
+            let query = r#"query { search(input: {pagination: {first: 8, after: "cursor"}, query: "search term"}) { id } }"#;
+            // 8 (list size) + 2 (input objects: SearchInput + PaginationInput)
+            assert_eq!(estimated_cost(SCHEMA, query, "{}"), 10.0);
+        }
+    }
+
+    /// Nested sizedFields in @listSize (e.g. "results { page }")
+    mod nested_sized_fields_tests {
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
+
+        #[rstest::rstest]
+        #[case::simple_sized_fields_on_nested_type(
+            r#"query { containerWithNestedList(first: 5) { page { id } metadata } }"#,
+            "{}",
+            6.0  // ResultContainer: 1, page: 5 * 1 = 5, metadata: 0
+        )]
+        #[case::nested_sized_fields_two_levels(
+            r#"query { deepContainerWithNestedList(first: 7) { results { page { id } } } }"#,
+            "{}",
+            9.0  // DeepContainer: 1, results: 1, page: 7 * 1 = 7
+        )]
+        #[case::nested_sized_fields_with_variable(
+            r#"query Q($n: Int!) { deepContainerWithNestedList(first: $n) { results { page { id } } } }"#,
+            r#"{"n": 3}"#,
+            5.0
+        )]
+        #[case::nested_sized_fields_with_default_value(
+            r#"query { deepContainerWithNestedList { results { page { id } } } }"#,
+            "{}",
+            12.0  // default first: 10
+        )]
+        #[case::nested_sized_fields_not_selected(
+            r#"query { deepContainerWithNestedList(first: 100) { total } }"#,
+            "{}",
+            1.0
+        )]
+        #[case::intermediate_container_without_sized_field(
+            r#"query { deepContainerWithNestedList(first: 100) { results { metadata } } }"#,
+            "{}",
+            2.0
+        )]
+        #[case::mixed_sized_fields_single_and_nested(
+            r#"query {
+                deepContainerWithMixedSizedFields(first: 5) {
+                    page { id }
+                    results { page { id } }
+                }
+            }"#,
+            "{}",
+            12.0  // DeepContainer: 1, page: 5 * 1 = 5, results: 1, page: 5 * 1 = 5
+        )]
+        fn nested_sized_fields_cases(
+            #[case] query: &str,
+            #[case] variables: &str,
+            #[case] expected_cost: f64,
+        ) {
+            assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+
+        /// Schema load fails when a sizedFields path has more than one leaf (one-leaf-per-path rule).
+        #[test]
+        fn multiple_leaves_in_one_path_fails_at_schema_load() {
+            use std::sync::Arc;
+
+            use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
+            use crate::spec;
+
+            // Schema with sizedFields: ["results { page metadata }"] - two leaves in one path
+            let schema_str = include_str!("./fixtures/custom_cost_schema.graphql").replace(
+                r#"sizedFields: ["results { page }"]"#,
+                r#"sizedFields: ["results { page metadata }"]"#,
+            );
+            // ResultContainer has page: [A] and metadata: String. So "results { page metadata }"
+            // has two top-level selections with no sub-selections (page is a leaf, metadata is a leaf).
+            let schema = spec::Schema::parse(&schema_str, &Default::default()).unwrap();
+            let result = DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone()));
+
+            match &result {
+                Err(e) => assert!(
+                    e.to_string().contains("at most one list field per path"),
+                    "expected error about one list field per path, got: {}",
+                    e
+                ),
+                Ok(_) => {
+                    panic!("expected schema load to fail for multiple list fields in one path")
+                }
+            }
+        }
     }
 }

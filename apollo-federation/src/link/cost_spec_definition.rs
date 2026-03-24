@@ -31,6 +31,7 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveCompositionOptions;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
@@ -248,6 +249,25 @@ impl CostSpecDefinition {
         }
     }
 
+    /// Returns all `@listSize` directives from a field definition.
+    pub fn list_size_directives_from_field_definition(
+        schema: &FederationSchema,
+        field: &FieldDefinition,
+    ) -> Result<Vec<ListSizeDirective>, FederationError> {
+        let directive_name = Self::list_size_directive_name(schema)?;
+        let Some(name) = directive_name.as_ref() else {
+            return Ok(Vec::new());
+        };
+        // get_all() returns all instances of the directive (for repeatable directives)
+        let directives: Vec<ListSizeDirective> = field
+            .directives
+            .get_all(name)
+            .map(Node::as_ref)
+            .map(ListSizeDirective::from_directive)
+            .collect();
+        Ok(directives)
+    }
+
     fn cost_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             COST_DIRECTIVE_NAME,
@@ -268,9 +288,11 @@ impl CostSpecDefinition {
                 DirectiveLocation::Object,
                 DirectiveLocation::Scalar,
             ],
-            true,
-            Some(&|v| COST_VERSIONS.get_dyn_minimum_required_version(v)),
-            None,
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|v| COST_VERSIONS.get_dyn_minimum_required_version(v),
+                static_argument_transform: None,
+                use_join_directive: false,
+            }),
         )
     }
 
@@ -313,9 +335,11 @@ impl CostSpecDefinition {
             ],
             false,
             &[DirectiveLocation::FieldDefinition],
-            true,
-            Some(&|v| COST_VERSIONS.get_dyn_minimum_required_version(v)),
-            None,
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|v| COST_VERSIONS.get_dyn_minimum_required_version(v),
+                static_argument_transform: None,
+                use_join_directive: false,
+            }),
         )
     }
 }
@@ -395,23 +419,24 @@ pub struct ListSizeDirective {
 }
 
 impl ListSizeDirective {
+    /// Creates a ListSizeDirective from a single directive instance.
+    /// Used by the plural API to process each directive individually.
+    pub fn from_directive(directive: &Directive) -> Self {
+        Self {
+            assumed_size: Self::assumed_size(directive),
+            slicing_argument_names: Self::slicing_argument_names(directive),
+            sized_fields: Self::sized_fields(directive),
+            require_one_slicing_argument: Self::require_one_slicing_argument(directive)
+                .unwrap_or(true),
+        }
+    }
+
     pub fn from_field_definition(
         directive_name: &Name,
         definition: &FieldDefinition,
     ) -> Option<Self> {
         let directive = definition.directives.get(directive_name)?;
-        let assumed_size = Self::assumed_size(directive);
-        let slicing_argument_names = Self::slicing_argument_names(directive);
-        let sized_fields = Self::sized_fields(directive);
-        let require_one_slicing_argument =
-            Self::require_one_slicing_argument(directive).unwrap_or(true);
-
-        Some(Self {
-            assumed_size,
-            slicing_argument_names,
-            sized_fields,
-            require_one_slicing_argument,
-        })
+        Some(Self::from_directive(directive))
     }
 
     fn assumed_size(directive: &Directive) -> Option<i32> {

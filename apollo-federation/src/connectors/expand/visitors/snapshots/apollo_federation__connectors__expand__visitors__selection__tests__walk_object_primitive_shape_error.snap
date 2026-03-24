@@ -1,0 +1,8 @@
+---
+source: apollo-federation/src/connectors/expand/visitors/selection.rs
+assertion_line: 1081
+expression: result.unwrap_err().to_string()
+---
+An internal error has occurred, please report this bug to Apollo.
+
+Details: Unexpected primitive String provided for object type Product

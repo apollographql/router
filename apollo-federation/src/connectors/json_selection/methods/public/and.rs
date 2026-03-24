@@ -240,6 +240,7 @@ mod method_tests {
     #[rstest::rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
     fn and_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->and($.missing)", spec).apply_to(&json!({

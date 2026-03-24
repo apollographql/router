@@ -13,11 +13,13 @@ use oci_client::Reference;
 use oci_client::client::ClientConfig;
 use oci_client::client::ClientProtocol;
 use oci_client::errors::OciDistributionError;
+use oci_client::errors::OciErrorCode;
 use oci_client::secrets::RegistryAuth;
 use thiserror::Error;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument::WithSubscriber;
+use url::Url;
 
 use crate::uplink::schema::SchemaState;
 
@@ -99,6 +101,11 @@ pub struct OciConfig {
 
     /// The duration between polling
     pub poll_interval: Duration,
+
+    /// Whether to use SSL (HTTPS) when connecting to the OCI registry.
+    /// Determined once at config creation from the registry hostname and
+    /// the `APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS` environment variable.
+    pub use_ssl: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -295,17 +302,71 @@ async fn fetch_oci_blob(
     Ok(blob_data)
 }
 
-/// The oci reference may not contain the protocol, only hostname[:port]. As a result,
-/// in order to test locally without SSL, either (1) protocol needs to be exposed as an
-/// env var or (2) protocol needs to be inferred from hostname. Rather than introduce a
-/// largely unused configuration option, this function checks the hostname for local
-/// development/testing and disables SSL accordingly.
-async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
-    let host = registry.split(":").next().expect("host must be provided");
-    if host == "localhost" || host == "127.0.0.1" || host == "dockerhost" {
-        ClientProtocol::Http
+const UNSECURE_HOSTS_ENV_VAR: &str = "APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS";
+const DEFAULT_UNSECURE_HOSTS: &[&str] = &["localhost", "127.0.0.1", "dockerhost"];
+
+/// Parse a comma-separated string of unsecure hosts. Empty entries are ignored.
+fn parse_unsecure_hosts(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn unsecure_hosts() -> Vec<String> {
+    match std::env::var(UNSECURE_HOSTS_ENV_VAR) {
+        Ok(val) => parse_unsecure_hosts(&val),
+        Err(_) => DEFAULT_UNSECURE_HOSTS
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+    }
+}
+
+/// Extract the hostname from a registry string like "host", "host:port",
+/// "http://host:port", or an IPv6 address like "[::1]:port".
+/// If a scheme is already present, it is parsed directly; otherwise a dummy
+/// scheme is prepended so `url::Url` can parse it.
+/// IPv6 addresses are returned without brackets (e.g. "::1" not "[::1]").
+fn extract_host(registry: &str) -> Option<String> {
+    let url = if registry.contains("://") {
+        Url::parse(registry).ok()?
     } else {
-        ClientProtocol::Https
+        Url::parse(&format!("dummy://{registry}")).ok()?
+    };
+    url.host().map(|h| match h {
+        url::Host::Ipv6(addr) => addr.to_string(),
+        other => other.to_string(),
+    })
+}
+
+/// Check whether `registry` matches any entry in `hosts`, comparing only the
+/// hostname portion (stripping any port).
+fn is_unsecure_host(registry: &str, hosts: &[String]) -> bool {
+    extract_host(registry).is_some_and(|host| hosts.iter().any(|h| h == &host))
+}
+
+/// Determine whether SSL should be used for the given OCI reference.
+///
+/// Consults the `APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS` environment variable,
+/// which contains a comma-separated list of hostnames that should use HTTP
+/// instead of HTTPS. When the variable is unset, the defaults are "localhost",
+/// "127.0.0.1", and "dockerhost". Setting it to an empty string disables all
+/// HTTP overrides.
+pub(crate) fn should_use_ssl(reference: &str) -> bool {
+    reference
+        .parse::<Reference>()
+        .map_or(true, |r| !is_unsecure_host(r.registry(), &unsecure_hosts()))
+}
+
+impl OciConfig {
+    fn client_protocol(&self) -> ClientProtocol {
+        if self.use_ssl {
+            ClientProtocol::Https
+        } else {
+            ClientProtocol::Http
+        }
     }
 }
 
@@ -313,7 +374,7 @@ async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
 pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<String, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
-    let protocol = infer_oci_protocol(reference.resolve_registry()).await;
+    let protocol = oci_config.client_protocol();
 
     let client = Client::new(ClientConfig {
         protocol,
@@ -358,7 +419,7 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
 pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
-    let protocol = infer_oci_protocol(reference.registry()).await;
+    let protocol = oci_config.client_protocol();
 
     tracing::debug!(
         "prepared to fetch schema from oci over {:?}, auth anonymous? {:?}",
@@ -432,6 +493,7 @@ pub(crate) fn stream_from_oci(
 
     let task = async move {
         let mut last_digest: Option<String> = None;
+        let mut polling_time = oci_config.poll_interval;
         loop {
             match fetch_oci_manifest_digest(&oci_config).await {
                 Ok(current_digest) => {
@@ -441,7 +503,6 @@ pub(crate) fn stream_from_oci(
                     } else {
                         // Digest changed, fetch the full schema
                         tracing::debug!("oci manifest digest changed, fetching schema");
-                        last_digest = Some(current_digest);
 
                         match fetch_oci(&oci_config).await {
                             Ok(oci_result) => {
@@ -455,9 +516,16 @@ pub(crate) fn stream_from_oci(
                                         "failed to push to stream. This is likely to be because the router is shutting down: {e}"
                                     );
                                     break;
+                                } else {
+                                    // Only update the digest if the schema fetch was successful
+                                    last_digest = Some(current_digest);
                                 }
                             }
                             Err(err) => {
+                                if let Some(retry_after) = parse_rate_limit_error(&err) {
+                                    polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
+                                }
+
                                 // Error logging is now handled in fetch_oci
                                 if let Err(e) = sender.send(Err(err)).await {
                                     tracing::debug!(
@@ -470,6 +538,11 @@ pub(crate) fn stream_from_oci(
                     }
                 }
                 Err(err) => {
+                    // It should not be possible to get a rate limit error here since the client will automatically move to a get request if the digest is not found, but just in case
+                    if let Some(retry_after) = parse_rate_limit_error(&err) {
+                        polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
+                    }
+
                     if let Err(e) = sender.send(Err(err)).await {
                         tracing::debug!(
                             "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
@@ -479,12 +552,29 @@ pub(crate) fn stream_from_oci(
                 }
             }
 
-            tokio::time::sleep(oci_config.poll_interval).await;
+            tokio::time::sleep(polling_time).await;
+            polling_time = oci_config.poll_interval;
         }
     };
     drop(tokio::task::spawn(task.with_current_subscriber()));
 
     ReceiverStream::new(receiver).boxed()
+}
+
+fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
+    if let OciError::Distribution(OciDistributionError::RegistryError { envelope, .. }) = error
+        && let Some(error) = envelope
+            .errors
+            .iter()
+            .find(|error| error.code == OciErrorCode::Toomanyrequests)
+    {
+        return error
+            .detail
+            .get("retryAfter")
+            .and_then(|value| value.as_u64())
+            .map(Duration::from_secs);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -533,6 +623,7 @@ mod tests {
             reference: reference.clone(),
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
+            use_ssl: false,
         }
     }
 
@@ -825,74 +916,80 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_localhost() {
-        let result = infer_oci_protocol("localhost").await;
-        assert_eq!(result, ClientProtocol::Http);
+    #[rstest::rstest]
+    #[case::external_registry("registry.apollographql.com/my-graph:latest")]
+    #[case::docker_io("docker.io/library/alpine:latest")]
+    #[case::invalid_reference_defaults_true("")]
+    #[case::no_substring_match("localhost.example.com/my-graph:latest")]
+    fn should_use_ssl_true(#[case] reference: &str) {
+        assert!(should_use_ssl(reference));
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_localhost_with_port() {
-        let result = infer_oci_protocol("localhost:5000").await;
-        assert_eq!(result, ClientProtocol::Http);
+    #[rstest::rstest]
+    #[case::localhost("localhost:5000/test-graph:latest")]
+    #[case::loopback("127.0.0.1:5000/test-graph:latest")]
+    #[case::dockerhost("dockerhost:5000/test-graph:latest")]
+    fn should_use_ssl_false(#[case] reference: &str) {
+        assert!(!should_use_ssl(reference));
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_127_0_0_1() {
-        let result = infer_oci_protocol("127.0.0.1").await;
-        assert_eq!(result, ClientProtocol::Http);
+    #[rstest::rstest]
+    #[case::comma_separated("host1,host2,host3", vec!["host1", "host2", "host3"])]
+    #[case::with_whitespace(" host1 , host2 , host3 ", vec!["host1", "host2", "host3"])]
+    #[case::empty_string("", vec![])]
+    #[case::trailing_commas("host1,,host2,", vec!["host1", "host2"])]
+    #[case::single_host("myregistry.local", vec!["myregistry.local"])]
+    fn parse_unsecure_hosts_cases(#[case] input: &str, #[case] expected: Vec<&str>) {
+        assert_eq!(parse_unsecure_hosts(input), expected);
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_127_0_0_1_with_port() {
-        let result = infer_oci_protocol("127.0.0.1:5000").await;
-        assert_eq!(result, ClientProtocol::Http);
+    #[rstest::rstest]
+    #[case::exact("myregistry.local", &["myregistry.local"], true)]
+    #[case::with_port("myregistry.local:5000", &["myregistry.local"], true)]
+    #[case::no_match("other.registry.com", &["myregistry.local"], false)]
+    #[case::empty_list("localhost", &[], false)]
+    #[case::default_localhost("localhost", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_localhost_port("localhost:5000", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_loopback("127.0.0.1", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_loopback_port("127.0.0.1:5000", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_dockerhost("dockerhost", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_dockerhost_port("dockerhost:5000", DEFAULT_UNSECURE_HOSTS, true)]
+    #[case::default_docker_io("docker.io", DEFAULT_UNSECURE_HOSTS, false)]
+    #[case::default_apollo("registry.apollographql.com", DEFAULT_UNSECURE_HOSTS, false)]
+    #[case::no_substring("localhost.example.com", &["localhost"], false)]
+    #[case::no_prefix_match("notlocalhost", &["localhost"], false)]
+    #[case::custom_replaces_defaults("internal.registry.corp", &["internal.registry.corp"], true)]
+    #[case::custom_port("internal.registry.corp:8080", &["internal.registry.corp"], true)]
+    #[case::custom_missing_localhost("localhost", &["internal.registry.corp"], false)]
+    #[case::ipv6_match("[::1]", &["::1"], true)]
+    #[case::ipv6_match_port("[::1]:5000", &["::1"], true)]
+    #[case::ipv6_no_match("localhost", &["::1"], false)]
+    fn is_unsecure_host_cases(
+        #[case] registry: &str,
+        #[case] hosts: &[&str],
+        #[case] expected: bool,
+    ) {
+        let hosts: Vec<String> = hosts.iter().map(|s| s.to_string()).collect();
+        assert_eq!(is_unsecure_host(registry, &hosts), expected);
     }
 
-    #[tokio::test]
-    async fn test_infer_oci_protocol_docker_io() {
-        let result = infer_oci_protocol("docker.io").await;
-        assert_eq!(result, ClientProtocol::Https);
-    }
-
-    #[tokio::test]
-    async fn test_infer_oci_protocol_docker_io_with_port() {
-        let result = infer_oci_protocol("docker.io:443").await;
-        assert_eq!(result, ClientProtocol::Https);
-    }
-
-    #[tokio::test]
-    async fn test_infer_oci_protocol_apollo_registry() {
-        let result = infer_oci_protocol("registry.apollographql.com").await;
-        assert_eq!(result, ClientProtocol::Https);
-    }
-
-    #[tokio::test]
-    async fn test_infer_oci_protocol_apollo_registry_with_port() {
-        let result = infer_oci_protocol("registry.apollographql.com:443").await;
-        assert_eq!(result, ClientProtocol::Https);
-    }
-
-    #[tokio::test]
-    async fn test_infer_oci_protocol_custom_registry() {
-        let result = infer_oci_protocol("localhost.example.com").await;
-        assert_eq!(result, ClientProtocol::Https);
-    }
-
-    #[tokio::test]
-    async fn test_infer_oci_protocol_port_only() {
-        // This case will never pass the initial reference validation, but is
-        // included here as a second layer of security.
-        let result = infer_oci_protocol(":8080").await;
-        assert_eq!(result, ClientProtocol::Https);
-    }
-
-    #[tokio::test]
-    async fn test_infer_oci_protocol_empty_string() {
-        // This case will never pass the initial reference validation, but is
-        // included here as a second layer of security.
-        let result = infer_oci_protocol("").await;
-        assert_eq!(result, ClientProtocol::Https);
+    #[rstest::rstest]
+    #[case::simple("localhost", "localhost")]
+    #[case::simple_port("localhost:5000", "localhost")]
+    #[case::ipv4("127.0.0.1", "127.0.0.1")]
+    #[case::ipv4_port("127.0.0.1:5000", "127.0.0.1")]
+    #[case::ipv6("[::1]", "::1")]
+    #[case::ipv6_port("[::1]:5000", "::1")]
+    #[case::domain_port("registry.example.com:443", "registry.example.com")]
+    #[case::http_scheme("http://localhost:5000", "localhost")]
+    #[case::http_ipv4("http://127.0.0.1:5000", "127.0.0.1")]
+    #[case::https_scheme("https://registry.example.com", "registry.example.com")]
+    #[case::https_port("https://registry.example.com:443", "registry.example.com")]
+    #[case::https_path("https://registry.example.com/v2/repo", "registry.example.com")]
+    #[case::http_path("http://localhost:5000/v2/my-graph/manifests/latest", "localhost")]
+    #[case::http_ipv6("http://[::1]:5000", "::1")]
+    fn extract_host_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(extract_host(input), Some(expected.to_string()));
     }
 
     #[test]
@@ -1206,6 +1303,7 @@ mod tests {
             reference: image_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
+            use_ssl: false,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -1241,6 +1339,7 @@ mod tests {
             reference: image_reference.to_string(),
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
+            use_ssl: false,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -1266,6 +1365,7 @@ mod tests {
             reference: digest_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
+            use_ssl: true,
         };
 
         let result = create_oci_schema_stream(oci_config);
@@ -1353,6 +1453,7 @@ mod tests {
             reference: digest_ref,
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
+            use_ssl: false,
         };
 
         let result = create_oci_schema_stream(oci_config_digest);
@@ -1486,6 +1587,143 @@ mod tests {
             blob_request_count.load(Ordering::Relaxed),
             2,
             "Both blobs should be fetched when digest changes"
+        );
+    }
+
+    struct SequentialBackoffResponse {
+        responses: Mutex<VecDeque<ResponseTemplate>>,
+    }
+
+    impl Respond for SequentialBackoffResponse {
+        fn respond(&self, _request: &Request) -> ResponseTemplate {
+            self.responses
+                .lock()
+                .pop_front()
+                .expect("should have enough responses")
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_oci_backoff_error_retry() {
+        let mock_server = &MockServer::start().await;
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+
+        let manifest_info = create_manifest_from_schema_layer("test schema", None);
+        let blob_url = Url::parse(&format!(
+            "{}/v2/{graph_id}/blobs/{}",
+            mock_server.uri(),
+            manifest_info.blob_digest
+        ))
+        .expect("url must be valid");
+
+        Mock::given(method("GET"))
+            .and(path(blob_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(manifest_info.schema_data.clone()),
+            )
+            .mount(mock_server)
+            .await;
+
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+
+        // First GET request returns 429 with Retry-After header and OCI error envelope, second returns 200
+        let oci_error_body = serde_json::json!({
+            "errors": [{
+                "code": "TOOMANYREQUESTS",
+                "message": "pull request limit exceeded",
+                "detail": {
+                    "retryAfter": 10
+                }
+            }]
+        });
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .expect(2)
+            .mount(mock_server)
+            .await;
+
+        // GET request for manifest
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(SequentialBackoffResponse {
+                responses: Mutex::new(VecDeque::from([
+                    // First response 429 to rate limit
+                    ResponseTemplate::new(429)
+                        .append_header("Retry-After", "10")
+                        .append_header(http::header::CONTENT_TYPE, "application/json")
+                        .set_body_json(&oci_error_body),
+                    // Second response 200 to return the manifest
+                    ResponseTemplate::new(200)
+                        .append_header("Docker-Content-Digest", &manifest_info.manifest_digest)
+                        .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                        .set_body_bytes(serde_json::to_vec(&manifest_info.oci_manifest).unwrap()),
+                ])),
+            })
+            .mount(mock_server)
+            .await;
+
+        let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid");
+        let oci_config = OciConfig {
+            apollo_key: "test-api-key".to_string(),
+            reference: image_reference.to_string(),
+            hot_reload: true,
+            poll_interval: Duration::from_millis(10),
+            use_ssl: false,
+        };
+
+        let start_time = tokio::time::Instant::now();
+        let mut stream = stream_from_oci(oci_config);
+
+        // The stream should eventually succeed after the backoff period
+        // Use a timeout to ensure the test completes
+        let result = timeout(Duration::from_secs(20), stream.next()).await;
+        assert!(
+            result.is_ok(),
+            "Stream should produce an error first within timeout"
+        );
+        let first_result = result.unwrap();
+        assert!(
+            first_result.is_some() && first_result.as_ref().unwrap().is_err(),
+            "First result should be an error"
+        );
+
+        let result = timeout(Duration::from_secs(20), stream.next()).await;
+        assert!(
+            result.is_ok(),
+            "Stream should produce a result after the backoff period second within timeout"
+        );
+
+        let elapsed = start_time.elapsed();
+
+        match result.unwrap() {
+            Some(Ok(schema_state)) => {
+                assert_eq!(schema_state.sdl, "test schema");
+            }
+            Some(Err(e)) => panic!("expected success after backoff retry, got error: {e}"),
+            None => panic!("expected stream to yield a result"),
+        }
+
+        // Verify that at least 10 seconds elapsed (the retry_after_secs from Retry-After header)
+        assert!(
+            elapsed >= Duration::from_secs(10),
+            "Should have slept for at least 10 seconds due to backoff, but elapsed time was {:?}",
+            elapsed
         );
     }
 }

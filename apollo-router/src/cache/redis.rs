@@ -56,7 +56,8 @@ const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
 ];
 
 /// Timeout applied to internal Redis operations, such as TCP connection initialization, TLS handshakes, AUTH or HELLO, cluster health checks, etc.
-const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(5);
+// NOTE: In practice we've found that 5s is too low, so we've set it to 10s. Do some sanity checking before tweaking it to a lower value
+const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(10);
 /// Interval on which we send PING commands to the Redis servers.
 const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -128,8 +129,15 @@ struct DropSafeRedisPool {
     pool: Arc<RedisPool>,
     caller: &'static str,
     heartbeat_abort_handle: AbortHandle,
-    // Metrics collector handles its own abort and gauges
-    _metrics_collector: RedisMetricsCollector,
+    // Metrics collector handles its own abort and spawns a background task for gauge updates
+    metrics_collector: RedisMetricsCollector,
+}
+
+impl DropSafeRedisPool {
+    /// Signal that the meter provider is ready and metrics gauges can be created.
+    fn activate(&self) {
+        self.metrics_collector.activate();
+    }
 }
 
 impl Deref for DropSafeRedisPool {
@@ -362,6 +370,9 @@ impl RedisCacheStorage {
                 }
             })
             .with_connection_config(|config| {
+                // NOTE: the default internal_command_timeout is 10s, so this line is just to make
+                // it explicit that we're using that default (at the time of writing, this const is
+                // set to 10s)
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
                 config.max_command_buffer_len = 10_000;
                 config.reconnect_on_auth_error = true;
@@ -479,7 +490,7 @@ impl RedisCacheStorage {
                 pool: pooled_client_arc,
                 caller,
                 heartbeat_abort_handle: heartbeat_handle.abort_handle(),
-                _metrics_collector: metrics_collector,
+                metrics_collector,
             }),
             namespace: namespace.map(Arc::new),
             ttl,
@@ -490,6 +501,14 @@ impl RedisCacheStorage {
 
     pub(crate) fn ttl(&self) -> Option<Duration> {
         self.ttl
+    }
+
+    /// Signal that the meter provider is ready and metrics gauges can be created.
+    ///
+    /// This MUST be called after `Telemetry.activate()` to ensure gauges are
+    /// registered with the correct meter provider.
+    pub(crate) fn activate(&self) {
+        self.inner.activate();
     }
 
     /// Helper method to record Redis errors for metrics

@@ -21,6 +21,7 @@ use http::HeaderValue;
 use http::Request;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
+use http_body::Body;
 use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
@@ -30,6 +31,7 @@ use serde_json::json;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
@@ -53,6 +55,8 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::plugins::telemetry::SpanMode;
+use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
+use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecordingStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -354,20 +358,28 @@ where
         .br(true)
         .gzip(true)
         .deflate(true);
-    let mut main_route = main_router::<RF>(configuration)
-        .layer(decompression)
-        .layer(middleware::from_fn_with_state(
-            (license.clone(), Instant::now(), Arc::new(AtomicU64::new(0))),
-            license_handler,
-        ))
-        .layer(Extension(service_factory))
-        .layer(cors)
-        // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
-        // Adding layers after telemetry will cause us to lose metrics and spans.
-        .layer(
-            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license, span_mode }),
-        )
-        .layer(middleware::from_fn(metrics_handler));
+
+    let mut main_route = main_router::<RF>(configuration).layer(
+        ServiceBuilder::new()
+            // Telemetry layers MUST be first. This means that they will be hit first during execution of the pipeline
+            // Adding layers before telemetry will cause us to lose metrics and spans.
+            .layer(middleware::from_fn(metrics_handler))
+            .layer(
+                TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan {
+                    license: license.clone(),
+                    span_mode,
+                }),
+            )
+            // CORS layer must be before any layer that can short-circuit with an error response, else
+            // browser clients will not be able to view the error response body.
+            .layer(cors)
+            .layer(Extension(service_factory))
+            .layer(middleware::from_fn_with_state(
+                (license, Instant::now(), Arc::new(AtomicU64::new(0))),
+                license_handler,
+            ))
+            .layer(decompression),
+    );
 
     if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
         main_route = main_endpoint_layer(main_route);
@@ -535,14 +547,34 @@ async fn handle_graphql<RF: RouterFactory>(
                 .as_ref()
                 .and_then(|value| value.to_str().ok())
                 .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
+
+            let response_body_size_recording = context
+                .extensions()
+                .with_lock(|lock| lock.remove::<ResponseBodySizeRecording>());
+
             let body = match opt_compressor {
-                None => body,
+                None => {
+                    if let Some(recording) = response_body_size_recording
+                        && let Some(size) = body.size_hint().exact()
+                    {
+                        recording.record_byte_count(size);
+                    }
+
+                    body
+                }
                 Some(compressor) => {
                     parts.headers.insert(
                         CONTENT_ENCODING,
                         HeaderValue::from_static(compressor.content_encoding()),
                     );
-                    router::body::from_result_stream(compressor.process(body))
+
+                    let stream = compressor.process(body);
+                    match response_body_size_recording {
+                        Some(recording) => router::body::from_result_stream(
+                            ResponseBodySizeRecordingStream::new(stream, recording),
+                        ),
+                        None => router::body::from_result_stream(stream),
+                    }
                 }
             };
 

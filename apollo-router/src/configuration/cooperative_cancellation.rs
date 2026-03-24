@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use bytesize::ByteSize;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -19,6 +20,9 @@ pub(crate) struct CooperativeCancellation {
     #[schemars(with = "Option<String>")]
     /// Enable timeout for query planning.
     timeout: Option<Duration>,
+    /// Enable memory limit for query planning.
+    #[schemars(with = "Option<String>", default)]
+    memory_limit: Option<ByteSize>,
 }
 
 impl Default for CooperativeCancellation {
@@ -27,6 +31,7 @@ impl Default for CooperativeCancellation {
             enabled: true,
             mode: Mode::Measure,
             timeout: None,
+            memory_limit: None,
         }
     }
 }
@@ -37,6 +42,11 @@ impl CooperativeCancellation {
         self.timeout
     }
 
+    /// Returns the memory limit, if configured.
+    pub(crate) fn memory_limit(&self) -> Option<ByteSize> {
+        self.memory_limit
+    }
+
     #[cfg(test)]
     /// Create a new `CooperativeCancellation` config in enforcement mode.
     pub(crate) fn enabled() -> Self {
@@ -44,6 +54,7 @@ impl CooperativeCancellation {
             enabled: true,
             mode: Mode::Enforce,
             timeout: None,
+            memory_limit: None,
         }
     }
 
@@ -52,14 +63,8 @@ impl CooperativeCancellation {
         self.enabled
     }
 
-    /// Returns true if this config is in measure mode.
-    pub(crate) fn is_measure_mode(&self) -> bool {
-        self.mode.is_measure_mode()
-    }
-
-    /// Returns true if this config is in enforce mode.
-    pub(crate) fn is_enforce_mode(&self) -> bool {
-        self.mode.is_enforce_mode()
+    pub(crate) fn mode(&self) -> Mode {
+        self.mode
     }
 
     #[cfg(test)]
@@ -69,6 +74,7 @@ impl CooperativeCancellation {
             enabled: true,
             mode: Mode::Enforce,
             timeout: Some(timeout),
+            memory_limit: None,
         }
     }
 
@@ -79,6 +85,57 @@ impl CooperativeCancellation {
             enabled: true,
             mode: Mode::Measure,
             timeout: Some(timeout),
+            memory_limit: None,
+        }
+    }
+
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
+    /// Create a new `CooperativeCancellation` config in enforce mode with a memory limit.
+    pub(crate) fn enforce_with_memory_limit(memory_limit: ByteSize) -> Self {
+        Self {
+            enabled: true,
+            mode: Mode::Enforce,
+            timeout: None,
+            memory_limit: Some(memory_limit),
+        }
+    }
+
+    /// Create a new `CooperativeCancellation` config in measure mode with a memory limit.
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
+    pub(crate) fn measure_with_memory_limit(memory_limit: ByteSize) -> Self {
+        Self {
+            enabled: true,
+            mode: Mode::Measure,
+            timeout: None,
+            memory_limit: Some(memory_limit),
+        }
+    }
+
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
+    /// Create a new `CooperativeCancellation` config in enforcement mode with both timeout and memory limit.
+    pub(crate) fn enforce_with_timeout_and_memory_limit(
+        timeout: Duration,
+        memory_limit: ByteSize,
+    ) -> Self {
+        Self {
+            enabled: true,
+            mode: Mode::Enforce,
+            timeout: Some(timeout),
+            memory_limit: Some(memory_limit),
+        }
+    }
+
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix, test))]
+    /// Create a new `CooperativeCancellation` config in measure mode with both timeout and memory limit.
+    pub(crate) fn measure_with_timeout_and_memory_limit(
+        timeout: Duration,
+        memory_limit: ByteSize,
+    ) -> Self {
+        Self {
+            enabled: true,
+            mode: Mode::Measure,
+            timeout: Some(timeout),
+            memory_limit: Some(memory_limit),
         }
     }
 }

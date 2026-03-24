@@ -44,6 +44,7 @@ use crate::merger::merge_argument::HasArguments;
 use crate::schema::blueprint::FEDERATION_OPERATION_FIELDS;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -129,31 +130,11 @@ impl Merger {
 
         trace!("Gathering fields to add for type {}", obj_or_itf);
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
-            // Check interfaces in the subgraph's schema first
-            let Ok(interfaces) = obj_or_itf.implemented_interfaces(subgraph.schema()) else {
-                // If the type doesn't exist in this subgraph, check if any of the interfaces
-                // it implements in the merged schema are interface objects in this subgraph
-                if let Ok(merged_interfaces) = obj_or_itf.implemented_interfaces(&self.merged) {
-                    for itf in merged_interfaces {
-                        if subgraph
-                            .schema()
-                            .get_type(itf.name.clone())
-                            .as_ref()
-                            .is_ok_and(|ty| subgraph.is_interface_object_type(ty))
-                        {
-                            // This marks the subgraph as having a relevant @interfaceObject,
-                            // even though we do not actively add that type's fields.
-                            extra_sources.insert(idx, None);
-                            break; // Only need to mark once per subgraph
-                        }
-                    }
-                }
-                continue;
-            };
-            for itf in interfaces {
+            // check if subgraph contains @interfaceObjects for any of the target implemented interfaces
+            for interface in obj_or_itf.implemented_interfaces(&self.merged)? {
                 if subgraph
                     .schema()
-                    .get_type(itf.name.clone())
+                    .get_type(interface.name.clone())
                     .as_ref()
                     .is_ok_and(|ty| subgraph.is_interface_object_type(ty))
                 {
@@ -163,17 +144,20 @@ impl Merger {
                 }
             }
 
-            for field in obj_or_itf.fields(subgraph.schema().schema())? {
-                let field_node = field.get(subgraph.schema().schema())?;
-                field_types.insert(field.clone(), field_node.ty.clone());
-                fields_to_add.entry(idx).or_default().insert(field);
-            }
-
-            if subgraph
+            // we look up the actual type in the subgraph schema as it can be different than the one in the supergraph
+            // (i.e. @interfaceObject in subgraph but an interface in supergraph)
+            if let Some(type_position) = subgraph
                 .schema()
                 .try_get_type(obj_or_itf.type_name().clone())
-                .is_some()
             {
+                let object_or_interface_in_subgraph: ObjectOrInterfaceTypeDefinitionPosition =
+                    type_position.try_into()?;
+                for field in object_or_interface_in_subgraph.fields(subgraph.schema().schema())? {
+                    let field_node = field.get(subgraph.schema().schema())?;
+                    field_types.insert(field.clone(), field_node.ty.clone());
+                    fields_to_add.entry(idx).or_default().insert(field);
+                }
+
                 // Our needsJoinField logic adds @join__field if any subgraphs define
                 // the parent type containing the field but not the field itself. In
                 // those cases, for each field we add, we need to add undefined entries
@@ -187,20 +171,23 @@ impl Merger {
 
         trace!("Adding fields to supergraph schema for type {}", obj_or_itf);
         for (idx, field_set) in fields_to_add {
-            for field in field_set {
-                let is_merged_field = !self.subgraphs[idx].schema().is_root_type(field.type_name())
-                    || !FEDERATION_OPERATION_FIELDS.contains(field.field_name());
+            for subgraph_field in field_set {
+                let is_merged_field = !self.subgraphs[idx]
+                    .schema()
+                    .is_root_type(subgraph_field.type_name())
+                    || !FEDERATION_OPERATION_FIELDS.contains(subgraph_field.field_name());
                 if !is_merged_field {
                     continue;
                 }
-                if !added.contains_key(&field)
-                    && let Some(ty) = field_types.get(&field)
+                let supergraph_field = obj_or_itf.field(subgraph_field.field_name().clone());
+                if !added.contains_key(&supergraph_field)
+                    && let Some(ty) = field_types.get(&subgraph_field)
                 {
-                    field.insert(
+                    supergraph_field.insert(
                         &mut self.merged,
                         Component::new(FieldDefinition {
                             description: None,
-                            name: field.field_name().clone(),
+                            name: supergraph_field.field_name().clone(),
                             arguments: vec![],
                             ty: ty.clone(),
                             directives: Default::default(),
@@ -208,9 +195,9 @@ impl Merger {
                     )?;
                 }
                 added
-                    .entry(field.clone())
+                    .entry(supergraph_field.clone())
                     .or_insert_with(|| extra_sources.clone())
-                    .insert(idx, Some(field));
+                    .insert(idx, Some(subgraph_field));
             }
         }
 
@@ -374,8 +361,22 @@ impl Merger {
         source_idx: usize,
     ) -> Result<Vec<ObjectFieldDefinitionPosition>, FederationError> {
         let mut interface_object_fields = Vec::new();
+        let parent_name_in_supergraph = dest_field.type_name();
         let subgraph = &self.subgraphs[source_idx];
+        if matches!(
+            dest_field,
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(_)
+        ) || subgraph
+            .schema()
+            .try_get_type(parent_name_in_supergraph.clone())
+            .is_some()
+        {
+            return Ok(interface_object_fields);
+        }
+
         for itf in dest_field.parent().implemented_interfaces(&self.merged)? {
+            // Note that since the type is an interface in the supergraph, we can assume that
+            // if it is an object type in the subgraph, then it is an @interfaceObject.
             let itf_as_obj = ObjectTypeDefinitionPosition {
                 type_name: itf.name.clone(),
             };
@@ -652,9 +653,9 @@ impl Merger {
         Ok(arg_sources)
     }
 
-    pub(crate) fn validate_field_sharing<T>(
+    pub(crate) fn validate_field_sharing(
         &mut self,
-        sources: &Sources<T>,
+        sources: &Sources<ObjectOrInterfaceFieldDefinitionPosition>,
         dest: &ObjectOrInterfaceFieldDefinitionPosition,
         merge_context: &FieldMergeContext,
     ) -> Result<(), FederationError> {
@@ -686,33 +687,28 @@ impl Merger {
             };
 
         // Iterate over sources and categorize fields
-        for (idx, unit) in sources.iter() {
-            if unit.is_some() {
-                if !merge_context.is_used_overridden(*idx)
-                    && !merge_context.is_unused_overridden(*idx)
-                {
-                    let subgraph = self.names[*idx].clone();
-                    categorize_field(*idx, subgraph, dest);
-                }
-            } else {
-                // Skip interface object fields if this subgraph is involved in overrides
-                // (either as the source or target of an override)
-                if !merge_context.is_used_overridden(*idx)
-                    && !merge_context.is_unused_overridden(*idx)
-                {
+        for (idx, source) in sources.iter() {
+            match source {
+                None => {
                     let itf_object_fields =
                         self.fields_in_source_if_abstracted_by_interface_object(dest, *idx)?;
+                    // In theory, a type can implement multiple interfaces and all of them could be a @interfaceObject in
+                    // the source and provide the field. If so, we want to consider each as a different source of the
+                    // field.
                     for field in itf_object_fields {
-                        // Also skip if the interface object field itself has @override
-                        let has_override = self.fields_with_override.object_fields.contains(&field);
-
-                        if !has_override {
-                            let subgraph_str = format!(
-                                "{} (through @interfaceObject field \"{}.{}\")",
-                                self.names[*idx], field.type_name, field.field_name
-                            );
-                            categorize_field(*idx, subgraph_str, &field.into());
-                        }
+                        let subgraph_str = format!(
+                            "{} (through @interfaceObject field \"{}.{}\")",
+                            self.names[*idx], field.type_name, field.field_name
+                        );
+                        categorize_field(*idx, subgraph_str, &field.into());
+                    }
+                }
+                Some(source) => {
+                    if !merge_context.is_used_overridden(*idx)
+                        && !merge_context.is_unused_overridden(*idx)
+                    {
+                        let subgraph = self.names[*idx].clone();
+                        categorize_field(*idx, subgraph, source);
                     }
                 }
             }
@@ -782,7 +778,6 @@ impl Merger {
 pub(crate) struct FieldMergeContextProperties {
     pub used_overridden: bool,
     pub unused_overridden: bool,
-    #[allow(dead_code)]
     pub override_with_unknown_target: bool,
     pub override_label: Option<String>,
 }
@@ -794,7 +789,6 @@ pub(crate) struct FieldMergeContext {
 }
 
 impl FieldMergeContext {
-    #[allow(dead_code)]
     pub(crate) fn new<I: IntoIterator<Item = usize>>(indices: I) -> Self {
         let mut props = HashMap::new();
         for i in indices {
@@ -803,7 +797,6 @@ impl FieldMergeContext {
         FieldMergeContext { props }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn is_used_overridden(&self, idx: usize) -> bool {
         self.props
             .get(&idx)
@@ -811,7 +804,6 @@ impl FieldMergeContext {
             .unwrap_or(false)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn is_unused_overridden(&self, idx: usize) -> bool {
         self.props
             .get(&idx)
@@ -819,42 +811,36 @@ impl FieldMergeContext {
             .unwrap_or(false)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_used_overridden(&mut self, idx: usize) {
         if let Some(p) = self.props.get_mut(&idx) {
             p.used_overridden = true;
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_unused_overridden(&mut self, idx: usize) {
         if let Some(p) = self.props.get_mut(&idx) {
             p.unused_overridden = true;
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_override_with_unknown_target(&mut self, idx: usize) {
         if let Some(p) = self.props.get_mut(&idx) {
             p.override_with_unknown_target = true;
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_override_label(&mut self, idx: usize, label: String) {
         if let Some(p) = self.props.get_mut(&idx) {
             p.override_label = Some(label);
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn override_label(&self, idx: usize) -> Option<&str> {
         self.props
             .get(&idx)
             .and_then(|p| p.override_label.as_deref())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn has_override_with_unknown_target(&self, idx: usize) -> bool {
         self.props
             .get(&idx)
@@ -862,7 +848,6 @@ impl FieldMergeContext {
             .unwrap_or(false)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn some<F>(&self, mut predicate: F) -> bool
     where
         F: FnMut(&FieldMergeContextProperties, usize) -> bool,

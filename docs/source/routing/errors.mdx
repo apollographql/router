@@ -42,11 +42,6 @@ A request's HTTP `Accept` header didn't contain any of the router's supported mi
 
 </Property>
 
-<Property name="429" short="Too many requests">
-
-Request traffic exceeded configured rate limits. See [client side traffic shaping](/router/configuration/traffic-shaping/#client-side-traffic-shaping).
-
-</Property>
 <Property name="499" short="Request canceled by client">
 
 The request was canceled because the client closed the connection, possibly due to a client side timeout.
@@ -55,6 +50,12 @@ The request was canceled because the client closed the connection, possibly due 
 <Property name="500" short="Internal server error">
 
 The router encountered an unexpected issue. [Report](https://github.com/apollographql/router/issues/new?assignees=&labels=raised+by+user&projects=&template=bug_report.md&title=) this possible bug to the router team.
+
+</Property>
+
+<Property name="503" short="Service unavailable">
+
+Request traffic exceeded your configured rate limits. See [client side traffic shaping](/router/configuration/traffic-shaping/#client-side-traffic-shaping).
 
 </Property>
 
@@ -123,6 +124,11 @@ There was an error fetching data from a connector service.
 <Property name="COST_ESTIMATED_TOO_EXPENSIVE">
 
 The estimated cost of the query was greater than the configured maximum cost.
+
+</Property>
+<Property name="SUBGRAPH_COST_ESTIMATED_TOO_EXPENSIVE">
+
+The estimated cost of the query directed at a specific subgraph exceeds the configured maximum cost.
 
 </Property>
 <Property name="COST_ACTUAL_TOO_EXPENSIVE">
@@ -224,6 +230,11 @@ There was an error at the HTTP transport layer when fetching data from a subgrap
 
 The operation was not fully executed because it attempted to use a field
 or type was unauthorized.
+
+</Property>
+<Property name="VALIDATION_INVALID_TYPE_VARIABLE">
+
+One or more operation variables have runtime values that don't match their defined GraphQL types.
 
 </Property>
 </PropertyList>

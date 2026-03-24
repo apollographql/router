@@ -1,3 +1,8 @@
+// This `cacheTag` spec is a supergraph-only feature spec to indicate that some of the subgraphs
+// use the `@cacheTag` directive. The `@cacheTag` directive itself is not used in supergraph
+// schema, since `@cacheTag` directive applications are composed using the `@join__directive`
+// directive.
+// PORT_NOTE: Ported from internals-js/src/specs/cacheTagSpec.ts (federation PR #3274).
 use std::sync::LazyLock;
 
 use apollo_compiler::schema::DirectiveLocation;
@@ -12,6 +17,7 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveCompositionOptions;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
@@ -39,7 +45,6 @@ impl CacheTagSpecDefinition {
     }
 
     fn directive_specification(&self) -> Box<dyn TypeAndDirectiveSpecification> {
-        // TODO: Port the JS federation PR (#3274), once Rust composition is implemented.
         Box::new(DirectiveSpecification::new(
             FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
             &[DirectiveArgumentSpecification {
@@ -52,9 +57,13 @@ impl CacheTagSpecDefinition {
             }],
             true, // repeatable
             &self.directive_locations(),
-            true, // composes
-            Some(&|v| CACHE_TAG_VERSIONS.get_dyn_minimum_required_version(v)),
-            None,
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|v| {
+                    CACHE_TAG_VERSIONS.get_dyn_minimum_required_version(v)
+                },
+                static_argument_transform: None,
+                use_join_directive: true,
+            }),
         ))
     }
 }
