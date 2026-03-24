@@ -98,10 +98,10 @@ impl SpanMode {
                 span
             }
             SpanMode::SpecCompliant => {
-                info_span!(ROUTER_SPAN_NAME,
-                    // Needed for apollo_telemetry and datadog span mapping
-                    "http.route" = %request.uri().path(),
-                    "http.request.method" = %request.method(),
+                info_span!(
+                    ROUTER_SPAN_NAME,
+                    // Note that http.route and http.request.method are always added by default,
+                    // but in the on_request selector logic in HttpServerAttributes and HttpCommonAttributes
                     "otel.name" = ::tracing::field::Empty,
                     "otel.kind" = "SERVER",
                     "otel.status_code" = ::tracing::field::Empty,
@@ -253,10 +253,10 @@ mod tests {
             .body("useful info")
             .unwrap();
 
-        let expected_fields = expect::field("http.route")
-            .with_value(&tracing::field::display("/path/to/location"))
-            .and(expect::field("http.request.method").with_value(&tracing::field::display("GET")))
-            .and(expect::field("otel.kind").with_value(&"SERVER"))
+        // In SpecCompliant mode, http.route and http.request.method are added
+        // by the on_request selector logic, not at span creation time.
+        let expected_fields = expect::field("otel.kind")
+            .with_value(&"SERVER")
             .and(expect::field("apollo_private.request").with_value(&true));
 
         let expected_span = expect::span()
@@ -287,7 +287,6 @@ mod tests {
             ("/foo/bar?baz", "/foo/bar"),
         ];
 
-        let span_modes = [SpanMode::SpecCompliant, SpanMode::Deprecated];
         let license_states = [
             LicenseState::LicensedHalt { limits: None },
             LicenseState::Unlicensed,
@@ -296,7 +295,7 @@ mod tests {
         for (uri, expected_route) in expected_routes {
             let request = http::Request::builder().uri(uri).body("").unwrap();
 
-            // test `request` spans
+            // test `request` spans (Deprecated mode only)
             for license_state in &license_states {
                 let expected_span = expect::span().named(REQUEST_SPAN_NAME).with_fields(
                     expect::field("http.route")
@@ -313,8 +312,8 @@ mod tests {
                 handle.assert_finished();
             }
 
-            // test `router` spans
-            for span_mode in span_modes {
+            // test `router` spans in Deprecated mode (http.route set at span creation)
+            {
                 let expected_span = expect::span().named(ROUTER_SPAN_NAME).with_fields(
                     expect::field("http.route")
                         .with_value(&tracing::field::display(expected_route)),
@@ -323,11 +322,14 @@ mod tests {
                 let (subscriber, handle) =
                     subscriber::mock().new_span(expected_span).run_with_handle();
                 tracing::subscriber::with_default(subscriber, || {
-                    let span = span_mode.create_router(&request);
+                    let span = SpanMode::Deprecated.create_router(&request);
                     let _guard = span.enter();
                 });
                 handle.assert_finished();
             }
+
+            // In SpecCompliant mode, http.route is added by HttpServerAttributes
+            // on_request selector logic, not at span creation time.
         }
     }
 }

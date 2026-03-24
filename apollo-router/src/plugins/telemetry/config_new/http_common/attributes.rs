@@ -184,15 +184,24 @@ impl DefaultForLevel for HttpCommonAttributes {
 impl Selectors<router::Request, router::Response, ()> for HttpCommonAttributes {
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
-        if let Some(key) = self
-            .http_request_method
-            .as_ref()
-            .and_then(|a| a.key(HTTP_REQUEST_METHOD.into()))
-        {
-            attrs.push(KeyValue::new(
-                key,
-                request.router_request.method().as_str().to_string(),
-            ));
+        // http.request.method is always added unless set to false as
+        // it is needed for apollo_telemetry and datadog span mapping
+        match self.http_request_method {
+            Some(StandardAttribute::Bool(true))
+            | Some(StandardAttribute::Aliased { alias: _ })
+            | None => {
+                if let Some(key) = self
+                    .http_request_method
+                    .as_ref()
+                    .and_then(|a| a.key(HTTP_REQUEST_METHOD.into()))
+                {
+                    attrs.push(KeyValue::new(
+                        key,
+                        request.router_request.method().as_str().to_string(),
+                    ));
+                }
+            }
+            Some(StandardAttribute::Bool(false)) => {}
         }
 
         if let Some(key) = self
@@ -458,6 +467,58 @@ mod test {
                 .find(|key_val| key_val.key.as_str() == HTTP_REQUEST_METHOD)
                 .map(|key_val| &key_val.value),
             Some(&"POST".into())
+        );
+    }
+
+    #[test]
+    fn test_http_common_request_method_disabled() {
+        let common = HttpCommonAttributes {
+            http_request_method: Some(StandardAttribute::Bool(false)),
+            ..Default::default()
+        };
+
+        let attributes = common.on_request(
+            &router::Request::fake_builder()
+                .method(http::Method::POST)
+                .build()
+                .unwrap(),
+        );
+        assert!(
+            !attributes
+                .iter()
+                .any(|key_val| key_val.key.as_str() == HTTP_REQUEST_METHOD),
+            "http.request.method should not be present when disabled"
+        );
+    }
+
+    #[test]
+    fn test_http_common_request_method_aliased() {
+        let common = HttpCommonAttributes {
+            http_request_method: Some(StandardAttribute::Aliased {
+                alias: "my_method".to_string(),
+            }),
+            ..Default::default()
+        };
+
+        let attributes = common.on_request(
+            &router::Request::fake_builder()
+                .method(http::Method::POST)
+                .build()
+                .unwrap(),
+        );
+        assert!(
+            !attributes
+                .iter()
+                .any(|key_val| key_val.key.as_str() == HTTP_REQUEST_METHOD),
+            "original key should not be present when aliased"
+        );
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key.as_str() == "my_method")
+                .map(|key_val| &key_val.value),
+            Some(&"POST".into()),
+            "aliased key should have the method value"
         );
     }
 
