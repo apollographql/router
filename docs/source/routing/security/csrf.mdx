@@ -35,7 +35,7 @@ The router **enables CSRF prevention by default**. When this feature is enabled,
 
   <Note>
   
-   A `Content-Type` of `application/json` is sufficient, including any suffix like `application/json; charset=utf-8`. Since all `POST` requests must use `Content-Type: application/json`, this means all `POST` requests will be executed. And because all versions of [Apollo Client Web](/react/api/link/apollo-link-http) that support `GET` requests include `Content-Type: application/json` headers, any request from Apollo Client Web (`POST` or `GET`) will also be executed.
+   A `Content-Type` of `application/json` is sufficient, including any suffix like `application/json; charset=utf-8`. Since all `POST` requests must use `Content-Type: application/json`, this means all `POST` requests will be executed. And because all versions of [Apollo Client Web](/react/api/link/apollo-link-http) that support `GET` requests include `Content-Type: application/json` headers, any request from Apollo Client Web (`POST` or `GET`) will also be executed. Note that as of v2.12.1, Apollo Router rejects all GraphQL requests with non-`application/json` `Content-Type` headers, so in practice this condition is equivalent to "The incoming request includes a `Content-Type` header specifying `application/json`."
 
   </Note>
 
