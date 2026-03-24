@@ -457,6 +457,9 @@ mod tests {
         }
 
         assert_eq!(shed, 0, "Expected all requests to succeed without shedding");
-        assert_eq!(other_err, 0, "Expected all requests to fail without errors");
+        assert_eq!(
+            other_err, 0,
+            "Expected all requests to succeed without errors"
+        );
     }
 }
