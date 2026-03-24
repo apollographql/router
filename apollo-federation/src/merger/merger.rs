@@ -1615,22 +1615,22 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         let mut source_as_entity = Vec::new();
         let mut source_as_non_entity = Vec::new();
 
-        let mut sources: Sources<usize> = Default::default();
+        let mut sources: Sources<_> = Default::default();
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
             let Some(key_directive_name) = subgraph.key_directive_name()? else {
                 continue;
             };
-            if obj.try_get(subgraph.schema().schema()).is_some() {
-                sources.insert(idx, Some(idx));
+            if let Some(node) = obj.try_get(subgraph.schema().schema()) {
+                sources.insert(idx, Some(node));
                 if obj.has_applied_directive(subgraph.schema(), &key_directive_name) {
-                    source_as_entity.push(idx);
+                    source_as_entity.push(node);
                 } else {
-                    source_as_non_entity.push(idx);
+                    source_as_non_entity.push(node);
                 }
             }
         }
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize, _>(
+            self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentEntity,
                 format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
                     &obj.type_name,
@@ -2272,34 +2272,34 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     } else {
                         format!("Element \"{dest}\"")
                     };
-                self.error_reporter.report_mismatch_hint::<T, T, _>(
-                    HintCode::InconsistentDescription,
-                    format!("{name} has inconsistent descriptions across subgraphs. "),
-                    dest,
-                    sources,
-                    &self.subgraphs,
-                    |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
-                    |elem, idx| {
-                        elem.description(self.subgraphs[idx].schema())
-                            .map(|desc| desc.to_string())
-                    },
-                    |desc, subgraphs| {
-                        format!(
-                            "The supergraph will use description (from {}):\n{}",
-                            subgraphs.unwrap_or_else(|| "undefined".to_string()),
-                            Self::description_string(desc, "  ")
-                        )
-                    },
-                    |desc, subgraphs| {
-                        format!(
-                            "\nIn {}, the description is:\n{}",
-                            subgraphs,
-                            Self::description_string(desc, "  ")
-                        )
-                    },
-                    false,
-                    true,
-                );
+                    self.error_reporter.report_mismatch_hint::<T, T, _>(
+                        HintCode::InconsistentDescription,
+                        format!("{name} has inconsistent descriptions across subgraphs. "),
+                        dest,
+                        sources,
+                        &self.subgraphs,
+                        |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
+                        |elem, idx| {
+                            elem.description(self.subgraphs[idx].schema())
+                                .map(|desc| desc.to_string())
+                        },
+                        |desc, subgraphs| {
+                            format!(
+                                "The supergraph will use description (from {}):\n{}",
+                                subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                                Self::description_string(desc, "  ")
+                            )
+                        },
+                        |desc, subgraphs| {
+                            format!(
+                                "\nIn {}, the description is:\n{}",
+                                subgraphs,
+                                Self::description_string(desc, "  ")
+                            )
+                        },
+                        false,
+                        true,
+                    );
                 }
             }
         }

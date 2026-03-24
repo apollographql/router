@@ -166,7 +166,7 @@ impl Merger {
                 if name_in_supergraph.is_none() {
                     name_in_supergraph = Some(&directive.name);
                 } else if name_in_supergraph.is_some_and(|n| *n != directive.name) {
-                    let definition_sources: IndexMap<_, _> = self
+                    let definition_sources = self
                         .subgraphs
                         .iter()
                         .enumerate()

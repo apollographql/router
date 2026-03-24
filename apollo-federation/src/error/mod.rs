@@ -141,7 +141,6 @@ impl<HL: HasLocations> HasLocations for &HL {
     }
 }
 
-
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {
     #[error("[{subgraph}] {error}")]

@@ -1,9 +1,5 @@
-use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::DirectiveDefinition;
-use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::Type;
-use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::HasLocations;
@@ -11,10 +7,10 @@ use crate::error::Locations;
 use crate::error::SubgraphLocation;
 use crate::merger::compose_directive_manager::MergeDirectiveItem;
 use crate::schema::position::AbstractTypeDefinitionPosition;
-use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
 use crate::schema::position::FieldArgumentDefinitionPosition;
@@ -39,27 +35,21 @@ use crate::schema::position::UnionTypenameFieldDefinitionPosition;
 use crate::subgraph::typestate::HasMetadata;
 use crate::subgraph::typestate::Subgraph;
 
-impl HasLocations for Type {
-    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
-        self.inner_named_type().locations(subgraph)
-    }
-}
-
-impl HasLocations for Directive {
-    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
-        todo!()
-    }
-}
-
-impl HasLocations for FieldDefinition {
-    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
-        todo!()
-    }
-}
-
 impl HasLocations for DirectiveDefinition {
-    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
-        todo!()
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
+        subgraph
+            .schema()
+            .schema()
+            .directive_definitions
+            .get(&self.name)
+            .map(|dir| dir.locations(subgraph))
+            .unwrap_or_default()
+    }
+}
+
+impl HasLocations for MergeDirectiveItem {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
+        self.definition.locations(subgraph)
     }
 }
 
@@ -311,32 +301,23 @@ impl HasLocations for DirectiveArgumentDefinitionPosition {
     }
 }
 
-impl HasLocations for Name {
-    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
-        todo!()
-    }
-}
-
-impl HasLocations for String {
-    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
-        Locations::default()
-    }
-}
-
-impl HasLocations for usize {
-    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
-        todo!()
-    }
-}
-
 impl HasLocations for DirectiveTargetPosition {
-    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
-        todo!()
-    }
-}
-
-impl HasLocations for MergeDirectiveItem {
-    fn locations<T: HasMetadata>(&self, _subgraph: &Subgraph<T>) -> Locations {
-        todo!()
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
+        match self {
+            DirectiveTargetPosition::Schema(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::ScalarType(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::ObjectType(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::ObjectField(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::ObjectFieldArgument(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::InterfaceType(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::InterfaceField(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::InterfaceFieldArgument(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::UnionType(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::EnumType(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::EnumValue(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::InputObjectType(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::InputObjectField(pos) => pos.locations(subgraph),
+            DirectiveTargetPosition::DirectiveArgument(pos) => pos.locations(subgraph),
+        }
     }
 }

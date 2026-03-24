@@ -23,7 +23,6 @@ pub(crate) struct ErrorReporter {
     names: Vec<String>,
 }
 
-
 impl ErrorReporter {
     pub(crate) fn new(names: Vec<String>) -> Self {
         Self {
@@ -74,7 +73,7 @@ impl ErrorReporter {
         (self.errors, self.hints)
     }
 
-    pub(crate) fn report_mismatch_error<D: HasLocations, S: HasLocations, T: HasMetadata>(
+    pub(crate) fn report_mismatch_error<D, S: HasLocations, T: HasMetadata>(
         &mut self,
         error: CompositionError,
         mismatched_element: &D,
@@ -139,7 +138,7 @@ impl ErrorReporter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn report_mismatch_error_with_specifics<D: HasLocations, S: HasLocations, T: HasMetadata>(
+    pub(crate) fn report_mismatch_error_with_specifics<D, S: HasLocations, T: HasMetadata>(
         &mut self,
         error: CompositionError,
         mismatched_element: &D,
@@ -177,7 +176,7 @@ impl ErrorReporter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn report_mismatch_hint<D: HasLocations, S: HasLocations, T: HasMetadata>(
+    pub(crate) fn report_mismatch_hint<D, S: HasLocations, T: HasMetadata>(
         &mut self,
         code: HintCode,
         message: String,
@@ -224,7 +223,7 @@ impl ErrorReporter {
     /// Reports a mismatch between a supergraph element and subgraph elements.
     /// Not meant to be used directly: use `report_mismatch_error` or `report_mismatch_hint` instead.
     #[allow(clippy::too_many_arguments)]
-    fn report_mismatch<D: HasLocations, S: HasLocations, T: HasMetadata>(
+    fn report_mismatch<D, S: HasLocations, T: HasMetadata>(
         &mut self,
         supergraph_element: Option<&D>,
         subgraph_elements: &Sources<S>,

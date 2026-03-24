@@ -79,7 +79,7 @@ impl Merger {
     ) -> Result<IndexSet<Name>, FederationError>
     where
         T: HasArguments + Debug + Display,
-        <T as HasArguments>::ArgumentPosition: HasLocations + Display,
+        <T as HasArguments>::ArgumentPosition: Display,
     {
         let mut arg_types: IndexMap<Name, Node<Type>> = Default::default();
         let mut removed_args = HashSet::new();
