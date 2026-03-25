@@ -652,39 +652,17 @@ mod h2c_cleartext {
 }
 
 mod h2c_keep_alive {
-    // use std::convert::Infallible;
-    // use std::io;
     use std::pin::Pin;
-    // use std::str::FromStr;
-    // use std::sync::Arc;
-    // use std::sync::Mutex;
     use std::task::Context;
     use std::task::Poll;
     use std::time::Duration;
 
-    // use axum::body::Body;
-    // use http::Request;
-    // use http::StatusCode;
-    // use http::Uri;
-    // use http::header::CONTENT_TYPE;
-    // use hyper::body::Incoming;
-    // use hyper_util::rt::TokioExecutor;
-    // use hyper_util::rt::TokioIo;
-    // use mime::APPLICATION_JSON;
-    // use serde_json_bytes::Value;
     use tokio::io::AsyncRead;
     use tokio::io::AsyncWrite;
     use tokio::io::ReadBuf;
 
-    // use tokio::net::TcpListener;
-    // use tower::BoxError;
-    // use tower::ServiceExt;
     use super::*;
     use crate::configuration::shared::Client;
-    // use crate::graphql::Response;
-    // use crate::plugins::traffic_shaping::Http2Config;
-    // use crate::services::http::HttpClientService;
-    // use crate::services::http::HttpRequest;
 
     /// Wraps a TcpStream and records all bytes the server reads from the client.
     struct SpyStream {
