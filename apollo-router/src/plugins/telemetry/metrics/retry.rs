@@ -1,8 +1,10 @@
 //! Retry wrapper for push metric exporters.
 //!
 //! Wraps a `PushMetricExporter` and retries failed exports a number
-//! of times with exponential backoff. Only surfaces the error after all attempts
-//! are exhausted, keeping transient failures out of the logs.
+//! of times with jittered exponential backoff. Only surfaces the error
+//! after all attempts are exhausted, keeping transient failures out of the logs.
+//! We use this approach as recommended by the OpenTelemetry Spec:
+//! https://opentelemetry.io/docs/specs/otel/protocol/exporter/#retry
 
 use std::fmt::Debug;
 use std::time::Duration;
@@ -11,6 +13,7 @@ use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
+use rand::Rng;
 
 const DEFAULT_MAX_RETRIES: usize = 3;
 const BASE_BACKOFF: Duration = Duration::from_millis(100);
@@ -53,7 +56,7 @@ impl<T: PushMetricExporter> PushMetricExporter for RetryMetricExporter<T> {
                     );
                     last_err = Some(err);
                     if attempt + 1 < self.max_retries {
-                        tokio::time::sleep(BASE_BACKOFF * 2u32.pow(attempt as u32)).await;
+                        tokio::time::sleep(jittered_backoff(BASE_BACKOFF, attempt as u32)).await;
                     }
                 }
             }
@@ -72,6 +75,17 @@ impl<T: PushMetricExporter> PushMetricExporter for RetryMetricExporter<T> {
     fn temporality(&self) -> Temporality {
         self.inner.temporality()
     }
+}
+
+/// Full jitter: uniform random duration in `[0, base_backoff * 2^attempt]`.
+fn jittered_backoff(base: Duration, attempt: u32) -> Duration {
+    let max = base * 2u32.pow(attempt);
+    let max_millis = max.as_millis() as u64;
+    if max_millis == 0 {
+        return Duration::ZERO;
+    }
+    let jittered = rand::rng().random_range(0..=max_millis);
+    Duration::from_millis(jittered)
 }
 
 #[cfg(test)]
@@ -155,5 +169,35 @@ mod tests {
         let result = exporter.export(&ResourceMetrics::default()).await;
         assert!(result.is_err());
         assert_eq!(exporter.inner.calls(), DEFAULT_MAX_RETRIES);
+    }
+
+    #[test]
+    fn jittered_backoff_within_bounds() {
+        let base = Duration::from_millis(100);
+        for attempt in 0..4 {
+            let max = base * 2u32.pow(attempt);
+            for _ in 0..200 {
+                let d = jittered_backoff(base, attempt);
+                assert!(d <= max, "attempt {attempt}: {d:?} exceeded max {max:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn jittered_backoff_zero_base() {
+        assert_eq!(jittered_backoff(Duration::ZERO, 0), Duration::ZERO);
+        assert_eq!(jittered_backoff(Duration::ZERO, 5), Duration::ZERO);
+    }
+
+    #[test]
+    fn jittered_backoff_has_spread() {
+        let base = Duration::from_millis(100);
+        let samples: Vec<Duration> = (0..100).map(|_| jittered_backoff(base, 2)).collect();
+        let min = *samples.iter().min().unwrap();
+        let max = *samples.iter().max().unwrap();
+        assert!(
+            max - min > Duration::from_millis(50),
+            "expected spread across samples, got min={min:?} max={max:?}"
+        );
     }
 }
