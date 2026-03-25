@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
 use derivative::Derivative;
@@ -344,189 +345,237 @@ impl Query {
         Ok((fragments, operation, defer_stats, hash))
     }
 
-    /// <https://spec.graphql.org/October2021/#CompleteValue()>
+    /// Mirrors `CompleteValue` from the spec.
+    /// <https://spec.graphql.org/September2025/#CompleteValue()>
     ///
-    /// Validates and formats a resolved field value according to its GraphQL type.
-    /// For object/interface/union types, merges the sub-selection sets of all
-    /// field nodes sharing this response key (`MergeSelectionSets`) and recurses
-    /// via `apply_selection_set`.
-    fn complete_value<'a: 'b, 'b>(
+    /// Formats a response value according to its GraphQL type.
+    fn format_value<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
         field_type: &executable::Type,
-        // All Field nodes that share this response key; their sub-selection sets
-        // are merged (MergeSelectionSets) when completing an object value.
-        fields: &[&'a Selection],
         input: &mut Value,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
+        fields: &[&'a Selection],
     ) -> Result<(), InvalidValue> {
+        // for every type, if we have an invalid value, we will replace it with null
+        // and return Ok(()), because values are optional by default
         match field_type {
-            executable::Type::NonNullNamed(_) | executable::Type::NonNullList(_) => {
-                let inner_type = match field_type {
-                    executable::Type::NonNullList(ty) => ty.clone().list(),
-                    executable::Type::NonNullNamed(name) => executable::Type::Named(name.clone()),
-                    _ => unreachable!(),
-                };
-                self.complete_value(parameters, &inner_type, fields, input, output, path)?;
-                if output.is_null() {
-                    let message = format!("Null value found for non-nullable type {inner_type}");
-                    parameters.errors.push(
-                        Error::builder()
-                            .message(&message)
-                            .path(Path::from_response_slice(path))
-                            .build(),
-                    );
-                    parameters.insert_coercion_error(
-                        Error::builder()
-                            .message(message)
-                            .path(Path::from_response_slice(path))
-                            .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
-                            .build(),
-                    );
-                    return Err(InvalidValue);
-                }
-            }
-            executable::Type::List(inner_type) => {
-                let Value::Array(input_array) = input else {
-                    return Ok(());
-                };
-                if output.is_null() {
-                    *output = Value::Array(vec![Value::Null; input_array.len()]);
-                }
-                let output_array = output.as_array_mut().ok_or(InvalidValue)?;
-                if let Err(InvalidValue) =
-                    input_array
-                        .iter_mut()
-                        .enumerate()
-                        .try_for_each(|(i, element)| {
-                            path.push(ResponsePathElement::Index(i));
-                            self.complete_value(
-                                parameters,
-                                inner_type,
-                                fields,
-                                element,
-                                &mut output_array[i],
-                                path,
-                            )?;
-                            path.pop();
-                            Ok(())
-                        })
-                {
-                    // We pop here because, if an error is found, the path still
-                    // contains the index of the invalid value.
-                    path.pop();
-                    parameters.nullified.push(Path::from_response_slice(path));
-                    parameters.insert_coercion_error(
-                        Error::builder()
-                            .message(format!(
-                                "Invalid value found inside the array of type [{inner_type}]"
-                            ))
-                            .path(Path::from_response_slice(path))
-                            .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
-                            .build(),
-                    );
-                    *output = Value::Null;
-                }
-            }
-            executable::Type::Named(type_name) => match type_name.as_str() {
+            executable::Type::Named(name) => match name.as_str() {
                 "Int" => self.format_integer(parameters, path, input, output),
                 "Float" => self.format_float(parameters, path, input, output),
                 "Boolean" => self.format_boolean(parameters, path, input, output),
                 "String" => self.format_string(parameters, path, input, output),
                 "Id" => self.format_id(parameters, path, input, output),
-                _ => {
-                    match parameters.schema.types.get(type_name) {
-                        Some(ExtendedType::Scalar(_)) => {
-                            *output = input.clone();
-                        }
-                        Some(ExtendedType::Enum(enum_type)) => {
-                            *output = input
-                                .as_str()
-                                .filter(|s| enum_type.values.contains_key(*s))
-                                .map(|_| input.clone())
-                                .unwrap_or_default();
-                        }
-                        _ => {
-                            // Object, Interface, or Union — apply sub-selections.
-                            if let Value::Object(input_object) = input {
-                                if let Some(input_type) =
-                                    input_object.get(TYPENAME).and_then(|v| v.as_str())
-                                {
-                                    // If there is a __typename, make sure the pointed type is a
-                                    // valid type of the schema. Otherwise, something is wrong,
-                                    // and in case we might be inadvertently leaking some data
-                                    // for an @inaccessible type or something, nullify the whole
-                                    // object. However, do note that due to `@interfaceObject`,
-                                    // some subgraph can have returned a __typename that is the
-                                    // name of an interface in the supergraph, and this is fine
-                                    // (that is, we should not return such a __typename to the
-                                    // user, but as long as it's not returned, having it in the
-                                    // internal data is ok and sometimes expected).
-                                    let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                                        parameters.schema.types.get(input_type)
-                                    else {
-                                        parameters.nullified.push(Path::from_response_slice(path));
-                                        *output = Value::Null;
-                                        return Ok(());
-                                    };
-                                }
-
-                                if output.is_null() {
-                                    *output = Value::Object(Object::with_capacity(fields.len()));
-                                }
-                                let output_object = output.as_object_mut().ok_or(InvalidValue)?;
-
-                                let typename = input_object
-                                    .get(TYPENAME)
-                                    .and_then(|val| val.as_str())
-                                    .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
-                                    .map(apollo_compiler::ast::Type::Named);
-
-                                let current_type = match parameters.schema.types.get(type_name) {
-                                    Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
-                                        typename.as_ref().unwrap_or(field_type)
-                                    }
-                                    _ => field_type,
-                                };
-
-                                // MergeSelectionSets: flatten sub-selections from all
-                                // field nodes sharing this response key.
-                                let merged = fields.iter().flat_map(|sel| {
-                                    if let Selection::Field {
-                                        selection_set: Some(ss),
-                                        ..
-                                    } = sel
-                                    {
-                                        ss.iter()
-                                    } else {
-                                        (&[] as &[Selection]).iter()
-                                    }
-                                });
-
-                                if self
-                                    .apply_selection_set(
-                                        merged,
-                                        parameters,
-                                        input_object,
-                                        output_object,
-                                        path,
-                                        current_type,
-                                    )
-                                    .is_err()
-                                {
-                                    parameters.nullified.push(Path::from_response_slice(path));
-                                    *output = Value::Null;
-                                }
-                            } else {
-                                parameters.nullified.push(Path::from_response_slice(path));
-                                *output = Value::Null;
-                            }
-                        }
-                    }
-                }
+                _ => self
+                    .format_named_type(parameters, field_type, input, name, output, path, fields)?,
             },
+            // if the list contains nonnullable types, we will receive a Err(InvalidValue)
+            // and should replace the entire list with null
+            // if the types are nullable, the inner call to filter_errors will take care
+            // of setting the current entry to null
+            executable::Type::List(inner_type) => {
+                self.format_list(parameters, input, inner_type, output, path, fields)?
+            }
+            // for non null types, we validate with the inner type, then if we get an InvalidValue
+            // we set it to null and immediately return an error instead of Ok(()), because we
+            // want the error to go up until the next nullable parent
+            executable::Type::NonNullNamed(_) | executable::Type::NonNullList(_) => {
+                self.format_non_nullable_value(parameters, field_type, input, output, path, fields)?
+            }
         }
+        Ok(())
+    }
+
+    #[inline]
+    fn format_non_nullable_value<'a: 'b, 'b>(
+        &'a self,
+        parameters: &mut FormatParameters,
+        field_type: &executable::Type,
+        input: &mut Value,
+        output: &mut Value,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        fields: &[&'a Selection],
+    ) -> Result<(), InvalidValue> {
+        let inner_type = match field_type {
+            executable::Type::NonNullList(ty) => ty.clone().list(),
+            executable::Type::NonNullNamed(name) => executable::Type::Named(name.clone()),
+            // This function should never be called for non-nullable types
+            _ => {
+                tracing::error!("`format_non_nullable_value` was called with a nullable type!!");
+                debug_assert!(field_type.is_non_null());
+                return Err(InvalidValue);
+            }
+        };
+
+        self.format_value(parameters, &inner_type, input, output, path, fields)?;
+
+        if output.is_null() {
+            let message = format!("Null value found for non-nullable type {inner_type}");
+            parameters.errors.push(
+                Error::builder()
+                    .message(&message)
+                    .path(Path::from_response_slice(path))
+                    .build(),
+            );
+            parameters.insert_coercion_error(
+                Error::builder()
+                    .message(message)
+                    .path(Path::from_response_slice(path))
+                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                    .build(),
+            );
+
+            Err(InvalidValue)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[inline]
+    fn format_list<'a: 'b, 'b>(
+        &'a self,
+        parameters: &mut FormatParameters,
+        input: &mut Value,
+        inner_type: &executable::Type,
+        output: &mut Value,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        fields: &[&'a Selection],
+    ) -> Result<(), InvalidValue> {
+        let Value::Array(input_array) = input else {
+            return Ok(());
+        };
+        if output.is_null() {
+            *output = Value::Array(vec![Value::Null; input_array.len()]);
+        }
+        let output_array = output.as_array_mut().ok_or(InvalidValue)?;
+        if let Err(InvalidValue) =
+            input_array
+                .iter_mut()
+                .enumerate()
+                .try_for_each(|(i, element)| {
+                    path.push(ResponsePathElement::Index(i));
+                    self.format_value(
+                        parameters,
+                        inner_type,
+                        element,
+                        &mut output_array[i],
+                        path,
+                        fields,
+                    )?;
+                    path.pop();
+                    Ok(())
+                })
+        {
+            // We pop here because, if an error is found, the path still contains the index of the
+            // invalid value.
+            path.pop();
+            parameters.nullified.push(Path::from_response_slice(path));
+            parameters.insert_coercion_error(
+                Error::builder()
+                    .message(format!(
+                        "Invalid value found inside the array of type [{inner_type}]"
+                    ))
+                    .path(Path::from_response_slice(path))
+                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                    .build(),
+            );
+            *output = Value::Null;
+        }
+        Ok(())
+    }
+
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn format_named_type<'a: 'b, 'b>(
+        &'a self,
+        parameters: &mut FormatParameters,
+        field_type: &executable::Type,
+        input: &mut Value,
+        type_name: &Name,
+        output: &mut Value,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        fields: &[&'a Selection],
+    ) -> Result<(), InvalidValue> {
+        // we cannot know about the expected format of custom scalars
+        // so we must pass them directly to the client
+        match parameters.schema.types.get(type_name) {
+            Some(ExtendedType::Scalar(_)) => {
+                *output = input.clone();
+                return Ok(());
+            }
+            Some(ExtendedType::Enum(enum_type)) => {
+                *output = input
+                    .as_str()
+                    .filter(|s| enum_type.values.contains_key(*s))
+                    .map(|_| input.clone())
+                    .unwrap_or_default();
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        if let Value::Object(input_object) = input {
+            if let Some(input_type) = input_object.get(TYPENAME).and_then(|val| val.as_str()) {
+                // If there is a __typename, make sure the pointed type is a valid type of the
+                // schema. Otherwise, something is wrong, and in case we might be inadvertently
+                // leaking some data for an @inacessible type or something, nullify the whole
+                // object. However, do note that due to `@interfaceObject`, some subgraph can have
+                // returned a __typename that is the name of an interface in the supergraph, and
+                // this is fine (that is, we should not return such a __typename to the user, but
+                // as long as it's not returned, having it in the internal data is ok and sometimes
+                // expected).
+                let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
+                    parameters.schema.types.get(input_type)
+                else {
+                    parameters.nullified.push(Path::from_response_slice(path));
+                    *output = Value::Null;
+                    return Ok(());
+                };
+            }
+
+            let typename = input_object
+                .get(TYPENAME)
+                .and_then(|val| val.as_str())
+                .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
+                .map(apollo_compiler::ast::Type::Named);
+
+            let current_type = match parameters.schema.types.get(field_type.inner_named_type()) {
+                Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
+                    typename.as_ref().unwrap_or(field_type)
+                }
+                _ => field_type,
+            };
+            let current_type_name = current_type.inner_named_type().as_str();
+
+            let (collected_fields, any_fragment_applied) =
+                self.collect_subfields(parameters, current_type_name, fields);
+
+            if output.is_null() {
+                *output = Value::Object(Object::with_capacity(collected_fields.len()));
+            }
+            let output_object = output.as_object_mut().ok_or(InvalidValue)?;
+
+            if self
+                .apply_collected_fields(
+                    &collected_fields,
+                    any_fragment_applied,
+                    parameters,
+                    input_object,
+                    output_object,
+                    path,
+                    current_type_name,
+                )
+                .is_err()
+            {
+                parameters.nullified.push(Path::from_response_slice(path));
+                *output = Value::Null;
+            }
+        } else {
+            parameters.nullified.push(Path::from_response_slice(path));
+            *output = Value::Null;
+        }
+
         Ok(())
     }
 
@@ -654,7 +703,7 @@ impl Query {
         }
     }
 
-    /// <https://spec.graphql.org/October2021/#CollectFields()>
+    /// <https://spec.graphql.org/September2025/#CollectFields()>
     ///
     /// Traverses `selections` (and any inline/named fragments it contains) and
     /// groups every `Field` selection by its response name (alias if present,
@@ -665,14 +714,14 @@ impl Query {
     /// encountered.
     fn collect_fields<'a>(
         &'a self,
-        schema: &ApiSchema,
+        parameters: &FormatParameters,
         object_type: &str,
         selection_set: impl IntoIterator<Item = &'a Selection>,
-        variables: &Object,
         visited_fragments: &mut HashSet<&'a str>,
         grouped_fields: &mut IndexMap<&'a ByteString, Vec<&'a Selection>>,
         any_fragment_applied: &mut bool,
     ) {
+        let schema = parameters.schema;
         for selection in selection_set {
             match selection {
                 Selection::Field {
@@ -681,7 +730,7 @@ impl Query {
                     include_skip,
                     ..
                 } => {
-                    if include_skip.should_skip(variables) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
                     let response_key = alias.as_ref().unwrap_or(name);
@@ -696,16 +745,15 @@ impl Query {
                     include_skip,
                     ..
                 } => {
-                    if include_skip.should_skip(variables) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
                     if Self::does_fragment_type_apply(schema, object_type, type_condition) {
                         *any_fragment_applied = true;
                         self.collect_fields(
-                            schema,
+                            parameters,
                             object_type,
                             frag_ss.iter(),
-                            variables,
                             visited_fragments,
                             grouped_fields,
                             any_fragment_applied,
@@ -715,7 +763,7 @@ impl Query {
                 Selection::FragmentSpread {
                     name, include_skip, ..
                 } => {
-                    if include_skip.should_skip(variables) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
                     // Each named fragment is visited at most once (spec requirement).
@@ -730,10 +778,9 @@ impl Query {
                         if Self::does_fragment_type_apply(schema, object_type, type_condition) {
                             *any_fragment_applied = true;
                             self.collect_fields(
-                                schema,
+                                parameters,
                                 object_type,
                                 frag_ss.iter(),
-                                variables,
                                 visited_fragments,
                                 grouped_fields,
                                 any_fragment_applied,
@@ -748,7 +795,7 @@ impl Query {
         }
     }
 
-    /// <https://spec.graphql.org/October2021/#DoesFragmentTypeApply()>
+    /// <https://spec.graphql.org/September2025/#DoesFragmentTypeApply()>
     fn does_fragment_type_apply(
         schema: &ApiSchema,
         object_type: &str,
@@ -757,46 +804,65 @@ impl Query {
         object_type == fragment_type || schema.is_subtype(fragment_type, object_type)
     }
 
-    /// <https://spec.graphql.org/October2021/#ExecuteSelectionSet()>
-    ///
-    /// Groups `selections` by response key via `collect_fields`, then calls
-    /// `apply_field` once per response key.  Processing each key exactly once
-    /// prevents double-processing bugs such as ROUTER-1598 (null propagation
-    /// bypassed by a later fragment).
-    fn apply_selection_set<'a: 'b, 'b>(
+    /// <https://spec.graphql.org/September2025/#CollectSubfields()>
+    fn collect_subfields<'a>(
         &'a self,
-        selections: impl IntoIterator<Item = &'a Selection>,
+        parameters: &FormatParameters,
+        current_type_name: &str,
+        fields: &[&'a Selection],
+    ) -> (IndexMap<&'a ByteString, Vec<&'a Selection>>, bool) {
+        let mut grouped_fields: IndexMap<&'a ByteString, Vec<&'a Selection>> = IndexMap::default();
+        let mut any_fragment_applied = false;
+        for field in fields {
+            if let Selection::Field {
+                selection_set: Some(sub_ss),
+                ..
+            } = field
+            {
+                // Each field node's selection set is passed to `collect_fields` with a *fresh*
+                // `visited_fragments` set, as required by the spec, and the results are merged
+                // into a single ordered map.
+                let mut visited_fragments: HashSet<&'a str> = HashSet::new();
+                self.collect_fields(
+                    parameters,
+                    current_type_name,
+                    sub_ss.iter(),
+                    &mut visited_fragments,
+                    &mut grouped_fields,
+                    &mut any_fragment_applied,
+                );
+            }
+        }
+        (grouped_fields, any_fragment_applied)
+    }
+
+    /// Mirrors `ExecuteCollectedFields` from the spec.
+    /// <https://spec.graphql.org/September2025/#ExecuteCollectedFields()>
+    ///
+    /// Iterates over a pre-built `collected_fields` map calling `apply_field`
+    /// once per response key.  Handles the filtered-query `__typename`
+    /// preservation before the field loop.
+    #[allow(clippy::too_many_arguments)]
+    fn apply_collected_fields<'a: 'b, 'b>(
+        &'a self,
+        collected_fields: &IndexMap<&'a ByteString, Vec<&'a Selection>>,
+        any_fragment_applied: bool,
         parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
-        current_type: &executable::Type,
+        current_type_name: &str,
     ) -> Result<(), InvalidValue> {
-        let current_type_name = current_type.inner_named_type().as_str();
-        let mut visited_fragments: HashSet<&'a str> = HashSet::new();
-        let mut grouped_fields: IndexMap<&'a ByteString, Vec<&'a Selection>> = IndexMap::default();
-        let mut any_fragment_applied = false;
-
-        self.collect_fields(
-            parameters.schema,
-            current_type_name,
-            selections,
-            parameters.variables,
-            &mut visited_fragments,
-            &mut grouped_fields,
-            &mut any_fragment_applied,
-        );
-
-        // For filtered queries, when at least one fragment's type condition was
-        // satisfied, preserve __typename so the original query can perform its own
-        // type-condition checks.
-        if !self.is_original && any_fragment_applied {
-            if let Some(input_type) = input.get(TYPENAME) {
-                output.insert(TYPENAME, input_type.clone());
-            }
+        // If this is the filtered query, we must keep the __typename field because the original
+        // query must know the type.
+        if !self.is_original
+            && any_fragment_applied
+            && let Some(input_type) = input.get(TYPENAME)
+        {
+            output.insert(TYPENAME, input_type.clone());
         }
 
-        for (response_key, fields) in &grouped_fields {
+        for (response_key, fields) in collected_fields {
             self.apply_field(
                 response_key,
                 fields,
@@ -804,18 +870,20 @@ impl Query {
                 input,
                 output,
                 path,
-                current_type,
+                current_type_name,
             )?;
         }
 
         Ok(())
     }
 
-    /// <https://spec.graphql.org/October2021/#ExecuteField()>
+    /// Mirrors `ExecuteField` from the spec.
+    /// <https://spec.graphql.org/September2025/#ExecuteField()>
     ///
     /// Executes a single field given the group of field nodes that all share the
     /// same response key.  Handles `__typename` specially; for all other fields
-    /// calls `complete_value`.
+    /// calls `format_value`.
+    #[allow(clippy::too_many_arguments)]
     fn apply_field<'a: 'b, 'b>(
         &'a self,
         response_key: &'a ByteString,
@@ -824,7 +892,7 @@ impl Query {
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
-        current_type: &executable::Type,
+        current_type_name: &str,
     ) -> Result<(), InvalidValue> {
         // `field[0]` won't panic, since collect_fields only creates groups with at least one field.
         let Selection::Field {
@@ -837,13 +905,10 @@ impl Query {
         };
 
         if name.as_str() == TYPENAME {
-            let object_type = parameters
-                .schema
-                .get_object(current_type.inner_named_type())
-                .or_else(|| {
-                    let input_value = input.get(response_key.as_str())?.as_str()?;
-                    parameters.schema.get_object(input_value)
-                });
+            let object_type = parameters.schema.get_object(current_type_name).or_else(|| {
+                let input_value = input.get(response_key.as_str())?.as_str()?;
+                parameters.schema.get_object(input_value)
+            });
 
             if let Some(object_type) = object_type {
                 output.insert((*response_key).clone(), object_type.name.as_str().into());
@@ -856,13 +921,13 @@ impl Query {
         if let Some(input_value) = input.get_mut(response_key.as_str()) {
             let output_value = output.entry((*response_key).clone()).or_insert(Value::Null);
             path.push(ResponsePathElement::Key(response_key.as_str()));
-            let res = self.complete_value(
+            let res = self.format_value(
                 parameters,
                 &field_type.0,
-                fields,
                 input_value,
                 output_value,
                 path,
+                fields,
             );
             path.pop();
             res?;
@@ -874,8 +939,8 @@ impl Query {
                 parameters.errors.push(
                     Error::builder()
                         .message(format!(
-                            "Null value found for non-nullable type {}",
-                            field_type.0.inner_named_type()
+                            "Cannot return null for non-nullable field {current_type_name}.{field_name}",
+                            field_name = name.as_str()
                         ))
                         .path(Path::from_response_slice(path))
                         .build(),
@@ -887,6 +952,8 @@ impl Query {
         Ok(())
     }
 
+    /// Mirrors `ExecuteRootSelectionSet` from the spec.
+    /// <https://spec.graphql.org/September2025/#ExecuteRootSelectionSet()>
     fn apply_root_selection_set<'a: 'b, 'b>(
         &'a self,
         root_type_name: &str,
@@ -901,62 +968,23 @@ impl Query {
         let mut any_fragment_applied = false;
 
         self.collect_fields(
-            parameters.schema,
+            parameters,
             root_type_name,
             selection_set.iter(),
-            parameters.variables,
             &mut visited_fragments,
             &mut grouped_fields,
             &mut any_fragment_applied,
         );
 
-        for (response_key, fields) in grouped_fields {
-            let Selection::Field {
-                name, field_type, ..
-            } = fields[0]
-            else {
-                continue;
-            };
-            let response_key_str = response_key.as_str();
-
-            if name.as_str() == TYPENAME {
-                output.insert(
-                    (*response_key).clone(),
-                    Value::String(root_type_name.into()),
-                );
-                continue;
-            }
-
-            if let Some(input_value) = input.get_mut(response_key_str) {
-                let output_value = output.entry((*response_key).clone()).or_insert(Value::Null);
-                path.push(ResponsePathElement::Key(response_key_str));
-                let res = self.complete_value(
-                    parameters,
-                    &field_type.0,
-                    &fields,
-                    input_value,
-                    output_value,
-                    path,
-                );
-                path.pop();
-                res?;
-            } else if field_type.is_non_null() {
-                parameters.errors.push(
-                    Error::builder()
-                        .message(format!(
-                            "Cannot return null for non-nullable field \
-                             {root_type_name}.{response_key_str}"
-                        ))
-                        .path(Path::from_response_slice(path))
-                        .build(),
-                );
-                return Err(InvalidValue);
-            } else {
-                output.insert((*response_key).clone(), Value::Null);
-            }
-        }
-
-        Ok(())
+        self.apply_collected_fields(
+            &grouped_fields,
+            any_fragment_applied,
+            parameters,
+            input,
+            output,
+            path,
+            root_type_name,
+        )
     }
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].

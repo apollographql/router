@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/services/supergraph/tests.rs
-assertion_line: 435
 expression: response
 ---
 {
@@ -12,7 +11,7 @@ expression: response
   "extensions": {
     "valueCompletion": [
       {
-        "message": "Null value found for non-nullable type ID",
+        "message": "Cannot return null for non-nullable field Organization.nonNullId",
         "path": [
           "currentUser",
           "activeOrganization"
