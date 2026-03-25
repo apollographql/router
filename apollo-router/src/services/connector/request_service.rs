@@ -85,6 +85,9 @@ pub struct Request {
 /// Response type for a connector
 #[derive(Debug)]
 pub struct Response {
+    /// The request context
+    pub(crate) context: Context,
+
     /// The result of the transport request
     pub(crate) transport_result: Result<TransportResponse, Error>,
 
@@ -94,6 +97,7 @@ pub struct Response {
 
 impl Response {
     pub(crate) fn error_new(
+        context: Context,
         error: Error,
         message: impl Into<String>,
         response_key: ResponseKey,
@@ -107,6 +111,7 @@ impl Response {
         };
 
         Self {
+            context,
             transport_result: Err(error),
             mapped_response,
         }
@@ -114,6 +119,7 @@ impl Response {
 
     #[cfg(test)]
     pub(crate) fn test_new(
+        context: Context,
         response_key: ResponseKey,
         problems: Vec<Problem>,
         data: serde_json_bytes::Value,
@@ -135,6 +141,7 @@ impl Response {
         let http_response = HttpResponse { inner: parts };
 
         Self {
+            context,
             transport_result: Ok(http_response.into()),
             mapped_response,
         }

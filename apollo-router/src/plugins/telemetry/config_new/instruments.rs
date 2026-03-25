@@ -3241,6 +3241,7 @@ mod tests {
                                         .unwrap();
                                     *http_response.headers_mut() = convert_http_headers(headers);
                                     let response = Response {
+                                        context: context.clone(),
                                         transport_result: Ok(TransportResponse::Http(
                                             HttpResponse {
                                                 inner: http_response.into_parts().0,
