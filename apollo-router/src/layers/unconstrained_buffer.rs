@@ -118,6 +118,7 @@ impl<Request> fmt::Debug for UnconstrainedBufferLayer<Request> {
 /// [`Pending`]: Poll::Pending
 /// [`unconstrained`]: tokio::task::unconstrained
 /// [`poll_ready`]: Service::poll_ready
+#[derive(Debug)]
 pub struct UnconstrainedBuffer<Req, F> {
     /// The inner [`Buffer`] layer, which wraps the actual service and is responsible for
     /// buffering requests.
