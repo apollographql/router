@@ -86,6 +86,38 @@ where
                     return Ok(ControlFlow::Break(response.into()));
                 }
 
+                if req.router_request.method() == Method::GET
+                    && !content_type_is_strictly_json_or_missing(req.router_request.headers())
+                {
+                    let response: http::Response<crate::services::router::Body> = http::Response::builder()
+                        .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(crate::services::router::Body::from(
+                            serde_json::json!({
+                                "errors": [
+                                    graphql::Error::builder()
+                                        .message(format!("GET request 'content-type' header may only contain: {:?}", APPLICATION_JSON.essence_str()))
+                                        .extension_code("INVALID_CONTENT_TYPE_HEADER")
+                                        .build()
+                                ]
+                            })
+                            .to_string(),
+                        ))
+                        .expect("cannot fail");
+                    u64_counter!(
+                        "apollo_router_http_requests_total",
+                        "Total number of HTTP requests made. (deprecated)",
+                        1,
+                        status = StatusCode::UNSUPPORTED_MEDIA_TYPE.as_u16() as i64,
+                        error = format!(
+                            "GET request 'content-type' header may only contain: {:?}",
+                            APPLICATION_JSON.essence_str()
+                        )
+                    );
+
+                    return Ok(ControlFlow::Break(response.into()));
+                }
+
                 let accepts = parse_accept(req.router_request.headers());
 
                 if accepts.wildcard
@@ -172,6 +204,29 @@ where
     }
 }
 
+/// Returns true if no content type was provided, or if content type's MIME type is `application/json`
+/// (including any optional parameters, ie `; charset=utf-8`).
+/// Returns false if any other types are provided or if any of the types are malformed.
+// NB: content type can come in through (1) multiple header values and (2) multiple elements within the
+//     same header value, so checking this is kind of a pain
+fn content_type_is_strictly_json_or_missing(headers: &HeaderMap) -> bool {
+    for header_value in headers.get_all(CONTENT_TYPE) {
+        let Ok(content_type_str) = header_value.to_str() else {
+            return false;
+        };
+
+        let mime_results = MediaTypeList::new(content_type_str);
+        for mime_result in mime_results {
+            let Ok(mime) = mime_result else { return false };
+            if !(mime.ty == APPLICATION && mime.subty == JSON) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
 /// Returns true if the headers content type is `application/json` or `application/graphql-response+json`
 fn content_type_is_json(headers: &HeaderMap) -> bool {
     headers.get_all(CONTENT_TYPE).iter().any(|value| {
@@ -252,6 +307,70 @@ mod tests {
     use http::HeaderValue;
 
     use super::*;
+
+    #[test]
+    fn content_type_is_strictly_json_or_missing_accepts_valid_headers() {
+        // empty headers
+        assert!(content_type_is_strictly_json_or_missing(&HeaderMap::new()));
+
+        // no content-type (other headers present)
+        let mut headers = HeaderMap::new();
+        headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
+        assert!(content_type_is_strictly_json_or_missing(&headers));
+
+        // empty string
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static(""));
+        assert!(content_type_is_strictly_json_or_missing(&headers));
+
+        // application/json
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        assert!(content_type_is_strictly_json_or_missing(&headers));
+
+        // application/json with charset parameter
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        );
+        assert!(content_type_is_strictly_json_or_missing(&headers));
+    }
+
+    #[test]
+    fn content_type_is_strictly_json_or_missing_rejects_invalid_headers() {
+        // malformed
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("invalid"));
+        assert!(!content_type_is_strictly_json_or_missing(&headers));
+
+        // text/plain
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+        assert!(!content_type_is_strictly_json_or_missing(&headers));
+
+        // multipart/form-data
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("multipart/form-data"),
+        );
+        assert!(!content_type_is_strictly_json_or_missing(&headers));
+
+        // application/graphql
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/graphql"),
+        );
+        assert!(!content_type_is_strictly_json_or_missing(&headers));
+
+        // multiple values, one invalid
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.append(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+        assert!(!content_type_is_strictly_json_or_missing(&headers));
+    }
 
     #[test]
     fn it_checks_accept_header() {
