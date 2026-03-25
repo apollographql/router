@@ -4,7 +4,7 @@
 //! of times with jittered exponential backoff. Only surfaces the error
 //! after all attempts are exhausted, keeping transient failures out of the logs.
 //! We use this approach as recommended by the OpenTelemetry Spec:
-//! https://opentelemetry.io/docs/specs/otel/protocol/exporter/#retry
+//! <https://opentelemetry.io/docs/specs/otel/protocol/exporter/#retry>
 
 use std::fmt::Debug;
 use std::time::Duration;
