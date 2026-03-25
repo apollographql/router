@@ -378,6 +378,75 @@ mod tests {
             .await;
     }
 
+    /// Confirms that genuine buffer exhaustion still causes [`LoadShed`] to shed requests.
+    ///
+    /// [`UnconstrainedBuffer`] bypasses the coop budget check but must still propagate genuine
+    /// [`Poll::Pending`] from a full semaphore so that real backpressure is preserved.
+    #[tokio::test(flavor = "current_thread")]
+    async fn full_buffer_should_still_cause_load_shedding() {
+        use std::sync::Arc;
+
+        use tokio::sync::Semaphore;
+
+        // A gate that holds the inner service blocked until we release it.
+        let gate = Arc::new(Semaphore::new(0));
+        let gate_clone = gate.clone();
+
+        let inner = tower::service_fn(move |_: ()| {
+            let gate = gate_clone.clone();
+            async move {
+                // Block until explicitly released.
+                let _permit = gate.acquire().await.unwrap();
+                Ok::<_, BoxError>("ok")
+            }
+        });
+
+        // Capacity 1: the worker holds 1 in-flight; 1 more can queue. A third makes the buffer full.
+        let inner_buffered = UnconstrainedBuffer::new(inner, 1);
+        let mut load_shed = LoadShed::new(inner_buffered);
+
+        // Request 1: accepted, worker picks it up and blocks at the gate.
+        poll_fn(|cx| load_shed.poll_ready(cx)).await.unwrap();
+        drop(load_shed.call(()));
+
+        // Yield so the worker task runs and drains request 1 from the channel.
+        tokio::task::yield_now().await;
+
+        // Request 2: fills the channel while the worker is blocked on request 1.
+        poll_fn(|cx| load_shed.poll_ready(cx)).await.unwrap();
+        drop(load_shed.call(()));
+
+        // Request 3: the channel is now full. Buffer::poll_ready returns genuine Pending
+        // (not coop-induced), LoadShed must shed this request.
+        poll_fn(|cx| {
+            // LoadShed::poll_ready always returns Ready — it absorbs the inner Pending.
+            assert!(matches!(load_shed.poll_ready(cx), Poll::Ready(Ok(()))));
+
+            let fut = load_shed.call(());
+            let mut fut = std::pin::pin!(fut);
+
+            // Overloaded resolves immediately in one poll.
+            let is_overloaded = match fut.as_mut().poll(cx) {
+                Poll::Ready(Err(ref e)) => e
+                    .downcast_ref::<tower::load_shed::error::Overloaded>()
+                    .is_some(),
+                _ => false,
+            };
+
+            assert!(
+                is_overloaded,
+                "Expected Overloaded when buffer is genuinely full; \
+                 UnconstrainedBuffer must not suppress real backpressure"
+            );
+
+            Poll::Ready(())
+        })
+        .await;
+
+        // Release the gate so the worker can drain and the runtime can shut down cleanly.
+        gate.add_permits(2);
+    }
+
     /// Load-based test: ensure that shedding never happens under load with the
     /// real Buffer Worker loop.
     ///
