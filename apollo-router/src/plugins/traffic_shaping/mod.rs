@@ -1450,6 +1450,137 @@ mod test {
         );
     }
 
+    #[tokio::test]
+    async fn test_subgraph_keep_alive_override_and_fallback() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          experimental_http2_keep_alive_interval: 30s
+          experimental_http2_keep_alive_timeout: 10s
+        subgraphs:
+          fast:
+            experimental_http2_keep_alive_interval: 5s
+          explicit_null:
+            experimental_http2_keep_alive_interval: null
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("fast")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(5)),
+            "subgraph-specific override should win"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_null")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(30)),
+            "explicit null falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("unknown")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(30)),
+            "unknown subgraph falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("unknown")
+                .experimental_http2_keep_alive_timeout,
+            Some(Duration::from_secs(10)),
+            "timeout is inherited from all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_connector_keep_alive_override_and_fallback() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        connector:
+          all:
+            experimental_http2_keep_alive_interval: 30s
+            experimental_http2_keep_alive_timeout: 10s
+          sources:
+            my_source:
+              experimental_http2_keep_alive_interval: 5s
+            explicit_null:
+              experimental_http2_keep_alive_interval: null
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("my_source")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(5)),
+            "source-specific override should win"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("explicit_null")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(30)),
+            "explicit null falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("unknown")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(30)),
+            "unknown source falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("unknown")
+                .experimental_http2_keep_alive_timeout,
+            Some(Duration::from_secs(10)),
+            "timeout is inherited from all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_keep_alive_is_none_when_not_configured() {
+        let config = serde_yaml::from_str::<Config>("{}").unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("any")
+                .experimental_http2_keep_alive_interval,
+            None,
+            "keep-alive interval should be None when not configured"
+        );
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("any")
+                .experimental_http2_keep_alive_timeout,
+            None,
+            "keep-alive timeout should be None when not configured"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn it_raises_different_errors_for_timeouts_and_rate_limits() {
         // expected behavior: the first request sent will timeout, the second request will return

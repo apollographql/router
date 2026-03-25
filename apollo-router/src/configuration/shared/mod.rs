@@ -119,4 +119,42 @@ mod tests {
         let result: Result<Client, _> = serde_yaml::from_str("bogus_field: true");
         assert!(result.is_err());
     }
+
+    #[rstest]
+    #[case::humantime_seconds(
+        "experimental_http2_keep_alive_interval: 30s",
+        Some(Duration::from_secs(30))
+    )]
+    #[case::humantime_millis(
+        "experimental_http2_keep_alive_interval: 500ms",
+        Some(Duration::from_millis(500))
+    )]
+    #[case::explicit_null("experimental_http2_keep_alive_interval: null", None)]
+    #[case::omitted("{}", None)]
+    fn test_keep_alive_interval_deserialization(
+        #[case] yaml: &str,
+        #[case] expected: Option<Duration>,
+    ) {
+        let client: Client = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(client.experimental_http2_keep_alive_interval, expected);
+    }
+
+    #[rstest]
+    #[case::humantime_seconds(
+        "experimental_http2_keep_alive_timeout: 10s",
+        Some(Duration::from_secs(10))
+    )]
+    #[case::humantime_millis(
+        "experimental_http2_keep_alive_timeout: 500ms",
+        Some(Duration::from_millis(500))
+    )]
+    #[case::explicit_null("experimental_http2_keep_alive_timeout: null", None)]
+    #[case::omitted("{}", None)]
+    fn test_keep_alive_timeout_deserialization(
+        #[case] yaml: &str,
+        #[case] expected: Option<Duration>,
+    ) {
+        let client: Client = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(client.experimental_http2_keep_alive_timeout, expected);
+    }
 }
