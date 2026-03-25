@@ -183,6 +183,7 @@ opentelemetry-jaeger-propagator = "0.31"
 opentelemetry-otlp = { version = "0.31", default-features = false, features = [
     "grpc-tonic",
     "gzip-tonic",
+    "gzip-http",
     "tonic",
     "tls",
     "http-proto",

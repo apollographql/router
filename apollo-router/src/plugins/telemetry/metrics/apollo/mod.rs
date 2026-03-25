@@ -6,6 +6,7 @@ use std::time::Duration;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::WithHttpConfig;
 use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::Aggregation;
@@ -140,22 +141,23 @@ impl Config {
                 .with_compression(opentelemetry_otlp::Compression::Gzip)
                 .with_temporality(Temporality::Delta)
                 .build()?,
-            // While Apollo doesn't use the HTTP protocol, we support it here for
-            // use in tests to enable WireMock.
             Protocol::Http => {
-                let maybe_endpoint = process_endpoint(
+                let endpoint_str = process_endpoint(
                     &Some(endpoint.to_string()),
                     &TelemetryDataKind::Metrics,
                     &Protocol::Http,
-                )?;
-                let mut builder = MetricExporter::builder()
+                )?
+                .ok_or("A valid HTTP OTLP endpoint is required when using the HTTP protocol")?;
+                let mut headers = std::collections::HashMap::new();
+                headers.insert("x-api-key".to_string(), key.to_string());
+                MetricExporter::builder()
                     .with_http()
                     .with_timeout(batch_config.max_export_timeout)
-                    .with_temporality(Temporality::Delta);
-                if let Some(endpoint) = maybe_endpoint {
-                    builder = builder.with_endpoint(endpoint);
-                }
-                builder.build()?
+                    .with_temporality(Temporality::Delta)
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .with_headers(headers)
+                    .with_endpoint(endpoint_str)
+                    .build()?
             }
         };
         // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
@@ -170,19 +172,22 @@ impl Config {
                 .with_temporality(Temporality::Delta)
                 .build()?,
             Protocol::Http => {
-                let maybe_endpoint = process_endpoint(
+                let endpoint_str = process_endpoint(
                     &Some(endpoint.to_string()),
                     &TelemetryDataKind::Metrics,
                     &Protocol::Http,
-                )?;
-                let mut builder = MetricExporter::builder()
+                )?
+                .ok_or("A valid HTTP OTLP endpoint is required when using the HTTP protocol")?;
+                let mut headers = std::collections::HashMap::new();
+                headers.insert("x-api-key".to_string(), key.to_string());
+                MetricExporter::builder()
                     .with_http()
                     .with_timeout(batch_config.max_export_timeout)
-                    .with_temporality(Temporality::Delta);
-                if let Some(endpoint) = maybe_endpoint {
-                    builder = builder.with_endpoint(endpoint);
-                }
-                builder.build()?
+                    .with_temporality(Temporality::Delta)
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .with_headers(headers)
+                    .with_endpoint(endpoint_str)
+                    .build()?
             }
         };
         // Wrap with overflow detection, then error prefixing
