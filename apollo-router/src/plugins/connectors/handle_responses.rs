@@ -199,6 +199,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     }
 
     connector::request_service::Response {
+        context: context.clone(),
         transport_result: result,
         mapped_response,
     }
@@ -266,6 +267,7 @@ fn log_connectors_event(
             // connectors events.
 
             let response = connector::request_service::Response {
+                context: context.clone(),
                 transport_result: Ok(TransportResponse::Http(HttpResponse {
                     inner: parts.clone(),
                 })),
