@@ -39,6 +39,7 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use parking_lot::Mutex;
+use flate2::read::GzDecoder;
 use prost::Message;
 use regex::Regex;
 use reqwest::Request;
@@ -694,9 +695,27 @@ impl IntegrationTest {
         Mock::given(method(Method::POST))
             .and(path("/v1/metrics"))
             .and(move |req: &wiremock::Request| {
-                // Decode the OTLP request and forward to the channel
-                if let Ok(msg) = ExportMetricsServiceRequest::decode(req.body.as_ref()) {
-                    let _ = apollo_otlp_metrics_tx.try_send(msg);
+                // Decompress gzip body if Content-Encoding indicates it, then decode as protobuf
+                let body: &[u8] = req.body.as_ref();
+                let is_gzip = req
+                    .headers
+                    .get("content-encoding")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| v.contains("gzip"))
+                    .unwrap_or(false);
+                let decoded = if is_gzip {
+                    let mut decoder = GzDecoder::new(body);
+                    let mut buf = Vec::new();
+                    std::io::Read::read_to_end(&mut decoder, &mut buf)
+                        .ok()
+                        .map(|_| buf)
+                } else {
+                    Some(body.to_vec())
+                };
+                if let Some(bytes) = decoded {
+                    if let Ok(msg) = ExportMetricsServiceRequest::decode(bytes.as_slice()) {
+                        let _ = apollo_otlp_metrics_tx.try_send(msg);
+                    }
                 }
                 // Always match so we return 200 OK
                 true
