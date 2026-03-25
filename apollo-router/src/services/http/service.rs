@@ -275,8 +275,14 @@ impl HttpClientService {
             .pool_timer(TokioTimer::new())
             .http2_only(http2 == Http2Config::Http2Only);
         if let Some(interval) = http2_keep_alive_interval {
-            client_builder.http2_keep_alive_interval(Some(interval));
-            client_builder.http2_keep_alive_timeout(http2_keep_alive_timeout);
+            client_builder
+                // WARN: http2 keep-alive requires a timer; don't remove this
+                .timer(TokioTimer::new())
+                .http2_keep_alive_interval(Some(interval))
+                .http2_keep_alive_timeout(http2_keep_alive_timeout)
+                // Send pings even when the connection is idle in the pool, so stale
+                // connections are detected before a request is made on them
+                .http2_keep_alive_while_idle(true);
         }
         let http_client = client_builder.build(connector);
 
