@@ -7099,3 +7099,337 @@ fn filtered_defer_fragment() {
 
     assert_json_snapshot!(response);
 }
+
+// ---------------------------------------------------------------------------
+// Micro-benchmarks for response formatting
+//
+// These are `#[ignore]` tests so they do not run in normal CI.  To run them:
+//
+//   cargo test --release -p apollo-router --lib -- bench_ --ignored --nocapture
+//
+// Scenarios:
+//   bench_format_response_wide_flat          — 30 scalar fields, no fragments
+//   bench_format_response_union_fragments    — two fragments on a union type (ROUTER-1598 path)
+//   bench_format_response_deep_nested_single — 5-level nesting, one fragment per level
+//   bench_format_response_deep_nested_merged — 5-level nesting, two fragments merged per level
+// ---------------------------------------------------------------------------
+
+const BENCH_NULLIFICATION_SCHEMA: &str = "
+    type Query {
+        thing: Thing
+    }
+    type Thing {
+        collection: U
+    }
+    union U = A | B
+    type A {
+        id: ID!
+        a: String
+    }
+    type B {
+        b: String
+    }
+";
+
+const BENCH_NULLIFICATION_QUERY: &str = "
+    query TestQuery {
+        thing {
+            ...AThingFrag
+            ...BThingFrag
+        }
+    }
+    fragment AThingFrag on Thing {
+        collection {
+            ... on A { id a }
+        }
+    }
+    fragment BThingFrag on Thing {
+        collection {
+            __typename
+            ... on B { b }
+        }
+    }
+";
+
+const BENCH_DEEP_SCHEMA: &str = "
+    type Query { root: L1 }
+    type L1 { a: String  b: String  child: L2 }
+    type L2 { a: String  b: String  child: L3 }
+    type L3 { a: String  b: String  child: L4 }
+    type L4 { a: String  b: String  child: L5 }
+    type L5 { a: String  b: String }
+";
+
+/// Wide flat selection: 30 scalar fields, no fragments.
+#[test]
+#[ignore = "perf benchmark — run with cargo test --release -- bench_ --ignored --nocapture"]
+fn bench_format_response_wide_flat() {
+    const SCHEMA: &str = "
+        type Query { row: Row }
+        type Row {
+            f01: String  f02: String  f03: String  f04: String  f05: String
+            f06: String  f07: String  f08: String  f09: String  f10: String
+            f11: String  f12: String  f13: String  f14: String  f15: String
+            f16: String  f17: String  f18: String  f19: String  f20: String
+            f21: String  f22: String  f23: String  f24: String  f25: String
+            f26: String  f27: String  f28: String  f29: String  f30: String
+        }
+    ";
+    const QUERY: &str = "{ row {
+        f01 f02 f03 f04 f05 f06 f07 f08 f09 f10
+        f11 f12 f13 f14 f15 f16 f17 f18 f19 f20
+        f21 f22 f23 f24 f25 f26 f27 f28 f29 f30
+    } }";
+
+    let schema_str = with_supergraph_boilerplate(SCHEMA, "Query");
+    let schema = Schema::parse(&schema_str, &Default::default()).expect("schema");
+    let api_schema = schema.api_schema();
+    let query = Query::parse(QUERY, None, &schema, &Default::default()).expect("query");
+
+    let response_data = json!({
+        "row": {
+            "f01": "v", "f02": "v", "f03": "v", "f04": "v", "f05": "v",
+            "f06": "v", "f07": "v", "f08": "v", "f09": "v", "f10": "v",
+            "f11": "v", "f12": "v", "f13": "v", "f14": "v", "f15": "v",
+            "f16": "v", "f17": "v", "f18": "v", "f19": "v", "f20": "v",
+            "f21": "v", "f22": "v", "f23": "v", "f24": "v", "f25": "v",
+            "f26": "v", "f27": "v", "f28": "v", "f29": "v", "f30": "v"
+        }
+    });
+
+    const WARMUP: usize = 1_000;
+    const ITERS: usize = 50_000;
+
+    for _ in 0..WARMUP {
+        let mut response = Response::builder().data(response_data.clone()).build();
+        query.format_response(
+            &mut response,
+            Default::default(),
+            api_schema,
+            BooleanValues { bits: 0 },
+            true,
+        );
+        std::hint::black_box(&response);
+    }
+
+    let start = std::time::Instant::now();
+    for _ in 0..ITERS {
+        let mut response = Response::builder().data(response_data.clone()).build();
+        query.format_response(
+            &mut response,
+            Default::default(),
+            api_schema,
+            BooleanValues { bits: 0 },
+            true,
+        );
+        std::hint::black_box(&response);
+    }
+    let elapsed = start.elapsed();
+    eprintln!(
+        "bench_format_response_wide_flat: {:.1} ns/iter  ({} iters, {:.3} ms total)",
+        elapsed.as_nanos() as f64 / ITERS as f64,
+        ITERS,
+        elapsed.as_secs_f64() * 1000.0,
+    );
+}
+
+/// Fragment-heavy union scenario: two fragments on the same parent type — the
+/// exact code path changed by the ROUTER-1598 fix.
+#[test]
+#[ignore = "perf benchmark — run with cargo test --release -- bench_ --ignored --nocapture"]
+fn bench_format_response_union_fragments() {
+    let schema_str = with_supergraph_boilerplate(BENCH_NULLIFICATION_SCHEMA, "Query");
+    let schema = Schema::parse(&schema_str, &Default::default()).expect("schema");
+    let api_schema = schema.api_schema();
+    let query =
+        Query::parse(BENCH_NULLIFICATION_QUERY, None, &schema, &Default::default()).expect("query");
+
+    let response_data = json!({
+        "thing": {
+            "collection": { "__typename": "A", "id": "1", "a": "hello" }
+        }
+    });
+
+    const WARMUP: usize = 1_000;
+    const ITERS: usize = 50_000;
+
+    for _ in 0..WARMUP {
+        let mut response = Response::builder().data(response_data.clone()).build();
+        query.format_response(
+            &mut response,
+            Default::default(),
+            api_schema,
+            BooleanValues { bits: 0 },
+            true,
+        );
+        std::hint::black_box(&response);
+    }
+
+    let start = std::time::Instant::now();
+    for _ in 0..ITERS {
+        let mut response = Response::builder().data(response_data.clone()).build();
+        query.format_response(
+            &mut response,
+            Default::default(),
+            api_schema,
+            BooleanValues { bits: 0 },
+            true,
+        );
+        std::hint::black_box(&response);
+    }
+    let elapsed = start.elapsed();
+    eprintln!(
+        "bench_format_response_union_fragments: {:.1} ns/iter  ({} iters, {:.3} ms total)",
+        elapsed.as_nanos() as f64 / ITERS as f64,
+        ITERS,
+        elapsed.as_secs_f64() * 1000.0,
+    );
+}
+
+/// Deep nested, single fragment per type.  Measures the common case with no
+/// fragment merging — one named fragment per level, 5 levels deep.
+#[test]
+#[ignore = "perf benchmark — run with cargo test --release -- bench_ --ignored --nocapture"]
+fn bench_format_response_deep_nested_single() {
+    const QUERY: &str = "
+        query Q { root { ...F1 } }
+        fragment F1 on L1 { a b child { ...F2 } }
+        fragment F2 on L2 { a b child { ...F3 } }
+        fragment F3 on L3 { a b child { ...F4 } }
+        fragment F4 on L4 { a b child { ...F5 } }
+        fragment F5 on L5 { a b }
+    ";
+
+    let schema_str = with_supergraph_boilerplate(BENCH_DEEP_SCHEMA, "Query");
+    let schema = Schema::parse(&schema_str, &Default::default()).expect("schema");
+    let api_schema = schema.api_schema();
+    let query = Query::parse(QUERY, None, &schema, &Default::default()).expect("query");
+
+    let response_data = json!({
+        "root": {
+            "a": "v", "b": "v",
+            "child": {
+                "a": "v", "b": "v",
+                "child": {
+                    "a": "v", "b": "v",
+                    "child": {
+                        "a": "v", "b": "v",
+                        "child": { "a": "v", "b": "v" }
+                    }
+                }
+            }
+        }
+    });
+
+    const WARMUP: usize = 1_000;
+    const ITERS: usize = 50_000;
+
+    for _ in 0..WARMUP {
+        let mut response = Response::builder().data(response_data.clone()).build();
+        query.format_response(
+            &mut response,
+            Default::default(),
+            api_schema,
+            BooleanValues { bits: 0 },
+            true,
+        );
+        std::hint::black_box(&response);
+    }
+
+    let start = std::time::Instant::now();
+    for _ in 0..ITERS {
+        let mut response = Response::builder().data(response_data.clone()).build();
+        query.format_response(
+            &mut response,
+            Default::default(),
+            api_schema,
+            BooleanValues { bits: 0 },
+            true,
+        );
+        std::hint::black_box(&response);
+    }
+    let elapsed = start.elapsed();
+    eprintln!(
+        "bench_format_response_deep_nested_single: {:.1} ns/iter  ({} iters, {:.3} ms total)",
+        elapsed.as_nanos() as f64 / ITERS as f64,
+        ITERS,
+        elapsed.as_secs_f64() * 1000.0,
+    );
+}
+
+/// Deep nested, two fragments merged per type.  Each level has two fragments
+/// (FragA selects `a`, FragB selects `b`) that both contribute a `child`
+/// sub-selection — the worst case for fragment merging overhead.
+#[test]
+#[ignore = "perf benchmark — run with cargo test --release -- bench_ --ignored --nocapture"]
+fn bench_format_response_deep_nested_merged() {
+    const QUERY: &str = "
+        query Q { root { ...F1a ...F1b } }
+        fragment F1a on L1 { a child { ...F2a } }
+        fragment F1b on L1 { b child { ...F2b } }
+        fragment F2a on L2 { a child { ...F3a } }
+        fragment F2b on L2 { b child { ...F3b } }
+        fragment F3a on L3 { a child { ...F4a } }
+        fragment F3b on L3 { b child { ...F4b } }
+        fragment F4a on L4 { a child { ...F5a } }
+        fragment F4b on L4 { b child { ...F5b } }
+        fragment F5a on L5 { a }
+        fragment F5b on L5 { b }
+    ";
+
+    let schema_str = with_supergraph_boilerplate(BENCH_DEEP_SCHEMA, "Query");
+    let schema = Schema::parse(&schema_str, &Default::default()).expect("schema");
+    let api_schema = schema.api_schema();
+    let query = Query::parse(QUERY, None, &schema, &Default::default()).expect("query");
+
+    let response_data = json!({
+        "root": {
+            "a": "v", "b": "v",
+            "child": {
+                "a": "v", "b": "v",
+                "child": {
+                    "a": "v", "b": "v",
+                    "child": {
+                        "a": "v", "b": "v",
+                        "child": { "a": "v", "b": "v" }
+                    }
+                }
+            }
+        }
+    });
+
+    const WARMUP: usize = 1_000;
+    const ITERS: usize = 50_000;
+
+    for _ in 0..WARMUP {
+        let mut response = Response::builder().data(response_data.clone()).build();
+        query.format_response(
+            &mut response,
+            Default::default(),
+            api_schema,
+            BooleanValues { bits: 0 },
+            true,
+        );
+        std::hint::black_box(&response);
+    }
+
+    let start = std::time::Instant::now();
+    for _ in 0..ITERS {
+        let mut response = Response::builder().data(response_data.clone()).build();
+        query.format_response(
+            &mut response,
+            Default::default(),
+            api_schema,
+            BooleanValues { bits: 0 },
+            true,
+        );
+        std::hint::black_box(&response);
+    }
+    let elapsed = start.elapsed();
+    eprintln!(
+        "bench_format_response_deep_nested_merged: {:.1} ns/iter  ({} iters, {:.3} ms total)",
+        elapsed.as_nanos() as f64 / ITERS as f64,
+        ITERS,
+        elapsed.as_secs_f64() * 1000.0,
+    );
+}
