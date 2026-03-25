@@ -776,15 +776,13 @@ mod h2c_keep_alive {
                 .await;
         });
 
-        let ping_counter = tokio::spawn(async move {
+        tokio::spawn(async move {
             let mut ping_count = 0;
             while let Some(()) = ping_rx.recv().await {
                 ping_count += 1;
             }
             ping_count
-        });
-
-        ping_counter
+        })
     }
 
     /// Start a spy server, make one request with the given client config, wait for keep-alive
