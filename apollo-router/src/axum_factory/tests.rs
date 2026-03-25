@@ -1199,6 +1199,163 @@ async fn it_errors_on_bad_content_type_header() -> Result<(), ApolloRouterError>
 }
 
 #[test(tokio::test)]
+async fn it_validates_get_request_content_type() -> Result<(), ApolloRouterError> {
+    let router_service = router::service::from_supergraph_mock_callback(|req| {
+        Ok(SupergraphResponse::new_from_graphql_response(
+            graphql::Response::builder()
+                .data(json!({"response": "hey"}))
+                .build(),
+            req.context,
+        ))
+    })
+    .await;
+
+    let (server, client) = init(router_service).await;
+    let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
+
+    // GET with no Content-Type → allowed
+    // A separate client is needed since the default client always sends Content-Type.
+    // apollo-require-preflight is needed to pass the CSRF check when there's no Content-Type.
+    let no_ct_client = reqwest::Client::builder()
+        .no_gzip()
+        .default_headers({
+            let mut h = HeaderMap::new();
+            h.insert(
+                ACCEPT,
+                HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+            );
+            h
+        })
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let response = no_ct_client
+        .get(url.as_str())
+        .header("apollo-require-preflight", "1")
+        .query(&[("query", "{ __typename }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "GET with no Content-Type should be allowed"
+    );
+
+    // GET with application/json → allowed
+    let response = client
+        .get(url.as_str())
+        .header(CONTENT_TYPE, "application/json")
+        .query(&[("query", "{ __typename }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "GET with application/json should be allowed"
+    );
+
+    // GET with application/json; charset=utf-8 → allowed (parameters are fine)
+    let response = client
+        .get(url.as_str())
+        .header(CONTENT_TYPE, "application/json; charset=utf-8")
+        .query(&[("query", "{ __typename }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "GET with application/json; charset=utf-8 should be allowed"
+    );
+
+    // GET with text/plain → 400
+    // apollo-require-preflight bypasses the CSRF check so the content-type check can fire.
+    let response = client
+        .get(url.as_str())
+        .header(CONTENT_TYPE, "text/plain")
+        .header("apollo-require-preflight", "1")
+        .query(&[("query", "{ __typename }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "GET with text/plain should be rejected"
+    );
+    assert_eq!(
+        response.text().await.unwrap(),
+        r#"{"errors":[{"message":"GET request 'content-type' header may only contain: \"application/json\"","extensions":{"code":"INVALID_CONTENT_TYPE_HEADER"}}]}"#
+    );
+
+    // GET with multipart/form-data → 400
+    // apollo-require-preflight bypasses the CSRF check so the content-type check can fire.
+    let response = client
+        .get(url.as_str())
+        .header(CONTENT_TYPE, "multipart/form-data")
+        .header("apollo-require-preflight", "1")
+        .query(&[("query", "{ __typename }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "GET with multipart/form-data should be rejected"
+    );
+
+    // GET with application/graphql → 400
+    // application/graphql triggers CORS preflight so CSRF passes it through,
+    // but the content-type check should reject it.
+    let response = client
+        .get(url.as_str())
+        .header(CONTENT_TYPE, "application/graphql")
+        .query(&[("query", "{ __typename }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "GET with application/graphql should be rejected"
+    );
+
+    // GET with malformed/unparseable Content-Type → 400
+    // apollo-require-preflight bypasses the CSRF check so the content-type check can fire.
+    let response = client
+        .get(url.as_str())
+        .header(CONTENT_TYPE, "invalid")
+        .header("apollo-require-preflight", "1")
+        .query(&[("query", "{ __typename }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "GET with malformed Content-Type should be rejected"
+    );
+
+    // POST with application/json → unaffected by the GET-specific check
+    let response = client
+        .post(url.as_str())
+        .header(CONTENT_TYPE, "application/json")
+        .body(json!({ "query": "{ __typename }" }).to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "POST with application/json should still work"
+    );
+
+    server.shutdown().await
+}
+
+#[test(tokio::test)]
 async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
     let query = "query";
     let operation_name = "operationName";
