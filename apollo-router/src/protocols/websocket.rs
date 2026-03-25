@@ -1223,9 +1223,8 @@ mod tests {
                     let _ = sender.send(headers);
                 }
 
-                let res = ws
-                    .protocols([GRAPHQL_WS_SUBPROTOCOL])
-                    .on_upgrade(move |mut socket| async move {
+                let res = ws.protocols([GRAPHQL_WS_SUBPROTOCOL]).on_upgrade(
+                    move |mut socket| async move {
                         let _init = socket.recv().await;
 
                         socket
@@ -1236,7 +1235,8 @@ mod tests {
                             .unwrap();
 
                         socket.close().await.ok();
-                    });
+                    },
+                );
 
                 Ok::<_, Infallible>(res)
             }
