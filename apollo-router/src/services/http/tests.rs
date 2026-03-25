@@ -660,21 +660,25 @@ mod h2c_keep_alive {
     use tokio::io::AsyncRead;
     use tokio::io::AsyncWrite;
     use tokio::io::ReadBuf;
+    use tokio::net::TcpStream;
+    use tokio::sync::mpsc::Sender;
+    use tokio::task::JoinHandle;
 
     use super::*;
     use crate::configuration::shared::Client;
 
-    /// Wraps a TcpStream and records all bytes the server reads from the client.
+    /// Wraps a TcpStream and emits a `()` on the `ping_tx` channel each time the server reads an H2
+    /// PING frame sent by the client.
     struct SpyStream {
-        inner: tokio::net::TcpStream,
-        recorded: Arc<Mutex<Vec<u8>>>,
+        inner: TcpStream,
+        ping_tx: Sender<()>,
     }
 
     impl SpyStream {
-        fn new(stream: tokio::net::TcpStream, recorded: Arc<Mutex<Vec<u8>>>) -> Self {
+        fn new(stream: TcpStream, ping_tx: Sender<()>) -> Self {
             Self {
                 inner: stream,
-                recorded,
+                ping_tx,
             }
         }
     }
@@ -686,11 +690,15 @@ mod h2c_keep_alive {
             buf: &mut ReadBuf<'_>,
         ) -> Poll<io::Result<()>> {
             let before = buf.filled().len();
+
             let result = Pin::new(&mut self.inner).poll_read(cx, buf);
             if matches!(result, Poll::Ready(Ok(()))) {
                 let new_bytes = buf.filled()[before..].to_vec();
-                self.recorded.lock().unwrap().extend_from_slice(&new_bytes);
+                if is_ping_frame(&new_bytes) {
+                    self.ping_tx.try_send(()).unwrap();
+                }
             }
+
             result
         }
     }
@@ -713,50 +721,39 @@ mod h2c_keep_alive {
         }
     }
 
-    /// Count H2 PING frames (not ACKs) in a raw byte slice by parsing H2 frames per RFC 7540.
-    /// * Preface: https://datatracker.ietf.org/doc/html/rfc7540#section-3.5
-    /// * Ping: https://datatracker.ietf.org/doc/html/rfc7540#section-6.7
-    /// * Frame header: https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
-    fn count_h2_ping_frames(data: &[u8]) -> usize {
-        const PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+    /// Check whether a raw byte slice is an H2 PING frame (not an ACK) per RFC 7540.
+    ///
+    /// This assumes the PING frame arrives as its own chunk — it inspects fixed offsets 3 and 4
+    /// for the frame type and flags rather than doing full frame parsing. In practice this works
+    /// because hyper sends keep-alive PINGs as standalone writes.
+    ///
+    /// References: [frame header] (§4.1), [PING frame] (§6.7)
+    ///
+    /// [frame header]: https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
+    /// [PING frame]: https://datatracker.ietf.org/doc/html/rfc7540#section-6.7
+    fn is_ping_frame(data: &[u8]) -> bool {
+        const FRAME_HEADER_SIZE: usize = 9;
         const PING_FRAME_TYPE: u8 = 0x06;
         const ACK_FLAG: u8 = 0x01;
-        const FRAME_HEADER_SIZE: usize = 9;
 
-        if !data.starts_with(PREFACE) {
-            return 0;
+        if data.len() < FRAME_HEADER_SIZE {
+            return false;
         }
 
-        let mut index = PREFACE.len();
-        let mut count = 0;
+        let frame_type = data[3];
+        let flags = data[4];
 
-        // iterate through each frame
-        while index + FRAME_HEADER_SIZE <= data.len() {
-            let frame_type = data[index + 3];
-            let flags = data[index + 4];
-            if frame_type == PING_FRAME_TYPE && flags & ACK_FLAG == 0 {
-                count += 1;
-            }
-
-            // figure out the next frame start location - length is an unsigned 24-bit integer, so
-            // we do the math manually
-            let length = (data[index] as usize) << 16
-                | (data[index + 1] as usize) << 8
-                | data[index + 2] as usize;
-            index += FRAME_HEADER_SIZE + length;
-        }
-
-        count
+        frame_type == PING_FRAME_TYPE && flags & ACK_FLAG == 0
     }
 
-    /// Start a spy H2 server. Returns a handle to the bytes the server read from the client.
-    fn start_spy_server(listener: TcpListener) -> Arc<Mutex<Vec<u8>>> {
-        let recorded = Arc::new(Mutex::new(Vec::new()));
-        let recorded_server = recorded.clone();
+    /// Start a spy H2 server that counts H2 PING frames sent by the client. Returns a
+    /// [`JoinHandle`] that resolves to the total ping count once the server connection closes.
+    fn start_spy_server_and_ping_counter(listener: TcpListener) -> JoinHandle<usize> {
+        let (ping_tx, mut ping_rx) = tokio::sync::mpsc::channel(100);
 
-        tokio::spawn(async move {
+        let _spy_server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            let spy_stream = SpyStream::new(stream, recorded_server);
+            let spy_stream = SpyStream::new(stream, ping_tx);
 
             let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
                 let response_body = serde_json::to_string(&Response {
@@ -779,16 +776,26 @@ mod h2c_keep_alive {
                 .await;
         });
 
-        recorded
+        let ping_counter = tokio::spawn(async move {
+            let mut ping_count = 0;
+            while let Some(()) = ping_rx.recv().await {
+                ping_count += 1;
+            }
+            ping_count
+        });
+
+        ping_counter
     }
 
+    /// Start a spy server, make one request with the given client config, wait for keep-alive
+    /// intervals to fire, then return the number of H2 PING frames the server observed.
     async fn run_server_and_count_keep_alive_pings(
         client_config: Client,
     ) -> Result<usize, BoxError> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let socket_addr = listener.local_addr()?;
-        let recorded = start_spy_server(listener);
 
+        let ping_counter = start_spy_server_and_ping_counter(listener);
         let service = HttpClientService::from_client_config(client_config)?;
 
         let url = Uri::from_str(&format!("http://{socket_addr}"))?;
@@ -807,12 +814,7 @@ mod h2c_keep_alive {
         tokio::time::sleep(Duration::from_millis(500)).await;
         drop(service);
 
-        // Give the server task a moment to flush its reads
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        let bytes = recorded.lock().unwrap().clone();
-        let ping_count = count_h2_ping_frames(&bytes);
-        Ok(ping_count)
+        Ok(ping_counter.await?)
     }
 
     #[tokio::test(flavor = "multi_thread")]
