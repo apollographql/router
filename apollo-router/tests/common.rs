@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
+use flate2::read::GzDecoder;
 use fred::clients::Client as RedisClient;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
@@ -39,7 +40,6 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use parking_lot::Mutex;
-use flate2::read::GzDecoder;
 use prost::Message;
 use regex::Regex;
 use reqwest::Request;
