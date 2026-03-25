@@ -78,9 +78,7 @@ impl<Request> UnconstrainedBufferLayer<Request> {
     /// `bound` gives the maximal number of requests that can be queued for the service before
     /// backpressure is applied to callers.
     ///
-    /// # A note on choosing a `bound`
-    ///
-    /// See [`Buffer::new`].
+    /// See [`Buffer::new`] for guidance on choosing a `bound`.
     pub const fn new(bound: usize) -> Self {
         UnconstrainedBufferLayer {
             bound,
