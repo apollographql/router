@@ -1,6 +1,6 @@
 //! Retry wrapper for push metric exporters.
 //!
-//! Wraps a `PushMetricExporter` and retries failed exports a configurable number
+//! Wraps a `PushMetricExporter` and retries failed exports a number
 //! of times with exponential backoff. Only surfaces the error after all attempts
 //! are exhausted, keeping transient failures out of the logs.
 
