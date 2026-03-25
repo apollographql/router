@@ -382,7 +382,7 @@ mod tests {
     ///
     /// [`UnconstrainedBuffer`] bypasses the coop budget check but must still propagate genuine
     /// [`Poll::Pending`] from a full semaphore so that real backpressure is preserved.
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test]
     async fn full_buffer_should_still_cause_load_shedding() {
         use std::sync::Arc;
 
@@ -406,6 +406,8 @@ mod tests {
         let mut load_shed = LoadShed::new(inner_buffered);
 
         // Request 1: accepted, worker picks it up and blocks at the gate.
+        // Buffer::call() enqueues synchronously; dropping the ResponseFuture only discards
+        // the response receiver — the request is already in the channel.
         poll_fn(|cx| load_shed.poll_ready(cx)).await.unwrap();
         drop(load_shed.call(()));
 
@@ -413,6 +415,7 @@ mod tests {
         tokio::task::yield_now().await;
 
         // Request 2: fills the channel while the worker is blocked on request 1.
+        // Same as above — drop only the response receiver, not the enqueued request.
         poll_fn(|cx| load_shed.poll_ready(cx)).await.unwrap();
         drop(load_shed.call(()));
 
@@ -427,7 +430,7 @@ mod tests {
 
             // Overloaded resolves immediately in one poll.
             let is_overloaded = match fut.as_mut().poll(cx) {
-                Poll::Ready(Err(ref e)) => e
+                Poll::Ready(Err(e)) => e
                     .downcast_ref::<tower::load_shed::error::Overloaded>()
                     .is_some(),
                 _ => false,
