@@ -70,6 +70,26 @@ struct Shaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
+<<<<<<< HEAD
+=======
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_pool_idle_timeout"
+    )]
+    #[schemars(with = "String", default = "default_pool_idle_timeout")]
+    pool_idle_timeout: Option<Duration>,
+    /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
+    /// unset (the default), keep-alive pings are disabled.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    experimental_http2_keep_alive_interval: Option<Duration>,
+    /// Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and
+    /// `experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    experimental_http2_keep_alive_timeout: Option<Duration>,
+>>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
 }
 
 #[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
@@ -107,6 +127,24 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.dns_resolution_strategy.as_ref())
                     .cloned(),
+<<<<<<< HEAD
+=======
+                pool_idle_timeout: self
+                    .pool_idle_timeout
+                    .as_ref()
+                    .or(fallback.pool_idle_timeout.as_ref())
+                    .cloned(),
+                experimental_http2_keep_alive_interval: self
+                    .experimental_http2_keep_alive_interval
+                    .as_ref()
+                    .or(fallback.experimental_http2_keep_alive_interval.as_ref())
+                    .cloned(),
+                experimental_http2_keep_alive_timeout: self
+                    .experimental_http2_keep_alive_timeout
+                    .as_ref()
+                    .or(fallback.experimental_http2_keep_alive_timeout.as_ref())
+                    .cloned(),
+>>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             },
         }
     }
@@ -155,6 +193,26 @@ struct ConnectorShaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for connectors
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
+<<<<<<< HEAD
+=======
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_pool_idle_timeout"
+    )]
+    #[schemars(with = "String", default = "default_pool_idle_timeout")]
+    pool_idle_timeout: Option<Duration>,
+    /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
+    /// unset (the default), keep-alive pings are disabled.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    experimental_http2_keep_alive_interval: Option<Duration>,
+    /// Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and
+    /// `experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    experimental_http2_keep_alive_timeout: Option<Duration>,
+>>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
 }
 
 impl Merge for ConnectorShaping {
@@ -179,6 +237,24 @@ impl Merge for ConnectorShaping {
                     .as_ref()
                     .or(fallback.dns_resolution_strategy.as_ref())
                     .cloned(),
+<<<<<<< HEAD
+=======
+                pool_idle_timeout: self
+                    .pool_idle_timeout
+                    .as_ref()
+                    .or(fallback.pool_idle_timeout.as_ref())
+                    .cloned(),
+                experimental_http2_keep_alive_interval: self
+                    .experimental_http2_keep_alive_interval
+                    .as_ref()
+                    .or(fallback.experimental_http2_keep_alive_interval.as_ref())
+                    .cloned(),
+                experimental_http2_keep_alive_timeout: self
+                    .experimental_http2_keep_alive_timeout
+                    .as_ref()
+                    .or(fallback.experimental_http2_keep_alive_timeout.as_ref())
+                    .cloned(),
+>>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             },
         }
     }
@@ -548,6 +624,16 @@ impl TrafficShaping {
         .map(|config| crate::configuration::shared::Client {
             experimental_http2: config.shaping.experimental_http2,
             dns_resolution_strategy: config.shaping.dns_resolution_strategy,
+<<<<<<< HEAD
+=======
+            pool_idle_timeout: config.shaping.pool_idle_timeout,
+            experimental_http2_keep_alive_interval: config
+                .shaping
+                .experimental_http2_keep_alive_interval,
+            experimental_http2_keep_alive_timeout: config
+                .shaping
+                .experimental_http2_keep_alive_timeout,
+>>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
         })
         .unwrap_or_default()
     }
@@ -561,6 +647,13 @@ impl TrafficShaping {
             .map(|config| crate::configuration::shared::Client {
                 experimental_http2: config.experimental_http2,
                 dns_resolution_strategy: config.dns_resolution_strategy,
+<<<<<<< HEAD
+=======
+                pool_idle_timeout: config.pool_idle_timeout,
+                experimental_http2_keep_alive_interval: config
+                    .experimental_http2_keep_alive_interval,
+                experimental_http2_keep_alive_timeout: config.experimental_http2_keep_alive_timeout,
+>>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             })
             .unwrap_or_default()
     }
@@ -1006,6 +1099,11 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Enable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6ThenIpv4),
+<<<<<<< HEAD
+=======
+                pool_idle_timeout: default_pool_idle_timeout(),
+                ..Default::default()
+>>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             },
         );
         assert_eq!(
@@ -1013,6 +1111,11 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Disable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv4Only),
+<<<<<<< HEAD
+=======
+                pool_idle_timeout: default_pool_idle_timeout(),
+                ..Default::default()
+>>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             },
         );
         assert_eq!(
@@ -1020,6 +1123,11 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Disable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6Only),
+<<<<<<< HEAD
+=======
+                pool_idle_timeout: default_pool_idle_timeout(),
+                ..Default::default()
+>>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             },
         );
     }
@@ -1260,4 +1368,296 @@ mod test {
         .expect("our body is valid json");
         assert_eq!("Your request has been timed out", j["errors"][0]["message"]);
     }
+<<<<<<< HEAD
+=======
+
+    #[tokio::test]
+    async fn test_subgraph_pool_idle_timeout_override_and_fallback() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          pool_idle_timeout: 10s
+        subgraphs:
+          fast:
+            pool_idle_timeout: 2s
+          explicit_null:
+            pool_idle_timeout: null
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("fast")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(2)),
+            "subgraph-specific override should win"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_null")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(10)),
+            "explicit null falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("unknown")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(10)),
+            "unknown subgraph falls back to all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_connector_pool_idle_timeout_override_and_fallback() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        connector:
+          all:
+            pool_idle_timeout: 20s
+          sources:
+            my_source:
+              pool_idle_timeout: 3s
+            explicit_null:
+              pool_idle_timeout: null
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("my_source")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(3)),
+            "source-specific override should win"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("explicit_null")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(20)),
+            "explicit null falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("unknown")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(20)),
+            "unknown source falls back to all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pool_idle_timeout_uses_default_when_not_configured() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          experimental_http2: disable
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("any")
+                .pool_idle_timeout,
+            default_pool_idle_timeout(),
+            "when pool_idle_timeout is not in the config, it should use the default"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_keep_alive_override_and_fallback() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          experimental_http2_keep_alive_interval: 30s
+          experimental_http2_keep_alive_timeout: 10s
+        subgraphs:
+          fast:
+            experimental_http2_keep_alive_interval: 5s
+          explicit_null:
+            experimental_http2_keep_alive_interval: null
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("fast")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(5)),
+            "subgraph-specific override should win"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_null")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(30)),
+            "explicit null falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("unknown")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(30)),
+            "unknown subgraph falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("unknown")
+                .experimental_http2_keep_alive_timeout,
+            Some(Duration::from_secs(10)),
+            "timeout is inherited from all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_connector_keep_alive_override_and_fallback() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        connector:
+          all:
+            experimental_http2_keep_alive_interval: 30s
+            experimental_http2_keep_alive_timeout: 10s
+          sources:
+            my_source:
+              experimental_http2_keep_alive_interval: 5s
+            explicit_null:
+              experimental_http2_keep_alive_interval: null
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("my_source")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(5)),
+            "source-specific override should win"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("explicit_null")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(30)),
+            "explicit null falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("unknown")
+                .experimental_http2_keep_alive_interval,
+            Some(Duration::from_secs(30)),
+            "unknown source falls back to all"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("unknown")
+                .experimental_http2_keep_alive_timeout,
+            Some(Duration::from_secs(10)),
+            "timeout is inherited from all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_keep_alive_is_none_when_not_configured() {
+        let config = serde_yaml::from_str::<Config>("{}").unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("any")
+                .experimental_http2_keep_alive_interval,
+            None,
+            "keep-alive interval should be None when not configured"
+        );
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("any")
+                .experimental_http2_keep_alive_timeout,
+            None,
+            "keep-alive timeout should be None when not configured"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_raises_different_errors_for_timeouts_and_rate_limits() {
+        // expected behavior: the first request sent will timeout, the second request will return
+        // immediately due to the ratelimit
+        let config: serde_json::Value = serde_yaml::from_str(
+            r#"
+        router:
+            global_rate_limit:
+                capacity: 1
+                interval: 100ms
+            timeout: 150ms
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+        let svc = ServiceBuilder::new()
+            .service_fn(move |_req: router::Request| async {
+                sleep(Duration::from_millis(500)).await;
+                RouterResponse::fake_builder().build()
+            })
+            .boxed();
+
+        let mut router_service = plugin.router_service(svc);
+
+        let mut tasks = JoinSet::new();
+        for _ in 0..2 {
+            let request = RouterRequest::fake_builder().build().unwrap();
+            tasks.spawn(router_service.ready().await.unwrap().call(request));
+        }
+
+        let mut results = tasks.join_all().await.into_iter();
+
+        let response = results.next().unwrap().unwrap().response;
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.status());
+
+        let response = results.next().unwrap().unwrap().response;
+        assert_eq!(StatusCode::GATEWAY_TIMEOUT, response.status());
+    }
+>>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
 }
