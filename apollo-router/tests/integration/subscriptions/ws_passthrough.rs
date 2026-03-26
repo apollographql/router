@@ -2,12 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use futures::SinkExt;
-use futures::StreamExt;
-use http::header::HeaderValue;
 use regex::Regex;
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tower::BoxError;
 use tracing::info;
 
@@ -1096,7 +1091,7 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
     Ok(())
 }
 
-/// Test that WebSocket connections can be established with non-ASCII header values through
+/// Test that WebSocket subscriptions work with non-ASCII header values through
 /// the full router stack. This validates the fix for the issue where tungstenite could not
 /// serialize headers containing non-ASCII (UTF-8) characters like "Montréal".
 ///
@@ -1147,92 +1142,52 @@ async fn test_subscription_ws_passthrough_with_non_ascii_headers(
     router.start().await;
     router.assert_started().await;
 
-    // Create a WebSocket connection to the router with non-ASCII headers
-    let router_ws_url = format!("ws://{}", router.bind_address());
-    let mut request = router_ws_url.into_client_request()?;
-
-    // Add the required GraphQL WebSocket protocol header
-    request.headers_mut().insert(
-        http::header::SEC_WEBSOCKET_PROTOCOL,
-        HeaderValue::from_static("graphql-transport-ws"),
-    );
-
-    // Add a header with non-ASCII UTF-8 value: "Montréal"
-    // The "é" character is encoded as bytes 0xC3 0xA9 in UTF-8
-    let non_ascii_value = "Montréal";
-    request.headers_mut().insert(
-        http::HeaderName::from_static("x-custom-location"),
-        HeaderValue::from_bytes(non_ascii_value.as_bytes())
-            .expect("HeaderValue should accept UTF-8 bytes"),
-    );
-
-    // This is the critical test: connect_async should succeed with the non-ASCII header.
-    // Before the tungstenite fix, this would fail during request serialization.
-    let (ws_stream, _response) = connect_async(request).await?;
-
-    let (mut write, mut read) = ws_stream.split();
-
-    // Send connection_init message
-    let init_msg = serde_json::json!({
-        "type": "connection_init",
-    });
-    write
-        .send(tokio_tungstenite::tungstenite::Message::Text(
-            serde_json::to_string(&init_msg)?.into(),
-        ))
-        .await?;
-
-    // Wait for connection_ack
-    if let Some(Ok(msg)) = read.next().await {
-        let msg_text = msg.to_text()?;
-        let ack: serde_json::Value = serde_json::from_str(msg_text)?;
-        assert_eq!(ack["type"], "connection_ack");
-    }
-
-    // Send subscription
+    // Use the configured query that matches our server configuration
     let query = create_sub_query(interval_ms, custom_payloads.len());
-    let subscribe_msg = serde_json::json!({
-        "id": "1",
-        "type": "subscribe",
-        "payload": {
-            "query": query,
-        },
-    });
-    write
-        .send(tokio_tungstenite::tungstenite::Message::Text(
-            serde_json::to_string(&subscribe_msg)?.into(),
-        ))
-        .await?;
 
-    // Receive subscription events
-    let mut event_count = 0;
-    while let Some(Ok(msg)) = read.next().await {
-        let msg_text = msg.to_text()?;
-        let response: serde_json::Value = serde_json::from_str(msg_text)?;
+    // Create a subscription request with a non-ASCII header
+    // The "é" character in "Montréal" is encoded as bytes 0xC3 0xA9 in UTF-8
+    let non_ascii_value = "Montréal";
+    let response = router
+        .execute_query(
+            crate::integration::common::Query::builder()
+                .body(serde_json::json!({
+                    "query": query
+                }))
+                .headers(std::collections::HashMap::from([
+                    (
+                        "Accept".to_string(),
+                        "multipart/mixed;subscriptionSpec=1.0".to_string(),
+                    ),
+                    ("x-custom-location".to_string(), non_ascii_value.to_string()),
+                ]))
+                .build(),
+        )
+        .await;
 
-        if response["type"] == "next" {
-            event_count += 1;
-            info!("Received event {}: {:?}", event_count, response);
-
-            // Verify we got the expected events
-            if event_count >= custom_payloads.len() {
-                break;
-            }
-        } else if response["type"] == "complete" {
-            break;
-        }
-    }
-
-    assert_eq!(
-        event_count,
-        custom_payloads.len(),
-        "Should have received all subscription events"
+    // Expect the router to handle the subscription successfully
+    // This is the critical test: the subscription should work with the non-ASCII header.
+    // Before the tungstenite fix, this would fail during WebSocket handshake.
+    assert!(
+        response.1.status().is_success(),
+        "Subscription request with non-ASCII header failed with status: {}",
+        response.1.status()
     );
+
+    let stream = response.1.bytes_stream();
+    let expected_events = vec![
+        create_initial_empty_response(),
+        create_expected_user_payload(1),
+        create_expected_user_payload(2),
+    ];
+    let _subscription_events = verify_subscription_events(stream, expected_events, true).await;
 
     // Check for errors in router logs
     router.assert_no_error_logs();
 
-    info!("WebSocket connection with non-ASCII headers test completed successfully");
+    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+
+    info!("WebSocket subscription with non-ASCII headers test completed successfully");
 
     Ok(())
 }
