@@ -1,4 +1,5 @@
 //! Apollo metrics
+use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -130,18 +131,34 @@ impl Config {
         batch_config: &OtlpMetricsBatchProcessorConfiguration,
     ) -> Result<(), BoxError> {
         tracing::info!("configuring Apollo OTLP metrics: {}", batch_config);
-        let mut metadata = MetadataMap::new();
-        metadata.insert("apollo.api.key", key.parse()?);
-        let exporter = match otlp_protocol {
-            Protocol::Grpc => MetricExporter::builder()
-                .with_tonic()
-                .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                .with_endpoint(endpoint.as_str())
-                .with_timeout(batch_config.max_export_timeout)
-                .with_metadata(metadata.clone())
-                .with_compression(opentelemetry_otlp::Compression::Gzip)
-                .with_temporality(Temporality::Delta)
-                .build()?,
+
+        let (exporter, realtime_exporter) = match otlp_protocol {
+            Protocol::Grpc => {
+                let mut metadata = MetadataMap::new();
+                metadata.insert("apollo.api.key", key.parse()?);
+
+                let exporter = MetricExporter::builder()
+                    .with_tonic()
+                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                    .with_endpoint(endpoint.as_str())
+                    .with_timeout(batch_config.max_export_timeout)
+                    .with_metadata(metadata.clone())
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .with_temporality(Temporality::Delta)
+                    .build()?;
+
+                // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
+                let realtime_exporter = MetricExporter::builder()
+                    .with_tonic()
+                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                    .with_endpoint(endpoint.as_str())
+                    .with_timeout(batch_config.max_export_timeout)
+                    .with_metadata(metadata.clone())
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .with_temporality(Temporality::Delta)
+                    .build()?;
+                (exporter, realtime_exporter)
+            }
             Protocol::Http => {
                 let endpoint_str = process_endpoint(
                     &Some(endpoint.to_string()),
@@ -149,48 +166,30 @@ impl Config {
                     &Protocol::Http,
                 )?
                 .ok_or("A valid HTTP OTLP endpoint is required when using the HTTP protocol")?;
-                let mut headers = std::collections::HashMap::new();
-                headers.insert("x-api-key".to_string(), key.to_string());
-                MetricExporter::builder()
+                let headers = HashMap::from([("x-api-key".to_string(), key.to_string())]);
+
+                let exporter = MetricExporter::builder()
+                    .with_http()
+                    .with_timeout(batch_config.max_export_timeout)
+                    .with_temporality(Temporality::Delta)
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .with_headers(headers.clone())
+                    .with_endpoint(endpoint_str.clone())
+                    .build()?;
+
+                // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
+                let realtime_exporter = MetricExporter::builder()
                     .with_http()
                     .with_timeout(batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers)
                     .with_endpoint(endpoint_str)
-                    .build()?
+                    .build()?;
+                (exporter, realtime_exporter)
             }
         };
-        // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
-        let realtime_exporter = match otlp_protocol {
-            Protocol::Grpc => MetricExporter::builder()
-                .with_tonic()
-                .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                .with_endpoint(endpoint.as_str())
-                .with_timeout(batch_config.max_export_timeout)
-                .with_metadata(metadata.clone())
-                .with_compression(opentelemetry_otlp::Compression::Gzip)
-                .with_temporality(Temporality::Delta)
-                .build()?,
-            Protocol::Http => {
-                let endpoint_str = process_endpoint(
-                    &Some(endpoint.to_string()),
-                    &TelemetryDataKind::Metrics,
-                    &Protocol::Http,
-                )?
-                .ok_or("A valid HTTP OTLP endpoint is required when using the HTTP protocol")?;
-                let mut headers = std::collections::HashMap::new();
-                headers.insert("x-api-key".to_string(), key.to_string());
-                MetricExporter::builder()
-                    .with_http()
-                    .with_timeout(batch_config.max_export_timeout)
-                    .with_temporality(Temporality::Delta)
-                    .with_compression(opentelemetry_otlp::Compression::Gzip)
-                    .with_headers(headers)
-                    .with_endpoint(endpoint_str)
-                    .build()?
-            }
-        };
+
         // Wrap with retry, then overflow detection, then error prefixing
         let named_exporter = NamedMetricExporter::new(
             OverflowMetricExporter::new_push(RetryMetricExporter::new(exporter)),
