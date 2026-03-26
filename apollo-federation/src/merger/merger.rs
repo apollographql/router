@@ -31,6 +31,7 @@ use crate::api_schema;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::HasLocations;
 use crate::error::SubgraphLocation;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
@@ -802,19 +803,19 @@ impl Merger {
                 };
             Some(type_kind_description)
         };
-        self.error_reporter
-            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition>(
-                CompositionError::TypeKindMismatch {
-                    message: format!(
-                        "Type \"{}\" has mismatched kind: it is defined as ",
-                        mismatched_type.type_name()
-                    ),
-                },
-                mismatched_type,
-                &sources,
-                |ty| Some(ty.kind().replace("Type", " Type")),
-                |ty, idx| type_kind_to_string(idx, ty),
-            );
+        self.error_reporter.report_mismatch_error(
+            CompositionError::TypeKindMismatch {
+                message: format!(
+                    "Type \"{}\" has mismatched kind: it is defined as ",
+                    mismatched_type.type_name()
+                ),
+            },
+            mismatched_type,
+            &sources,
+            &self.subgraphs,
+            |ty| Some(ty.kind().replace("Type", " Type")),
+            |ty, idx| type_kind_to_string(idx, ty),
+        );
     }
 
     fn add_directives_shallow(&mut self) -> Result<(), FederationError> {
@@ -1577,9 +1578,7 @@ impl Merger {
                 && !self.are_all_fields_external(*idx, source)?
                 && !subgraph.is_interface_object_type(&source.clone().into())
             {
-                self.error_reporter.report_mismatch_hint::<
-                    ObjectOrInterfaceTypeDefinitionPosition,
-                    ObjectOrInterfaceTypeDefinitionPosition>(
+                self.error_reporter.report_mismatch_hint(
                         hint_id.clone(),
 format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\": ",
                             type_description,
@@ -1588,6 +1587,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         ),
                         dest,
                         sources,
+                        &self.subgraphs,
                         |_| Some("yes".to_string()),
                         |pos, idx| pos.field(field.field_name().clone())
                             .try_get(self.subgraphs[idx].schema().schema())
@@ -1611,28 +1611,29 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         let mut source_as_entity = Vec::new();
         let mut source_as_non_entity = Vec::new();
 
-        let mut sources: Sources<usize> = Default::default();
+        let mut sources: Sources<_> = Default::default();
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
             let Some(key_directive_name) = subgraph.key_directive_name()? else {
                 continue;
             };
-            if obj.try_get(subgraph.schema().schema()).is_some() {
-                sources.insert(idx, Some(idx));
+            if let Some(node) = obj.try_get(subgraph.schema().schema()) {
+                sources.insert(idx, Some(node));
                 if obj.has_applied_directive(subgraph.schema(), &key_directive_name) {
-                    source_as_entity.push(idx);
+                    source_as_entity.push(node);
                 } else {
-                    source_as_non_entity.push(idx);
+                    source_as_non_entity.push(node);
                 }
             }
         }
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize>(
+            self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentEntity,
                 format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
                     &obj.type_name,
                 ),
                 obj,
                 &sources,
+                &self.subgraphs,
                 // Categorize whether the source has a @key or not.
                 |_| Some("no".to_string()),
                 |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
@@ -1891,7 +1892,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         is_input_position: bool,
     ) -> Result<bool, FederationError>
     where
-        T: Display + HasType + Debug,
+        T: HasLocations + Display + HasType + Debug,
     {
         if sources.is_empty() {
             self.error_reporter_mut()
@@ -1966,10 +1967,11 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 }
             };
 
-            self.error_reporter.report_mismatch_error::<Type, T>(
+            self.error_reporter.report_mismatch_error(
                 error,
                 &ty,
                 sources,
+                &self.subgraphs,
                 |d| Some(format!("type \"{d}\"")),
                 |s, idx| {
                     s.get_type(self.subgraphs[idx].schema())
@@ -1999,13 +2001,14 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 "subtype"
             };
 
-            self.error_reporter.report_mismatch_hint::<Type, T>(
+            self.error_reporter.report_mismatch_hint(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs: ",
                 ),
                 &ty,
                 sources,
+                &self.subgraphs,
                 |d| Some(d.to_string()),
                 |s, idx| {
                     s.get_type(self.subgraphs[idx].schema())
@@ -2202,7 +2205,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         dest: &T,
     ) -> Result<(), FederationError>
     where
-        T: HasDescription + Display,
+        T: HasLocations + HasDescription + Display,
     {
         let mut descriptions: IndexMap<&str, (usize, &str)> = Default::default();
         for (idx, source) in sources.iter() {
@@ -2265,11 +2268,12 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     } else {
                         format!("Element \"{dest}\"")
                     };
-                    self.error_reporter.report_mismatch_hint::<T, T>(
+                    self.error_reporter.report_mismatch_hint(
                         HintCode::InconsistentDescription,
                         format!("{name} has inconsistent descriptions across subgraphs. "),
                         dest,
                         sources,
+                        &self.subgraphs,
                         |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
                         |elem, idx| {
                             elem.description(self.subgraphs[idx].schema())
