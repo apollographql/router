@@ -321,11 +321,12 @@ impl Merger {
                     ))
                 }
             }
-            self.error_reporter.report_mismatch_hint::<Directive, DirectiveTargetPosition>(
+            self.error_reporter.report_mismatch_hint(
                     HintCode::InconsistentNonRepeatableDirectiveArguments,
                     format!("Non-repeatable directive @{name} is applied to \"{dest}\" in multiple subgraphs but with incompatible arguments. "),
                     &most_used_directive,
                     sources,
+                    &self.subgraphs,
                     print_arguments,
                     |pos, idx| {
                         pos.get_applied_directives(self.subgraphs[idx].schema(), name)
@@ -497,11 +498,12 @@ impl Merger {
                 // An executable directive could appear in any place of a query and thus get to any subgraph, so we cannot keep an
                 // executable directive unless it is in all subgraphs. We use an 'intersection' strategy.
                 dest.remove(&mut self.merged)?;
-                self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, DirectiveDefinitionPosition>(
+                self.error_reporter.report_mismatch_hint(
                     HintCode::InconsistentExecutableDirectivePresence,
                     format!("Executable directive \"@{name}\" will not be part of the supergraph as it does not appear in all subgraphs: "),
                     dest,
                     sources,
+                    &self.subgraphs,
                     |_elt| Some("yes".to_string()),
                     |_elt, _idx| Some("yes".to_string()),
                     |_, subgraphs| format!("it is defined in {}", subgraphs.unwrap_or_default()),
@@ -539,11 +541,12 @@ impl Merger {
                     self.subgraphs[*idx].name, locations
                 );
                 if locations.is_empty() {
-                    self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, DirectiveDefinitionPosition>(
+                    self.error_reporter.report_mismatch_hint(
                         HintCode::NoExecutableDirectiveLocationsIntersection,
                         format!("Executable directive \"@{name}\" has no location that is common to all subgraphs: "),
                         dest,
                         sources,
+                        &self.subgraphs,
                         |_| Some(location_string(&[])),
                         |pos, idx| pos.try_get(self.subgraphs[idx].schema().schema())
                             .map(|elt| location_string(&extract_executable_locations(elt))),
@@ -562,11 +565,12 @@ impl Merger {
         let supergraph_dest = dest.get(self.merged.schema())?;
 
         if inconsistent_repeatable {
-            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition>(
+            self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentExecutableDirectiveRepeatable,
                 format!("Executable directive \"@{name}\" will not be marked repeatable in the supergraph as it is inconsistently marked repeatable in subgraphs: "),
                 supergraph_dest,
                 sources,
+                &self.subgraphs,
                 |_| if repeatable.unwrap_or_default() { Some("yes".to_string()) } else { Some("no".to_string()) },
                 |pos, idx| pos.try_get(self.subgraphs[idx].schema().schema())
                     .map(|elt|  if elt.repeatable { "yes".to_string() } else { "no".to_string() }),
@@ -577,13 +581,14 @@ impl Merger {
             );
         }
         if inconsistent_locations {
-            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition>(
+            self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentExecutableDirectiveLocations,
                 format!(
                     "Executable directive \"@{name}\" has inconsistent locations across subgraphs "
                 ),
                 supergraph_dest,
                 sources,
+                &self.subgraphs,
                 |elt| Some(location_string(&extract_executable_locations(elt))),
                 |pos, idx| pos.try_get(self.subgraphs[idx].schema().schema()).map(|elt| location_string(&extract_executable_locations(elt))),
                 |locs, subgraphs| {

@@ -927,6 +927,22 @@ expression: "&schema"
           ],
           "description": "Use HTTP/2 to communicate with the coprocessor."
         },
+        "experimental_http2_keep_alive_interval": {
+          "default": null,
+          "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "experimental_http2_keep_alive_timeout": {
+          "default": null,
+          "description": "Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and\n`experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "pool_idle_timeout": {
           "default": {
             "nanos": 0,
@@ -2636,6 +2652,22 @@ expression: "&schema"
             }
           ],
           "description": "Enable HTTP2 for connectors"
+        },
+        "experimental_http2_keep_alive_interval": {
+          "default": null,
+          "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "experimental_http2_keep_alive_timeout": {
+          "default": null,
+          "description": "Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and\n`experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "global_rate_limit": {
           "anyOf": [
@@ -10667,6 +10699,22 @@ expression: "&schema"
             }
           ],
           "description": "Enable HTTP2 for subgraphs"
+        },
+        "experimental_http2_keep_alive_interval": {
+          "default": null,
+          "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "experimental_http2_keep_alive_timeout": {
+          "default": null,
+          "description": "Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and\n`experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "global_rate_limit": {
           "anyOf": [
