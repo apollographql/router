@@ -712,10 +712,10 @@ impl IntegrationTest {
                 } else {
                     Some(body.to_vec())
                 };
-                if let Some(bytes) = decoded {
-                    if let Ok(msg) = ExportMetricsServiceRequest::decode(bytes.as_slice()) {
-                        let _ = apollo_otlp_metrics_tx.try_send(msg);
-                    }
+                if let Some(bytes) = decoded
+                    && let Ok(msg) = ExportMetricsServiceRequest::decode(bytes.as_slice())
+                {
+                    let _ = apollo_otlp_metrics_tx.try_send(msg);
                 }
                 // Always match so we return 200 OK
                 true
