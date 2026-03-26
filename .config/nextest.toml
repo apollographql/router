@@ -129,6 +129,7 @@ or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_basic) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_priority_sampling_no_parent_propagated) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_resource_mapping_default) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_resource_mapping_override) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_resources) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_span_metrics) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_with_parent_span) )

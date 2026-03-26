@@ -229,6 +229,8 @@ impl RedisMetricsCollector {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use opentelemetry::KeyValue;
 
     use super::*;

@@ -17,7 +17,7 @@
 *.iml
 .vscode
 
-# Cursor agent skills and plan docs (local/personal)
+# Cursor (local IDE: skills, plans, plan-docs)
 .cursor/skills/
 .cursor/plan-docs/
 .cursor/plans/
@@ -63,8 +63,3 @@ fuzz/timeout-*
 .agents/skills/rust-best-practices
 .github/instructions/docs.instructions.md
 .github/skills/rust-best-practices
-
-# Cursor plan docs and skills (local IDE configuration)
-.cursor/plan-docs/
-.cursor/plans/
-.cursor/skills/
