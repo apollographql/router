@@ -237,6 +237,27 @@ traffic_shaping:
 
 <HttpConnection type="subgraph" />
 
+#### HTTP/2 keep-alive
+
+Router can send periodic HTTP/2 PING frames on idle subgraph connections to detect and close stale connections before they cause request failures. This is particularly useful when connections can become silently broken (for example, due to network timeouts or load balancer idle timeouts).
+
+Use `experimental_http2_keep_alive_interval` to enable keep-alive pings. When you set this, the router sends a PING frame after a connection has been idle for the specified duration. If your subgraph does not respond within `experimental_http2_keep_alive_timeout` (default: 20 seconds), the connection is closed.
+
+Both options apply under `all`, per-subgraph under `subgraphs`, and per-source under `connector.sources`.
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    experimental_http2_keep_alive_interval: 30s # Send a PING every 30s on idle connections
+    experimental_http2_keep_alive_timeout: 10s  # Close the connection if no PONG within 10s
+```
+
+<Note>
+
+Keep-alive pings require HTTP/2 to be active. Setting `experimental_http2: disable` will prevent pings from being sent regardless of these settings.
+
+</Note>
+
 ### Ordering
 
 Traffic shaping always executes these steps in the same order, to ensure a consistent behavior. Declaration order in the configuration will not affect the runtime order:
