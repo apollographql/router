@@ -1206,4 +1206,90 @@ mod tests {
         .with_metrics()
         .await;
     }
+
+    /// Test that WebSocket connections can be established with non-ASCII header values.
+    /// This validates the fix for the issue where tungstenite could not serialize
+    /// headers containing non-ASCII (UTF-8) characters like "Montréal".
+    #[tokio::test]
+    async fn test_ws_connection_with_non_ascii_header() {
+        let (captured_tx, captured_rx) = tokio::sync::oneshot::channel::<http::HeaderMap>();
+        let captured_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(captured_tx)));
+
+        let ws_handler = move |ws: WebSocketUpgrade, headers: axum::http::HeaderMap| {
+            let tx = captured_tx.clone();
+            async move {
+                // Capture the headers from the upgrade request
+                if let Some(sender) = tx.lock().unwrap().take() {
+                    let _ = sender.send(headers);
+                }
+
+                let res = ws.protocols([GRAPHQL_WS_SUBPROTOCOL]).on_upgrade(
+                    move |mut socket| async move {
+                        let _init = socket.recv().await;
+
+                        socket
+                            .send(AxumWsMessage::text(
+                                serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                            ))
+                            .await
+                            .unwrap();
+
+                        socket.close().await.ok();
+                    },
+                );
+
+                Ok::<_, Infallible>(res)
+            }
+        };
+
+        let app = Router::new().route("/ws", get(ws_handler));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server = axum::serve(listener, app);
+        let socket_addr = server.local_addr().unwrap();
+        tokio::spawn(async { server.await.unwrap() });
+
+        let url = format!("ws://{socket_addr}/ws");
+        let mut request = url.into_client_request().unwrap();
+        request.headers_mut().insert(
+            http::header::SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static(GRAPHQL_WS_SUBPROTOCOL),
+        );
+
+        // Add a header with non-ASCII UTF-8 value: "Montréal"
+        // The "é" character is encoded as bytes 0xC3 0xA9 in UTF-8
+        let non_ascii_value = "Montr\u{00e9}al";
+        request.headers_mut().insert(
+            http::HeaderName::from_static("x-custom-location"),
+            HeaderValue::from_bytes(non_ascii_value.as_bytes())
+                .expect("HeaderValue should accept UTF-8 bytes"),
+        );
+
+        // This is the critical test: connect_async should succeed with the non-ASCII header.
+        // Before the tungstenite fix, this would fail during request serialization.
+        let (ws_stream, _resp) = connect_async(request).await.unwrap();
+
+        let sub_uuid = Uuid::new_v4();
+        let gql_socket = GraphqlWebSocket::new(
+            convert_websocket_stream(ws_stream, sub_uuid.to_string()),
+            sub_uuid.to_string(),
+            WebSocketProtocol::GraphqlWs,
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Verify the connection works
+        assert!(gql_socket.id == sub_uuid.to_string());
+
+        // Verify the server received the non-ASCII header correctly
+        let headers = captured_rx.await.expect("should receive captured headers");
+        let received_value = headers
+            .get("x-custom-location")
+            .expect("server should have received x-custom-location header");
+        assert_eq!(
+            received_value.as_bytes(),
+            non_ascii_value.as_bytes(),
+            "Header value should match the original non-ASCII value 'Montréal'"
+        );
+    }
 }

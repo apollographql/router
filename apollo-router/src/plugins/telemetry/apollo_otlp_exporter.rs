@@ -8,6 +8,7 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::WithHttpConfig;
 use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
@@ -25,6 +26,8 @@ use url::Url;
 use super::apollo::ErrorsConfiguration;
 use super::config_new::subgraph::attributes::SUBGRAPH_NAME;
 use super::otlp::Protocol;
+use super::otlp::TelemetryDataKind;
+use super::otlp::process_endpoint;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
 use super::tracing::apollo_telemetry::LightSpanData;
 use super::tracing::apollo_telemetry::encode_ftv1_trace;
@@ -63,23 +66,36 @@ impl ApolloOtlpExporter {
     ) -> Result<ApolloOtlpExporter, BoxError> {
         tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP traces exporter");
 
-        let mut metadata = MetadataMap::new();
-        metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
         let mut otlp_exporter = match protocol {
-            Protocol::Grpc => SpanExporterBuilder::new()
-                .with_tonic()
-                .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                .with_timeout(batch_config.max_export_timeout)
-                .with_endpoint(endpoint.to_string())
-                .with_metadata(metadata)
-                .with_compression(opentelemetry_otlp::Compression::Gzip)
-                .build()?,
-            // So far only using HTTP path for testing - the Studio backend only accepts GRPC today.
-            Protocol::Http => SpanExporterBuilder::new()
-                .with_http()
-                .with_timeout(batch_config.max_export_timeout)
-                .with_endpoint(endpoint.to_string())
-                .build()?,
+            Protocol::Grpc => {
+                let mut metadata = MetadataMap::new();
+                metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
+                SpanExporterBuilder::new()
+                    .with_tonic()
+                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                    .with_timeout(batch_config.max_export_timeout)
+                    .with_endpoint(endpoint.to_string())
+                    .with_metadata(metadata)
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .build()?
+            }
+            Protocol::Http => {
+                let endpoint_str = process_endpoint(
+                    &Some(endpoint.to_string()),
+                    &TelemetryDataKind::Traces,
+                    &Protocol::Http,
+                )?
+                .ok_or("A valid HTTP OTLP endpoint is required when using the HTTP protocol")?;
+                let mut headers = std::collections::HashMap::new();
+                headers.insert("x-api-key".to_string(), apollo_key.to_string());
+                SpanExporterBuilder::new()
+                    .with_http()
+                    .with_timeout(batch_config.max_export_timeout)
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .with_headers(headers)
+                    .with_endpoint(endpoint_str)
+                    .build()?
+            }
         };
 
         otlp_exporter.set_resource(
