@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.12.0"
+version = "2.12.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -59,7 +59,7 @@ snapshot = []
 addr2line = "0.25.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.12.0" }
+apollo-federation = { path = "../apollo-federation", version = "=2.12.1" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -101,8 +101,14 @@ fred = { version = "10.1.0", features = [
     "serde-json",
     "replicas"
 ] }
+# We don't use this dependency, but the "all" feature is required for fred's
+# "tcp-user-timeouts" feature to work: https://github.com/aembke/fred.rs/pull/369
+socket2 = { version = "0.5", features = ["all"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"
+# Not used directly, but declared here to enforce a minimum version floor for this
+# transitive dependency and to allow Renovate to manage future version bumps.
+h2 = "0.4.13"
 hex.workspace = true
 http.workspace = true
 http-body = "1.0.1"
@@ -161,22 +167,23 @@ once_cell = "1.19.0"
 # groups `^tracing` and `^opentelemetry*` dependencies together as of
 # https://github.com/apollographql/router/pull/1509.  A comment which exists
 # there (and on `tracing` packages below) should be updated should this change.
-opentelemetry = { version = "0.24.0", features = ["trace", "metrics"] }
-opentelemetry_sdk = { version = "0.24.1", default-features = false, features = [
+opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.31", default-features = false, features = [
     "rt-tokio",
     "trace",
+    "metrics",
+    "spec_unstable_metrics_views",
+    "experimental_trace_batch_span_processor_with_async_runtime",
+    "experimental_metrics_periodicreader_with_async_runtime",
 ] }
-opentelemetry-aws = "0.12.0"
-# START TEMP DATADOG Temporarily remove until we upgrade otel to the latest version
-# This means including the rmp library
-# opentelemetry-datadog = { version = "0.12.0", features = ["reqwest-client"] }
+opentelemetry-aws = "0.19"
 rmp = "0.8"
-# END TEMP DATADOG
-opentelemetry-http = "0.13.0"
-opentelemetry-jaeger-propagator = "0.3.0"
-opentelemetry-otlp = { version = "0.17.0", default-features = false, features = [
+opentelemetry-http = "0.31"
+opentelemetry-jaeger-propagator = "0.31"
+opentelemetry-otlp = { version = "0.31", default-features = false, features = [
     "grpc-tonic",
     "gzip-tonic",
+    "gzip-http",
     "tonic",
     "tls",
     "http-proto",
@@ -184,17 +191,17 @@ opentelemetry-otlp = { version = "0.17.0", default-features = false, features = 
     "reqwest-client",
     "trace",
 ] }
-opentelemetry-semantic-conventions = "0.16.0"
-opentelemetry-zipkin = { version = "0.22.0", default-features = false, features = [
+opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
+opentelemetry-zipkin = { version = "0.31", default-features = false, features = [
     "reqwest-client",
     "reqwest-rustls",
 ] }
-opentelemetry-prometheus = "0.17.0"
+opentelemetry-prometheus = "0.31"
 paste = "1.0.15"
 pin-project-lite = "0.2.14"
-prometheus = "0.13"
-prost = "0.13.0"
-prost-types = "0.13.0"
+prometheus = "0.14"
+prost = "0.14.0"
+prost-types = "0.14.0"
 proteus = "0.5.0"
 rand = "0.9.0"
 rhai = { version = "1.23.6", features = ["sync", "serde", "internals"] }
@@ -233,10 +240,10 @@ thiserror = "2.0.0"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net", "fs"] }
 tokio-util = { version = "0.7.11", features = ["net", "codec", "time", "compat"] }
-tonic = { version = "0.12.3", features = [
+tonic = { version = "0.14.5", features = [
     "transport",
-    "tls",
-    "tls-roots",
+    "tls-ring",
+    "tls-native-roots",
     "gzip",
 ] }
 tower.workspace = true
@@ -252,7 +259,7 @@ uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 wiremock = "0.6"
 wsl = "0.1.0"
-tokio-tungstenite = { version = "0.28.0", features = [
+tokio-tungstenite = { version = "0.29.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
@@ -288,7 +295,7 @@ ryu = "1.0.15"
 apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 scopeguard = "1.2.0"
-tokio-tar = { package = "astral-tokio-tar", version = "0.5.3" }
+tokio-tar = { package = "astral-tokio-tar", version = "0.6.0" }
 blake3 = { version = "1.8.2", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -319,16 +326,16 @@ memchr = { version = "2.7.4", default-features = false }
 mockall = "0.14.0"
 num-traits = "0.2.19"
 once_cell.workspace = true
-opentelemetry-stdout = { version = "0.5.0", features = ["trace"] }
-opentelemetry = { version = "0.24.0", features = ["testing"] }
-opentelemetry_sdk = { version = "0.24.1", features = ["testing"] }
-opentelemetry-proto = { version = "0.7.0", features = [
+opentelemetry-stdout = { version = "0.31", features = ["trace"] }
+opentelemetry = { version = "0.31", features = ["testing"] }
+opentelemetry_sdk = { version = "0.31", features = ["testing"] }
+opentelemetry-proto = { version = "0.31", features = [
     "metrics",
     "trace",
     "gen-tonic-messages",
     "with-serde",
 ] }
-opentelemetry-datadog = { version = "0.12.0", features = ["reqwest-client"] }
+opentelemetry-datadog = { version = "0.19", features = ["reqwest-client"] }
 p256 = "0.13.2"
 pretty_assertions = "1.4.1"
 reqwest = { version = "0.12.9", default-features = false, features = [
@@ -355,7 +362,7 @@ tracing-subscriber = { version = "0.3.20", default-features = false, features = 
     "env-filter",
     "fmt",
 ] }
-tracing-opentelemetry = "0.25.0"
+tracing-opentelemetry = "0.32"
 tracing-test = "=0.2.5"
 tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
@@ -373,12 +380,12 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 ] }
 
 [build-dependencies]
-tonic-build = "0.12.3"
+tonic-prost-build = "0.14.0"
 serde_json.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = [
-    "serde_regex", # Referenced only as a string in a macro
+    "socket2", # Only used to enable a transitive feature pending https://github.com/aembke/fred.rs/pull/369
 ]
 
 [[test]]

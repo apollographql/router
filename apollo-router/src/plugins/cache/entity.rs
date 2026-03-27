@@ -52,8 +52,8 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::response_cache::plugin::find_matching_key_field_set;
 use crate::query_planner::OperationKind;
@@ -64,14 +64,14 @@ use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
 
 /// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
-pub(crate) const ENTITY_CACHE_VERSION: &str = "1.1";
+pub(crate) const ENTITY_CACHE_VERSION: &str = "1.2";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 /// Context key to enable support of surrogate cache key
 pub(crate) const CONTEXT_CACHE_KEYS: &str = "apollo::entity_cache::cached_keys_status";
 
-register_plugin!("apollo", "preview_entity_cache", EntityCache);
+register_private_plugin!("apollo", "preview_entity_cache", EntityCache);
 
 #[derive(Clone)]
 pub(crate) struct EntityCache {
@@ -97,6 +97,16 @@ pub(crate) struct Storage {
 impl Storage {
     pub(crate) fn get(&self, subgraph: &str) -> Option<&RedisCacheStorage> {
         self.subgraphs.get(subgraph).or(self.all.as_ref())
+    }
+
+    /// Activate all Redis storages so they can start emitting metrics.
+    pub(crate) fn activate(&self) {
+        if let Some(all) = &self.all {
+            all.activate();
+        }
+        for storage in self.subgraphs.values() {
+            storage.activate();
+        }
     }
 }
 
@@ -190,7 +200,7 @@ pub(crate) struct CacheHitMiss {
 }
 
 #[async_trait::async_trait]
-impl Plugin for EntityCache {
+impl PluginPrivate for EntityCache {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
@@ -461,6 +471,10 @@ impl Plugin for EntityCache {
         }
 
         map
+    }
+
+    fn activate(&self) {
+        self.storage.activate();
     }
 }
 

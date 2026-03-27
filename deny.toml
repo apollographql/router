@@ -24,16 +24,20 @@ git-fetch-with-cli = true
 ignore = [
     "RUSTSEC-2023-0071",
 
-    # protobuf is used only through prometheus crates, enforced by
-    # a `[bans]` entry below. in the prometheus crates, only the protobuf
-    # encoder is used, while only the decoder is affected by this advisory.
-    "RUSTSEC-2024-0437",
-
     # The following crates are unmaintained
     "RUSTSEC-2024-0320", # TODO replace the `yaml-rust` crate with a maintained equivalent
     "RUSTSEC-2024-0436", # TODO replace the `paste` crate with a maintained equivalent
     "RUSTSEC-2024-0388", # TODO replace the `derivative` crate with a maintained equivalent
     "RUSTSEC-2025-0134", # TODO figure out what to do with rustls-pemfile, which is no longer maintained (trans dep of hyper-rustls, tonic)
+
+    # Temporary exemption: the CRL matching bug requires a compromised trusted CA to exploit, and the
+    # router does not enable CRL revocation checking, so this code path is not reachable in practice.
+    "RUSTSEC-2026-0049", # TODO: update rustls-webpki (ROUTER-1675)
+
+    # Temporary exemption: the router doesn't unpack or parse existing tarballs.
+    "RUSTSEC-2026-0066", # TODO: update tar (ROUTER-1676)
+    "RUSTSEC-2026-0067", # TODO: update tar (ROUTER-1676)
+    "RUSTSEC-2026-0068", # TODO: update tar (ROUTER-1676)
 ]
 
 # This section is considered when running `cargo deny check licenses`
@@ -96,12 +100,7 @@ highlight = "all"
 
 # List of crates to deny
 deny = [
-  { crate = "openssl-sys" },
-  # Prevent adding new dependencies on protobuf that may use code with
-  # a security advisory in it (see `[advisories]`).
-  # If you *must* add a new crate to the "wrappers" here, carefully audit
-  # that it is *not* affected by any of the advisories above.
-  { crate = "protobuf:<3.7.2", wrappers = ["prometheus", "opentelemetry-prometheus"] },
+  { name = "openssl-sys" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

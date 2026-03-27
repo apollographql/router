@@ -169,7 +169,7 @@ impl Merger {
                 input_example,
                 output_example,
             } if violates_intersection_requirement => {
-                self.error_reporter.report_mismatch_error_with_specifics::<_, _>(
+                self.error_reporter.report_mismatch_error_with_specifics(
                     CompositionError::EnumValueMismatch {
                         message: format!(
                             "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
@@ -178,6 +178,7 @@ impl Merger {
                     },
                     &value_pos,
                     sources,
+                    &self.subgraphs,
                     |_| Some("yes".to_string()),
                     |source, _| {
                         if source.values.contains_key(&value_pos.value_name) {
@@ -193,13 +194,14 @@ impl Merger {
                 );
             }
             EnumTypeUsage::Input { .. } if violates_intersection_requirement => {
-                self.error_reporter.report_mismatch_hint::<_, _>(
+                self.error_reporter.report_mismatch_hint(
                     HintCode::InconsistentEnumValueForInputEnum,
                     format!(
                         "Value \"{}\" of enum type \"{}\" will not be part of the supergraph as it is not defined in all the subgraphs defining \"{}\": ", value_pos.value_name, value_pos.type_name, value_pos.type_name
                     ),
                     &value_pos,
                     sources,
+                    &self.subgraphs,
                     |_| Some("yes".to_string()),
                     |source, _| {
                         if source.values.contains_key(&value_pos.value_name) {
@@ -264,13 +266,14 @@ impl Merger {
         // As soon as we find a subgraph that has the type but not the member, we hint.
         for enum_type in sources.values().flatten() {
             if !enum_type.values.contains_key(value_name) {
-                self.error_reporter.report_mismatch_hint::<_, _>(
+                self.error_reporter.report_mismatch_hint(
                     HintCode::InconsistentEnumValueForOutputEnum,
                     format!(
                         "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": ",
                     ),
                     dest_name,
                     sources,
+                    &self.subgraphs,
                     |_| Some("yes".to_string()),
                     |source, _| {
                         if source.values.contains_key(value_name) {
@@ -284,7 +287,6 @@ impl Merger {
                     false,
                     false,
                 );
-                return;
             }
         }
     }
@@ -449,6 +451,7 @@ pub(crate) mod tests {
             link_spec_definition,
             join_spec_definition,
             join_directive_identities: Default::default(),
+            directives_using_join_directive: Default::default(),
             schema_to_import_to_feature_url: Default::default(),
             latest_federation_version_used: FEDERATION_VERSIONS.latest().version().clone(),
             applied_directives_to_merge: Default::default(),

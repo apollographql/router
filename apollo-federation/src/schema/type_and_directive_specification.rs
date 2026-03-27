@@ -538,9 +538,21 @@ type ArgumentMergerFactory =
 pub(crate) type StaticArgumentsTransform =
     dyn Fn(&Subgraph<Validated>, IndexMap<Name, Value>) -> IndexMap<Name, Value>;
 
+/// Options for directive composition. Passed to `DirectiveSpecification::new` when the directive
+/// composes; groups composition-related parameters to keep the constructor under Clippy’s limit.
+#[derive(Clone)]
+pub(crate) struct DirectiveCompositionOptions {
+    pub(crate) supergraph_specification: &'static SupergraphSpecification,
+    pub(crate) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
+    pub(crate) use_join_directive: bool,
+}
+
 #[derive(Clone)]
 pub(crate) struct DirectiveCompositionSpecification {
     pub(crate) supergraph_specification: &'static SupergraphSpecification,
+    /// Whether this directive is composed via `@join__directive` in the supergraph.
+    /// Matches JS `DirectiveCompositionSpecification.useJoinDirective` (federation PR #3274).
+    pub(crate) use_join_directive: bool,
     /// Factory function returning an actual argument merger for given federation schema.
     pub(crate) argument_merger: Option<Rc<ArgumentMergerFactory>>,
     pub(crate) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
@@ -561,17 +573,10 @@ impl DirectiveSpecification {
         args: &[DirectiveArgumentSpecification],
         repeatable: bool,
         locations: &[DirectiveLocation],
-        composes: bool,
-        supergraph_specification: Option<&'static SupergraphSpecification>,
-        static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
+        composition: Option<DirectiveCompositionOptions>,
     ) -> Self {
-        let mut composition: Option<DirectiveCompositionSpecification> = None;
-        if composes {
-            let Some(supergraph_specification) = supergraph_specification else {
-                panic!(
-                    "Should provide a @link specification to use in supergraph for directive @{name} if it composes"
-                );
-            };
+        let mut composition_spec: Option<DirectiveCompositionSpecification> = None;
+        if let Some(opts) = composition {
             let mut argument_merger: Option<Rc<ArgumentMergerFactory>> = None;
             let arg_strategies_iter = args.iter().filter_map(|arg| {
                 Some((arg.base_spec.name.to_string(), arg.composition_strategy?))
@@ -593,15 +598,16 @@ impl DirectiveSpecification {
                     arg_strategies,
                 ));
             }
-            composition = Some(DirectiveCompositionSpecification {
-                supergraph_specification,
+            composition_spec = Some(DirectiveCompositionSpecification {
+                supergraph_specification: opts.supergraph_specification,
+                use_join_directive: opts.use_join_directive,
                 argument_merger,
-                static_argument_transform,
+                static_argument_transform: opts.static_argument_transform,
             })
         }
         Self {
             name,
-            composition,
+            composition: composition_spec,
             args: args.to_vec(),
             repeatable,
             locations: locations.to_vec(),
@@ -1014,23 +1020,8 @@ mod tests {
     use crate::link::spec_definition::SpecDefinition;
     use crate::schema::FederationSchema;
     use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
+    use crate::schema::type_and_directive_specification::DirectiveCompositionOptions;
     use crate::schema::type_and_directive_specification::DirectiveSpecification;
-
-    #[test]
-    #[should_panic(
-        expected = "Should provide a @link specification to use in supergraph for directive @foo if it composes"
-    )]
-    fn must_have_supergraph_link_if_composed() {
-        DirectiveSpecification::new(
-            name!("foo"),
-            &[],
-            false,
-            &[DirectiveLocation::Object],
-            true,
-            None,
-            None,
-        );
-    }
 
     #[test]
     #[should_panic(
@@ -1063,13 +1054,15 @@ mod tests {
             ],
             false,
             &[DirectiveLocation::Object],
-            true,
-            Some(&|_| {
-                LINK_VERSIONS
-                    .find(&Version { major: 1, minor: 0 })
-                    .map(|v| v as &dyn SpecDefinition)
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|_| {
+                    LINK_VERSIONS
+                        .find(&Version { major: 1, minor: 0 })
+                        .map(|v| v as &dyn SpecDefinition)
+                },
+                static_argument_transform: None,
+                use_join_directive: false,
             }),
-            None,
         );
     }
 
@@ -1090,13 +1083,15 @@ mod tests {
             }],
             true,
             &[DirectiveLocation::Object],
-            true,
-            Some(&|_| {
-                LINK_VERSIONS
-                    .find(&Version { major: 1, minor: 0 })
-                    .map(|v| v as &dyn SpecDefinition)
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|_| {
+                    LINK_VERSIONS
+                        .find(&Version { major: 1, minor: 0 })
+                        .map(|v| v as &dyn SpecDefinition)
+                },
+                static_argument_transform: None,
+                use_join_directive: false,
             }),
-            None,
         );
     }
 }

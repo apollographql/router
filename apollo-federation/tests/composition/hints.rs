@@ -893,14 +893,206 @@ In subgraph "Subgraph2", the description is:
         assert_has_hint(
             &result,
             "INCONSISTENT_DESCRIPTION",
-            r#"Element "T.f" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraphs "Subgraph2" and "Subgraph3"):
-  """
-  Return a super secret integer
-  """
-In subgraph "Subgraph1", the description is:
+            r#"Element "T.f" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Subgraph1"):
   """
   I don't know what I'm doing
+  """
+In subgraphs "Subgraph2" and "Subgraph3", the description is:
+  """
+  Return a super secret integer
   """"#,
+        );
+    }
+
+    #[test]
+    fn hints_on_inconsistent_description_for_merged_type_order() {
+        // Two subgraphs define type Order with different descriptions.
+        // The chosen description is lexicographically first by description text.
+        let orders_subgraph = ServiceDefinition {
+            name: "Orders",
+            type_defs: r#"
+                schema {
+                    query: Query
+                }
+
+                type Query {
+                    order: Order @shareable
+                }
+
+                """Reference type to order entity in ONE GRAPH"""
+                type Order @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let users_subgraph = ServiceDefinition {
+            name: "Users",
+            type_defs: r#"
+                type Query {
+                    order: Order @shareable
+                }
+
+                """Represents a user order"""
+                type Order @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[orders_subgraph, users_subgraph]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_DESCRIPTION",
+            r#"Element "Order" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Users"):
+  """
+  Represents a user order
+  """
+In subgraph "Orders", the description is:
+  """
+  Reference type to order entity in ONE GRAPH
+  """"#,
+        );
+
+        let api_schema = result
+            .to_api_schema(Default::default())
+            .expect("api schema");
+        let order_type = api_schema
+            .schema()
+            .types
+            .get("Order")
+            .expect("Order type in schema");
+        let desc = order_type.description().map(|n| n.as_str()).unwrap_or("");
+        assert_eq!(
+            desc.trim(),
+            "Represents a user order",
+            "supergraph should use chosen description"
+        );
+    }
+
+    #[test]
+    fn hints_on_inconsistent_description_for_merged_type_three_subgraphs_determinism() {
+        // Three subgraphs define type Product with different descriptions (each count 1).
+        let catalog_subgraph = ServiceDefinition {
+            name: "Catalog",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Product in the catalog"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let inventory_subgraph = ServiceDefinition {
+            name: "Inventory",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Inventory product entity"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let reviews_subgraph = ServiceDefinition {
+            name: "Reviews",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Product for reviews"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let result =
+            compose_as_fed2_subgraphs(&[catalog_subgraph, inventory_subgraph, reviews_subgraph])
+                .unwrap();
+
+        let api_schema = result
+            .to_api_schema(Default::default())
+            .expect("api schema");
+        let product_type = api_schema
+            .schema()
+            .types
+            .get("Product")
+            .expect("Product type in schema");
+        let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
+        assert_eq!(
+            desc.trim(),
+            "Product in the catalog",
+            "supergraph should use chosen description"
+        );
+    }
+
+    #[test]
+    fn hints_on_inconsistent_description_for_merged_type_three_subgraphs_order_independent() {
+        // Same as above but pass subgraphs in different order.
+        // Result must still be the same lexicographically first description text.
+        let catalog_subgraph = ServiceDefinition {
+            name: "Catalog",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Product in the catalog"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let inventory_subgraph = ServiceDefinition {
+            name: "Inventory",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Inventory product entity"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        let reviews_subgraph = ServiceDefinition {
+            name: "Reviews",
+            type_defs: r#"
+                type Query {
+                    product: Product @shareable
+                }
+                """Product for reviews"""
+                type Product @shareable {
+                    id: ID!
+                }
+            "#,
+        };
+
+        // Different input order; determinism should still choose the same description.
+        let result =
+            compose_as_fed2_subgraphs(&[reviews_subgraph, catalog_subgraph, inventory_subgraph])
+                .unwrap();
+
+        let api_schema = result
+            .to_api_schema(Default::default())
+            .expect("api schema");
+        let product_type = api_schema
+            .schema()
+            .types
+            .get("Product")
+            .expect("Product type in schema");
+        let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
+        assert_eq!(
+            desc.trim(),
+            "Product in the catalog",
+            "supergraph description must be deterministic regardless of subgraph order"
         );
     }
 }

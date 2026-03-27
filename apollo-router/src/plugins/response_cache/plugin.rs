@@ -87,7 +87,7 @@ use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
 
 /// Change this key if you introduce a breaking change in response caching algorithm to make sure it won't take the previous entries
-pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.1";
+pub(crate) const RESPONSE_CACHE_VERSION: &str = "1.2";
 pub(crate) const CACHE_TAG_DIRECTIVE_NAME: &str = "federation__cacheTag";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
@@ -141,6 +141,20 @@ impl StorageInterface {
     pub(crate) fn get(&self, subgraph: &str) -> Option<&Storage> {
         let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
         storage.get()
+    }
+
+    /// Activate all storages so they can start emitting metrics.
+    pub(crate) fn activate(&self) {
+        if let Some(all) = &self.all
+            && let Some(storage) = all.get()
+        {
+            storage.activate();
+        }
+        for storage in self.subgraphs.values() {
+            if let Some(storage) = storage.get() {
+                storage.activate();
+            }
+        }
     }
 }
 
@@ -361,7 +375,9 @@ impl PluginPrivate for ResponseCache {
         })
     }
 
-    fn activate(&self) {}
+    fn activate(&self) {
+        self.storage.activate();
+    }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let debug = self.debug;

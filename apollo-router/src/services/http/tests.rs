@@ -568,45 +568,47 @@ mod tls {
 
 mod h2c_cleartext {
     use super::*;
+    use crate::configuration::shared::Client;
 
     // Starts a local server that responds with a default GraphQL response over plain HTTP.
     async fn emulate_h2c_server(listener: TcpListener) {
-        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            Ok(http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .status(StatusCode::OK)
-                .body(
-                    serde_json::to_string(&Response {
+        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            let response_builder =
+                http::Response::builder().header(CONTENT_TYPE, APPLICATION_JSON.essence_str());
+
+            let response = match request.version() {
+                Version::HTTP_2 => {
+                    let response_body = serde_json::to_string(&Response {
                         data: Some(Value::default()),
                         ..Response::default()
-                    })
-                    .expect("always valid")
-                    .into(),
-                )
-                .unwrap())
+                    });
+                    response_builder
+                        .status(StatusCode::OK)
+                        .body(response_body.unwrap().into())
+                }
+                Version::HTTP_11 => response_builder
+                    .status(StatusCode::HTTP_VERSION_NOT_SUPPORTED)
+                    .body(Body::empty()),
+                version => panic!("unexpected version {version:?}"),
+            };
+
+            Ok(response.unwrap())
         }
 
-        // XXX(@goto-bus-stop): ideally this server would *only* support HTTP 2 and not HTTP 1
         serve(listener, handle).await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_subgraph_h2c() {
+    async fn test_subgraph_h2c_works_with_http2only() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_h2c_server(listener));
 
-        let subgraph_service = HttpClientService::new(
-            "test",
-            rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("read native TLS root certificates")
-                .with_no_client_auth(),
-            crate::configuration::shared::Client::builder()
-                .experimental_http2(Http2Config::Http2Only)
-                .build(),
-        )
-        .expect("can create a HttpService");
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .build();
+        let subgraph_service =
+            HttpClientService::from_client_config(client_config).expect("can create a HttpService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = send_request(
@@ -615,7 +617,234 @@ mod h2c_cleartext {
             r#"{"query":"{ me { name username } }"#,
         )
         .await;
+
         assert_response_body(response, r#"{"data":null}"#).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_h2c_not_used_with_enable() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_h2c_server(listener));
+
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Enable)
+            .build();
+        let subgraph_service =
+            HttpClientService::from_client_config(client_config).expect("can create a HttpService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = send_request(
+            subgraph_service,
+            url,
+            r#"{"query":"{ me { name username } }"#,
+        )
+        .await;
+
+        // h2c only works with `Http2Config::Http2Only` - hyper only supports HTTP/2 with TLS or
+        // with 'prior knowledge'
+        // https://github.com/hyperium/hyper/issues/2411
+        assert_eq!(
+            response.http_response.status(),
+            StatusCode::HTTP_VERSION_NOT_SUPPORTED
+        );
+    }
+}
+
+mod h2c_keep_alive {
+    use std::pin::Pin;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::time::Duration;
+
+    use tokio::io::AsyncRead;
+    use tokio::io::AsyncWrite;
+    use tokio::io::ReadBuf;
+    use tokio::net::TcpStream;
+    use tokio::sync::mpsc::Sender;
+    use tokio::task::JoinHandle;
+
+    use super::*;
+    use crate::configuration::shared::Client;
+
+    /// Wraps a TcpStream and emits a `()` on the `ping_tx` channel each time the server reads an H2
+    /// PING frame sent by the client.
+    struct SpyStream {
+        inner: TcpStream,
+        ping_tx: Sender<()>,
+    }
+
+    impl SpyStream {
+        fn new(stream: TcpStream, ping_tx: Sender<()>) -> Self {
+            Self {
+                inner: stream,
+                ping_tx,
+            }
+        }
+    }
+
+    impl AsyncRead for SpyStream {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            let before = buf.filled().len();
+
+            let result = Pin::new(&mut self.inner).poll_read(cx, buf);
+            if matches!(result, Poll::Ready(Ok(()))) {
+                let new_bytes = buf.filled()[before..].to_vec();
+                if is_ping_frame(&new_bytes) {
+                    self.ping_tx.try_send(()).unwrap();
+                }
+            }
+
+            result
+        }
+    }
+
+    impl AsyncWrite for SpyStream {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            Pin::new(&mut self.inner).poll_write(cx, buf)
+        }
+
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.inner).poll_flush(cx)
+        }
+
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.inner).poll_shutdown(cx)
+        }
+    }
+
+    /// Check whether a raw byte slice is an H2 PING frame (not an ACK) per RFC 7540.
+    ///
+    /// This assumes the PING frame arrives as its own chunk — it inspects fixed offsets 3 and 4
+    /// for the frame type and flags rather than doing full frame parsing. In practice this works
+    /// because hyper sends keep-alive PINGs as standalone writes.
+    ///
+    /// References: [frame header] (§4.1), [PING frame] (§6.7)
+    ///
+    /// [frame header]: https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
+    /// [PING frame]: https://datatracker.ietf.org/doc/html/rfc7540#section-6.7
+    fn is_ping_frame(data: &[u8]) -> bool {
+        const FRAME_HEADER_SIZE: usize = 9;
+        const PING_FRAME_TYPE: u8 = 0x06;
+        const ACK_FLAG: u8 = 0x01;
+
+        if data.len() < FRAME_HEADER_SIZE {
+            return false;
+        }
+
+        let frame_type = data[3];
+        let flags = data[4];
+
+        frame_type == PING_FRAME_TYPE && flags & ACK_FLAG == 0
+    }
+
+    /// Start a spy H2 server that counts H2 PING frames sent by the client. Returns a
+    /// [`JoinHandle`] that resolves to the total ping count once the server connection closes.
+    fn start_spy_server_and_ping_counter(listener: TcpListener) -> JoinHandle<usize> {
+        let (ping_tx, mut ping_rx) = tokio::sync::mpsc::channel(100);
+
+        let _spy_server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let spy_stream = SpyStream::new(stream, ping_tx);
+
+            let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
+                let response_body = serde_json::to_string(&Response {
+                    data: Some(Value::default()),
+                    ..Response::default()
+                })
+                .unwrap();
+                Ok::<_, Infallible>(
+                    http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .status(StatusCode::OK)
+                        .body(Body::from(response_body))
+                        .unwrap(),
+                )
+            });
+
+            // serve_connection drives the h2 connection, including automatic PING ACKs
+            let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection(TokioIo::new(spy_stream), svc)
+                .await;
+        });
+
+        tokio::spawn(async move {
+            let mut ping_count = 0;
+            while let Some(()) = ping_rx.recv().await {
+                ping_count += 1;
+            }
+            ping_count
+        })
+    }
+
+    /// Start a spy server, make one request with the given client config, wait for keep-alive
+    /// intervals to fire, then return the number of H2 PING frames the server observed.
+    async fn run_server_and_count_keep_alive_pings(
+        client_config: Client,
+    ) -> Result<usize, BoxError> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let socket_addr = listener.local_addr()?;
+
+        let ping_counter = start_spy_server_and_ping_counter(listener);
+        let service = HttpClientService::from_client_config(client_config)?;
+
+        let url = Uri::from_str(&format!("http://{socket_addr}"))?;
+        let request = HttpRequest {
+            http_request: Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{"query":"{ me }"}"#))?,
+            context: crate::Context::new(),
+        };
+
+        // Clone so the service (and its connection pool) stays alive after the request
+        service.clone().oneshot(request).await?;
+
+        // Wait for several keep-alive intervals while the connection sits idle in the pool
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        drop(service);
+
+        Ok(ping_counter.await?)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_keep_alive_pings_are_sent() {
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .experimental_http2_keep_alive_interval(Duration::from_millis(50))
+            .build();
+
+        let ping_count = run_server_and_count_keep_alive_pings(client_config)
+            .await
+            .unwrap();
+        assert!(
+            ping_count > 0,
+            "expected at least one H2 PING frame from the client, got {ping_count}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_no_pings_without_keep_alive() {
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            // no keep-alive interval configured
+            .build();
+
+        let ping_count = run_server_and_count_keep_alive_pings(client_config)
+            .await
+            .unwrap();
+        assert_eq!(
+            ping_count, 0,
+            "expected no H2 PING frames when keep-alive is not configured"
+        );
     }
 }
 
@@ -666,7 +895,7 @@ mod compressed_req_res {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_compressed_response(listener));
 
-        let subgraph_service = HttpClientService::new(
+        let subgraph_service = HttpClientService::test_new(
             "test",
             rustls::ClientConfig::builder()
                 .with_native_roots()
@@ -980,5 +1209,111 @@ mod http_version_negotiation {
 
         expected.check(&version_tracker);
         assert_response_body(response, r#"{"data": "success"}"#).await;
+    }
+}
+
+mod pool_idle_timeout {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use super::*;
+
+    /// Server that counts how many TCP connections are accepted
+    async fn serve_counting(
+        listener: TcpListener,
+        connection_count: Arc<AtomicUsize>,
+    ) -> std::io::Result<()> {
+        loop {
+            let (stream, _) = listener.accept().await?;
+            connection_count.fetch_add(1, Ordering::SeqCst);
+            let io = TokioIo::new(stream);
+            tokio::spawn(async move {
+                let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
+                    Ok::<_, Infallible>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .body::<Body>(r#"{"data":null}"#.into())
+                            .unwrap(),
+                    )
+                });
+                let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                    .serve_connection_with_upgrades(io, svc)
+                    .await;
+            });
+        }
+    }
+
+    fn make_client_config(timeout: Option<Duration>) -> crate::configuration::shared::Client {
+        match timeout {
+            Some(d) => crate::configuration::shared::Client::builder()
+                .pool_idle_timeout(d)
+                .build(),
+            None => crate::configuration::shared::Client {
+                pool_idle_timeout: None,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[rstest]
+    #[case::short_timeout_evicts(
+        Some(Duration::from_millis(50)),
+        Duration::from_millis(200),
+        2, // expect a new connection after the idle timeout
+    )]
+    #[case::long_timeout_reuses(
+        Some(Duration::from_secs(60)),
+        Duration::from_millis(200),
+        1, // expect the pooled connection to be reused
+    )]
+    #[case::none_disables_eviction(
+        None,
+        Duration::from_millis(200),
+        1, // None means no idle timeout → connection stays pooled
+    )]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_pool_idle_timeout_evicts_connections(
+        #[case] timeout: Option<Duration>,
+        #[case] sleep_between: Duration,
+        #[case] expected_connections: usize,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let connection_count = Arc::new(AtomicUsize::new(0));
+
+        tokio::task::spawn(serve_counting(listener, connection_count.clone()));
+
+        let mut service = HttpClientService::test_new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            make_client_config(timeout),
+        )
+        .expect("can create HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+
+        let response = send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            connection_count.load(Ordering::SeqCst),
+            1,
+            "first request opens one connection"
+        );
+
+        tokio::time::sleep(sleep_between).await;
+
+        tower::ServiceExt::ready(&mut service).await.unwrap();
+        let response = send_request(service, url, r#"{"query":"{ b }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            connection_count.load(Ordering::SeqCst),
+            expected_connections,
+            "expected {expected_connections} total TCP connections for timeout {timeout:?} with {sleep_between:?} sleep"
+        );
     }
 }
