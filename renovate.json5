@@ -138,8 +138,6 @@
       groupName: null,
       groupSlug: null,
     },
-<<<<<<< HEAD
-=======
     // Add a note to the Rhai update PR to add a changeset
     {
       matchManagers: ['cargo'],
@@ -150,6 +148,5 @@
       groupName: null,
       groupSlug: null,
     },
->>>>>>> 1256bf3e (chore: exclude Rhai from the >= 1.0 renovate group (#9061))
   ],
 }
