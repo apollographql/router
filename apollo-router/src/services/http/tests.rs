@@ -651,6 +651,203 @@ mod h2c_cleartext {
     }
 }
 
+mod h2c_keep_alive {
+    use std::pin::Pin;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::time::Duration;
+
+    use tokio::io::AsyncRead;
+    use tokio::io::AsyncWrite;
+    use tokio::io::ReadBuf;
+    use tokio::net::TcpStream;
+    use tokio::sync::mpsc::Sender;
+    use tokio::task::JoinHandle;
+
+    use super::*;
+    use crate::configuration::shared::Client;
+
+    /// Wraps a TcpStream and emits a `()` on the `ping_tx` channel each time the server reads an H2
+    /// PING frame sent by the client.
+    struct SpyStream {
+        inner: TcpStream,
+        ping_tx: Sender<()>,
+    }
+
+    impl SpyStream {
+        fn new(stream: TcpStream, ping_tx: Sender<()>) -> Self {
+            Self {
+                inner: stream,
+                ping_tx,
+            }
+        }
+    }
+
+    impl AsyncRead for SpyStream {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            let before = buf.filled().len();
+
+            let result = Pin::new(&mut self.inner).poll_read(cx, buf);
+            if matches!(result, Poll::Ready(Ok(()))) {
+                let new_bytes = buf.filled()[before..].to_vec();
+                if is_ping_frame(&new_bytes) {
+                    self.ping_tx.try_send(()).unwrap();
+                }
+            }
+
+            result
+        }
+    }
+
+    impl AsyncWrite for SpyStream {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            Pin::new(&mut self.inner).poll_write(cx, buf)
+        }
+
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.inner).poll_flush(cx)
+        }
+
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.inner).poll_shutdown(cx)
+        }
+    }
+
+    /// Check whether a raw byte slice is an H2 PING frame (not an ACK) per RFC 7540.
+    ///
+    /// This assumes the PING frame arrives as its own chunk — it inspects fixed offsets 3 and 4
+    /// for the frame type and flags rather than doing full frame parsing. In practice this works
+    /// because hyper sends keep-alive PINGs as standalone writes.
+    ///
+    /// References: [frame header] (§4.1), [PING frame] (§6.7)
+    ///
+    /// [frame header]: https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
+    /// [PING frame]: https://datatracker.ietf.org/doc/html/rfc7540#section-6.7
+    fn is_ping_frame(data: &[u8]) -> bool {
+        const FRAME_HEADER_SIZE: usize = 9;
+        const PING_FRAME_TYPE: u8 = 0x06;
+        const ACK_FLAG: u8 = 0x01;
+
+        if data.len() < FRAME_HEADER_SIZE {
+            return false;
+        }
+
+        let frame_type = data[3];
+        let flags = data[4];
+
+        frame_type == PING_FRAME_TYPE && flags & ACK_FLAG == 0
+    }
+
+    /// Start a spy H2 server that counts H2 PING frames sent by the client. Returns a
+    /// [`JoinHandle`] that resolves to the total ping count once the server connection closes.
+    fn start_spy_server_and_ping_counter(listener: TcpListener) -> JoinHandle<usize> {
+        let (ping_tx, mut ping_rx) = tokio::sync::mpsc::channel(100);
+
+        let _spy_server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let spy_stream = SpyStream::new(stream, ping_tx);
+
+            let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
+                let response_body = serde_json::to_string(&Response {
+                    data: Some(Value::default()),
+                    ..Response::default()
+                })
+                .unwrap();
+                Ok::<_, Infallible>(
+                    http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .status(StatusCode::OK)
+                        .body(Body::from(response_body))
+                        .unwrap(),
+                )
+            });
+
+            // serve_connection drives the h2 connection, including automatic PING ACKs
+            let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection(TokioIo::new(spy_stream), svc)
+                .await;
+        });
+
+        tokio::spawn(async move {
+            let mut ping_count = 0;
+            while let Some(()) = ping_rx.recv().await {
+                ping_count += 1;
+            }
+            ping_count
+        })
+    }
+
+    /// Start a spy server, make one request with the given client config, wait for keep-alive
+    /// intervals to fire, then return the number of H2 PING frames the server observed.
+    async fn run_server_and_count_keep_alive_pings(
+        client_config: Client,
+    ) -> Result<usize, BoxError> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let socket_addr = listener.local_addr()?;
+
+        let ping_counter = start_spy_server_and_ping_counter(listener);
+        let service = HttpClientService::from_client_config(client_config)?;
+
+        let url = Uri::from_str(&format!("http://{socket_addr}"))?;
+        let request = HttpRequest {
+            http_request: Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{"query":"{ me }"}"#))?,
+            context: crate::Context::new(),
+        };
+
+        // Clone so the service (and its connection pool) stays alive after the request
+        service.clone().oneshot(request).await?;
+
+        // Wait for several keep-alive intervals while the connection sits idle in the pool
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        drop(service);
+
+        Ok(ping_counter.await?)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_keep_alive_pings_are_sent() {
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .experimental_http2_keep_alive_interval(Duration::from_millis(50))
+            .build();
+
+        let ping_count = run_server_and_count_keep_alive_pings(client_config)
+            .await
+            .unwrap();
+        assert!(
+            ping_count > 0,
+            "expected at least one H2 PING frame from the client, got {ping_count}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_no_pings_without_keep_alive() {
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            // no keep-alive interval configured
+            .build();
+
+        let ping_count = run_server_and_count_keep_alive_pings(client_config)
+            .await
+            .unwrap();
+        assert_eq!(
+            ping_count, 0,
+            "expected no H2 PING frames when keep-alive is not configured"
+        );
+    }
+}
+
 mod compressed_req_res {
     use super::*;
 

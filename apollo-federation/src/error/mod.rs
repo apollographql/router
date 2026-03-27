@@ -135,6 +135,12 @@ pub(crate) trait HasLocations {
     fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations;
 }
 
+impl<HL: HasLocations> HasLocations for &HL {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
+        HL::locations(self, subgraph)
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
@@ -477,6 +483,27 @@ impl CompositionError {
             | Self::OverrideSourceHasOverride { .. }
             | Self::QueryRootMissing { .. } => self,
         }
+    }
+
+    pub(crate) fn append_locations(
+        mut self,
+        new_locations: impl IntoIterator<Item = SubgraphLocation>,
+    ) -> Self {
+        match &mut self {
+            Self::SubgraphError { locations, .. }
+            | Self::EmptyMergedEnumType { locations, .. }
+            | Self::InputFieldMergeFailed { locations, .. }
+            | Self::ExtensionWithNoBase { locations, .. }
+            | Self::RequiredArgumentMissingInSomeSubgraph { locations, .. }
+            | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
+            | Self::EmptyMergedInputType { locations, .. }
+            | Self::InvalidFieldSharing { locations, .. }
+            | Self::ArgumentDefaultMismatch { locations, .. }
+            | Self::InputFieldDefaultMismatch { locations, .. } => locations.extend(new_locations),
+            // Remaining errors do not have an obvious way to appending locations, so we do nothing
+            _ => {}
+        }
+        self
     }
 
     pub fn locations(&self) -> &[SubgraphLocation] {

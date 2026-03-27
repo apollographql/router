@@ -531,7 +531,7 @@ impl Merger {
 
         // Phase 2: Reporting - report errors in groups, matching JS version order
         if has_invalid_types {
-            self.error_reporter.report_mismatch_error::<FieldDefinition, FieldDefinitionPosition>(
+            self.error_reporter.report_mismatch_error(
                 CompositionError::ExternalTypeMismatch {
                     message: format!(
                         "Type of field \"{dest}\" is incompatible across subgraphs (where marked @external): it has ",
@@ -539,6 +539,7 @@ impl Merger {
                 },
                 dest_field,
                 sources,
+                &self.subgraphs,
                 |d| Some(format!("type \"{}\"", d.ty)),
                 |s, idx| s.try_get(self.subgraphs[idx].schema().schema()).map(|f| format!("type \"{}\"", f.ty)),
             );
@@ -550,7 +551,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error_with_specifics::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition>(
+            self.error_reporter.report_mismatch_error_with_specifics(
                 CompositionError::ExternalArgumentMissing {
                     message: format!(
                         "Field \"{dest}\" is missing argument \"{argument_pos}\" in some subgraphs where it is marked @external: "
@@ -558,6 +559,7 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
+                &self.subgraphs,
                 |_| Some("present".to_string()),
                 |_, _idx| Some("present".to_string()),
                 |_, names| format!("argument \"{argument_pos}\" is declared in {} ", names.unwrap_or("undefined".to_string())),
@@ -572,7 +574,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition>(
+            self.error_reporter.report_mismatch_error(
                 CompositionError::ExternalArgumentTypeMismatch {
                     message: format!(
                         "Type of argument \"{argument_pos}\" is incompatible across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -580,6 +582,7 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
+                &self.subgraphs,
                 |d| d.try_get(self.merged.schema()).map(|a| format!("type \"{}\"", a.ty)),
                 |s, idx| s.try_get(self.subgraphs[idx].schema().schema()).map(|a| format!("type \"{}\"", a.ty)),
             );
@@ -591,7 +594,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition>(
+            self.error_reporter.report_mismatch_error(
                 CompositionError::ExternalArgumentDefaultMismatch {
                     message: format!(
                         "Argument \"{argument_pos}\" has incompatible defaults across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -599,8 +602,9 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
+                &self.subgraphs,
                 |d| d.try_get(self.merged.schema())
-                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))), 
+                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))),
                 |s, idx| s.try_get(self.subgraphs[idx].schema().schema())
                         .map(|f| if let Some(def) = &f.default_value {
                             format!("default value {}", def)
