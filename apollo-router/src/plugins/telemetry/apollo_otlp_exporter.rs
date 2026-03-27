@@ -66,17 +66,19 @@ impl ApolloOtlpExporter {
     ) -> Result<ApolloOtlpExporter, BoxError> {
         tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP traces exporter");
 
-        let mut metadata = MetadataMap::new();
-        metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
         let mut otlp_exporter = match protocol {
-            Protocol::Grpc => SpanExporterBuilder::new()
-                .with_tonic()
-                .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                .with_timeout(batch_config.max_export_timeout)
-                .with_endpoint(endpoint.to_string())
-                .with_metadata(metadata)
-                .with_compression(opentelemetry_otlp::Compression::Gzip)
-                .build()?,
+            Protocol::Grpc => {
+                let mut metadata = MetadataMap::new();
+                metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
+                SpanExporterBuilder::new()
+                    .with_tonic()
+                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                    .with_timeout(batch_config.max_export_timeout)
+                    .with_endpoint(endpoint.to_string())
+                    .with_metadata(metadata)
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .build()?
+            }
             Protocol::Http => {
                 let endpoint_str = process_endpoint(
                     &Some(endpoint.to_string()),
