@@ -1390,8 +1390,16 @@ impl Rhai {
             .register_iterator::<HeaderMap>();
     }
 
-    pub(super) fn new_rhai_engine(path: Option<PathBuf>, sdl: String, main: PathBuf) -> Engine {
+    pub(super) fn new_rhai_engine(
+        path: Option<PathBuf>,
+        sdl: String,
+        main: PathBuf,
+        max_strings_interned: Option<usize>,
+    ) -> Engine {
         let mut engine = Engine::new();
+        if let Some(n) = max_strings_interned {
+            engine.set_max_strings_interned(n);
+        }
         // If we pass in a path, use it to configure our engine
         // with a FileModuleResolver which allows import to work
         // in scripts.

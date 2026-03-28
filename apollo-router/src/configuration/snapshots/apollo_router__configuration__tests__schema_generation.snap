@@ -8298,6 +8298,16 @@ expression: "&schema"
             "null"
           ]
         },
+        "max_strings_interned": {
+          "default": null,
+          "description": "Maximum number of strings to intern in the Rhai engine.\n\nWhen the `sync` feature is active (required for multi-threaded use),\nevery string operation acquires a `RwLock` on the interner. Under high\nconcurrency this lock can become a bottleneck.\n\nSet to `0` to disable string interning entirely, which eliminates the\nlock acquisition on every string operation and can improve throughput\nfor workloads with many concurrent Rhai executions.\n\nDefaults to `null`, which preserves Rhai's built-in default of 256\ninterned strings.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "scripts": {
           "description": "The directory where Rhai scripts can be found",
           "type": [
