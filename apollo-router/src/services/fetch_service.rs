@@ -193,6 +193,7 @@ impl FetchService {
                 &schema,
                 &current_dir,
                 paths,
+                None, // Connectors don't use contexts
                 response,
                 hoist_orphan_errors,
             );
@@ -306,6 +307,9 @@ impl FetchService {
                     &current_dir,
                     &schema,
                     variables.inverted_paths,
+                    variables
+                        .contextual_arguments
+                        .map(|ctx| ctx.inverted_contexts),
                     subfetch_trace,
                     hoist_orphan_errors,
                 )
