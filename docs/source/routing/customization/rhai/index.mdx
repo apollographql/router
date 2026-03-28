@@ -40,8 +40,8 @@ rhai:
   # The router looks for this filename in your Rhai script directory.
   main: "test.rhai"
 
-  # Maximum number of strings to intern in the Rhai engine.
-  # See "String interning and concurrent performance" under Limitations for details.
+  # Maximum number of strings to intern in Rhai engine.
+  # See String interning and concurrent performance under Limitations for details.
   # max_strings_interned: 0
 ```
 
@@ -533,9 +533,9 @@ This is particularly risky when using closures within callbacks while referencin
 
 ### String interning and concurrent performance
 
-The router compiles Rhai with the [`sync` feature](https://rhai.rs/book/start/features.html) enabled, which makes the engine safe to share across threads. A side effect of this is that Rhai's string interner — which caches frequently-used strings to reduce allocations — is protected by a `RwLock`. Under high concurrency, threads that encounter new strings must acquire a write lock, which serializes those operations across all concurrent requests.
+Router compiles Rhai with the [`sync` feature](https://rhai.rs/book/start/features.html) enabled, which makes the engine safe to share across threads. A side effect of this is that Rhai's string interner — which caches frequently-used strings to reduce allocations — is protected by a `RwLock`. Under high concurrency, threads that encounter new strings must acquire a write lock, which serializes those operations across all concurrent requests.
 
-By default, the Rhai engine interns up to 256 strings. You can control this limit with the `max_strings_interned` configuration option:
+By default, Rhai engine interns up to 256 strings. You can control this limit with the `max_strings_interned` configuration option:
 
 ```yaml title="config.yaml"
 rhai:
@@ -547,15 +547,15 @@ rhai:
 <Note>
 
 **Pros of disabling string interning (`max_strings_interned: 0`):**
-- Eliminates `RwLock` contention on the string interner under concurrent load. Benchmarks of script workloads representative of header manipulation and context key lookups show approximately 60% latency reduction and 2.5× throughput improvement on Rhai engine execution at 8 concurrent threads.
-- Most beneficial for deployments processing many concurrent requests through scripts that access a large number of distinct string values (such as long context keys, header names, and template-interpolated values).
+- Eliminates `RwLock` contention on the string interner under concurrent load. Benchmarks of script workloads representative of header manipulation and context key lookups show approximately 60% latency reduction and 2.5× throughput improvement on Rhai engine execution at 8 concurrent threads
+- Most beneficial for deployments processing many concurrent requests through scripts that access many distinct string values (such as long context keys, header names, and template-interpolated values)
 
-**Cons of disabling string interning:**
-- Repeated identical strings are each allocated separately rather than sharing a single allocation. This increases memory pressure and allocation frequency, which may be noticeable in scripts that produce a high volume of repeated short strings.
-- String equality comparisons lose the interning fast path (pointer equality) and must compare bytes. This effect is small in practice.
-- For low-concurrency deployments or scripts with limited string variety, the default of 256 interned strings may offer better overall performance by amortizing allocation costs.
+**Considerations for disabling string interning:**
+- Repeated identical strings are each allocated separately rather than sharing a single allocation. This increases memory pressure and allocation frequency, which might be noticeable in scripts that produce a high volume of repeated short strings
+- String equality comparisons lose the interning fast path (pointer equality) and must compare bytes. This effect is small in practice
+- For low-concurrency deployments or scripts with limited string variety, the default of 256 interned strings might offer better overall performance by spreading out allocation costs
 
-Benchmark your specific script workload under realistic concurrency before changing this setting.
+Benchmark your specific script workload under realistic concurrency before you change this setting.
 
 </Note>
 
