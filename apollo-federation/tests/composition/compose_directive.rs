@@ -596,8 +596,8 @@ mod inconsistent_imports {
     // first, the lower-version subgraph's directives failed the `satisfies` version check and the
     // entire spec was marked as wont-merge, silently dropping both directives from the supergraph.
     #[test]
-    fn allows_importing_different_directives_from_the_same_spec_in_different_subgraphs_higher_version_first(
-    ) {
+    fn allows_importing_different_directives_from_the_same_spec_in_different_subgraphs_higher_version_first()
+     {
         let subgraph_a = generate_subgraph(
             "subgraphA",
             r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
