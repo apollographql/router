@@ -87,6 +87,7 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::layers::instrument::InstrumentLayer;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
@@ -1192,8 +1193,8 @@ impl PluginPrivate for Telemetry {
     fn http_client_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::http::BoxCloneSyncService,
+    ) -> crate::services::http::BoxCloneSyncService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
 
@@ -1270,7 +1271,7 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
