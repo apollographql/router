@@ -12,7 +12,6 @@ use itertools::Itertools;
 use crate::connectors::ConnectSpec;
 use crate::connectors::SelectionTrie;
 use crate::connectors::StringTemplate;
-use crate::connectors::spec::connect_spec_from_schema;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -25,7 +24,9 @@ use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 
-const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
+// `@cacheTag` uses the basic string interpolation from Connect spec v0.2.
+// It doesn't have to be in sync with the latest Connect version.
+const CONNECT_SPEC_FOR_INTERPOLATION: ConnectSpec = ConnectSpec::V0_2;
 
 /// Validates `@cacheTag` directives and pushes any errors into `errors`.
 pub(crate) fn validate_cache_tag_directives(
@@ -162,8 +163,8 @@ fn validate_args_on_field(
             .map_err(|e| SingleFederationError::InvalidGraphQL {
                 message: e.to_string(),
             })?;
-    let connect_spec = connect_spec_from_schema(schema.schema()).unwrap_or(DEFAULT_CONNECT_SPEC);
-    let format = match StringTemplate::parse_with_spec(args.format, connect_spec) {
+    let format = match StringTemplate::parse_with_spec(args.format, CONNECT_SPEC_FOR_INTERPOLATION)
+    {
         Ok(format) => format,
         Err(err) => {
             errors.push(
@@ -304,8 +305,8 @@ fn validate_args_on_object_type(
             .map_err(|e| SingleFederationError::InvalidGraphQL {
                 message: e.to_string(),
             })?;
-    let connect_spec = connect_spec_from_schema(schema.schema()).unwrap_or(DEFAULT_CONNECT_SPEC);
-    let format = match StringTemplate::parse_with_spec(args.format, connect_spec) {
+    let format = match StringTemplate::parse_with_spec(args.format, CONNECT_SPEC_FOR_INTERPOLATION)
+    {
         Ok(format) => format,
         Err(err) => {
             errors.push(
@@ -764,12 +765,5 @@ mod tests {
             build_for_errors(SCHEMA),
             vec!["cacheTag applied on types can only reference arguments in format using $key"]
         );
-    }
-
-    #[test]
-    fn test_latest_connect_spec() {
-        // This test exists to find out when ConnectSpec::latest() changes, so
-        // we can decide whether to update DEFAULT_CONNECT_SPEC.
-        assert_eq!(DEFAULT_CONNECT_SPEC, ConnectSpec::latest());
     }
 }
