@@ -558,10 +558,6 @@ mod inconsistent_imports {
         assert_eq!(bar_directive.to_string(), r#"@bar(name: "b")"#);
     }
 
-    // PORT NOTE: This is an improvement in behavior over the JS version, which errors in this
-    // case. There isn't a strong reason to force all subgraphs to define a directive if they do
-    // not use it. This was effectively forcing customers to define a new spec for every custom
-    // directive they wanted to compose, even if only one subgraph used it.
     #[test]
     fn allows_importing_different_directives_from_the_same_spec_in_different_subgraphs() {
         let subgraph_a = generate_subgraph(
@@ -592,9 +588,7 @@ mod inconsistent_imports {
     }
 
     // Regression test: the same scenario as above but with the higher-version subgraph listed
-    // *first* in the composition call. Previously, when the higher-version subgraph was processed
-    // first, the lower-version subgraph's directives failed the `satisfies` version check and the
-    // entire spec was marked as wont-merge, silently dropping both directives from the supergraph.
+    // *first* in the composition call. Composition must succeed regardless of subgraph order.
     #[test]
     fn allows_importing_different_directives_from_the_same_spec_in_different_subgraphs_higher_version_first()
      {
@@ -616,9 +610,9 @@ mod inconsistent_imports {
             r#"@bar(name: "b")"#,
         );
 
-        // subgraph_b (v1.1) is intentionally placed before subgraph_a (v1.0) to reproduce the
-        // ordering bug: without the minor-version sort fix this would silently wont-merge the
-        // entire spec.
+        // subgraph_b (v1.1) is intentionally placed before subgraph_a (v1.0): composition must
+        // succeed regardless of argument order because the latest version is derived from all
+        // items, not from the position in the input slice.
         let result = compose(vec![subgraph_b, subgraph_a])
             .expect("Composition should succeed regardless of argument order");
         assert_eq!(result.hints().len(), 0);
@@ -716,11 +710,9 @@ mod inconsistent_imports {
         );
     }
 
-    // Regression test: SG1 uses the older spec version (v1.0) and imports a superset of
-    // directives (@foo and @bar), while SG2 uses the newer version (v1.1) but only imports a
-    // subset (@foo). @bar's definition must still be sourced from SG1 (v1.0) and included in
-    // the supergraph. Without the minor-version sort fix, passing SG2 first would cause
-    // v1.0.satisfies(v1.1) = false and mark the entire spec as wont-merge.
+    // Regression test: SG1 (v1.0) composes @foo and @bar; SG2 (v1.1) composes only @foo.
+    // SG2 defines @bar in its schema even though it does not compose it, so the latest-version
+    // subgraph (SG2) can still provide @bar's definition and composition must succeed.
     #[test]
     fn allows_older_version_superset_and_newer_version_subset_across_subgraphs() {
         let subgraph_a = generate_subgraph(
@@ -747,8 +739,7 @@ mod inconsistent_imports {
             r#"@foo(name: "b")"#,
         );
 
-        // Test both orderings: the bug only manifested when the higher-version subgraph (SG2,
-        // v1.1) was passed first, because v1.0.satisfies(v1.1) = false.
+        // Test both orderings: composition must succeed regardless of input order.
         for (first, second, label) in [
             (&subgraph_a, &subgraph_b, "SG1(v1.0) first"),
             (&subgraph_b, &subgraph_a, "SG2(v1.1) first"),
@@ -766,6 +757,94 @@ mod inconsistent_imports {
                 "directive @bar(name: String!) on FIELD_DEFINITION",
             );
         }
+    }
+
+    // Error test: SG1 (v1.0) composes @foo and @bar; SG2 (v1.1) composes only @foo and does
+    // NOT define @bar in its schema at all. Because no subgraph at the latest version (v1.1)
+    // has a definition for @bar, composition must fail with an explicit error rather than
+    // silently using SG1's outdated definition.
+    #[test]
+    fn errors_when_no_latest_version_subgraph_defines_directive() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo", "@bar"])"#,
+            r#"
+            @composeDirective(name: "@foo")
+            @composeDirective(name: "@bar")
+            "#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!) on FIELD_DEFINITION
+            "#,
+            r#"@foo(name: "a") @bar(name: "a2")"#,
+        );
+        // subgraph_b is at v1.1 (latest) but only defines @foo — @bar is absent from its schema.
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            r#"directive @foo(name: String!) on FIELD_DEFINITION"#,
+            r#"@foo(name: "b")"#,
+        );
+
+        for (first, second, label) in [
+            (&subgraph_a, &subgraph_b, "SG1(v1.0) first"),
+            (&subgraph_b, &subgraph_a, "SG2(v1.1) first"),
+        ] {
+            let result = compose(vec![first.clone(), second.clone()]);
+            assert!(result.is_err(), "Composition should fail ({label})");
+            let errors = result.unwrap_err();
+            let composition_errors: Vec<_> = errors
+                .iter()
+                .filter(|e| {
+                    e.code().definition().code().to_string() == "DIRECTIVE_COMPOSITION_ERROR"
+                })
+                .collect();
+            assert!(
+                !composition_errors.is_empty(),
+                "Expected a DIRECTIVE_COMPOSITION_ERROR ({label})"
+            );
+            assert!(
+                composition_errors.iter().any(|e| {
+                    let msg = e.to_string();
+                    msg.contains("Core feature") && msg.contains("@bar")
+                }),
+                "Expected error about Core feature missing @bar ({label}), got: {:?}",
+                composition_errors
+                    .iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    // Documents current behavior when two subgraphs at the same spec version compose the same
+    // directive but with incompatible definitions (different arguments). Unlike the TypeScript
+    // implementation which silently picks one definition, the Rust merger rejects incompatible
+    // definitions with a merge error. Users must ensure consistent definitions across subgraphs.
+    #[test]
+    fn errors_when_same_version_subgraphs_have_incompatible_directive_definitions() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            r#"directive @foo(name: String!) on FIELD_DEFINITION | OBJECT"#,
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            r#"directive @foo(name: String!, address: String) on FIELD_DEFINITION"#,
+            r#"@foo(name: "b", address: "c")"#,
+        );
+
+        // Incompatible definitions (different arguments) cause a merge error in Rust.
+        let result = compose(vec![subgraph_a, subgraph_b]);
+        assert!(
+            result.is_err(),
+            "Expected composition to fail when directive definitions are incompatible"
+        );
     }
 
     #[test]
