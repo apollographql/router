@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use futures::StreamExt;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
@@ -31,6 +32,7 @@ use crate::graphql;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
+use crate::metrics::FutureMetricsExt;
 use crate::plugin::DynPlugin;
 use crate::plugin::test::MockExecutionService;
 use crate::plugin::test::MockRouterService;
@@ -45,9 +47,11 @@ use crate::plugins::rhai::engine::RhaiRouterResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphResponse;
 use crate::services::ExecutionRequest;
+use crate::services::RouterRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::router;
 use crate::test_harness::tracing_test;
 
 // There is a lot of repetition in these tests, so I've tried to reduce that with these two
@@ -1178,4 +1182,300 @@ async fn test_complex_property_chain() {
     call_property_mutation_test("test_complex_property_chain", request)
         .await
         .expect("test failed - complex property chains should work");
+}
+
+#[tokio::test]
+async fn test_rhai_metric_router_request() {
+    async {
+        let mut mock_service = MockRouterService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: router::Request| {
+                Ok(router::Response::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let dyn_plugin: Box<dyn crate::plugin::DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &serde_json::Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"test_metrics.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service));
+        let req = router::Request::fake_builder().build().unwrap();
+        let _ = router_service.ready().await.unwrap().call(req).await;
+
+        assert_histogram_count!(
+            "apollo.router.operations.rhai.duration",
+            1,
+            "rhai.stage" = "RouterRequest",
+            "rhai.succeeded" = true,
+            "rhai.is_deferred" = false
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
+async fn test_rhai_metric_supergraph_request() {
+    async {
+        let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let dyn_plugin: Box<dyn crate::plugin::DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &serde_json::Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"test_metrics.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let req = SupergraphRequest::fake_builder().build().unwrap();
+        let _ = router_service.ready().await.unwrap().call(req).await;
+
+        assert_histogram_count!(
+            "apollo.router.operations.rhai.duration",
+            1,
+            "rhai.stage" = "SupergraphRequest",
+            "rhai.succeeded" = true,
+            "rhai.is_deferred" = false
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
+async fn test_rhai_metric_subgraph_request() {
+    async {
+        let mut mock_service = crate::plugin::test::MockSubgraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SubgraphRequest| {
+                Ok(subgraph::Response::fake_builder()
+                    .context(req.context)
+                    .build())
+            });
+
+        let dyn_plugin: Box<dyn crate::plugin::DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &serde_json::Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"test_metrics.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.subgraph_service("test", BoxService::new(mock_service));
+        let req = SubgraphRequest::fake_builder().build();
+        let _ = router_service.ready().await.unwrap().call(req).await;
+
+        assert_histogram_count!(
+            "apollo.router.operations.rhai.duration",
+            1,
+            "rhai.stage" = "SubgraphRequest",
+            "rhai.succeeded" = true,
+            "rhai.is_deferred" = false
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
+async fn test_rhai_metric_failed_callback() {
+    async {
+        let mut mock_service = MockSupergraphService::new();
+        // The supergraph_service in test_metrics_fail.rhai throws, so we might never call the mock
+        mock_service
+            .expect_call()
+            .times(0..=1)
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let dyn_plugin: Box<dyn crate::plugin::DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &serde_json::Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"test_metrics_fail.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let req = SupergraphRequest::fake_builder().build().unwrap();
+        let _ = router_service.ready().await.unwrap().call(req).await;
+
+        assert_histogram_count!(
+            "apollo.router.operations.rhai.duration",
+            1,
+            "rhai.stage" = "SupergraphRequest",
+            "rhai.succeeded" = false,
+            "rhai.is_deferred" = false
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
+async fn test_rhai_metric_no_callback_no_emission() {
+    async {
+        let mut mock_service = MockSupergraphService::new();
+        mock_service.expect_call().never();
+
+        let dyn_plugin: Box<dyn crate::plugin::DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &serde_json::Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"test_metrics_empty.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        // No supergraph_service callback registered — plugin returns original service unchanged
+        // and no metric is emitted
+        let _service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+
+        assert_histogram_not_exists!(
+            "apollo.router.operations.rhai.duration",
+            f64,
+            "rhai.stage" = "SupergraphRequest"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
+async fn test_rhai_metric_subgraph_response() {
+    async {
+        let mut mock_service = MockSubgraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SubgraphRequest| {
+                Ok(subgraph::Response::fake_builder()
+                    .context(req.context)
+                    .build())
+            });
+
+        let dyn_plugin: Box<dyn crate::plugin::DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &serde_json::Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"test_metrics_response.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.subgraph_service("test", BoxService::new(mock_service));
+        let req = SubgraphRequest::fake_builder().build();
+        let _ = router_service.ready().await.unwrap().call(req).await;
+
+        assert_histogram_count!(
+            "apollo.router.operations.rhai.duration",
+            1,
+            "rhai.stage" = "SubgraphResponse",
+            "rhai.succeeded" = true,
+            "rhai.is_deferred" = false
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
+async fn test_rhai_metric_deferred_response() {
+    async {
+        let ctx = Context::default();
+        let deferred_response = SupergraphResponse::fake_stream_builder()
+            .responses(vec![
+                graphql::Response::builder().build(),
+                graphql::Response::builder().build(),
+            ])
+            .context(ctx.clone())
+            .build()
+            .unwrap();
+
+        let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .return_once(move |_req: SupergraphRequest| Ok(deferred_response));
+
+        let dyn_plugin: Box<dyn crate::plugin::DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &serde_json::Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"test_metrics_response.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let req = SupergraphRequest::fake_builder().build().unwrap();
+        let resp = router_service
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .unwrap();
+        // Drive the response stream to completion so the deferred-chunk metric fires.
+        let _chunks: Vec<_> = resp.response.into_body().collect().await;
+
+        assert_histogram_count!(
+            "apollo.router.operations.rhai.duration",
+            1,
+            "rhai.stage" = "SupergraphResponse",
+            "rhai.succeeded" = true,
+            "rhai.is_deferred" = false
+        );
+        assert_histogram_count!(
+            "apollo.router.operations.rhai.duration",
+            1,
+            "rhai.stage" = "SupergraphResponse",
+            "rhai.succeeded" = true,
+            "rhai.is_deferred" = true
+        );
+    }
+    .with_metrics()
+    .await;
 }
