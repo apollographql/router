@@ -236,11 +236,11 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         &self,
         subgraph: &str,
         response_fn: impl Fn(http::HttpRequest) -> F + Send + Sync + Clone + 'static,
-    ) -> ServiceHandle<http::HttpRequest, http::BoxService>
+    ) -> ServiceHandle<http::HttpRequest, http::BoxCloneSyncService>
     where
         F: Future<Output = Result<http::HttpResponse, BoxError>> + Send + 'static,
     {
-        let service: http::BoxService = http::BoxService::new(ServiceBuilder::new().service_fn(
+        let service: http::BoxCloneSyncService = http::BoxCloneSyncService::new(ServiceBuilder::new().service_fn(
             move |req: http::HttpRequest| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }

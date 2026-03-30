@@ -2,12 +2,12 @@
 use std::sync::Arc;
 
 use tower::BoxError;
-use tower::ServiceExt;
 use tower_service::Service;
 
 use super::Plugins;
 use super::router::body::RouterBody;
 use crate::Context;
+use crate::layers::ServiceExt as _;
 
 pub(crate) mod service;
 #[cfg(test)]
@@ -17,6 +17,8 @@ pub(crate) use service::HttpClientService;
 
 pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
+pub(crate) type BoxCloneSyncService =
+    tower::util::BoxCloneSyncService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
 #[non_exhaustive]
@@ -64,19 +66,19 @@ impl HttpClientServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> BoxService {
+    pub(crate) fn create(&self, name: &str) -> BoxCloneSyncService {
         let service = self.service.clone();
         self.plugins
             .iter()
             .rev()
-            .fold(service.boxed(), |acc, (_, e)| {
+            .fold(service.boxed_clone_sync(), |acc, (_, e)| {
                 e.http_client_service(name, acc)
             })
     }
 }
 
 pub(crate) trait MakeHttpService: Send + Sync + 'static {
-    fn make(&self) -> BoxService;
+    fn make(&self) -> BoxCloneSyncService;
 }
 
 impl<S> MakeHttpService for S
@@ -88,7 +90,7 @@ where
         + 'static,
     <S as Service<HttpRequest>>::Future: Send,
 {
-    fn make(&self) -> BoxService {
-        self.clone().boxed()
+    fn make(&self) -> BoxCloneSyncService {
+        self.clone().boxed_clone_sync()
     }
 }

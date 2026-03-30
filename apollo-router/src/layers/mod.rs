@@ -6,6 +6,7 @@ use std::ops::ControlFlow;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::layer::util::Stack;
+use tower::util::BoxCloneSyncService;
 use tower_service::Service;
 use tracing::Span;
 
@@ -457,6 +458,17 @@ pub trait ServiceExt<Request>: Service<Request> {
         MF: Clone,
     {
         MapFutureWithRequestDataService::new(self, req_fn, map_fn)
+    }
+
+    /// See [`tower::util::boxed_clone`] for details.
+    /// This variant returns a [`BoxCloneSyncService`] instead of a [`BoxService`].
+    fn boxed_clone_sync(self) -> BoxCloneSyncService<Request, Self::Response, Self::Error>
+    where
+        Self: Sized + Send + 'static,
+        Self::Future: Send + 'static,
+        Self: Clone + Sync,
+    {
+        BoxCloneSyncService::new(self)
     }
 }
 impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}
