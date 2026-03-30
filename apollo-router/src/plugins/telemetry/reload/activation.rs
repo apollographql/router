@@ -269,12 +269,10 @@ impl Drop for Activation {
 
         #[cfg(not(test))]
         {
-            for meter_provider in meter_providers.into_values() {
-                spawn_blocking(move || drop(meter_provider));
-            }
-            if let Some(tracer_provider) = tracer_provider {
-                spawn_blocking(move || drop(tracer_provider));
-            }
+            spawn_blocking(|| {
+                drop(meter_providers);
+                drop(tracer_provider);
+            });
         }
     }
 }
