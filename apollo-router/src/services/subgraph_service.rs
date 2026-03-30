@@ -1224,11 +1224,11 @@ mod tests {
     use super::*;
     use crate::Context;
     use crate::assert_response_eq_ignoring_error_id;
+    use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
     use crate::plugins::subscription::CallbackMode;
-    use crate::plugins::subscription::DeduplicationConfig;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::subscription::SubgraphPassthroughMode;
@@ -1895,7 +1895,7 @@ mod tests {
                     .into(),
                 }),
             },
-            deduplication: DeduplicationConfig::default(),
+            deduplication: SubgraphConfiguration::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
         }

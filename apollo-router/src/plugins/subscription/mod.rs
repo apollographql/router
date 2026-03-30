@@ -16,6 +16,7 @@ use self::callback::CallbackService;
 use self::notification::Notify;
 use crate::Endpoint;
 use crate::ListenAddr;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
@@ -62,7 +63,7 @@ pub(crate) struct SubscriptionConfig {
     /// Select a subscription mode (callback or passthrough)
     pub(crate) mode: SubscriptionModeConfig,
     /// Configure subgraph subscription deduplication
-    pub(crate) deduplication: DeduplicationConfig,
+    pub(crate) deduplication: SubgraphConfiguration<DeduplicationConfig>,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
@@ -80,6 +81,15 @@ pub(crate) struct DeduplicationConfig {
     /// For example, if you forward the "User-Agent" header, but the subgraph doesn't depend on the value of that header,
     /// adding it to this list will let the router dedupe subgraph subscriptions even if the header value is different.
     pub(crate) ignored_headers: HashSet<String>,
+    /// When true, JWT claims from the authorization context are excluded from the deduplication key.
+    /// Use this when your subgraph data does not vary by user identity and you want authenticated
+    /// users to share a single subgraph WebSocket connection.
+    ///
+    /// Security note: with this enabled, a user may receive events from a connection originally
+    /// opened by a different user.  Only enable this when subgraph subscription data is truly
+    /// non-personalized.
+    /// (default: false)
+    pub(crate) ignore_auth_context: bool,
 }
 
 impl Default for DeduplicationConfig {
@@ -87,6 +97,7 @@ impl Default for DeduplicationConfig {
         Self {
             enabled: true,
             ignored_headers: Default::default(),
+            ignore_auth_context: false,
         }
     }
 }
@@ -96,7 +107,7 @@ impl Default for SubscriptionConfig {
         Self {
             enabled: true,
             mode: Default::default(),
-            deduplication: DeduplicationConfig::default(),
+            deduplication: SubgraphConfiguration::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
         }
@@ -1060,9 +1071,53 @@ mod tests {
         .unwrap();
 
         assert!(sub_config.enabled);
-        assert!(sub_config.deduplication.enabled);
+        assert!(sub_config.deduplication.all.enabled);
         assert!(sub_config.max_opened_subscriptions.is_none());
         assert!(sub_config.queue_capacity.is_none());
+
+        // ignore_auth_context: explicit true via global all
+        let cfg_ignore_auth: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "mode": {
+                "callback": {
+                    "public_url": "https://example.com/callback",
+                    "subgraphs": ["accounts"]
+                }
+            },
+            "deduplication": { "all": { "ignore_auth_context": true } }
+        }))
+        .unwrap();
+        assert!(cfg_ignore_auth.deduplication.all.ignore_auth_context);
+
+        // ignore_auth_context: default is false when field is absent
+        let cfg_default_auth: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "mode": {
+                "callback": {
+                    "public_url": "https://example.com/callback",
+                    "subgraphs": ["accounts"]
+                }
+            }
+        }))
+        .unwrap();
+        assert!(!cfg_default_auth.deduplication.all.ignore_auth_context);
+
+        // per-subgraph override: disable dedup for one subgraph while keeping it enabled globally
+        let cfg_per_subgraph: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "mode": {
+                "callback": {
+                    "public_url": "https://example.com/callback",
+                    "subgraphs": ["accounts"]
+                }
+            },
+            "deduplication": {
+                "all": { "enabled": true },
+                "subgraphs": {
+                    "article": { "enabled": false }
+                }
+            }
+        }))
+        .unwrap();
+        assert!(cfg_per_subgraph.deduplication.get("accounts").enabled);
+        assert!(!cfg_per_subgraph.deduplication.get("article").enabled);
     }
 }
 
