@@ -476,42 +476,6 @@ impl Default for BodyConf {
 }
 
 impl BodyConf {
-    /// Returns true if any body content should be sent
-    #[cfg(test)]
-    pub(super) fn should_send_any(&self) -> bool {
-        match self {
-            BodyConf::All(send) => *send,
-            BodyConf::Selective(fields) => fields.data || fields.errors || fields.extensions,
-        }
-    }
-
-    /// Returns true if the data field should be sent
-    #[cfg(test)]
-    pub(super) fn should_send_data(&self) -> bool {
-        match self {
-            BodyConf::All(send) => *send,
-            BodyConf::Selective(fields) => fields.data,
-        }
-    }
-
-    /// Returns true if the errors field should be sent
-    #[cfg(test)]
-    pub(super) fn should_send_errors(&self) -> bool {
-        match self {
-            BodyConf::All(send) => *send,
-            BodyConf::Selective(fields) => fields.errors,
-        }
-    }
-
-    /// Returns true if the extensions field should be sent
-    #[cfg(test)]
-    pub(super) fn should_send_extensions(&self) -> bool {
-        match self {
-            BodyConf::All(send) => *send,
-            BodyConf::Selective(fields) => fields.extensions,
-        }
-    }
-
     /// Returns true if data or errors fields should be sent
     /// Used to determine if GraphQL spec validation is needed
     pub(super) fn should_send_data_or_errors(&self) -> bool {

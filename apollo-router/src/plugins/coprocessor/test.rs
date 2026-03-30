@@ -4870,36 +4870,14 @@ mod tests {
     }
 
     #[test]
-    fn test_body_conf_methods() {
+    fn test_body_conf_should_send_data_or_errors() {
         use crate::plugins::coprocessor::BodyFieldsConf;
 
         // Test BodyConf::All
-        assert!(!BodyConf::All(false).should_send_any());
-        assert!(BodyConf::All(true).should_send_any());
-
-        // Test BodyConf::Selective
-        let selective_errors_only = BodyConf::Selective(BodyFieldsConf {
-            data: false,
-            errors: true,
-            extensions: false,
-        });
-        assert!(selective_errors_only.should_send_any());
-        assert!(!selective_errors_only.should_send_data());
-        assert!(selective_errors_only.should_send_errors());
-        assert!(!selective_errors_only.should_send_extensions());
-
-        let selective_none = BodyConf::Selective(BodyFieldsConf {
-            data: false,
-            errors: false,
-            extensions: false,
-        });
-        assert!(!selective_none.should_send_any());
-
-        // Test should_send_data_or_errors
         assert!(BodyConf::All(true).should_send_data_or_errors());
         assert!(!BodyConf::All(false).should_send_data_or_errors());
 
-        // Only extensions - should return false
+        // Test BodyConf::Selective - only extensions should return false
         let extensions_only = BodyConf::Selective(BodyFieldsConf {
             data: false,
             errors: false,
@@ -4907,9 +4885,15 @@ mod tests {
         });
         assert!(!extensions_only.should_send_data_or_errors());
 
-        // Data or errors present - should return true
-        assert!(selective_errors_only.should_send_data_or_errors());
+        // Test BodyConf::Selective - errors only should return true
+        let errors_only = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: true,
+            extensions: false,
+        });
+        assert!(errors_only.should_send_data_or_errors());
 
+        // Test BodyConf::Selective - data only should return true
         let data_only = BodyConf::Selective(BodyFieldsConf {
             data: true,
             errors: false,
@@ -4917,6 +4901,7 @@ mod tests {
         });
         assert!(data_only.should_send_data_or_errors());
 
+        // Test BodyConf::Selective - data with extensions should return true
         let data_and_extensions = BodyConf::Selective(BodyFieldsConf {
             data: true,
             errors: false,
