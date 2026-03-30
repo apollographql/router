@@ -1816,6 +1816,9 @@ pub(crate) const ANY_TYPE_SPEC: ScalarTypeSpecification = ScalarTypeSpecificatio
 pub(crate) const SERVICE_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
     name: FEDERATION_SERVICE_TYPE_NAME,
     fields: |_schema| {
+        // NOTE: Federation specifies `_Service { sdl: String! }`. This spec still uses nullable
+        // `String`; switch to `Type::NonNullNamed(GRAPHQL_STRING_TYPE_NAME)` when subgraph
+        // compatibility and normalization are aligned with that.
         [FieldSpecification {
             name: FEDERATION_SDL_FIELD_NAME,
             ty: Type::Named(GRAPHQL_STRING_TYPE_NAME),
