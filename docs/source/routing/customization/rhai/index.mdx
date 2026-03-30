@@ -40,9 +40,9 @@ rhai:
   # The router looks for this filename in your Rhai script directory.
   main: "test.rhai"
 
-  # Maximum number of strings to intern in Rhai engine.
-  # See String interning and concurrent performance under Limitations for details.
-  # max_strings_interned: 0
+  # Set to false to disable string interning and eliminate RwLock contention
+  # under concurrent load. See String interning and concurrent performance under Limitations for details.
+  # intern_strings: false
 ```
 
 1. Add the `rhai` top-level key to your router's [YAML config file](/router/configuration/overview/#yaml-config-file).

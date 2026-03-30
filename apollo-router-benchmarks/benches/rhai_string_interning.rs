@@ -218,7 +218,7 @@ fn rhai_string_interning_benchmark(c: &mut Criterion) {
                                 s.spawn(move || {
                                     for _ in 0..per_thread {
                                         let mut scope = Scope::new();
-                                        engine
+                                        let _ = engine
                                             .eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast)
                                             .expect("eval ok");
                                     }
