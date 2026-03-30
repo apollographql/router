@@ -88,8 +88,17 @@ impl ApolloOtlpExporter {
                 .ok_or("A valid HTTP OTLP endpoint is required when using the HTTP protocol")?;
                 let mut headers = std::collections::HashMap::new();
                 headers.insert("x-api-key".to_string(), apollo_key.to_string());
+
+                // opentelemetry-otlp depends on reqwest with `default-features = false`,
+                // which strips out proxy support entirely.  Injecting our own client —
+                // built under the router's reqwest feature set, which includes proxy
+                // support — restores the standard HTTP_PROXY / HTTPS_PROXY / NO_PROXY
+                // env var behaviour that every other outbound client in the router uses.
+                let http_client = build_otlp_http_client(batch_config.max_export_timeout)?;
+
                 SpanExporterBuilder::new()
                     .with_http()
+                    .with_http_client(http_client)
                     .with_timeout(batch_config.max_export_timeout)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers)
@@ -264,6 +273,20 @@ impl ApolloOtlpExporter {
             dropped_attributes_count: span.droppped_attribute_count,
         }
     }
+}
+
+/// Build a reqwest client for the OTLP HTTP exporter.
+///
+/// opentelemetry-otlp declares its reqwest dependency with `default-features = false`,
+/// which strips proxy support from its internal client.  By injecting a client built
+/// under the router's own reqwest feature set — which includes full proxy support —
+/// we restore the standard `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` behaviour that
+/// every other outbound client in the router already uses.
+fn build_otlp_http_client(timeout: std::time::Duration) -> Result<reqwest::Client, BoxError> {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(BoxError::from)
 }
 
 impl SpanExporter for ApolloOtlpExporter {

@@ -168,8 +168,20 @@ impl Config {
                 .ok_or("A valid HTTP OTLP endpoint is required when using the HTTP protocol")?;
                 let headers = HashMap::from([("x-api-key".to_string(), key.to_string())]);
 
+                // Inject our own reqwest client for the same reason as the trace exporter:
+                // opentelemetry-otlp uses `default-features = false` on reqwest, stripping
+                // proxy support.  Our client restores HTTP_PROXY / HTTPS_PROXY / NO_PROXY
+                // behaviour consistently with every other outbound client in the router.
+                let http_client = reqwest::Client::builder()
+                    .timeout(batch_config.max_export_timeout)
+                    .build()?;
+                let realtime_http_client = reqwest::Client::builder()
+                    .timeout(batch_config.max_export_timeout)
+                    .build()?;
+
                 let exporter = MetricExporter::builder()
                     .with_http()
+                    .with_http_client(http_client)
                     .with_timeout(batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
@@ -180,6 +192,7 @@ impl Config {
                 // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
                 let realtime_exporter = MetricExporter::builder()
                     .with_http()
+                    .with_http_client(realtime_http_client)
                     .with_timeout(batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
