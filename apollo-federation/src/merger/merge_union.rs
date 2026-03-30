@@ -85,7 +85,7 @@ impl Merger {
         for union_type in sources.values().flatten() {
             // As soon as we find a subgraph that has the union type but not the member, we hint
             if !union_type.members.contains(member_name) {
-                self.error_reporter.report_mismatch_hint::<UnionTypeDefinitionPosition, Node<UnionType>>(
+                self.error_reporter.report_mismatch_hint(
                     HintCode::InconsistentUnionMember,
 format!(
                         "Union type \"{}\" includes member type \"{}\" in some but not all defining subgraphs: ",
@@ -93,6 +93,7 @@ format!(
                     ),
                     dest,
                     sources,
+                    &self.subgraphs,
                     |_| Some("yes".to_string()),
                     |s, _| {
                         if s.members.contains(member_name) {

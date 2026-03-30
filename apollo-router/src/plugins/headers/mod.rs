@@ -1580,7 +1580,7 @@ mod test {
     }
 
     fn example_connector_response(
-        _req: connector::request_service::Request,
+        req: connector::request_service::Request,
     ) -> Result<connector::request_service::Response, BoxError> {
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -1588,6 +1588,7 @@ mod test {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
         Ok(connector::request_service::Response::test_new(
+            req.context.clone(),
             key,
             Vec::new(),
             json!(""),

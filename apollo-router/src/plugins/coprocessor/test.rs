@@ -5628,6 +5628,7 @@ mod tests {
                         .collect();
 
                     let response = request_service::Response::test_new(
+                        req.context.clone(),
                         req.key,
                         Default::default(),
                         serde_json_bytes::json!("ok"),
@@ -6240,8 +6241,9 @@ mod tests {
         fn create_error_connector_service()
         -> tower::util::BoxService<request_service::Request, request_service::Response, BoxError>
         {
-            tower::service_fn(|_req: request_service::Request| async {
+            tower::service_fn(|req: request_service::Request| async {
                 Ok(request_service::Response {
+                    context: req.context,
                     transport_result: Err(
                         apollo_federation::connectors::runtime::errors::Error::TransportFailure(
                             "original error".to_string(),

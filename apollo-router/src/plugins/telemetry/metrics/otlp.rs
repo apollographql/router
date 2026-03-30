@@ -8,6 +8,7 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
+use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
@@ -29,9 +30,11 @@ impl MetricsConfigurator for super::super::otlp::Config {
 
         let exporter = config.build_metric_exporter()?;
 
-        // Wrap with overflow detection, then error prefixing
-        let named_exporter =
-            NamedMetricExporter::new(OverflowMetricExporter::new_push(exporter), "otlp");
+        // // Wrap with retry, then overflow detection, then error prefixing
+        let named_exporter = NamedMetricExporter::new(
+            OverflowMetricExporter::new_push(RetryMetricExporter::new(exporter)),
+            "otlp",
+        );
         builder.with_reader(
             MeterProviderType::Public,
             PeriodicReader::builder(named_exporter, runtime::Tokio)
