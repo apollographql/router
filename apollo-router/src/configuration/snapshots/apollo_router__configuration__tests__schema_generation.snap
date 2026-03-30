@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -8291,20 +8292,15 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for the Rhai Plugin",
       "properties": {
+        "intern_strings": {
+          "default": true,
+          "description": "Whether to enable Rhai's internal string interning.\n\nWhen the `sync` feature is active (required for multi-threaded use),\nevery string operation acquires a `RwLock` on the interner. Under high\nconcurrency this lock can become a bottleneck.\n\nSet to `false` to disable string interning entirely, which eliminates\nlock acquisition on every string operation and can improve throughput\nfor workloads with many concurrent Rhai executions.\n\nDefaults to `true`, which preserves Rhai's built-in default of 256\ninterned strings.",
+          "type": "boolean"
+        },
         "main": {
           "description": "The main entry point for Rhai script evaluation",
           "type": [
             "string",
-            "null"
-          ]
-        },
-        "max_strings_interned": {
-          "default": null,
-          "description": "Maximum number of strings to intern in the Rhai engine.\n\nWhen the `sync` feature is active (required for multi-threaded use),\nevery string operation acquires a `RwLock` on the interner. Under high\nconcurrency this lock can become a bottleneck.\n\nSet to `0` to disable string interning entirely, which eliminates the\nlock acquisition on every string operation and can improve throughput\nfor workloads with many concurrent Rhai executions.\n\nDefaults to `null`, which preserves Rhai's built-in default of 256\ninterned strings.",
-          "format": "uint",
-          "minimum": 0,
-          "type": [
-            "integer",
             "null"
           ]
         },

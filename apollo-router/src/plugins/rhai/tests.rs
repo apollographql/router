@@ -245,19 +245,19 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
 // A Rhai engine suitable for minimal testing. There are no scripts and the SDL is an empty
 // string.
 fn new_rhai_test_engine() -> Engine {
-    Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new(), None)
+    Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new(), true)
 }
 
 #[tokio::test]
-async fn it_creates_plugin_with_max_strings_interned_zero() {
-    // Verify that max_strings_interned: 0 is accepted through the full config
+async fn it_creates_plugin_with_intern_strings_false() {
+    // Verify that intern_strings: false is accepted through the full config
     // deserialization → plugin initialization path.
     let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
         .find(|factory| factory.name == "apollo.rhai")
         .expect("Plugin not found")
         .create_instance_without_schema(
             &Value::from_str(
-                r#"{"scripts":"tests/fixtures", "main":"test.rhai", "max_strings_interned": 0}"#,
+                r#"{"scripts":"tests/fixtures", "main":"test.rhai", "intern_strings": false}"#,
             )
             .unwrap(),
         )
@@ -279,8 +279,8 @@ fn it_rejects_unknown_rhai_config_fields() {
 }
 
 #[test]
-fn it_disables_string_interning_when_zero() {
-    let engine = Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new(), Some(0));
+fn it_disables_string_interning_when_false() {
+    let engine = Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new(), false);
     // Verify the engine can still evaluate string-heavy expressions with interning disabled.
     let result: String = engine
         .eval(r#"let s = "hello"; s + " " + "world""#)
@@ -289,8 +289,8 @@ fn it_disables_string_interning_when_zero() {
 }
 
 #[test]
-fn it_preserves_default_interning_when_none() {
-    let engine = Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new(), None);
+fn it_preserves_default_interning_when_true() {
+    let engine = Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new(), true);
     // Verify the engine behaves identically to the default when no override is given.
     let result: String = engine
         .eval(r#"let s = "hello"; s + " " + "world""#)

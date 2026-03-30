@@ -207,8 +207,7 @@ fn rhai_string_interning_benchmark(c: &mut Criterion) {
                 label,
                 |b, _| {
                     b.iter_custom(|iters| {
-                        let per_thread =
-                            ((iters as usize).max(1) + CONCURRENCY - 1) / CONCURRENCY;
+                        let per_thread = ((iters as usize).max(1) + CONCURRENCY - 1) / CONCURRENCY;
                         let engine = engine.clone();
                         let ast = ast.clone();
                         let start = Instant::now();
