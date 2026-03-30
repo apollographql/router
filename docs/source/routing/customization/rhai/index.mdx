@@ -547,7 +547,7 @@ rhai:
 <Note>
 
 **Pros of disabling string interning (`max_strings_interned: 0`):**
-- Eliminates `RwLock` contention on the string interner under concurrent load. Benchmarks of script workloads representative of header manipulation and context key lookups show approximately 60% latency reduction and 2.5× throughput improvement on Rhai engine execution at 8 concurrent threads
+- Eliminates `RwLock` contention on the string interner under concurrent load, which can meaningfully improve throughput for deployments processing many concurrent requests through Rhai scripts
 - Most beneficial for deployments processing many concurrent requests through scripts that access many distinct string values (such as long context keys, header names, and template-interpolated values)
 
 **Considerations for disabling string interning:**
