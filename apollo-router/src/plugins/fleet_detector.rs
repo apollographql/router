@@ -16,9 +16,10 @@ use serde::Deserialize;
 use sysinfo::System;
 use tower::BoxError;
 use tower::ServiceExt as _;
-use tower::util::BoxService;
+use tower::util::BoxCloneSyncService;
 use tracing::debug;
 
+use crate::layers::ServiceExt as _;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -334,8 +335,8 @@ impl PluginPrivate for FleetDetector {
     fn http_client_service(
         &self,
         subgraph_name: &str,
-        service: BoxService<HttpRequest, HttpResponse, BoxError>,
-    ) -> BoxService<HttpRequest, HttpResponse, BoxError> {
+        service: BoxCloneSyncService<HttpRequest, HttpResponse, BoxError>,
+    ) -> BoxCloneSyncService<HttpRequest, HttpResponse, BoxError> {
         let sn_req = Arc::new(subgraph_name.to_string());
         let sn_res = sn_req.clone();
         service
@@ -426,7 +427,7 @@ impl PluginPrivate for FleetDetector {
                     }
                 }
             })
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 
@@ -670,7 +671,7 @@ mod tests {
                         http_response: res,
                         context: Default::default(),
                     })
-                    .boxed(),
+                    .boxed_clone_sync(),
             );
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
@@ -747,7 +748,7 @@ mod tests {
                         http_response: res.map(Body::from),
                         context: Default::default(),
                     })
-                    .boxed(),
+                    .boxed_clone_sync(),
             );
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()

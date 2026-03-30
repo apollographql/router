@@ -800,7 +800,7 @@ pub(crate) async fn call_single_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
-    client: crate::services::http::BoxService,
+    client: crate::services::http::BoxCloneSyncService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
     let subgraph_request_event = context
@@ -1053,7 +1053,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: crate::services::http::BoxService,
+    mut client: crate::services::http::BoxCloneSyncService,
     context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
