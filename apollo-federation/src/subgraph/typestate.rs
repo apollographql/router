@@ -46,6 +46,7 @@ use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
+use crate::schema::position::HasType;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -1049,7 +1050,13 @@ impl FederationSchema {
             type_name: query_root_type_name,
             field_name: FEDERATION_SERVICE_FIELD_NAME,
         };
-        if service_field_pos.try_get(self.schema()).is_none() {
+        // JS does not keep the user provided _service field
+        if service_field_pos.try_get(self.schema()).is_some() {
+            if !service_field_pos.get_type(self)?.is_non_null() {
+                service_field_pos
+                    .set_type(self, Type::NonNullNamed(self.service_type()?.type_name))?;
+            }
+        } else {
             service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
         }
 
@@ -1138,7 +1145,6 @@ impl FederationSchema {
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use apollo_compiler::ast::OperationType;
