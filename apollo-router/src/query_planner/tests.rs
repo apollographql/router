@@ -24,6 +24,8 @@ use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::apollo_studio_interop::UsageReporting;
+use crate::configuration::HoistOrphanErrors;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
@@ -123,6 +125,7 @@ async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed(
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     ));
 
     let result = query_plan
@@ -191,6 +194,7 @@ async fn fetch_includes_operation_name() {
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     ));
 
     let _response = query_plan
@@ -256,6 +260,7 @@ async fn fetch_makes_post_requests() {
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     ));
 
     let _response = query_plan
@@ -418,6 +423,7 @@ async fn defer() {
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     ));
 
     let response = query_plan
@@ -521,6 +527,7 @@ async fn defer_if_condition() {
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     ));
 
     let defer_primary_response = query_plan
@@ -687,6 +694,7 @@ async fn dependent_mutations() {
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
     ));
 
     let (sender, _) = tokio::sync::mpsc::channel(10);

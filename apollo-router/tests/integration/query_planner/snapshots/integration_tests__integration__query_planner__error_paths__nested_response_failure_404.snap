@@ -44,7 +44,47 @@ expression: response
     {
       "message": "HTTP fetch failed from 'accounts': 404: Not Found",
       "path": [
-        "topProducts"
+        "topProducts",
+        0,
+        "reviews",
+        0,
+        "author"
+      ],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "accounts",
+        "reason": "404: Not Found",
+        "http": {
+          "status": 404
+        }
+      }
+    },
+    {
+      "message": "HTTP fetch failed from 'accounts': 404: Not Found",
+      "path": [
+        "topProducts",
+        0,
+        "reviews",
+        1,
+        "author"
+      ],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "accounts",
+        "reason": "404: Not Found",
+        "http": {
+          "status": 404
+        }
+      }
+    },
+    {
+      "message": "HTTP fetch failed from 'accounts': 404: Not Found",
+      "path": [
+        "topProducts",
+        1,
+        "reviews",
+        0,
+        "author"
       ],
       "extensions": {
         "code": "SUBREQUEST_HTTP_ERROR",
@@ -58,7 +98,47 @@ expression: response
     {
       "message": "HTTP fetch failed from 'accounts': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
       "path": [
-        "topProducts"
+        "topProducts",
+        0,
+        "reviews",
+        0,
+        "author"
+      ],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "accounts",
+        "reason": "subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+        "http": {
+          "status": 404
+        }
+      }
+    },
+    {
+      "message": "HTTP fetch failed from 'accounts': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+      "path": [
+        "topProducts",
+        0,
+        "reviews",
+        1,
+        "author"
+      ],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "accounts",
+        "reason": "subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+        "http": {
+          "status": 404
+        }
+      }
+    },
+    {
+      "message": "HTTP fetch failed from 'accounts': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+      "path": [
+        "topProducts",
+        1,
+        "reviews",
+        0,
+        "author"
       ],
       "extensions": {
         "code": "SUBREQUEST_HTTP_ERROR",

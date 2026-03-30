@@ -274,6 +274,7 @@ impl FetchNode {
         paths: Vec<Vec<Path>>,
         operation_str: &str,
         variables: Map<ByteString, Value>,
+        hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         let (_parts, response) = match service
             .oneshot(subgraph_request)
@@ -301,7 +302,8 @@ impl FetchNode {
             );
         }
 
-        let (value, errors) = self.response_at_path(schema, current_dir, paths, response);
+        let (value, errors) =
+            self.response_at_path(schema, current_dir, paths, response, hoist_orphan_errors);
 
         (value, errors)
     }
@@ -337,9 +339,9 @@ impl FetchNode {
     /// into the right slots for the supergraph response, and it does that by a bit of path
     /// handling and manipulation
     ///
-    /// Importantly, it makes a decision about entity-less errors. When we have such an error, it's
-    /// unclear where it should be applied so we apply them to the most immediate parent of the
-    /// current_dir
+    /// When `hoist_orphan_errors` is true, entity-less errors are assigned to the nearest
+    /// non-array ancestor of `current_dir`, preventing error multiplication across array
+    /// elements. When false, they are assigned to `current_dir` as-is.
     #[instrument(skip_all, level = "debug", name = "response_insert")]
     pub(crate) fn response_at_path<'a>(
         &'a self,
@@ -347,6 +349,7 @@ impl FetchNode {
         current_dir: &'a Path,
         inverted_paths: Vec<Vec<Path>>,
         response: graphql::Response,
+        hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         if !self.requires.is_empty() {
             let entities_path = Path(vec![json_ext::PathElement::Key(
@@ -354,38 +357,21 @@ impl FetchNode {
                 None,
             )]);
 
-            // the fallback_dir is the immediate parent of the current_dir when the current_dir is
-            // wildcarded (ie, @, which is PathElement::Flatten--conceptually, flattening is the
-            // application of some behavior to every index in an array)
+            // when hoist_orphan_errors is enabled, the fallback_dir is the immediate parent of
+            // the current_dir when the current_dir is wildcarded (ie, @, which is PathElement::Flatten)
             //
-            // this is important because sometimes we get paths that don't start with _entities and
-            // we're unsure where to apply any errors returned by subgraphs; previously we applied
-            // them to the wildcarded current_dir, which means we applied them to _everything_ at
-            // that path; if we were handling an array, we'd apply each error to every element of
-            // that array
-            //
-            // you can guess what that might do: if you have a query returning some large number of
-            // errors and every one of those errors is applied to every index represented in the
-            // array of data that we're building for the response, you get an explosion of errors
-            // (and downstream of this function, an explosion of memory allocations when we clone
-            // each error in FlattenNode--worse, we add them to a vec and that vec will get resized
-            // when its capacity is hit, creating a significant memory burden that almost certainly
-            // leads to an OOMKill)
-            //
-            // the moral of the story is that we need to be very careful in this function when we
-            // apply wildcards for paths
-            let fallback_dir = {
-                // if we have a wildcard (@, Flatten)
+            // this prevents error multiplication across array elements
+            let error_dir = if hoist_orphan_errors {
                 let pos = current_dir
                     .0
                     .iter()
                     .position(|e| matches!(e, json_ext::PathElement::Flatten(_)));
-                // then take the most immediate parent
                 match pos {
                     Some(i) => Path(current_dir.0[..i].to_vec()),
-                    // otherwise, use the current_dir
                     None => current_dir.clone(),
                 }
+            } else {
+                current_dir.clone()
             };
 
             let mut errors: Vec<Error> = vec![];
@@ -422,16 +408,16 @@ impl FetchNode {
                                 }
                             }
                             _ => {
-                                error.path = Some(fallback_dir.clone());
+                                error.path = Some(error_dir.clone());
                                 errors.push(error)
                             }
                         }
                     } else {
-                        error.path = Some(fallback_dir.clone());
+                        error.path = Some(error_dir.clone());
                         errors.push(error);
                     }
                 } else {
-                    error.path = Some(fallback_dir.clone());
+                    error.path = Some(error_dir.clone());
                     errors.push(error);
                 }
             }
@@ -695,7 +681,7 @@ mod tests {
             data,
             ..Default::default()
         };
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert!(errors.is_empty());
         assert_eq!(value, expected);
@@ -744,7 +730,7 @@ mod tests {
             .error(make_error(error_path))
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
@@ -771,7 +757,7 @@ mod tests {
             .error(graphql::Error::builder().message("error 3").build())
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert_eq!(errors.len(), 3);
         assert_eq!(
@@ -800,7 +786,7 @@ mod tests {
             )
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].extension_code().as_deref(), Some("UNAUTHORIZED"));
@@ -850,7 +836,42 @@ mod tests {
             .error(make_error(error_path))
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
+    }
+
+    #[rstest]
+    #[case::flatten_preserved_when_disabled(
+        vec![key("users"), flatten()],
+        None,
+        Path(vec![key("users"), flatten()])
+    )]
+    #[case::nested_flatten_preserved_when_disabled(
+        vec![key("a"), flatten(), key("b"), flatten()],
+        None,
+        Path(vec![key("a"), flatten(), key("b"), flatten()])
+    )]
+    #[case::non_entities_path_gets_current_dir_when_disabled(
+        vec![key("items"), flatten()],
+        Some(Path(vec![key("something")])),
+        Path(vec![key("items"), flatten()])
+    )]
+    fn entity_error_uses_current_dir_when_hoist_disabled(
+        #[case] dir_elements: Vec<json_ext::PathElement>,
+        #[case] error_path: Option<Path>,
+        #[case] expected_path: Path,
+    ) {
+        let schema = test_schema();
+        let node = make_fetch_node(make_requires());
+        let current_dir = Path(dir_elements);
+        let response = graphql::Response::builder()
+            .data(json!({"_entities": []}))
+            .error(make_error(error_path))
+            .build();
+
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
@@ -875,7 +896,7 @@ mod tests {
             .build();
 
         let (value, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response);
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert!(errors.is_empty());
         let top = value.as_object().unwrap().get("topField").unwrap();
@@ -900,7 +921,7 @@ mod tests {
             .build();
 
         let (value, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response);
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert!(errors.is_empty());
         let arr = value
@@ -923,7 +944,7 @@ mod tests {
             .data(json!({"_entities": []}))
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert!(errors.is_empty());
         assert_eq!(value, Value::default());
@@ -946,7 +967,7 @@ mod tests {
             .build();
 
         let (value, errors) =
-            node.response_at_path(&schema, &current_dir, inverted_paths, response);
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert!(errors.is_empty());
         let arr = value
@@ -978,7 +999,8 @@ mod tests {
             )
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, inverted_paths, response);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(
@@ -1009,6 +1031,7 @@ mod tests {
             &current_dir,
             vec![vec![Path(vec![key("data"), index(0)])]],
             response,
+            false,
         );
 
         assert_eq!(errors.len(), 1);
@@ -1034,7 +1057,8 @@ mod tests {
             )
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, inverted_paths, response);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert_eq!(errors.len(), 2);
         assert_eq!(
@@ -1062,7 +1086,7 @@ mod tests {
             )
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (_, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert!(errors.is_empty());
     }
@@ -1084,7 +1108,8 @@ mod tests {
             )
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, inverted_paths, response);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].extension_code().as_deref(), Some("FORBIDDEN"));
@@ -1115,7 +1140,8 @@ mod tests {
             )
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, inverted_paths, response);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert_eq!(errors.len(), 1);
         assert_eq!(
@@ -1138,7 +1164,7 @@ mod tests {
             )
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1154,7 +1180,7 @@ mod tests {
             .data(json!({"something": "else"}))
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert_eq!(value, Value::Null);
         assert!(errors.is_empty());
@@ -1169,7 +1195,7 @@ mod tests {
             .error(graphql::Error::builder().message("subgraph error").build())
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1197,7 +1223,7 @@ mod tests {
             )
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 3);
@@ -1232,7 +1258,7 @@ mod tests {
             )
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 2);
@@ -1255,7 +1281,7 @@ mod tests {
             .data(json!({"_entities": "not_an_array"}))
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
         assert_eq!(value, Value::Null);
         assert!(errors.is_empty());
@@ -1272,7 +1298,7 @@ mod tests {
             .error(graphql::Error::builder().message("bad entities").build())
             .build();
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1291,7 +1317,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response);
+        let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
         assert_eq!(value, Value::Null);
         assert_eq!(errors.len(), 1);
@@ -1324,7 +1350,8 @@ mod tests {
             .error(graphql::Error::builder().message("pathless").build())
             .build();
 
-        let (_, errors) = node.response_at_path(&schema, &current_dir, inverted_paths, response);
+        let (_, errors) =
+            node.response_at_path(&schema, &current_dir, inverted_paths, response, true);
 
         assert_eq!(errors.len(), 3);
         assert_eq!(

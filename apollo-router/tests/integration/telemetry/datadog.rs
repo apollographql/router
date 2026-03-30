@@ -706,7 +706,7 @@ async fn test_header_propagator_override() -> Result<(), BoxError> {
         .build()
         .await;
 
-    let trace_id = opentelemetry::trace::TraceId::from_u128(uuid::Uuid::new_v4().as_u128());
+    let trace_id = opentelemetry::trace::TraceId::from(uuid::Uuid::new_v4().as_u128());
 
     router.start().await;
     router.assert_started().await;

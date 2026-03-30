@@ -1,6 +1,7 @@
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use regex::Regex;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 
@@ -16,8 +17,35 @@ use crate::services::router;
 use crate::services::router::body;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::test_harness::tracing_test;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
+
+fn assert_span_contains_authorization_error_event(span: &str) {
+    let pattern = format!(
+        r"^[0-9TZ\-:.]+ ERROR router\{{[^}}]+}}:{span}.*Authorization error unauthorized_query_paths=\[.*]$"
+    );
+    let span_regex = Regex::new(&pattern).unwrap();
+
+    let contains_err_event_in_span = tracing_test::logs_assert(|lines| {
+        for line in lines {
+            if span_regex.captures(line).is_some() {
+                return Ok(());
+            }
+        }
+
+        Err(lines.join("\n"))
+    });
+    assert!(contains_err_event_in_span.is_ok());
+}
+
+fn assert_logs_contain_entire_request_authorization_error() {
+    assert_span_contains_authorization_error_event("query_planning");
+}
+
+fn assert_logs_contain_partial_authorization_error() {
+    assert_span_contains_authorization_error_event("format_response");
+}
 
 #[tokio::test]
 async fn authenticated_request() {
@@ -335,6 +363,8 @@ async fn authenticated_directive() {
 
 #[tokio::test]
 async fn authenticated_directive_reject_unauthorized() {
+    let _guard = tracing_test::dispatcher_guard();
+
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -416,10 +446,12 @@ async fn authenticated_directive_reject_unauthorized() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    assert_logs_contain_entire_request_authorization_error();
 }
 
 #[tokio::test]
 async fn authenticated_directive_dry_run() {
+    let _guard = tracing_test::dispatcher_guard();
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -501,6 +533,7 @@ async fn authenticated_directive_dry_run() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    assert_logs_contain_partial_authorization_error();
 }
 
 const SCOPES_SCHEMA: &str = r#"schema
@@ -738,6 +771,8 @@ async fn scopes_directive() {
 
 #[tokio::test]
 async fn scopes_directive_reject_unauthorized() {
+    let _guard = tracing_test::dispatcher_guard();
+
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -814,10 +849,12 @@ async fn scopes_directive_reject_unauthorized() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    assert_logs_contain_entire_request_authorization_error();
 }
 
 #[tokio::test]
 async fn scopes_directive_dry_run() {
+    let _guard = tracing_test::dispatcher_guard();
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -894,10 +931,12 @@ async fn scopes_directive_dry_run() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    assert_logs_contain_partial_authorization_error();
 }
 
 #[tokio::test]
 async fn errors_in_extensions() {
+    let _guard = tracing_test::dispatcher_guard();
     let subgraphs = MockedSubgraphs([
     ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
@@ -976,6 +1015,7 @@ async fn errors_in_extensions() {
         .unwrap();
 
     insta::assert_json_snapshot!(response);
+    assert_logs_contain_partial_authorization_error();
 }
 
 const CACHE_KEY_SCHEMA: &str = r#"schema
@@ -1115,4 +1155,96 @@ async fn cache_key_metadata() {
     let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
 
     insta::assert_json_snapshot!(response);
+}
+
+// Verifies that the refactored typed config parsing produces the same values as the
+// old manual JSON path navigation for every combination of present/absent config fields.
+mod config_parsing {
+    use serde_json::json;
+
+    use crate::plugins::authorization::Conf;
+    use crate::plugins::authorization::ErrorConfig;
+
+    // Old extraction logic, preserved verbatim from before the refactor.
+    fn old_enabled(value: &serde_json::Value) -> Option<bool> {
+        value
+            .get("directives")
+            .and_then(|v| v.as_object())
+            .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()))
+    }
+
+    fn old_errors(value: &serde_json::Value) -> Option<ErrorConfig> {
+        value
+            .get("directives")
+            .and_then(|v| v.as_object())
+            .and_then(|v| {
+                v.get("errors")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+            })
+    }
+
+    fn old_directives_flags(value: &serde_json::Value) -> Option<(bool, bool)> {
+        value
+            .get("directives")
+            .and_then(|v| v.as_object())
+            .map(|config| {
+                (
+                    config
+                        .get("reject_unauthorized")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    config
+                        .get("dry_run")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                )
+            })
+    }
+
+    // New extraction via typed deserialization.
+    fn new_conf(value: &serde_json::Value) -> Option<Conf> {
+        serde_json::from_value(value.clone()).ok()
+    }
+
+    #[rstest::rstest]
+    #[case(json!({}))]
+    #[case(json!({ "directives": {} }))]
+    #[case(json!({ "directives": { "enabled": true } }))]
+    #[case(json!({ "directives": { "enabled": false } }))]
+    #[case(json!({ "directives": { "dry_run": true } }))]
+    #[case(json!({ "directives": { "reject_unauthorized": true } }))]
+    #[case(json!({ "directives": { "dry_run": true, "reject_unauthorized": true } }))]
+    #[case(json!({ "directives": { "errors": {} } }))]
+    #[case(json!({ "directives": { "errors": { "log": false } } }))]
+    #[case(json!({ "directives": { "errors": { "response": "extensions" } } }))]
+    #[case(json!({ "directives": { "errors": { "response": "disabled" } } }))]
+    #[case(json!({ "directives": { "errors": { "log": false, "response": "extensions" } } }))]
+    #[case(json!({
+        "directives": {
+            "enabled": true,
+            "dry_run": true,
+            "reject_unauthorized": true,
+            "errors": { "log": true, "response": "errors" }
+        }
+    }))]
+    fn config_parsing_matches(#[case] value: serde_json::Value) {
+        let conf = new_conf(&value);
+
+        let old_enabled = old_enabled(&value).unwrap_or(true);
+        let old_errors = old_errors(&value).unwrap_or_default();
+        let old_flags = old_directives_flags(&value).unwrap_or((false, false));
+
+        let new_conf = conf.clone().unwrap_or_default();
+
+        let new_enabled = new_conf.directives.enabled;
+        let new_errors = new_conf.directives.errors;
+        let new_flags = (
+            new_conf.directives.reject_unauthorized,
+            new_conf.directives.dry_run,
+        );
+
+        assert_eq!(old_enabled, new_enabled);
+        assert_eq!(old_errors, new_errors);
+        assert_eq!(old_flags, new_flags);
+    }
 }

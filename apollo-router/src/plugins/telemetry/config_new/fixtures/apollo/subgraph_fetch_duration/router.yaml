@@ -6,3 +6,4 @@ telemetry:
       subgraph:
         http.client.request.duration: false
         http.client.request.body.size: false
+        http.client.response.body.size: false

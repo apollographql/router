@@ -1,0 +1,11 @@
+telemetry:
+  instrumentation:
+    events:
+      supergraph:
+        my.response.event:
+          message: "Response triggered by request header"
+          level: info
+          on: response
+          condition:
+            exists:
+              request_header: x-log-request

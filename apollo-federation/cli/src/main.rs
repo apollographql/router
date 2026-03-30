@@ -1,7 +1,6 @@
 use std::fs;
 use std::io;
 use std::num::NonZeroU32;
-use std::ops::Range;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -9,7 +8,6 @@ use std::process::ExitCode;
 use anyhow::Error as AnyError;
 use anyhow::anyhow;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::parser::LineColumn;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use apollo_federation::bail;
@@ -22,7 +20,6 @@ use apollo_federation::error::CompositionError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::error::SubgraphLocation;
-use apollo_federation::internal_composition_api;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
@@ -541,43 +538,8 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
         }
     };
 
-    // Extra subgraph validation for @cacheTag directive
-    let result = internal_composition_api::validate_cache_tag_directives(&name, &url, &doc_str)?;
-    if !result.errors.is_empty() {
-        for err in &result.errors {
-            eprintln!(
-                "{code}: {message}",
-                code = err.code(),
-                message = err.message()
-            );
-            print_locations(&err.locations);
-            eprintln!(); // line break
-        }
-        let num_errors = result.errors.len();
-        return Err(anyhow!(
-            "Error: found {num_errors} error(s) in subgraph schema"
-        ));
-    }
-
     println!("{}", subgraph.schema_string());
     Ok(())
-}
-
-fn print_locations(locations: &[Range<LineColumn>]) {
-    if locations.is_empty() {
-        eprintln!("locations: <unknown>");
-    } else {
-        eprintln!("locations:");
-        for loc in locations {
-            eprintln!(
-                "  {start_line}:{start_column} - {end_line}:{end_column}",
-                start_line = loc.start.line,
-                start_column = loc.start.column,
-                end_line = loc.end.line,
-                end_column = loc.end.column,
-            );
-        }
-    }
 }
 
 fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {

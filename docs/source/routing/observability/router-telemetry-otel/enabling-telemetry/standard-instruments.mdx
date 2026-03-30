@@ -260,7 +260,8 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
   - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
   - `error`: One of `channel closed`, `channel full`.
 
-- `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit otel's hard cardinality limit.
+- `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit OpenTelemetry's cardinality limit. When a metric exceeds its cardinality limit, new attribute combinations are aggregated into an overflow bucket.
+  - `metric.name`: The name of the metric that exceeded its cardinality limit.
 
 ## Internals
 

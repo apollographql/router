@@ -243,7 +243,7 @@ expression: "&schema"
         },
         "library_name_header": {
           "default": "apollographql-library-name",
-          "description": "The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.\nValid values must match the regex `^[ a-zA-Z0-9.@/_\\-]{1,60}$`. Invalid values result in a `400` response.",
           "type": [
             "string",
             "null"
@@ -251,7 +251,7 @@ expression: "&schema"
         },
         "library_version_header": {
           "default": "apollographql-library-version",
-          "description": "The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.\nValid values must match the regex `^[ a-zA-Z0-9.@/_\\-]{1,60}$`. Invalid values result in a `400` response.",
           "type": [
             "string",
             "null"
@@ -903,7 +903,7 @@ expression: "&schema"
     },
     "Client": {
       "additionalProperties": false,
-      "description": "HTTP client configuration for coprocessors.",
+      "description": "HTTP client configuration",
       "properties": {
         "dns_resolution_strategy": {
           "anyOf": [
@@ -926,6 +926,30 @@ expression: "&schema"
             }
           ],
           "description": "Use HTTP/2 to communicate with the coprocessor."
+        },
+        "experimental_http2_keep_alive_interval": {
+          "default": null,
+          "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "experimental_http2_keep_alive_timeout": {
+          "default": null,
+          "description": "Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and\n`experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         }
       },
       "type": "object"
@@ -2375,6 +2399,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "connector_http_response_body_size": {
+              "description": "The connector HTTP response body size (wire bytes before decompression).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_http_response_body_size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "connector_http_method": {
               "description": "The connector HTTP method.",
               "type": "boolean"
@@ -2543,6 +2580,20 @@ expression: "&schema"
             "connector_on_response_error"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The context ID of the request (unique per request).",
+          "properties": {
+            "context_id": {
+              "description": "The context ID",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "context_id"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2602,6 +2653,22 @@ expression: "&schema"
           ],
           "description": "Enable HTTP2 for connectors"
         },
+        "experimental_http2_keep_alive_interval": {
+          "default": null,
+          "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "experimental_http2_keep_alive_timeout": {
+          "default": null,
+          "description": "Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and\n`experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "global_rate_limit": {
           "anyOf": [
             {
@@ -2612,6 +2679,14 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         },
         "timeout": {
           "default": null,
@@ -5667,6 +5742,18 @@ expression: "&schema"
         }
       ]
     },
+    "HoistOrphanErrors": {
+      "additionalProperties": false,
+      "description": "Per-subgraph configuration for hoisting orphan errors.\n\n\"Orphan errors\" are errors from entity fetches that lack a valid `_entities` path.\nWhen hoisting is enabled, these errors are assigned to the nearest non-array\nancestor in the response path, preventing them from being duplicated across\nevery element in an array.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable hoisting of orphan errors for this subgraph.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "Homepage": {
       "additionalProperties": false,
       "description": "Configuration options pertaining to the home page.",
@@ -8521,7 +8608,7 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
-          "description": "The size hint of the body.\nThis is used as the Content-Length header has not yet been populated\nwhen selectors are evaluated",
+          "description": "The size hint of the body.\nIf compression is enabled, this will be the uncompressed size.\nIts not possible to get the compressed size in selector as the\nbody has not yet been compressed at the time on_response is called.",
           "properties": {
             "response_size_hint": {
               "description": "Extract response size hint in bytes",
@@ -8615,6 +8702,20 @@ expression: "&schema"
           },
           "required": [
             "trace_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The context ID of the request (unique per request).",
+          "properties": {
+            "context_id": {
+              "description": "The context ID",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "context_id"
           ],
           "type": "object"
         }
@@ -9698,6 +9799,31 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphHoistOrphanErrorsConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HoistOrphanErrors"
+            }
+          ],
+          "default": {
+            "enabled": false
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HoistOrphanErrors"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphInvalidationConfig": {
       "additionalProperties": false,
       "properties": {
@@ -10107,6 +10233,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "subgraph_response_body_size": {
+              "description": "The subgraph response body size.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_response_body_size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "default": {
               "anyOf": [
                 {
@@ -10480,6 +10619,20 @@ expression: "&schema"
             "response_cache_control"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The context ID of the request (unique per request).",
+          "properties": {
+            "context_id": {
+              "description": "The context ID",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "context_id"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -10547,6 +10700,22 @@ expression: "&schema"
           ],
           "description": "Enable HTTP2 for subgraphs"
         },
+        "experimental_http2_keep_alive_interval": {
+          "default": null,
+          "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "experimental_http2_keep_alive_timeout": {
+          "default": null,
+          "description": "Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and\n`experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "global_rate_limit": {
           "anyOf": [
             {
@@ -10557,6 +10726,14 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "pool_idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 15
+          },
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "type": "string"
         },
         "timeout": {
           "default": null,
@@ -11424,6 +11601,20 @@ expression: "&schema"
           },
           "required": [
             "is_primary_response"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The context ID of the request (unique per request).",
+          "properties": {
+            "context_id": {
+              "description": "The context ID",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "context_id"
           ],
           "type": "object"
         }
@@ -12349,6 +12540,20 @@ expression: "&schema"
     },
     "experimental_diagnostics": {
       "$ref": "#/definitions/Config5"
+    },
+    "experimental_hoist_orphan_errors": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/SubgraphHoistOrphanErrorsConfiguration"
+        }
+      ],
+      "default": {
+        "all": {
+          "enabled": false
+        },
+        "subgraphs": {}
+      },
+      "description": "When enabled for specific subgraphs, orphan errors (those without a valid\n`_entities` path) are assigned to the nearest non-array ancestor in the\nresponse path, preventing them from being duplicated across every array\nelement."
     },
     "experimental_type_conditioned_fetching": {
       "default": false,

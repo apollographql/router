@@ -2,9 +2,7 @@ use std::fmt::Debug;
 
 use http::uri;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::ExportError;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::export::trace::{self};
+use opentelemetry_sdk::trace::SpanData;
 use url::ParseError;
 
 use self::unified_tags::UnifiedTags;
@@ -68,7 +66,7 @@ fn default_service_name_mapping<'a>(_span: &'a SpanData, config: &'a ModelConfig
 }
 
 fn default_name_mapping<'a>(span: &'a SpanData, _config: &'a ModelConfig) -> &'a str {
-    span.instrumentation_lib.name.as_ref()
+    span.instrumentation_scope.name()
 }
 
 fn default_resource_mapping<'a>(span: &'a SpanData, _config: &'a ModelConfig) -> &'a str {
@@ -96,12 +94,6 @@ pub enum Error {
     /// Other errors
     #[error("{0}")]
     Other(String),
-}
-
-impl ExportError for Error {
-    fn exporter_name(&self) -> &'static str {
-        "datadog"
-    }
 }
 
 impl From<rmp::encode::ValueWriteError> for Error {
@@ -150,7 +142,7 @@ impl ApiVersion {
     pub(crate) fn encode(
         self,
         model_config: &ModelConfig,
-        traces: Vec<&[trace::SpanData]>,
+        traces: Vec<&[SpanData]>,
         mapping: &Mapping,
         unified_tags: &UnifiedTags,
         resource: Option<&Resource>,
@@ -201,6 +193,7 @@ pub(crate) mod tests {
     use std::time::SystemTime;
 
     use base64::Engine;
+    use opentelemetry::InstrumentationScope;
     use opentelemetry::KeyValue;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
@@ -209,21 +202,19 @@ pub(crate) mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry_sdk::InstrumentationLibrary;
     use opentelemetry_sdk::trace::SpanEvents;
     use opentelemetry_sdk::trace::SpanLinks;
-    use opentelemetry_sdk::{self};
 
     use super::*;
 
-    fn get_traces() -> Vec<Vec<trace::SpanData>> {
+    fn get_traces() -> Vec<Vec<SpanData>> {
         vec![vec![get_span(7, 1, 99)]]
     }
 
-    pub(crate) fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64) -> trace::SpanData {
+    pub(crate) fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64) -> SpanData {
         let span_context = SpanContext::new(
-            TraceId::from_u128(trace_id),
-            SpanId::from_u64(span_id),
+            TraceId::from_bytes(trace_id.to_be_bytes()),
+            SpanId::from_bytes(span_id.to_be_bytes()),
             TraceFlags::default(),
             false,
             TraceState::default(),
@@ -236,11 +227,12 @@ pub(crate) mod tests {
             KeyValue::new("span.type", "web"),
             KeyValue::new("host.name", "test"),
         ];
-        let instrumentation_lib = InstrumentationLibrary::builder("component").build();
+        let instrumentation_scope = InstrumentationScope::builder("component").build();
 
-        trace::SpanData {
+        SpanData {
             span_context,
-            parent_span_id: SpanId::from_u64(parent_span_id),
+            parent_span_id: SpanId::from_bytes(parent_span_id.to_be_bytes()),
+            parent_span_is_remote: false,
             span_kind: SpanKind::Client,
             name: "resource".into(),
             start_time,
@@ -249,7 +241,7 @@ pub(crate) mod tests {
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: Status::Ok,
-            instrumentation_lib,
+            instrumentation_scope,
             dropped_attributes_count: 0,
         }
     }

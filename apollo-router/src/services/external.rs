@@ -32,6 +32,8 @@ use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::query_planner::QueryPlan;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
+#[cfg(unix)]
+use crate::services::parse_unix_socket_url;
 use crate::services::router;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
@@ -297,16 +299,9 @@ where
         // Standard http::Uri doesn't support unix:// URLs, so we need to convert them
         // using hyperlocal which encodes the socket path in a way the Unix connector understands
         #[cfg(unix)]
-        let converted_uri = if let Some(path) = uri.strip_prefix("unix://") {
-            let socket_path: Arc<str> = path.into();
-            // We hardcode a "/" to the socket because we don't have any special path handling
-            // logic yet. Unix sockets are interesting in that they're not _really_ URIs, they're
-            // just files that folks have decided to prepend with unix://. There's no real path
-            // spec or anything like that, so when we do use paths, we end up just treating it as
-            // the entire file
-            // TODO: ROUTER-1589 to add path support
-            let hyperlocal_uri: http::Uri = hyperlocal::Uri::new(socket_path.as_ref(), "/").into();
-            hyperlocal_uri
+        let converted_uri: http::Uri = if let Some(path) = uri.strip_prefix("unix://") {
+            let (socket_path, http_path) = parse_unix_socket_url(path);
+            hyperlocal::Uri::new(socket_path, http_path).into()
         } else {
             uri.parse()?
         };

@@ -49,7 +49,36 @@ expression: parse_result_for_snapshot(response).await
         },
         "message": "query estimated cost 110 exceeded configured maximum 1 for subgraph users",
         "path": [
-          "ships"
+          "ships",
+          0
+        ]
+      },
+      {
+        "extensions": {
+          "code": "SUBGRAPH_COST_ESTIMATED_TOO_EXPENSIVE",
+          "cost.subgraph": "users",
+          "cost.subgraph.estimated": 110.0,
+          "cost.subgraph.max": 1.0,
+          "service": "users"
+        },
+        "message": "query estimated cost 110 exceeded configured maximum 1 for subgraph users",
+        "path": [
+          "ships",
+          1
+        ]
+      },
+      {
+        "extensions": {
+          "code": "SUBGRAPH_COST_ESTIMATED_TOO_EXPENSIVE",
+          "cost.subgraph": "users",
+          "cost.subgraph.estimated": 110.0,
+          "cost.subgraph.max": 1.0,
+          "service": "users"
+        },
+        "message": "query estimated cost 110 exceeded configured maximum 1 for subgraph users",
+        "path": [
+          "ships",
+          2
         ]
       }
     ]

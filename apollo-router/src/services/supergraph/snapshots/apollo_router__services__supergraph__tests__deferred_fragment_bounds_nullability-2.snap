@@ -19,7 +19,8 @@ expression: stream.next_response().await.unwrap()
           "path": [
             "currentUser",
             "activeOrganization",
-            "suborga"
+            "suborga",
+            0
           ],
           "extensions": {
             "code": "FETCH_ERROR",
@@ -55,7 +56,8 @@ expression: stream.next_response().await.unwrap()
           "path": [
             "currentUser",
             "activeOrganization",
-            "suborga"
+            "suborga",
+            1
           ],
           "extensions": {
             "code": "FETCH_ERROR",
@@ -91,7 +93,8 @@ expression: stream.next_response().await.unwrap()
           "path": [
             "currentUser",
             "activeOrganization",
-            "suborga"
+            "suborga",
+            2
           ],
           "extensions": {
             "code": "FETCH_ERROR",

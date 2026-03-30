@@ -2,7 +2,9 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use std::time::Instant;
@@ -15,7 +17,6 @@ use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
 use config_new::router_overhead;
-use error_handler::handle_error;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::future::ready;
@@ -47,6 +48,7 @@ use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rand::Rng;
+use regex::Regex;
 use reload::activation::Activation;
 use reload::tracing::TracingConfigurator;
 use serde_json_bytes::ByteString;
@@ -100,7 +102,9 @@ use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphIn
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
+use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
+use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
@@ -153,7 +157,6 @@ pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
 mod error_counter;
-mod error_handler;
 mod fmt_layer;
 pub(crate) mod formatters;
 mod logging;
@@ -238,7 +241,7 @@ impl LruSizeInstrument {
                     gauge.observe(value.load(std::sync::atomic::Ordering::Relaxed), &[]);
                 }
             })
-            .init();
+            .build();
 
         Self {
             value,
@@ -317,9 +320,6 @@ impl PluginPrivate for Telemetry {
             }
         }
 
-        opentelemetry::global::set_error_handler(handle_error)
-            .expect("otel error handler lock poisoned, fatal");
-
         let mut config = init.config;
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
@@ -368,6 +368,7 @@ impl PluginPrivate for Telemetry {
         let supergraph_schema_id = self.supergraph_schema_id.clone();
         let config_later = self.config.clone();
         let config_request = self.config.clone();
+        let config_checkpoint = self.config.clone();
         let span_mode = config.instrumentation.spans.mode;
         let use_legacy_request_span =
             matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
@@ -419,6 +420,40 @@ impl PluginPrivate for Telemetry {
                     span_mode.create_router(&request.router_request)
                 })
             }))
+            .checkpoint(move |req: router::Request| {
+                let library_name_valid = req
+                    .router_request
+                    .headers()
+                    .get(&config_checkpoint.apollo.library_name_header)
+                    .and_then(|v| v.to_str().ok())
+                    .is_none_or(is_valid_client_library_value);
+                let library_version_valid = req
+                    .router_request
+                    .headers()
+                    .get(&config_checkpoint.apollo.library_version_header)
+                    .and_then(|v| v.to_str().ok())
+                    .is_none_or(is_valid_client_library_value);
+                if !library_name_valid || !library_version_valid {
+                    if !library_name_valid {
+                        ::tracing::warn!(
+                            "Rejecting request: invalid client library name header value"
+                        );
+                    }
+                    if !library_version_valid {
+                        ::tracing::warn!(
+                            "Rejecting request: invalid client library version header value"
+                        );
+                    }
+                    Ok(ControlFlow::Break(
+                        router::Response::error_builder()
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .context(req.context)
+                            .build()?,
+                    ))
+                } else {
+                    Ok(ControlFlow::Continue(req))
+                }
+            })
             .map_future_with_request_data(
                 move |request: &router::Request| {
                     let _ = request.context.insert(
@@ -547,6 +582,26 @@ impl PluginPrivate for Telemetry {
                             KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or_default()),
                             KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or_default()),
                         ]);
+
+                        if let Some(http_server_response_body_size) =
+                            &custom_instruments.http_server_response_body_size
+                        {
+                            let CustomHistogramInner {
+                                histogram,
+                                attributes,
+                                ..
+                            } = &*http_server_response_body_size.inner.lock();
+                            // Clone the histogram (which uses an Arc internally) and store
+                            // in ResponseBodySizeRecording so that we can later record the
+                            // final byte count after the body stream is fully sent.
+                            if let Some(histogram) = &histogram {
+                                let recording = ResponseBodySizeRecording::new(
+                                    histogram.clone(),
+                                    attributes.clone(),
+                                );
+                                ctx.extensions().with_lock(|lock| lock.insert(recording));
+                            }
+                        }
 
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
@@ -1809,6 +1864,14 @@ impl Telemetry {
     }
 }
 
+// Regex for allowed values for client library names and versions
+static VALID_CLIENT_LIBRARY_VALUE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[ a-zA-Z0-9.@/_\-]{1,60}$").unwrap());
+
+pub(crate) fn is_valid_client_library_value(value: &str) -> bool {
+    VALID_CLIENT_LIBRARY_VALUE_REGEX.is_match(value)
+}
+
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
     if let ForwardHeaders::None = forward_rules {
         return String::from("{}");
@@ -2177,13 +2240,16 @@ mod tests {
                     .full_config(full_config)
                     .build(),
             )
+            .with_metrics()
             .await
             .unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_serialization() {
-        create_plugin_with_config(include_str!("testdata/config.router.yaml")).await;
+        create_plugin_with_config(include_str!("testdata/config.router.yaml"))
+            .with_metrics()
+            .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2192,6 +2258,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_all_features_enabled.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2207,6 +2274,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_all_features_enabled_response_cache.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2222,6 +2290,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_all_features_explicitly_disabled.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2241,6 +2310,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_all_features_defaults.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2260,6 +2330,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_apq_enabled_partial_defaults.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2271,6 +2342,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/full_config_apq_disabled_partial_defaults.router.yaml"
         ))
+        .with_metrics()
         .await;
         let features = enabled_features(plugin.as_ref());
         assert!(
@@ -2297,7 +2369,7 @@ mod tests {
 
             assert_counter!(
                 "http.request",
-                1,
+                1.0,
                 "another_test" = "my_default_value",
                 "my_value" = 2,
                 "myname" = "label_value",
@@ -2348,7 +2420,7 @@ mod tests {
 
             assert_counter!(
                 "http.request",
-                1,
+                1.0,
                 "another_test" = "my_default_value",
                 "error" = "nope",
                 "myname" = "label_value",
@@ -2517,7 +2589,6 @@ mod tests {
                 "http.response.status_code" = 400,
                 "acme.my_attribute" = "application/json",
                 "error.type" = "Bad Request",
-                "http.response.status_code" = 400,
                 "network.protocol.version" = "HTTP/1.1"
             );
         }
@@ -2836,6 +2907,7 @@ mod tests {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/config.field_instrumentation_sampler.router.yaml"
         ))
+        .with_metrics()
         .await;
 
         let ftv1_counter = Arc::new(AtomicUsize::new(0));
@@ -3217,7 +3289,7 @@ mod tests {
         let mut injected = Injected(HashMap::new());
         let _ctx = opentelemetry::Context::new()
             .with_remote_span_context(SpanContext::new(
-                TraceId::from_u128(0x04f9e396465c4840bc2bf493b8b1a7fc),
+                TraceId::from(0x04f9e396465c4840bc2bf493b8b1a7fc),
                 SpanId::INVALID,
                 TraceFlags::default(),
                 false,

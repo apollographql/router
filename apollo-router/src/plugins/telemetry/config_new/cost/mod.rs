@@ -161,13 +161,13 @@ impl CostInstrumentsConfig {
 
         [(
             COST_ESTIMATED_KEY.to_string(),
-            StaticInstrument::Histogram(meter.f64_histogram(COST_ESTIMATED_KEY).with_description("Estimated cost of the operation using the currently configured cost model").init()),
+            StaticInstrument::Histogram(meter.f64_histogram(COST_ESTIMATED_KEY).with_description("Estimated cost of the operation using the currently configured cost model").build()),
         ),(
             COST_ACTUAL_KEY.to_string(),
-            StaticInstrument::Histogram(meter.f64_histogram(COST_ACTUAL_KEY).with_description("Actual cost of the operation using the currently configured cost model").init()),
+            StaticInstrument::Histogram(meter.f64_histogram(COST_ACTUAL_KEY).with_description("Actual cost of the operation using the currently configured cost model").build()),
         ),(
             COST_DELTA_KEY.to_string(),
-            StaticInstrument::Histogram(meter.f64_histogram(COST_DELTA_KEY).with_description("Delta between the estimated and actual cost of the operation using the currently configured cost model").init()),
+            StaticInstrument::Histogram(meter.f64_histogram(COST_DELTA_KEY).with_description("Delta between the estimated and actual cost of the operation using the currently configured cost model").build()),
         )]
         .into_iter()
         .collect()

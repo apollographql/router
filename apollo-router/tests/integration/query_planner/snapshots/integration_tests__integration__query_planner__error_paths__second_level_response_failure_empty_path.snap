@@ -44,7 +44,18 @@ expression: response
     {
       "message": "inventory error",
       "path": [
-        "topProducts"
+        "topProducts",
+        0
+      ],
+      "extensions": {
+        "service": "inventory"
+      }
+    },
+    {
+      "message": "inventory error",
+      "path": [
+        "topProducts",
+        1
       ],
       "extensions": {
         "service": "inventory"

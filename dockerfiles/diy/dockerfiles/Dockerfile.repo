@@ -17,13 +17,13 @@ RUN rustup component add rustfmt
 # Copy the router source to our build environment
 COPY . .
 
-# Build and install the router
-RUN cargo install --path apollo-router
+# Build the router
+RUN cargo build --locked --release -p apollo-router
 
 # Make directories for config and schema
 RUN mkdir -p /dist/config && \
     mkdir /dist/schema && \
-    mv /usr/local/cargo/bin/router /dist
+    mv target/release/router /dist
 
 # Copy configuration for docker image
 COPY dockerfiles/router.yaml /dist/config

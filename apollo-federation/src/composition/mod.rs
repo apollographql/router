@@ -50,7 +50,6 @@ pub fn compose_with_connectors(
     // - These were supposed to be pre-merge validations, but historically FBP performed these
     //   Rust-based validation, before JS composition.
     // - Once JS-to-Rust migration is done, we can move these to pre-merge validations.
-    // TODO: (FED-841) Call `validate_cache_tag_directives`
     // TODO: (FED-855) Call `connectors::validation`, which may change the subgraphs before upgrading.
 
     tracing::debug!("Expanding subgraphs...");
