@@ -43,6 +43,7 @@ use super::HttpResponse;
 use crate::Configuration;
 use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
+use crate::configuration::shared::DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
@@ -250,6 +251,10 @@ impl HttpClientService {
             .https_or_http();
 
         let pool_idle_timeout = client_config.pool_idle_timeout;
+        let http2_keep_alive_interval = client_config.experimental_http2_keep_alive_interval;
+        let http2_keep_alive_timeout = client_config
+            .experimental_http2_keep_alive_timeout
+            .unwrap_or(DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT);
 
         let http2 = client_config.experimental_http2.unwrap_or_default();
         let connector = match http2 {
@@ -261,14 +266,25 @@ impl HttpClientService {
             Http2Config::Http2Only => builder.enable_http2().wrap_connector(http_connector),
         };
 
-        let http_client =
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                .pool_idle_timeout(pool_idle_timeout)
-                // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
-                // unless you're also removing `pool_idle_timeout`
-                .pool_timer(TokioTimer::new())
-                .http2_only(http2 == Http2Config::Http2Only)
-                .build(connector);
+        let mut client_builder =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
+        client_builder
+            .pool_idle_timeout(pool_idle_timeout)
+            // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
+            // unless you're also removing `pool_idle_timeout`
+            .pool_timer(TokioTimer::new())
+            .http2_only(http2 == Http2Config::Http2Only);
+        if let Some(interval) = http2_keep_alive_interval {
+            client_builder
+                // WARN: http2 keep-alive requires a timer; don't remove this
+                .timer(TokioTimer::new())
+                .http2_keep_alive_interval(Some(interval))
+                .http2_keep_alive_timeout(http2_keep_alive_timeout)
+                // Send pings even when the connection is idle in the pool, so stale
+                // connections are detected before a request is made on them
+                .http2_keep_alive_while_idle(true);
+        }
+        let http_client = client_builder.build(connector);
 
         #[cfg(unix)]
         let unix_client = {
