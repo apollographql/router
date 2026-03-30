@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::OnceLock;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use buildstructor::buildstructor;
 use flate2::read::GzDecoder;
@@ -917,7 +919,11 @@ impl IntegrationTest {
             .open(&self.test_config_location)
             .await
             .expect("must have been able to open config file");
-        f.write_all("\n#touched\n".as_bytes())
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before UNIX epoch")
+            .as_nanos();
+        f.write_all(format!("\n#touched-{stamp}\n").as_bytes())
             .await
             .expect("must be able to write config file");
     }
@@ -932,12 +938,17 @@ impl IntegrationTest {
             &self.redis_namespace,
             Some(&self.port_replacements),
         );
-        tokio::fs::write(
-            &self.test_config_location,
-            serde_yaml::to_string(&config).unwrap(),
-        )
-        .await
-        .expect("must be able to write config");
+        let mut content = serde_yaml::to_string(&config).unwrap();
+        // Append a unique comment so file content always changes. PollWatcher uses
+        // with_compare_contents(true); identical rewrites may not emit Data events on Windows.
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before UNIX epoch")
+            .as_nanos();
+        content.push_str(&format!("\n# update-{stamp}\n"));
+        tokio::fs::write(&self.test_config_location, content)
+            .await
+            .expect("must be able to write config");
     }
 
     #[allow(dead_code)]
