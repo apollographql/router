@@ -516,4 +516,48 @@ mod tests {
             Response::builder().data(Some(Value::Null)).build(),
         );
     }
+
+    /// Tests for Unicode / emoji handling in subgraph responses.
+    ///
+    /// Non-BMP characters (U+10000 and above, e.g. 💰 U+1F4B0) require two UTF-16 code units
+    /// when encoded as \uXXXX JSON escapes: a high surrogate (\uD800–\uDBFF) followed immediately
+    /// by a low surrogate (\uDC00–\uDFFF). serde_json enforces this strictly; a lone high
+    /// surrogate is rejected as malformed JSON (RFC 8259 §7).
+    mod unicode {
+        use rstest::rstest;
+
+        use super::*;
+
+        // Valid encodings — all should parse successfully and round-trip to the same data.
+        #[rstest]
+        // Raw UTF-8 bytes: the most common and correct encoding.
+        #[case::raw_utf8("{ \"data\": { \"greeting\": \"hello 💰💕\" } }", bjson!({ "greeting": "hello 💰💕" }))]
+        // \uD83D\uDCB0 = 💰, \uD83D\uDC95 = 💕: valid surrogate pairs as emitted by Java's Jackson
+        // (ensure_ascii=true) or Python's json.dumps(ensure_ascii=True).
+        #[case::surrogate_pairs(r#"{"data":{"greeting":"hello \uD83D\uDCB0\uD83D\uDC95"}}"#, bjson!({ "greeting": "hello 💰💕" }))]
+        // ❤ is U+2764 (BMP, single \uXXXX); 😀 is U+1F600 (non-BMP, surrogate pair \uD83D\uDE00).
+        #[case::bmp_and_surrogate_pair(r#"{"data":{"greeting":"\u2764 \uD83D\uDE00"}}"#, bjson!({ "greeting": "❤ 😀" }))]
+        fn valid_emoji(#[case] json: &str, #[case] expected: Value) {
+            let resp = Response::from_bytes(Bytes::copy_from_slice(json.as_bytes())).unwrap();
+            assert_eq!(resp.data, Some(expected));
+        }
+
+        // Invalid encodings — lone high surrogates must be rejected with a helpful hint.
+        #[rstest]
+        // \uD83D followed by a space: high surrogate with no following \uDCxx (first serde_json branch).
+        #[case::lone_surrogate_space(r#"{"data":{"greeting":"hello \uD83D end"}}"#)]
+        // \uD83D\n: high surrogate followed by a valid escape that isn't \u (second branch).
+        #[case::lone_surrogate_non_u_escape(r#"{"data":{"greeting":"hello \uD83D\n end"}}"#)]
+        fn lone_surrogate_rejected(#[case] json: &str) {
+            let err = Response::from_bytes(Bytes::copy_from_slice(json.as_bytes())).unwrap_err();
+            assert!(
+                err.reason.contains("unexpected end of hex escape"),
+                "expected base serde_json error, got: {err}"
+            );
+            assert!(
+                err.reason.contains("unpaired Unicode surrogate"),
+                "expected surrogate hint in error, got: {err}"
+            );
+        }
+    }
 }
