@@ -1214,7 +1214,10 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_reloaded(&mut self) {
-        self.wait_for_log_message("reload complete").await;
+        // Reload can exceed 10s on CI when OTLP meter providers shut down (e.g. delta temporality
+        // flush) while the state machine rebuilds the pipeline.
+        self.wait_for_log_message_with_timeout("reload complete", Duration::from_secs(30))
+            .await;
     }
 
     #[allow(dead_code)]
@@ -1230,8 +1233,14 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn wait_for_log_message(&mut self, msg: &str) {
+        self.wait_for_log_message_with_timeout(msg, Duration::from_secs(10))
+            .await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn wait_for_log_message_with_timeout(&mut self, msg: &str, timeout: Duration) {
         let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(10) {
+        while now.elapsed() < timeout {
             if let Ok(line) = self.stdio_rx.try_recv() {
                 self.logs.push(line.to_string());
                 if line.contains(msg) {
