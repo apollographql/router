@@ -616,8 +616,8 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn http_client_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::http::BoxCloneSyncService,
+    ) -> crate::services::http::BoxCloneSyncService {
         service
     }
 
@@ -737,8 +737,8 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     fn http_client_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService;
+        service: crate::services::http::BoxCloneSyncService,
+    ) -> crate::services::http::BoxCloneSyncService;
 
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
@@ -791,8 +791,8 @@ where
     fn http_client_service(
         &self,
         name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::http::BoxCloneSyncService,
+    ) -> crate::services::http::BoxCloneSyncService {
         self.http_client_service(name, service)
     }
 

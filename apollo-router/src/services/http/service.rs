@@ -639,7 +639,7 @@ mod tests {
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::otel;
     use crate::plugins::telemetry::otel::OtelData;
-    use crate::services::http::BoxService;
+    use crate::services::http::BoxCloneSyncService;
     use crate::services::http::HttpClientService;
     use crate::services::http::HttpRequest;
     use crate::services::http::service::WireByteCount;
@@ -715,7 +715,7 @@ mod tests {
         (guard, recording_layer)
     }
 
-    async fn make_telemetry_http_client(service_name: &str) -> BoxService {
+    async fn make_telemetry_http_client(service_name: &str) -> BoxCloneSyncService {
         let full_config = serde_json::json!({
             "telemetry": {}
         });
@@ -747,7 +747,7 @@ mod tests {
         )
         .expect("can create a HttpClientService");
 
-        plugin.http_client_service(service_name, BoxService::new(http_client_service))
+        plugin.http_client_service(service_name, BoxCloneSyncService::new(http_client_service))
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -898,7 +898,7 @@ mod tests {
 
         // Wrap with telemetry plugin
         let mut telemetry_wrapped_service =
-            plugin.http_client_service("test", BoxService::new(http_client_service));
+            plugin.http_client_service("test", BoxCloneSyncService::new(http_client_service));
 
         let (_guard, recording_layer) = setup_tracing();
 
