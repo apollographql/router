@@ -105,8 +105,27 @@ impl Response {
     ///
     /// This will return an error (identifying the faulty service) if the input is invalid.
     pub(crate) fn from_bytes(b: Bytes) -> Result<Response, MalformedResponseError> {
-        let value = Value::from_bytes(b).map_err(|error| MalformedResponseError {
-            reason: error.to_string(),
+        let value = Value::from_bytes(b).map_err(|error| {
+            let mut reason = error.to_string();
+
+            // RFC 8259 §7 requires that non-BMP characters encoded as \uXXXX escapes use
+            // a surrogate pair: a high surrogate (\uD800–\uDBFF) immediately followed by a
+            // low surrogate (\uDC00–\uDFFF). A lone high surrogate is invalid JSON.
+            // https://www.rfc-editor.org/rfc/rfc8259#section-7
+            //
+            // In serde_json, `UnexpectedEndOfHexEscape` is only reachable from the
+            // surrogate-parsing code path, so this message string uniquely identifies a
+            // lone-surrogate error — no additional byte-level check is needed.
+            if error.classify() == serde_json::error::Category::Syntax
+                && reason.contains("unexpected end of hex escape")
+            {
+                reason.push_str(
+                    "; the subgraph response contains an unpaired Unicode surrogate \
+                    (e.g. \\uD83D without a following \\uDCxx). Fix the subgraph to emit \
+                    raw UTF-8 or correctly paired surrogate escapes.",
+                );
+            }
+            MalformedResponseError { reason }
         })?;
         Response::from_value(value)
     }
