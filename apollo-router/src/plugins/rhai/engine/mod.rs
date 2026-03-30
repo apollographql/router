@@ -1394,11 +1394,11 @@ impl Rhai {
         path: Option<PathBuf>,
         sdl: String,
         main: PathBuf,
-        max_strings_interned: Option<usize>,
+        intern_strings: bool,
     ) -> Engine {
         let mut engine = Engine::new();
-        if let Some(n) = max_strings_interned {
-            engine.set_max_strings_interned(n);
+        if !intern_strings {
+            engine.set_max_strings_interned(0);
         }
         // If we pass in a path, use it to configure our engine
         // with a FileModuleResolver which allows import to work

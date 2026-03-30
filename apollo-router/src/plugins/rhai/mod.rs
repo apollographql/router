@@ -51,6 +51,10 @@ struct Rhai {
     scope: Arc<Mutex<Scope<'static>>>,
 }
 
+fn default_intern_strings() -> bool {
+    true
+}
+
 /// Configuration for the Rhai Plugin
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -60,20 +64,20 @@ pub(crate) struct Conf {
     scripts: Option<PathBuf>,
     /// The main entry point for Rhai script evaluation
     main: Option<String>,
-    /// Maximum number of strings to intern in the Rhai engine.
+    /// Whether to enable Rhai's internal string interning.
     ///
     /// When the `sync` feature is active (required for multi-threaded use),
     /// every string operation acquires a `RwLock` on the interner. Under high
     /// concurrency this lock can become a bottleneck.
     ///
-    /// Set to `0` to disable string interning entirely, which eliminates the
+    /// Set to `false` to disable string interning entirely, which eliminates
     /// lock acquisition on every string operation and can improve throughput
     /// for workloads with many concurrent Rhai executions.
     ///
-    /// Defaults to `null`, which preserves Rhai's built-in default of 256
+    /// Defaults to `true`, which preserves Rhai's built-in default of 256
     /// interned strings.
-    #[serde(default)]
-    max_strings_interned: Option<usize>,
+    #[serde(default = "default_intern_strings")]
+    intern_strings: bool,
 }
 
 #[async_trait::async_trait]
@@ -98,7 +102,7 @@ impl Plugin for Rhai {
             Some(scripts_path),
             sdl.to_string(),
             main.clone(),
-            init.config.max_strings_interned,
+            init.config.intern_strings,
         ));
         let ast = engine
             .compile_file(main.clone())
