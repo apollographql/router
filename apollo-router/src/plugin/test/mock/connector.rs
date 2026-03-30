@@ -112,7 +112,13 @@ impl Service<ConnectorRequest> for MockConnector {
             let data = json!(response);
             let headers = self.headers.clone();
 
-            ConnectorResponse::test_new(response_key, Default::default(), data, Some(headers))
+            ConnectorResponse::test_new(
+                req.context.clone(),
+                response_key,
+                vec![],
+                data,
+                Some(headers),
+            )
         } else {
             let error_message = format!(
                 "couldn't find mock for query {}",
@@ -122,7 +128,13 @@ impl Service<ConnectorRequest> for MockConnector {
             let data = json!(error_message);
             let headers = self.headers.clone();
 
-            ConnectorResponse::test_new(response_key, Default::default(), data, Some(headers))
+            ConnectorResponse::test_new(
+                req.context.clone(),
+                response_key,
+                vec![],
+                data,
+                Some(headers),
+            )
         };
         future::ok(response)
     }
