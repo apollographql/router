@@ -335,7 +335,10 @@ impl PluginPrivate for EntityCache {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         ServiceBuilder::new()
             .map_response(|mut response: supergraph::Response| {
                 if let Some(cache_control) = response
@@ -349,7 +352,7 @@ impl PluginPrivate for EntityCache {
                 response
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn subgraph_service(

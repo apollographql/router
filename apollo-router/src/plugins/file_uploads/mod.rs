@@ -86,7 +86,10 @@ impl PluginPrivate for FileUploadsPlugin {
             .boxed()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         if !self.enabled {
             return service;
         }
@@ -108,7 +111,7 @@ impl PluginPrivate for FileUploadsPlugin {
             })
             .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn execution_service(

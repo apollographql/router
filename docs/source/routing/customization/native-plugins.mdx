@@ -101,8 +101,8 @@ impl Plugin for HelloWorld {
 
     fn supergraph_service(
         &self,
-        service: supergraph::BoxService,
-    ) -> supergraph::BoxService {
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         service
     }
 

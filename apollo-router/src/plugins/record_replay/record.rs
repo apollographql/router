@@ -144,7 +144,10 @@ impl Plugin for Record {
             .boxed()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         if !self.enabled {
             return service;
         }
@@ -210,7 +213,7 @@ impl Plugin for Record {
                 })
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn execution_service(

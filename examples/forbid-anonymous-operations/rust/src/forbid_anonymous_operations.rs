@@ -2,6 +2,7 @@ use std::ops::ControlFlow;
 
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
+use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -9,7 +10,6 @@ use apollo_router::services::supergraph;
 use http::StatusCode;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 #[derive(Default)]
 // Global state for our plugin would live here.
@@ -31,7 +31,10 @@ impl Plugin for ForbidAnonymousOperations {
 
     // Forbidding anonymous operations can happen at the very beginning of our GraphQL request lifecycle.
     // We will thus put the logic it in the `supergraph_service` section of our plugin.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         // `ServiceBuilder` provides us with a `checkpoint` method.
         //
         // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
@@ -72,7 +75,7 @@ impl Plugin for ForbidAnonymousOperations {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 
@@ -94,6 +97,7 @@ register_plugin!(
 #[cfg(test)]
 mod tests {
     use apollo_router::graphql;
+    use apollo_router::layers::ServiceExt as _;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::services::supergraph;
@@ -131,8 +135,8 @@ mod tests {
         let mock_service = test::MockSupergraphService::new();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
-        let service_stack =
-            ForbidAnonymousOperations::default().supergraph_service(mock_service.boxed());
+        let service_stack = ForbidAnonymousOperations::default()
+            .supergraph_service(mock_service.boxed_clone_sync());
 
         // Let's create a request without an operation name...
         let request_without_any_operation_name = supergraph::Request::fake_builder()
@@ -166,8 +170,8 @@ mod tests {
         let mock_service = test::MockSupergraphService::new();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
-        let service_stack =
-            ForbidAnonymousOperations::default().supergraph_service(mock_service.boxed());
+        let service_stack = ForbidAnonymousOperations::default()
+            .supergraph_service(mock_service.boxed_clone_sync());
 
         // Let's create a request with an empty operation name...
         let request_with_empty_operation_name = supergraph::Request::fake_builder()
@@ -226,8 +230,8 @@ mod tests {
             });
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
-        let service_stack =
-            ForbidAnonymousOperations::default().supergraph_service(mock_service.boxed());
+        let service_stack = ForbidAnonymousOperations::default()
+            .supergraph_service(mock_service.boxed_clone_sync());
 
         // Let's create a request with an valid operation name...
         let request_with_operation_name = supergraph::Request::fake_builder()

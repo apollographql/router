@@ -24,6 +24,7 @@ use tower_service::Service;
 
 use crate::Configuration;
 use crate::Notify;
+use crate::layers::ServiceExt as _;
 use crate::plugin;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
@@ -181,11 +182,11 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     pub(crate) fn supergraph_service<F>(
         &self,
         response_fn: impl Fn(supergraph::Request) -> F + Send + Sync + Clone + 'static,
-    ) -> ServiceHandle<supergraph::Request, supergraph::BoxService>
+    ) -> ServiceHandle<supergraph::Request, supergraph::BoxCloneSyncService>
     where
         F: Future<Output = Result<supergraph::Response, BoxError>> + Send + 'static,
     {
-        let service: supergraph::BoxService = supergraph::BoxService::new(
+        let service: supergraph::BoxCloneSyncService = supergraph::BoxCloneSyncService::new(
             ServiceBuilder::new().service_fn(move |req: supergraph::Request| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }
@@ -489,12 +490,15 @@ mod test_for_harness {
                 .boxed()
         }
 
-        fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        fn supergraph_service(
+            &self,
+            service: supergraph::BoxCloneSyncService,
+        ) -> supergraph::BoxCloneSyncService {
             // This purposely does not use load_shed to allow us to test readiness.
             ServiceBuilder::new()
                 .concurrency_limit(1)
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         }
     }
     register_plugin!("apollo_testing", "my_test_plugin", MyTestPlugin);

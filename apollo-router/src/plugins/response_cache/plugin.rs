@@ -380,7 +380,10 @@ impl PluginPrivate for ResponseCache {
         self.storage.activate();
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         let debug = self.debug;
         ServiceBuilder::new()
             .map_response(move |mut response: supergraph::Response| {
@@ -422,7 +425,7 @@ impl PluginPrivate for ResponseCache {
                 response
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn subgraph_service(
