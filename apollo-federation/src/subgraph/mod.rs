@@ -443,9 +443,8 @@ impl SubgraphError {
 
 impl Display for SubgraphError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let subgraph = &self.subgraph;
         for (code, message) in self.format_errors() {
-            writeln!(f, "{code} [{subgraph}] {message}")?;
+            writeln!(f, "{code} {message}")?;
         }
         Ok(())
     }

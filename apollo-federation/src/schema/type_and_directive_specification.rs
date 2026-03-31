@@ -45,9 +45,9 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::same_type;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
-
 //////////////////////////////////////////////////////////////////////////////
 // Field and Argument Specifications
 
@@ -429,11 +429,21 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
     }
 }
 
+// **** WARNING: DO NOT USE ****
+//
+// Subgraph schema building, at this time of writing, does not really support
+// input objects in specs. We did a number of one-off things to support them in
+// the connect spec's case, and it will be non-maintainable/bug-prone to do them
+// again.
+//
+// There's work to be done to support input objects more generally; please see
+// https://github.com/apollographql/federation/pull/3311 for more information.
 pub(crate) struct InputObjectTypeSpecification {
     pub(crate) name: Name,
     pub(crate) fields: fn(&FederationSchema) -> Vec<ArgumentSpecification>,
 }
 
+// **** WARNING: DO NOT USE ****
 impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
     fn name(&self) -> &Name {
         &self.name
@@ -446,60 +456,118 @@ impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
     ) -> Result<(), FederationError> {
         let actual_name = actual_type_name(&self.name, link);
         let field_specs = (self.fields)(schema);
+        let resolved_specs: IndexMap<Name, ResolvedArgumentSpecification> = field_specs
+            .into_iter()
+            .map(|spec| {
+                spec.resolve(schema, link)
+                    .and_then(|r| Ok((r.name.clone(), r)))
+            })
+            .collect::<Result<IndexMap<Name, ResolvedArgumentSpecification>, FederationError>>()?;
         let existing = schema.try_get_type(actual_name.clone());
         if let Some(existing) = existing {
+            let mut errors: Vec<SingleFederationError> = vec![];
             // ensure existing definition is InputObject
             ensure_expected_type_kind(TypeKind::InputObject, &existing)?;
             let existing_type = existing.get(schema.schema())?;
-            let ExtendedType::InputObject(existing_obj_type) = existing_type else {
+            let ExtendedType::InputObject(existing_input_obj_type) = existing_type else {
                 return Err(FederationError::internal(format!(
                     "Expected ExtendedType::InputObject but got {}",
                     TypeKind::from(existing_type)
                 )));
             };
-
-            // ensure all expected fields are present in the existing object type
-            let mut new_definition_fields = Vec::with_capacity(field_specs.len());
-            for field_spec in field_specs {
-                let field_def = field_spec.resolve(schema, link)?;
-                new_definition_fields.push(field_def);
+            // the following mimics `ensure_same_arguments()`, but with some changes.
+            for ResolvedArgumentSpecification {
+                name: field_name,
+                ty,
+                default_value,
+            } in resolved_specs.values()
+            {
+                if let Some(existing_field) = existing_input_obj_type.fields.get(field_name) {
+                    let mut existing_field_type = (*existing_field.ty).clone();
+                    if existing_field.ty.is_non_null() && !ty.is_non_null() {
+                        // It's ok to redefine an optional input field as mandatory. For
+                        // instance, if you want to force people on your team to provide a
+                        // "maxSize", you can redefine ConnectBatch as
+                        // `input ConnectBatch { maxSize: Int! }` to get validation. In
+                        // other words, you are allowed to always pass an input field that
+                        // is optional if you so wish.
+                        existing_field_type = existing_field_type.nullable();
+                    }
+                    // Note that while `ensureSameArguments()` allows input type
+                    // redefinitions (e.g. allowing users to declare `String` instead of a
+                    // custom scalar), this behavior can be confusing/error-prone more
+                    // generally, so we forbid this for now. We can relax this later on a
+                    // case-by-case basis if needed.
+                    //
+                    // Further, `ensureSameArguments()` would skip default value checking
+                    // if the input type was non-nullable. It's unclear why this is there;
+                    // it may have been a mistake due to the impression that non-nullable
+                    // inputs can't have default values (they can), or this may have been
+                    // to avoid some breaking change, but there's no such limitation in
+                    // the case of input objects, so we always validate default values
+                    // here.
+                    if !same_type(&ty, &existing_field_type) {
+                        errors.push(
+                            SingleFederationError::TypeDefinitionInvalid {
+                                message: format!("Invalid definition for type {}: input field \"{field_name}\" should have type \"{ty}\" but found type \"{}\"", self.name, existing_field.ty)
+                            }
+                        )
+                    } else if default_value.as_ref() != existing_field.default_value.as_deref() {
+                        errors.push(
+                            SingleFederationError::TypeDefinitionInvalid {
+                                message: format!("Invalid definition for type {}: input field \"{field_name}\" should have default value \"{}\" but found default value \"{}\"",
+                                    self.name,
+                                    default_value.as_ref().unwrap_or(&Value::Null),
+                                    existing_field.default_value.as_deref().unwrap_or(&Value::Null),
+                                )
+                            }
+                        )
+                    }
+                } else {
+                    // Not declaring an optional input field is ok: that means you won't
+                    // be able to pass a non-default value in your schema, but we allow
+                    // you that. But missing a required input field it not ok.
+                    if ty.is_non_null() && default_value.is_none() {
+                        errors.push(
+                            SingleFederationError::TypeDefinitionInvalid {
+                                message: format!("Invalid definition for type {}: missing required input field \"{field_name}\"", self.name)
+                            }
+                        )
+                    }
+                    continue;
+                }
             }
-            let existing_definition_fields: Vec<_> = existing_obj_type
-                .fields
-                .values()
-                .map(|v| v.node.clone())
+            for (existing_field_name, _) in &existing_input_obj_type.fields {
+                // If it's an expected input field, we already validated it. But we
+                // still need to reject unknown input fields.
+                if !resolved_specs.contains_key(existing_field_name) {
+                    errors.push(
+                        SingleFederationError::TypeDefinitionInvalid {
+                            message: format!("Invalid definition for type {}: unknown/unsupported input field \"{existing_field_name}\"", self.name)
+                        }
+                    )
+                }
+            }
+            MultipleFederationErrors::from_iter(errors).into_result()
+        } else {
+            let field_map: IndexMap<Name, Component<InputValueDefinition>> = resolved_specs
+                .into_iter()
+                .map(|(k, v)| (k, Component::new(v.into())))
                 .collect();
-            let errors = ensure_same_arguments(
-                new_definition_fields.as_slice(),
-                existing_definition_fields.as_slice(),
+            let type_pos = InputObjectTypeDefinitionPosition {
+                type_name: actual_name,
+            };
+            type_pos.pre_insert(schema)?;
+            type_pos.insert(
                 schema,
-                format!("input object type {actual_name}").as_str(),
-                |s| SingleFederationError::TypeDefinitionInvalid {
-                    message: s.to_string(),
-                },
-            );
-            return MultipleFederationErrors::from_iter(errors).into_result();
+                Node::new(InputObjectType {
+                    description: None,
+                    name: type_pos.type_name.clone(),
+                    directives: Default::default(),
+                    fields: field_map,
+                }),
+            )
         }
-
-        let mut field_map = IndexMap::default();
-        for field_spec in field_specs {
-            let field_def: InputValueDefinition = field_spec.resolve(schema, link)?.into();
-            field_map.insert(field_def.name.clone(), Component::new(field_def));
-        }
-
-        let type_pos = InputObjectTypeDefinitionPosition {
-            type_name: actual_name,
-        };
-        type_pos.pre_insert(schema)?;
-        type_pos.insert(
-            schema,
-            Node::new(InputObjectType {
-                description: None,
-                name: type_pos.type_name.clone(),
-                directives: Default::default(),
-                fields: field_map,
-            }),
-        )
     }
 
     fn as_any(&self) -> &dyn Any {
