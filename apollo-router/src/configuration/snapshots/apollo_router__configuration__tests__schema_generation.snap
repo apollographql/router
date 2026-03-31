@@ -4251,6 +4251,28 @@ expression: "&schema"
             "null"
           ]
         },
+        "client.name": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StandardAttribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional client name populated from the request headers."
+        },
+        "client.version": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StandardAttribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional client version populated from the request headers."
+        },
         "dd.trace_id": {
           "anyOf": [
             {
@@ -4509,6 +4531,28 @@ expression: "&schema"
             "boolean",
             "null"
           ]
+        },
+        "client.name": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StandardAttribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional client name populated from the request headers."
+        },
+        "client.version": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StandardAttribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional client version populated from the request headers."
         },
         "dd.trace_id": {
           "anyOf": [

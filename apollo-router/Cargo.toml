@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.12.1"
+version = "2.13.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -59,7 +59,7 @@ snapshot = []
 addr2line = "0.25.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.12.1" }
+apollo-federation = { path = "../apollo-federation", version = "=2.13.0" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -183,6 +183,7 @@ opentelemetry-jaeger-propagator = "0.31"
 opentelemetry-otlp = { version = "0.31", default-features = false, features = [
     "grpc-tonic",
     "gzip-tonic",
+    "gzip-http",
     "tonic",
     "tls",
     "http-proto",
@@ -258,7 +259,7 @@ uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 wiremock = "0.6"
 wsl = "0.1.0"
-tokio-tungstenite = { version = "0.28.0", features = [
+tokio-tungstenite = { version = "0.29.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }

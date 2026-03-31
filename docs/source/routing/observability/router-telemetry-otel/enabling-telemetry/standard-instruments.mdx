@@ -90,7 +90,13 @@ You can attach custom attributes using [router selectors](/router/configuration/
 
 ## Session
 
-- `apollo.router.session.count.active` - Number of in-flight GraphQL requests
+- `apollo.router.session.count.active` - Number of in-flight GraphQL requests. **Deprecated**: use `http.server.active_requests` instead.
+
+<Note>
+
+`apollo.router.session.count.active` is a legacy Apollo-specific metric. Apollo recommends using [`http.server.active_requests`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/instruments#opentelemetry-standard-instruments) instead, which follows OpenTelemetry semantic conventions and is the standard way to measure in-flight HTTP requests. `apollo.router.session.count.active` might be removed in a future release.
+
+</Note>
 
 ## Cache
 

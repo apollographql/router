@@ -36,8 +36,12 @@ If your library does support federated tracing, see its documentation to learn h
 
 <Note>
 
-If your subgraph uses Apollo Server with `@apollo/subgraph`, federated tracing is enabled by default. You can customize this behavior with Apollo Server's [inline trace plugin](/apollo-server/api/plugin/inline-trace).
-If your subgraph uses the Ariadne Python library, this [demo repository](https://github.com/apollosolutions/ariadne-federated-traces) shows how to add support for federated tracing.
+If your subgraph uses **Apollo Server** with `@apollo/subgraph`:
+
+- With Apollo Server 3, federated tracing is enabled by default.
+- With **Apollo Server 4+**, the [inline trace plugin](/apollo-server/api/plugin/inline-trace) is **not installed by default**. Explicitly add and configure `ApolloServerPluginInlineTrace` in your Apollo Server setup for the subgraph to emit federated trace data.
+
+Also if your subgraph uses the Ariadne Python library, this [demo repository](https://github.com/apollosolutions/ariadne-federated-traces) shows how to enable support for federated tracing.
 
 </Note>
 
