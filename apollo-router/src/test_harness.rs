@@ -271,7 +271,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::execution_service`]
     pub fn execution_hook(
         self,
-        callback: impl Fn(execution::BoxService) -> execution::BoxService + Send + Sync + 'static,
+        callback: impl Fn(execution::BoxCloneSyncService) -> execution::BoxCloneSyncService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(ExecutionServicePlugin(callback))
     }
@@ -478,7 +481,7 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for ExecutionServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(execution::BoxService) -> execution::BoxService,
+    F: 'static + Send + Sync + Fn(execution::BoxCloneSyncService) -> execution::BoxCloneSyncService,
 {
     type Config = ();
 
@@ -486,7 +489,10 @@ where
         unreachable!()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         (self.0)(service)
     }
 }

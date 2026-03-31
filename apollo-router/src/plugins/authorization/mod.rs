@@ -32,6 +32,7 @@ use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
@@ -619,7 +620,10 @@ impl Plugin for AuthorizationPlugin {
         }
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         ServiceBuilder::new()
             .map_request(|request: execution::Request| {
                 let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
@@ -640,7 +644,7 @@ impl Plugin for AuthorizationPlugin {
                 request
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

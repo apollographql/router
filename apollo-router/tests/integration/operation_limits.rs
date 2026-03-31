@@ -5,6 +5,7 @@ use std::sync::atomic::Ordering;
 use apollo_compiler::parser::Parser;
 use apollo_router::TestHarness;
 use apollo_router::graphql;
+use apollo_router::layers::ServiceExt as _;
 use apollo_router::services::execution;
 use apollo_router::services::supergraph;
 use serde_json::json;
@@ -367,7 +368,7 @@ async fn build_test_harness(
                         .unwrap())
                 }
             })
-            .boxed()
+            .boxed_clone_sync()
         })
         .build_supergraph()
         .await
