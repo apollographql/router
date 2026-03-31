@@ -218,11 +218,11 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         &self,
         subgraph: &str,
         response_fn: impl Fn(subgraph::Request) -> F + Send + Sync + Clone + 'static,
-    ) -> ServiceHandle<subgraph::Request, subgraph::BoxService>
+    ) -> ServiceHandle<subgraph::Request, subgraph::BoxCloneSyncService>
     where
         F: Future<Output = Result<subgraph::Response, BoxError>> + Send + 'static,
     {
-        let service: subgraph::BoxService = subgraph::BoxService::new(
+        let service: subgraph::BoxCloneSyncService = subgraph::BoxCloneSyncService::new(
             ServiceBuilder::new().service_fn(move |req: subgraph::Request| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }
@@ -240,12 +240,12 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     where
         F: Future<Output = Result<http::HttpResponse, BoxError>> + Send + 'static,
     {
-        let service: http::BoxCloneSyncService = http::BoxCloneSyncService::new(ServiceBuilder::new().service_fn(
-            move |req: http::HttpRequest| {
+        let service: http::BoxCloneSyncService = http::BoxCloneSyncService::new(
+            ServiceBuilder::new().service_fn(move |req: http::HttpRequest| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }
-            },
-        ));
+            }),
+        );
 
         ServiceHandle::new(self.plugin.http_client_service(subgraph, service))
     }

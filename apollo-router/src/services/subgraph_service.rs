@@ -32,7 +32,6 @@ use tokio::sync::oneshot;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tracing::Instrument;
 use tracing::instrument;
 
@@ -56,6 +55,7 @@ use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::ServiceExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::file_uploads;
@@ -1155,7 +1155,7 @@ impl SubgraphServiceFactory {
                     Arc::from(name.clone()),
                 ))
                 .service(maker.make())
-                .boxed();
+                .boxed_clone_sync();
             let service = ServiceBuilder::new()
                 .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
                 .service(
@@ -1172,9 +1172,11 @@ impl SubgraphServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxService> {
+    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxCloneSyncService> {
         // Note: We have to box our cloned service to erase the type of the Buffer.
-        self.services.get(name).map(|svc| svc.clone().boxed())
+        self.services
+            .get(name)
+            .map(|svc| svc.clone().boxed_clone_sync())
     }
 }
 
@@ -1182,7 +1184,7 @@ impl SubgraphServiceFactory {
 ///
 /// there can be multiple instances of that service executing at any given time
 pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
-    fn make(&self) -> subgraph::BoxCloneService;
+    fn make(&self) -> subgraph::BoxCloneSyncService;
 }
 
 impl<S> MakeSubgraphService for S
@@ -1194,8 +1196,8 @@ where
         + 'static,
     <S as Service<SubgraphRequest>>::Future: Send,
 {
-    fn make(&self) -> subgraph::BoxCloneService {
-        self.clone().boxed_clone()
+    fn make(&self) -> subgraph::BoxCloneSyncService {
+        self.clone().boxed_clone_sync()
     }
 }
 

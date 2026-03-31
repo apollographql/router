@@ -1,3 +1,4 @@
+use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -59,7 +60,11 @@ impl Plugin for HelloWorld {
     }
 
     // Called for each subgraph
-    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        _name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         ServiceBuilder::new()
@@ -69,7 +74,7 @@ impl Plugin for HelloWorld {
             // .checkpoint()
             // .timeout()
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

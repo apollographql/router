@@ -17,6 +17,7 @@ use tower::ServiceExt;
 use crate::error::Error;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::SupergraphResponse;
@@ -80,8 +81,8 @@ impl Plugin for IncludeSubgraphErrors {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneSyncService,
+    ) -> crate::services::subgraph::BoxCloneSyncService {
         // We need to attach the subgraph name to each error so that we can do the filtering in the supergraph service.
         // The reason filtering is not done here is that other types of request may also generate errors that need filtering.
         // Pushing the error filtering to supergraph will ensure that everything gets filtered.
@@ -94,7 +95,7 @@ impl Plugin for IncludeSubgraphErrors {
                 }
                 r
             })
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

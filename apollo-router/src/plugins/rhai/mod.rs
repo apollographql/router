@@ -30,6 +30,7 @@ use self::engine::RhaiService;
 use self::engine::SharedMut;
 use crate::error::Error;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
@@ -169,7 +170,11 @@ impl Plugin for Rhai {
         shared_service.take_unwrap()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         const FUNCTION_NAME_SERVICE: &str = "subgraph_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -197,12 +202,12 @@ pub(crate) enum ServiceStep {
     Router(SharedMut<router::BoxService>),
     Supergraph(SharedMut<supergraph::BoxService>),
     Execution(SharedMut<execution::BoxService>),
-    Subgraph(SharedMut<subgraph::BoxService>),
+    Subgraph(SharedMut<subgraph::BoxCloneSyncService>),
 }
 
 // Actually use the checkpoint function so that we can shortcut requests which fail
 macro_rules! gen_map_request {
-    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $cloner: ident) => {
         $borrow.replace(|service| {
             fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
                 move |_request: &$base::Request| {
@@ -234,7 +239,7 @@ macro_rules! gen_map_request {
                     Ok(ControlFlow::Continue(request_opt.unwrap()))
                 })
                 .service(service)
-                .boxed()
+                .$cloner()
         })
     };
 }
@@ -351,7 +356,7 @@ macro_rules! gen_map_router_deferred_request {
 }
 
 macro_rules! gen_map_response {
-    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $cloner: ident) => {
         $borrow.replace(|service| {
             service
                 .map_response(move |response: $base::Response| {
@@ -375,7 +380,7 @@ macro_rules! gen_map_response {
                     let response_opt = guard.take();
                     response_opt.unwrap()
                 })
-                .boxed()
+                .$cloner()
         })
     };
 }
@@ -609,13 +614,13 @@ impl ServiceStep {
                 gen_map_router_deferred_request!(router, service, rhai_service, callback);
             }
             ServiceStep::Supergraph(service) => {
-                gen_map_request!(supergraph, service, rhai_service, callback);
+                gen_map_request!(supergraph, service, rhai_service, callback, boxed);
             }
             ServiceStep::Execution(service) => {
-                gen_map_request!(execution, service, rhai_service, callback);
+                gen_map_request!(execution, service, rhai_service, callback, boxed);
             }
             ServiceStep::Subgraph(service) => {
-                gen_map_request!(subgraph, service, rhai_service, callback);
+                gen_map_request!(subgraph, service, rhai_service, callback, boxed_clone_sync);
             }
         }
     }
@@ -632,7 +637,7 @@ impl ServiceStep {
                 gen_map_deferred_response!(execution, service, rhai_service, callback);
             }
             ServiceStep::Subgraph(service) => {
-                gen_map_response!(subgraph, service, rhai_service, callback);
+                gen_map_response!(subgraph, service, rhai_service, callback, boxed_clone_sync);
             }
         }
     }

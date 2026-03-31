@@ -36,6 +36,7 @@ use crate::error::Error;
 use crate::graphql;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -217,7 +218,11 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
         self.execution_service(service)
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         self.subgraph_service(name, service)
     }
 
@@ -315,7 +320,11 @@ where
         )
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         self.configuration.subgraph.all.as_service(
             self.http_client.clone(),
             service,
@@ -811,11 +820,11 @@ impl SubgraphStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: subgraph::BoxService,
+        service: subgraph::BoxCloneSyncService,
         default_url: String,
         service_name: String,
         response_validation: bool,
-    ) -> subgraph::BoxService
+    ) -> subgraph::BoxCloneSyncService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -915,7 +924,7 @@ impl SubgraphStage {
             .option_layer(response_layer)
             .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

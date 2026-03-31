@@ -24,6 +24,7 @@ use self::multipart_request::MultipartRequest;
 use self::rearrange_query_plan::rearrange_query_plan;
 use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::execution;
@@ -134,8 +135,8 @@ impl PluginPrivate for FileUploadsPlugin {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         if !self.enabled {
             return service;
         }
@@ -148,7 +149,7 @@ impl PluginPrivate for FileUploadsPlugin {
             })
             .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

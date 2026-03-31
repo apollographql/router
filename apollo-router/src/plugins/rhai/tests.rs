@@ -16,6 +16,7 @@ use sha2::Digest;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
+use tower::util::BoxCloneSyncService;
 use tower::util::BoxService;
 use tracing_futures::WithSubscriber;
 use uuid::Uuid;
@@ -997,7 +998,8 @@ async fn test_subgraph_error_logging(script_name: &str) -> Result<(), BoxError> 
 
     let dyn_plugin = create_plugin(script_name).await?;
 
-    let mut service = dyn_plugin.subgraph_service("test_subgraph", BoxService::new(mock_service));
+    let mut service =
+        dyn_plugin.subgraph_service("test_subgraph", BoxCloneSyncService::new(mock_service));
     let req = SubgraphRequest::fake_builder()
         .context(Context::new())
         .build();

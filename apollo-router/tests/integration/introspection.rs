@@ -1,3 +1,4 @@
+use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::supergraph::Request;
 use serde_json::json;
@@ -355,7 +356,7 @@ async fn make_request_with_extra_config(
                     json!({"data": {"me": {"id": 1}}}),
                 )
                 .build()
-                .boxed(),
+                .boxed_clone_sync(),
             _ => default,
         })
         .build_supergraph()

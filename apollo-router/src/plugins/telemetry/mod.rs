@@ -942,7 +942,11 @@ impl PluginPrivate for Telemetry {
             .boxed()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         let config = self.config.clone();
         let span_mode = self.config.instrumentation.spans.mode;
         let conf = self.config.clone();
@@ -1074,7 +1078,7 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn connector_request_service(
@@ -2106,6 +2110,7 @@ mod tests {
     use serde_json_bytes::json;
     use tower::Service;
     use tower::ServiceExt;
+    use tower::util::BoxCloneSyncService;
     use tower::util::BoxService;
 
     use super::CustomTraceIdPropagator;
@@ -2743,7 +2748,7 @@ mod tests {
                 },
             );
             let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", BoxService::new(mock_bad_request_service));
+                plugin.subgraph_service("test", BoxCloneSyncService::new(mock_bad_request_service));
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -2845,7 +2850,7 @@ mod tests {
                 },
             );
             let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", BoxService::new(mock_bad_request_service));
+                plugin.subgraph_service("test", BoxCloneSyncService::new(mock_bad_request_service));
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -3007,8 +3012,10 @@ mod tests {
                         .build())
                 });
 
-            let mut subgraph_service =
-                plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
+            let mut subgraph_service = plugin.subgraph_service(
+                "my_subgraph_name",
+                BoxCloneSyncService::new(mock_subgraph_service),
+            );
             let subgraph_req = SubgraphRequest::fake_builder()
                 .subgraph_request(
                     http_ext::Request::fake_builder()
@@ -3067,7 +3074,7 @@ mod tests {
 
             let mut subgraph_service = plugin.subgraph_service(
                 "my_subgraph_name_error",
-                BoxService::new(mock_subgraph_service_in_error),
+                BoxCloneSyncService::new(mock_subgraph_service_in_error),
             );
 
             let subgraph_req = SubgraphRequest::fake_builder()
