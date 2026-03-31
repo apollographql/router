@@ -31,7 +31,7 @@ experimental_diagnostics:
 - `listen`: Socket address and port for the diagnostics server. Default: `127.0.0.1:8089`. Keep this bound to localhost; do not expose it to the network.
 - `output_directory`: Directory where memory dump files are stored. Default: `/tmp/router-diagnostics` on Unix. Created automatically if it does not exist. Memory dumps are only generated on Linux.
 
-After startup, the router logs the diagnostics URL, where you can find the interactive dashboard.For example:
+After startup, the router logs the diagnostics URL, where you can find the interactive dashboard. For example:
 
 ```
 Diagnostics endpoints at http://127.0.0.1:8089/diagnostics
@@ -74,6 +74,13 @@ curl http://127.0.0.1:8089/diagnostics/report.txt
 ```
 
 ## Dashboard
+
+<img
+  class="screenshot"
+  src="../../images/diagnostics/dashboard.png"
+  alt="Apollo Router Diagnostics web UI: Dashboard tab with router system summary, memory profiling controls, memory dumps list, and diagnostic report download"
+  width="1200"
+/>
 
 From the diagnostics dashboard you can:
 
