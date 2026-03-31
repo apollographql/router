@@ -9,6 +9,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
@@ -1446,5 +1447,15 @@ impl SchemaElement for SchemaDefinition {
 impl SchemaElement for ExtendedType {
     fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
         self.iter_origins()
+    }
+}
+
+pub(crate) fn same_type(t1: &Type, t2: &Type) -> bool {
+    match (t1, t2) {
+        (Type::Named(n1), Type::Named(n2)) => n1 == n2,
+        (Type::NonNullNamed(n1), Type::NonNullNamed(n2)) => n1 == n2,
+        (Type::List(inner1), Type::List(inner2)) => same_type(inner1, inner2),
+        (Type::NonNullList(inner1), Type::NonNullList(inner2)) => same_type(inner1, inner2),
+        _ => false,
     }
 }
