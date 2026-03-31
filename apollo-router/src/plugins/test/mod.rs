@@ -199,11 +199,11 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     pub(crate) fn execution_service<F>(
         &self,
         response_fn: impl Fn(execution::Request) -> F + Send + Sync + Clone + 'static,
-    ) -> ServiceHandle<execution::Request, execution::BoxService>
+    ) -> ServiceHandle<execution::Request, execution::BoxCloneSyncService>
     where
         F: Future<Output = Result<execution::Response, BoxError>> + Send + 'static,
     {
-        let service: execution::BoxService = execution::BoxService::new(
+        let service: execution::BoxCloneSyncService = execution::BoxCloneSyncService::new(
             ServiceBuilder::new().service_fn(move |req: execution::Request| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }

@@ -108,8 +108,8 @@ impl Plugin for HelloWorld {
 
     fn execution_service(
         &self,
-        service: execution::BoxService,
-    ) -> execution::BoxService {
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         service
     }
 

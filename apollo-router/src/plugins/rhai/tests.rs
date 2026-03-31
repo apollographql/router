@@ -197,7 +197,8 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.execution_service(BoxService::new(mock_service));
+        let mut router_service =
+            dyn_plugin.execution_service(BoxCloneSyncService::new(mock_service));
         let fake_req = http_ext::Request::fake_builder()
             .header("x-custom-header", "CUSTOM_VALUE")
             .body(Request::builder().query(String::new()).build())
@@ -964,7 +965,7 @@ async fn test_execution_error_logging(script_name: &str) -> Result<(), BoxError>
         mock_service
     });
     let dyn_plugin = create_plugin(script_name).await?;
-    let mut service = dyn_plugin.execution_service(BoxService::new(mock_service));
+    let mut service = dyn_plugin.execution_service(BoxCloneSyncService::new(mock_service));
     let fake_req = http_ext::Request::fake_builder()
         .body(Request::builder().query(String::new()).build())
         .build()?;

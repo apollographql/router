@@ -213,8 +213,8 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
 
     fn execution_service(
         &self,
-        service: services::execution::BoxService,
-    ) -> services::execution::BoxService {
+        service: services::execution::BoxCloneSyncService,
+    ) -> services::execution::BoxCloneSyncService {
         self.execution_service(service)
     }
 
@@ -309,8 +309,8 @@ where
 
     fn execution_service(
         &self,
-        service: services::execution::BoxService,
-    ) -> services::execution::BoxService {
+        service: services::execution::BoxCloneSyncService,
+    ) -> services::execution::BoxCloneSyncService {
         self.configuration.execution.as_service(
             self.http_client.clone(),
             service,

@@ -183,6 +183,23 @@ where
     }
 }
 
+impl<S, Request> Clone for CheckpointService<S, Request>
+where
+    S: Service<Request>,
+    S: Send + Clone + 'static,
+    S::Future: Send,
+    S::Response: Send + 'static,
+    S::Error: Into<BoxError> + Send + 'static,
+    Request: Send + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            checkpoint_fn: Arc::clone(&self.checkpoint_fn),
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod checkpoint_tests {
     use tower::BoxError;
