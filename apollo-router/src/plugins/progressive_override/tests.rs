@@ -6,6 +6,7 @@ use tower::ServiceExt;
 
 use crate::Context;
 use crate::TestHarness;
+use crate::layers::ServiceExt as _;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -205,7 +206,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     ))
     .await
     .unwrap()
-    .supergraph_service(mock_service.boxed());
+    .supergraph_service(mock_service.boxed_clone_sync());
 
     let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
@@ -354,7 +355,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     ))
     .await
     .unwrap()
-    .supergraph_service(mock_service.boxed());
+    .supergraph_service(mock_service.boxed_clone_sync());
 
     let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),

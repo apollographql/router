@@ -718,7 +718,10 @@ impl PluginPrivate for Telemetry {
             .boxed()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let span_mode = self.config.instrumentation.spans.mode;
         let config = self.config.clone();
@@ -906,7 +909,7 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn execution_service(
@@ -2225,7 +2228,8 @@ mod tests {
                     .unwrap())
             });
 
-        let mut supergraph_service = plugin.supergraph_service(BoxService::new(mock_service));
+        let mut supergraph_service =
+            plugin.supergraph_service(BoxCloneSyncService::new(mock_service));
         let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
         let _router_response = supergraph_service
             .ready()
@@ -2426,7 +2430,7 @@ mod tests {
                 },
             );
             let mut bad_request_supergraph_service =
-                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+                plugin.supergraph_service(BoxCloneSyncService::new(mock_bad_request_service));
             let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
             let _router_response = bad_request_supergraph_service
                 .ready()
@@ -2637,7 +2641,7 @@ mod tests {
                 },
             );
             let mut bad_request_supergraph_service =
-                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+                plugin.supergraph_service(BoxCloneSyncService::new(mock_bad_request_service));
             let supergraph_req = SupergraphRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2955,7 +2959,7 @@ mod tests {
                     .unwrap())
             });
         let mut request_supergraph_service =
-            plugin.supergraph_service(BoxService::new(mock_request_service));
+            plugin.supergraph_service(BoxCloneSyncService::new(mock_request_service));
 
         for _ in 0..10 {
             let supergraph_req = SupergraphRequest::fake_builder()
@@ -3384,7 +3388,7 @@ mod tests {
                     .build()
             });
 
-        let mut service = plugin.supergraph_service(BoxService::new(mock_service));
+        let mut service = plugin.supergraph_service(BoxCloneSyncService::new(mock_service));
         let router_req = SupergraphRequest::fake_builder().build().unwrap();
         let _router_response = service
             .ready()

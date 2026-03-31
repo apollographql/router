@@ -10,7 +10,6 @@ use apollo_router::services::execution;
 use apollo_router::services::supergraph;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 #[derive(Debug)]
 struct DoNotExecute {
@@ -28,7 +27,10 @@ impl Plugin for DoNotExecute {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         ServiceBuilder::new()
             .map_request(|mut req: supergraph::Request| {
                 let body = req.supergraph_request.body_mut();
@@ -39,7 +41,7 @@ impl Plugin for DoNotExecute {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn execution_service(

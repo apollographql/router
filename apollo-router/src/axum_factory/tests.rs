@@ -74,6 +74,7 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
+use crate::layers::ServiceExt as _;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -2131,7 +2132,7 @@ async fn http_compressed_service() -> impl Service<
                         graphql_response
                     })
                 })
-                .boxed()
+                .boxed_clone_sync()
         })
         .build_http_service()
         .await
@@ -2181,7 +2182,7 @@ async fn http_deferred_service() -> impl Service<
                         graphql_response
                     })
                 })
-                .boxed()
+                .boxed_clone_sync()
         })
         .build_http_service()
         .await
