@@ -11,7 +11,6 @@ use apollo_router::services::execution;
 use apollo_router::services::supergraph;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 #[derive(Debug)]
 struct ExposeReferencedFieldsByType {
@@ -29,7 +28,10 @@ impl Plugin for ExposeReferencedFieldsByType {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         ServiceBuilder::new()
             .map_first_graphql_response(
                 |context, http_parts, mut graphql_response: graphql::Response| {
@@ -41,7 +43,7 @@ impl Plugin for ExposeReferencedFieldsByType {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn execution_service(

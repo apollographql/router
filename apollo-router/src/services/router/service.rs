@@ -48,6 +48,7 @@ use crate::graphql;
 use crate::http_ext;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
@@ -103,19 +104,21 @@ pub(crate) struct RouterService {
     // Cannot be under Arc. Batching state must be preserved for each RouterService
     // instance
     batching: Batching,
-    supergraph_service: supergraph::BoxCloneService,
+    supergraph_service: supergraph::BoxCloneSyncService,
 }
 
 impl RouterService {
     fn new(
-        sgb: supergraph::BoxService,
+        sgb: supergraph::BoxCloneSyncService,
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
     ) -> Self {
-        let supergraph_service: supergraph::BoxCloneService =
-            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
+        let supergraph_service: supergraph::BoxCloneSyncService = ServiceBuilder::new()
+            .buffered()
+            .service(sgb)
+            .boxed_clone_sync();
 
         RouterService {
             apq_layer: Arc::new(apq_layer),
@@ -152,7 +155,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone_sync())
         .build_common()
         .await
         .unwrap();
@@ -202,7 +205,7 @@ pub(crate) async fn empty() -> impl Service<
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(Default::default())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone_sync())
         .build_common()
         .await
         .unwrap();

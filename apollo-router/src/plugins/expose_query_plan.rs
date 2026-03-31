@@ -10,12 +10,11 @@ use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt as TowerServiceExt;
 
 use super::connectors::query_plans::replace_connector_service_names;
 use super::connectors::query_plans::replace_connector_service_names_text;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
@@ -101,7 +100,10 @@ impl Plugin for ExposeQueryPlan {
             .boxed_clone_sync()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         let conf_enabled = self.enabled;
         service
             .map_future_with_request_data(move |req: &supergraph::Request| {
@@ -153,7 +155,7 @@ impl Plugin for ExposeQueryPlan {
 
                 res
             })
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 
@@ -164,6 +166,7 @@ mod tests {
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::Service;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::MockedSubgraphs;
@@ -173,7 +176,7 @@ mod tests {
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
-    async fn build_mock_supergraph(config: serde_json::Value) -> supergraph::BoxCloneService {
+    async fn build_mock_supergraph(config: serde_json::Value) -> supergraph::BoxCloneSyncService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -230,7 +233,7 @@ mod tests {
 
     async fn execute_supergraph_test(
         query: &str,
-        mut supergraph_service: supergraph::BoxCloneService,
+        mut supergraph_service: supergraph::BoxCloneSyncService,
     ) -> Response {
         let request = supergraph::Request::fake_builder()
             .query(query.to_string())
@@ -253,7 +256,7 @@ mod tests {
 
     async fn execute_supergraph_test_dry_run(
         query: &str,
-        mut supergraph_service: supergraph::BoxCloneService,
+        mut supergraph_service: supergraph::BoxCloneSyncService,
     ) -> Response {
         let request = supergraph::Request::fake_builder()
             .query(query.to_string())

@@ -1870,7 +1870,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::default(),
             true,
@@ -1961,7 +1961,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::default(),
             true,
@@ -2060,7 +2060,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::default(),
             true,

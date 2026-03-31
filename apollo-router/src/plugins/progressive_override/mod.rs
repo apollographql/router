@@ -19,6 +19,7 @@ use tower::ServiceExt;
 
 use self::layers::query_analysis::ParsedDocument;
 use self::visitor::OverrideLabelVisitor;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
@@ -167,7 +168,10 @@ impl Plugin for ProgressiveOverridePlugin {
     //    operation
     // 4. Add the filtered, sorted set of labels to the context for use by the
     //    query planner
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         if !self.enabled {
             service
         } else {
@@ -256,7 +260,7 @@ impl Plugin for ProgressiveOverridePlugin {
                 request
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
         }
     }
 }

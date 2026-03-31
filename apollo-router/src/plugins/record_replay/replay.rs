@@ -131,7 +131,10 @@ impl Plugin for Replay {
             .boxed()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         let report = self.report.clone();
         let recorded_chunks = self.recording.client_response.chunks.clone();
 
@@ -161,7 +164,7 @@ impl Plugin for Replay {
                 })
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn execution_service(

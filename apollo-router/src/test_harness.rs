@@ -263,7 +263,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::supergraph_service`]
     pub fn supergraph_hook(
         self,
-        callback: impl Fn(supergraph::BoxService) -> supergraph::BoxService + Send + Sync + 'static,
+        callback: impl Fn(supergraph::BoxCloneSyncService) -> supergraph::BoxCloneSyncService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(SupergraphServicePlugin(callback))
     }
@@ -344,7 +347,7 @@ impl<'a> TestHarness<'a> {
     }
 
     /// Builds the supergraph service
-    pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
+    pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneSyncService, BoxError> {
         let (config, schema, supergraph_creator) = self.build_common().await?;
 
         Ok(tower::service_fn(move |request: supergraph::Request| {
@@ -377,7 +380,7 @@ impl<'a> TestHarness<'a> {
 
             async move { router.oneshot(request).await }
         })
-        .boxed_clone())
+        .boxed_clone_sync())
     }
 
     /// Builds the router service
@@ -465,7 +468,10 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for SupergraphServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(supergraph::BoxService) -> supergraph::BoxService,
+    F: 'static
+        + Send
+        + Sync
+        + Fn(supergraph::BoxCloneSyncService) -> supergraph::BoxCloneSyncService,
 {
     type Config = ();
 
@@ -473,7 +479,10 @@ where
         unreachable!()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         (self.0)(service)
     }
 }
