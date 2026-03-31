@@ -92,6 +92,32 @@ For information on finding graph artifact references, see [Graph Artifacts](/gra
 </td>
 </tr>
 <tr>
+<td style="min-width: 150px;">
+
+##### `APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS`
+
+</td>
+<td>
+
+A comma-separated list of registry hostnames to use HTTP instead of HTTPS when fetching graph artifacts.
+
+<br/><br/>
+
+When this variable is not set, Router defaults to allowing HTTP for `localhost`, `127.0.0.1`, and `dockerhost`. 
+
+<br/><br/>
+
+When this variable is set to a non-empty value, only the specified hosts use HTTP and the defaults are replaced. For example, to allow HTTP for a custom internal registry and `localhost`:
+
+<br/><br/>
+
+```bash
+APOLLO_GRAPH_ARTIFACT_UNSECURE_HOSTS="internal.registry.corp,localhost"
+```
+
+When this variable is set to an empty string (`""`), all HTTP overrides are disabled, requiring HTTPS for every registry, including localhost.
+
+</td>
 </tr>
 </tbody>
 </table>

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Debug;
 use std::fmt::Display;
 
 use apollo_compiler::Name;
@@ -13,6 +14,7 @@ use tracing::trace;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::HasLocations;
 use crate::error::Locations;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
@@ -76,7 +78,7 @@ impl Merger {
         dest: &T,
     ) -> Result<IndexSet<Name>, FederationError>
     where
-        T: HasArguments + std::fmt::Debug + Display,
+        T: HasArguments + Debug + Display,
         <T as HasArguments>::ArgumentPosition: Display,
     {
         let mut arg_types: IndexMap<Name, Node<Type>> = Default::default();
@@ -217,7 +219,7 @@ impl Merger {
                         })
                         .collect();
 
-                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, &Node<InputValueDefinition>>(
+                    self.error_reporter.report_mismatch_hint(
                         HintCode::InconsistentArgumentPresence,
                         format!(
                             "Optional argument \"{}\" will not be included in the supergraph as it does not appear in all subgraphs: ",
@@ -225,6 +227,7 @@ impl Merger {
                         ),
                         &dest_arg_pos,
                         &arg_sources,
+                        &self.subgraphs,
                         |_elt| Some("yes".to_string()),
                         |_elt, _| Some("yes".to_string()),
                         |_, subgraphs| format!("it is defined in {}", subgraphs.unwrap_or_default()),
@@ -256,10 +259,12 @@ impl Merger {
     where
         T: Clone
             + Display
+            + HasLocations
             + HasDefaultValue
             + HasDescription
             + HasType
-            + Into<DirectiveTargetPosition>,
+            + Into<DirectiveTargetPosition>
+            + Debug,
     {
         trace!("Merging argument \"{dest}\"");
         self.merge_description(sources, dest)?;
@@ -275,7 +280,7 @@ impl Merger {
         dest: &T,
     ) -> Result<(), FederationError>
     where
-        T: Display + HasDefaultValue + HasType,
+        T: Display + HasLocations + HasDefaultValue + HasType,
     {
         trace!("Merging default value for \"{dest}\"");
         let mut dest_default: Option<Node<Value>> = None;
@@ -344,7 +349,7 @@ impl Merger {
         };
 
         if is_incompatible {
-            self.error_reporter.report_mismatch_error::<Node<Value>, T>(
+            self.error_reporter.report_mismatch_error(
                 if T::is_input_field() {
                     CompositionError::InputFieldDefaultMismatch {
                         message: format!("Input field \"{dest}\" has incompatible default values across subgraphs: it has "),
@@ -358,6 +363,7 @@ impl Merger {
                 },
                 dest_default,
                 sources,
+                &self.subgraphs,
                 |v| Some(format!("default value {v}")),
                 |pos, idx| {
                     Some(pos.get_default_value(self.subgraphs[idx].schema())
@@ -366,11 +372,12 @@ impl Merger {
                 },
             );
         } else if is_inconsistent {
-            self.error_reporter.report_mismatch_hint::<Node<Value>, T>(
+            self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentDefaultValuePresence,
                 format!("Argument \"{dest}\" has a default value in only some subgraphs: "),
                 dest_default,
                 sources,
+                        &self.subgraphs,
                 // When inconsistent, we set no default. So, the supergraph element should always
                 // be "no default value". The matching strings drive the ordering in the message.
                 |_| Some("no default value".to_string()),

@@ -3,15 +3,16 @@ use std::fmt::Formatter;
 use std::time::Duration;
 
 use opentelemetry::Context;
-use opentelemetry::trace::TraceResult;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::BatchConfig;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::Span;
+use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::BoxError;
 
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
@@ -22,9 +23,13 @@ pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
 #[allow(unreachable_pub, dead_code)]
 pub(crate) mod datadog_exporter;
+mod named;
 pub(crate) mod otlp;
 pub(crate) mod reload;
 pub(crate) mod zipkin;
+
+pub(crate) use named::NamedSpanExporter;
+pub(crate) use named::NamedTokioRuntime;
 
 #[derive(Debug)]
 struct ApolloFilterSpanProcessor<T: SpanProcessor> {
@@ -59,12 +64,12 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
         }
     }
 
-    fn force_flush(&self) -> TraceResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
 
-    fn shutdown(&self) -> TraceResult<()> {
-        self.delegate.shutdown()
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.delegate.shutdown_with_timeout(timeout)
     }
 
     fn set_resource(&mut self, resource: &Resource) {
@@ -150,14 +155,70 @@ fn max_concurrent_exports_default() -> usize {
     1
 }
 
+impl BatchProcessorConfig {
+    /// Apply OTEL_BSP_* environment variable overrides to this config.
+    /// This should be used for third-party exporters (OTLP, Datadog, Zipkin)
+    /// but NOT for Apollo exporters.
+    pub(crate) fn with_env_overrides(self) -> Result<Self, BoxError> {
+        Ok(BatchProcessorConfig {
+            scheduled_delay: Self::parse_duration_env(
+                "OTEL_BSP_SCHEDULE_DELAY",
+                self.scheduled_delay,
+            )?,
+            max_queue_size: Self::parse_usize_env("OTEL_BSP_MAX_QUEUE_SIZE", self.max_queue_size)?,
+            max_export_batch_size: Self::parse_usize_env(
+                "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+                self.max_export_batch_size,
+            )?,
+            max_export_timeout: Self::parse_duration_env(
+                "OTEL_BSP_EXPORT_TIMEOUT",
+                self.max_export_timeout,
+            )?,
+            max_concurrent_exports: Self::parse_usize_env(
+                "OTEL_BSP_MAX_CONCURRENT_EXPORTS",
+                self.max_concurrent_exports,
+            )?,
+        })
+    }
+
+    fn parse_duration_env(var: &str, default: Duration) -> Result<Duration, BoxError> {
+        match std::env::var(var) {
+            Ok(value) => {
+                let millis = value.parse::<u64>().map_err(|e| {
+                    format!(
+                        "invalid value '{}' for {}, expected milliseconds: {}",
+                        value, var, e
+                    )
+                })?;
+                Ok(Duration::from_millis(millis))
+            }
+            Err(_) => Ok(default),
+        }
+    }
+
+    fn parse_usize_env(var: &str, default: usize) -> Result<usize, BoxError> {
+        match std::env::var(var) {
+            Ok(value) => value.parse::<usize>().map_err(|e| {
+                format!(
+                    "invalid value '{}' for {}, expected integer: {}",
+                    value, var, e
+                )
+                .into()
+            }),
+            Err(_) => Ok(default),
+        }
+    }
+}
+
 impl From<BatchProcessorConfig> for BatchConfig {
     fn from(config: BatchProcessorConfig) -> Self {
         BatchConfigBuilder::default()
             .with_scheduled_delay(config.scheduled_delay)
             .with_max_queue_size(config.max_queue_size)
             .with_max_export_batch_size(config.max_export_batch_size)
-            .with_max_export_timeout(config.max_export_timeout)
+            // Concurrent exports and export timeout require experimental_trace_batch_span_processor_with_async_runtime feature
             .with_max_concurrent_exports(config.max_concurrent_exports)
+            .with_max_export_timeout(config.max_export_timeout)
             .build()
     }
 }

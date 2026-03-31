@@ -4,12 +4,17 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::MetricsExporterBuilder;
+use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::InstrumentKind;
+use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::Temporality;
+use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
 use opentelemetry_sdk::runtime;
-use prometheus::exponential_buckets;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
@@ -25,9 +30,9 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
-use crate::plugins::telemetry::metrics::CustomAggregationSelector;
-use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
+use crate::plugins::telemetry::metrics::NamedMetricExporter;
+use crate::plugins::telemetry::metrics::OverflowMetricExporter;
+use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
@@ -37,10 +42,21 @@ use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 pub(crate) mod histogram;
 pub(crate) mod studio;
 
+/// Default histogram buckets for Apollo metrics
 fn default_buckets() -> Vec<f64> {
     vec![
         0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
     ]
+}
+
+/// Exponential buckets for Apollo realtime metrics.
+///
+/// This aggregation uses the Apollo histogram format where a duration, x, in μs is
+/// counted in the bucket of index max(0, min(ceil(ln(x)/ln(1.1)), 383)).
+/// Returns buckets from ~1.4ms to ~5min.
+fn realtime_buckets() -> Vec<f64> {
+    prometheus::exponential_buckets(0.001399084909, 1.1, 129)
+        .expect("failed to generate exponential buckets")
 }
 
 impl MetricsConfigurator for Config {
@@ -116,15 +132,15 @@ impl Config {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter = match otlp_protocol {
-            Protocol::Grpc => MetricsExporterBuilder::Tonic(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                    .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_config.max_export_timeout)
-                    .with_metadata(metadata.clone())
-                    .with_compression(opentelemetry_otlp::Compression::Gzip),
-            ),
+            Protocol::Grpc => MetricExporter::builder()
+                .with_tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                .with_endpoint(endpoint.as_str())
+                .with_timeout(batch_config.max_export_timeout)
+                .with_metadata(metadata.clone())
+                .with_compression(opentelemetry_otlp::Compression::Gzip)
+                .with_temporality(Temporality::Delta)
+                .build()?,
             // While Apollo doesn't use the HTTP protocol, we support it here for
             // use in tests to enable WireMock.
             Protocol::Http => {
@@ -133,104 +149,126 @@ impl Config {
                     &TelemetryDataKind::Metrics,
                     &Protocol::Http,
                 )?;
-                let mut otlp_exporter = opentelemetry_otlp::new_exporter()
-                    .http()
-                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(batch_config.max_export_timeout);
-                if let Some(endpoint) = maybe_endpoint {
-                    otlp_exporter = otlp_exporter.with_endpoint(endpoint);
-                }
-                MetricsExporterBuilder::Http(otlp_exporter)
-            }
-        }
-        .build_metrics_exporter(
-            Box::new(CustomTemporalitySelector(
-                opentelemetry_sdk::metrics::data::Temporality::Delta,
-            )),
-            Box::new(
-                CustomAggregationSelector::builder()
-                    .boundaries(default_buckets())
-                    .build(),
-            ),
-        )?;
-        // MetricsExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
-        let realtime_exporter = match otlp_protocol {
-            Protocol::Grpc => MetricsExporterBuilder::Tonic(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                    .with_endpoint(endpoint.as_str())
+                let mut builder = MetricExporter::builder()
+                    .with_http()
                     .with_timeout(batch_config.max_export_timeout)
-                    .with_metadata(metadata.clone())
-                    .with_compression(opentelemetry_otlp::Compression::Gzip),
-            ),
+                    .with_temporality(Temporality::Delta);
+                if let Some(endpoint) = maybe_endpoint {
+                    builder = builder.with_endpoint(endpoint);
+                }
+                builder.build()?
+            }
+        };
+        // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
+        let realtime_exporter = match otlp_protocol {
+            Protocol::Grpc => MetricExporter::builder()
+                .with_tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                .with_endpoint(endpoint.as_str())
+                .with_timeout(batch_config.max_export_timeout)
+                .with_metadata(metadata.clone())
+                .with_compression(opentelemetry_otlp::Compression::Gzip)
+                .with_temporality(Temporality::Delta)
+                .build()?,
             Protocol::Http => {
                 let maybe_endpoint = process_endpoint(
                     &Some(endpoint.to_string()),
                     &TelemetryDataKind::Metrics,
                     &Protocol::Http,
                 )?;
-                let mut otlp_exporter = opentelemetry_otlp::new_exporter()
-                    .http()
-                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(batch_config.max_export_timeout);
+                let mut builder = MetricExporter::builder()
+                    .with_http()
+                    .with_timeout(batch_config.max_export_timeout)
+                    .with_temporality(Temporality::Delta);
                 if let Some(endpoint) = maybe_endpoint {
-                    otlp_exporter = otlp_exporter.with_endpoint(endpoint);
+                    builder = builder.with_endpoint(endpoint);
                 }
-                MetricsExporterBuilder::Http(otlp_exporter)
+                builder.build()?
             }
-        }
-        .build_metrics_exporter(
-            Box::new(CustomTemporalitySelector(
-                opentelemetry_sdk::metrics::data::Temporality::Delta,
-            )),
-            // This aggregation uses the Apollo histogram format where a duration, x, in μs is
-            // counted in the bucket of index max(0, min(ceil(ln(x)/ln(1.1)), 383)).
-            Box::new(
-                CustomAggregationSelector::builder()
-                    .boundaries(
-                        // Returns [~1.4ms ... ~5min]
-                        exponential_buckets(0.001399084909, 1.1, 129).unwrap(),
-                    )
-                    .build(),
-            ),
-        )?;
-        let named_exporter = NamedMetricsExporter::new(exporter, "apollo");
-        let named_realtime_exporter = NamedMetricsExporter::new(realtime_exporter, "apollo");
+        };
+        // Wrap with retry, then overflow detection, then error prefixing
+        let named_exporter = NamedMetricExporter::new(
+            OverflowMetricExporter::new_push(RetryMetricExporter::new(exporter)),
+            "apollo",
+        );
+        let named_realtime_exporter = NamedMetricExporter::new(
+            OverflowMetricExporter::new_push(RetryMetricExporter::new(realtime_exporter)),
+            "apollo",
+        );
 
         let default_reader = PeriodicReader::builder(named_exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
-            .with_timeout(batch_config.max_export_timeout)
             .build();
 
         let realtime_reader = PeriodicReader::builder(named_realtime_exporter, runtime::Tokio)
             .with_interval(batch_config.scheduled_delay)
-            .with_timeout(batch_config.max_export_timeout)
             .build();
 
-        let resource = Resource::new([
-            KeyValue::new("apollo.router.id", router_id()),
-            KeyValue::new("apollo.graph.ref", reference.to_string()),
-            KeyValue::new("apollo.schema.id", schema_id.to_string()),
-            KeyValue::new(
-                "apollo.user.agent",
-                format!(
-                    "{}@{}",
-                    std::env!("CARGO_PKG_NAME"),
-                    std::env!("CARGO_PKG_VERSION")
+        let resource = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new("apollo.router.id", router_id()),
+                KeyValue::new("apollo.graph.ref", reference.to_string()),
+                KeyValue::new("apollo.schema.id", schema_id.to_string()),
+                KeyValue::new(
+                    "apollo.user.agent",
+                    format!(
+                        "{}@{}",
+                        std::env!("CARGO_PKG_NAME"),
+                        std::env!("CARGO_PKG_VERSION")
+                    ),
                 ),
-            ),
-            KeyValue::new("apollo.client.host", hostname()?),
-            KeyValue::new("apollo.client.uname", get_uname()?),
-        ]);
+                KeyValue::new("apollo.client.host", hostname()?),
+                KeyValue::new("apollo.client.uname", get_uname()?),
+            ])
+            .build();
 
         builder
             .with_reader(MeterProviderType::Apollo, default_reader)
             .with_resource(MeterProviderType::Apollo, resource.clone());
 
+        // Configure histogram buckets for Apollo metrics
+        let apollo_buckets = default_buckets();
+        builder.with_view(MeterProviderType::Apollo, move |instrument: &Instrument| {
+            if instrument.kind() == InstrumentKind::Histogram {
+                Some(
+                    Stream::builder()
+                        .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                            boundaries: apollo_buckets.clone(),
+                            record_min_max: true,
+                        })
+                        .build()
+                        .expect("Failed to create stream for apollo metrics"),
+                )
+            } else {
+                None
+            }
+        });
+
         builder
             .with_reader(MeterProviderType::ApolloRealtime, realtime_reader)
             .with_resource(MeterProviderType::ApolloRealtime, resource.clone());
+
+        // Configure exponential histogram buckets for Apollo realtime metrics
+        let realtime_histogram_buckets = realtime_buckets();
+        builder.with_view(
+            MeterProviderType::ApolloRealtime,
+            move |instrument: &Instrument| {
+                if instrument.kind() == InstrumentKind::Histogram {
+                    Some(
+                        Stream::builder()
+                            .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                                boundaries: realtime_histogram_buckets.clone(),
+                                record_min_max: true,
+                            })
+                            .build()
+                            .expect("Failed to create stream for apollo realtime metrics"),
+                    )
+                } else {
+                    None
+                }
+            },
+        );
+
         Ok(())
     }
 

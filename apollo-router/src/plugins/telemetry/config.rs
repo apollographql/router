@@ -7,12 +7,9 @@ use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry::metrics::MetricsError;
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
-use opentelemetry_sdk::metrics::View;
-use opentelemetry_sdk::metrics::new_view;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -161,36 +158,76 @@ pub(crate) struct MetricView {
     pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
 }
 
-impl TryInto<Box<dyn View>> for MetricView {
-    type Error = MetricsError;
+impl MetricView {
+    /// Creates a default view for a named instrument with histogram aggregation.
+    pub(crate) fn default_histogram(name: String, boundaries: Vec<f64>) -> Self {
+        Self {
+            name,
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: Some(MetricAggregation::Histogram {
+                buckets: boundaries,
+            }),
+            allowed_attribute_keys: None,
+        }
+    }
 
-    fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
-        let aggregation = self.aggregation.map(|aggregation| match aggregation {
-            MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
-                boundaries: buckets,
-                record_min_max: true,
-            },
-            MetricAggregation::Drop => Aggregation::Drop,
-        });
-        let instrument = Instrument::new().name(self.name);
-        let mut mask = Stream::new();
+    /// Merges user-provided overrides into this view configuration.
+    /// User-specified (`Some`) fields take precedence; unspecified (`None`) fields
+    /// retain the values from `self`.
+    pub(crate) fn merge(self, user: Self) -> Self {
+        Self {
+            name: self.name,
+            rename: user.rename.or(self.rename),
+            description: user.description.or(self.description),
+            unit: user.unit.or(self.unit),
+            aggregation: user.aggregation.or(self.aggregation),
+            allowed_attribute_keys: user.allowed_attribute_keys.or(self.allowed_attribute_keys),
+        }
+    }
+
+    /// Builds a Stream from this view configuration.
+    /// Use this when you've already matched the instrument by name.
+    pub(crate) fn into_stream(self) -> Stream {
+        let mut stream = Stream::builder();
         if let Some(new_name) = self.rename {
-            mask = mask.name(new_name);
+            stream = stream.with_name(new_name);
         }
         if let Some(desc) = self.description {
-            mask = mask.description(desc);
+            stream = stream.with_description(desc);
         }
-        if let Some(unit) = self.unit {
-            mask = mask.unit(unit);
+        if let Some(u) = self.unit {
+            stream = stream.with_unit(u);
         }
-        if let Some(aggregation) = aggregation {
-            mask = mask.aggregation(aggregation);
+        if let Some(agg) = self.aggregation {
+            let aggregation = match agg {
+                MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
+                    boundaries: buckets,
+                    record_min_max: true,
+                },
+                MetricAggregation::Drop => Aggregation::Drop,
+            };
+            stream = stream.with_aggregation(aggregation);
         }
-        if let Some(allowed_attribute_keys) = self.allowed_attribute_keys {
-            mask = mask.allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
+        if let Some(keys) = self.allowed_attribute_keys {
+            stream = stream.with_allowed_attribute_keys(keys.into_iter().map(Key::new));
         }
+        stream.build().expect("Failed to build metric view")
+    }
 
-        new_view(instrument, mask)
+    /// Converts this MetricView into a view function for OTel SDK 0.31+
+    pub(crate) fn into_view_fn(
+        self,
+    ) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
+        let name = self.name.clone();
+        let view = self;
+        move |instrument: &Instrument| {
+            if instrument.name() != name {
+                return None;
+            }
+            Some(view.clone().into_stream())
+        }
     }
 }
 
@@ -648,6 +685,7 @@ impl From<opentelemetry::Array> for AttributeArray {
             opentelemetry::Array::String(v) => {
                 AttributeArray::String(v.into_iter().map(|v| v.into()).collect())
             }
+            _ => unreachable!("unexpected opentelemetry::Array variant"),
         }
     }
 }
@@ -689,32 +727,35 @@ impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
     }
 }
 
-impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
-    fn from(config: &TracingCommon) -> Self {
-        let mut common = opentelemetry_sdk::trace::Config::default();
-
-        let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
-        if config.parent_based_sampler {
+impl TracingCommon {
+    /// Configures a TracerProviderBuilder with sampler, span limits, and resource settings.
+    pub(crate) fn configure_tracer_provider_builder(
+        &self,
+        builder: opentelemetry_sdk::trace::TracerProviderBuilder,
+    ) -> opentelemetry_sdk::trace::TracerProviderBuilder {
+        let mut sampler: opentelemetry_sdk::trace::Sampler = self.sampler.clone().into();
+        if self.parent_based_sampler {
             sampler = parent_based(sampler);
         }
-        if config.preview_datadog_agent_sampling.unwrap_or_default() {
-            common = common.with_sampler(DatadogAgentSampling::new(
+
+        let builder = builder
+            .with_span_limits(SpanLimits {
+                max_events_per_span: self.max_events_per_span,
+                max_attributes_per_span: self.max_attributes_per_span,
+                max_links_per_span: self.max_links_per_span,
+                max_attributes_per_event: self.max_attributes_per_event,
+                max_attributes_per_link: self.max_attributes_per_link,
+            })
+            .with_resource(self.to_resource());
+
+        if self.preview_datadog_agent_sampling.unwrap_or_default() {
+            builder.with_sampler(DatadogAgentSampling::new(
                 sampler,
-                config.parent_based_sampler,
-            ));
+                self.parent_based_sampler,
+            ))
         } else {
-            common = common.with_sampler(sampler);
+            builder.with_sampler(sampler)
         }
-
-        common = common.with_max_events_per_span(config.max_events_per_span);
-        common = common.with_max_attributes_per_span(config.max_attributes_per_span);
-        common = common.with_max_links_per_span(config.max_links_per_span);
-        common = common.with_max_attributes_per_event(config.max_attributes_per_event);
-        common = common.with_max_attributes_per_link(config.max_attributes_per_link);
-
-        // Take the default first, then config, then env resources, then env variable. Last entry wins
-        common = common.with_resource(config.to_resource());
-        common
     }
 }
 
@@ -834,6 +875,13 @@ impl Conf {
 
 #[cfg(test)]
 mod tests {
+
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::data::MetricData;
+    use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+    use opentelemetry_sdk::runtime;
     use serde_json::json;
 
     use super::*;
@@ -937,5 +985,330 @@ mod tests {
         assert_eq!(view.description, Some("Custom description".to_string()));
         assert_eq!(view.unit, Some("s".to_string()));
         assert!(view.aggregation.is_some());
+    }
+
+    #[test]
+    fn test_default_histogram_creates_view_with_buckets() {
+        let boundaries = vec![0.1, 0.5, 1.0, 5.0];
+        let view = MetricView::default_histogram("my.metric".to_string(), boundaries.clone());
+
+        assert_eq!(view.name, "my.metric");
+        assert_eq!(view.rename, None);
+        assert_eq!(view.description, None);
+        assert_eq!(view.unit, None);
+        assert_eq!(
+            view.aggregation,
+            Some(MetricAggregation::Histogram {
+                buckets: boundaries
+            })
+        );
+        assert_eq!(view.allowed_attribute_keys, None);
+    }
+
+    #[test]
+    fn test_merge_user_overrides_all_fields() {
+        let default =
+            MetricView::default_histogram("my.histogram".to_string(), vec![0.1, 0.5, 1.0]);
+        let user = MetricView {
+            name: "my.histogram".to_string(),
+            rename: Some("renamed.histogram".to_string()),
+            description: Some("User description".to_string()),
+            unit: Some("ms".to_string()),
+            aggregation: Some(MetricAggregation::Histogram {
+                buckets: vec![1.0, 5.0, 10.0],
+            }),
+            allowed_attribute_keys: Some(HashSet::from(["key1".to_string()])),
+        };
+
+        let merged = default.merge(user);
+        assert_eq!(merged.name, "my.histogram");
+        assert_eq!(merged.rename, Some("renamed.histogram".to_string()));
+        assert_eq!(merged.description, Some("User description".to_string()));
+        assert_eq!(merged.unit, Some("ms".to_string()));
+        assert_eq!(
+            merged.aggregation,
+            Some(MetricAggregation::Histogram {
+                buckets: vec![1.0, 5.0, 10.0]
+            })
+        );
+        assert_eq!(
+            merged.allowed_attribute_keys,
+            Some(HashSet::from(["key1".to_string()]))
+        );
+    }
+
+    #[test]
+    fn test_merge_user_specifies_nothing_preserves_defaults() {
+        let default_buckets = vec![0.1, 0.5, 1.0];
+        let default =
+            MetricView::default_histogram("my.histogram".to_string(), default_buckets.clone());
+        let user = MetricView {
+            name: "my.histogram".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: None,
+            allowed_attribute_keys: None,
+        };
+
+        let merged = default.merge(user);
+        assert_eq!(merged.name, "my.histogram");
+        assert_eq!(merged.rename, None);
+        assert_eq!(merged.description, None);
+        assert_eq!(merged.unit, None);
+        assert_eq!(
+            merged.aggregation,
+            Some(MetricAggregation::Histogram {
+                buckets: default_buckets
+            }),
+            "default histogram aggregation should be preserved when user specifies none"
+        );
+        assert_eq!(merged.allowed_attribute_keys, None);
+    }
+
+    #[test]
+    fn test_merge_partial_override_preserves_default_aggregation() {
+        let default_buckets = vec![0.001, 0.005, 0.015, 0.05, 0.1];
+        let default = MetricView::default_histogram(
+            "http.server.request.duration".to_string(),
+            default_buckets.clone(),
+        );
+        let user = MetricView {
+            name: "http.server.request.duration".to_string(),
+            rename: None,
+            description: Some("Custom description".to_string()),
+            unit: None,
+            aggregation: None,
+            allowed_attribute_keys: Some(HashSet::from([
+                "http.method".to_string(),
+                "http.status_code".to_string(),
+            ])),
+        };
+
+        let merged = default.merge(user);
+        assert_eq!(
+            merged.aggregation,
+            Some(MetricAggregation::Histogram {
+                buckets: default_buckets
+            }),
+            "default histogram buckets should be inherited when user doesn't specify aggregation"
+        );
+        assert_eq!(merged.description, Some("Custom description".to_string()));
+        assert_eq!(
+            merged.allowed_attribute_keys,
+            Some(HashSet::from([
+                "http.method".to_string(),
+                "http.status_code".to_string(),
+            ]))
+        );
+    }
+
+    #[test]
+    fn test_merge_user_drop_overrides_default_histogram() {
+        let default =
+            MetricView::default_histogram("noisy.metric".to_string(), vec![0.1, 0.5, 1.0]);
+        let user = MetricView {
+            name: "noisy.metric".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: Some(MetricAggregation::Drop),
+            allowed_attribute_keys: None,
+        };
+
+        let merged = default.merge(user);
+        assert_eq!(
+            merged.aggregation,
+            Some(MetricAggregation::Drop),
+            "user Drop aggregation should override default histogram"
+        );
+    }
+
+    /// Helper to extract histogram bounds from exported metrics
+    fn get_histogram_bounds(
+        exporter: &InMemoryMetricExporter,
+        metric_name: &str,
+    ) -> Option<Vec<f64>> {
+        let metrics = exporter.get_finished_metrics().ok()?;
+        for resource_metrics in metrics {
+            for scope_metrics in resource_metrics.scope_metrics() {
+                for metric in scope_metrics.metrics() {
+                    if metric.name() == metric_name
+                        && let opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(
+                            MetricData::Histogram(histogram),
+                        ) = metric.data()
+                        && let Some(dp) = histogram.data_points().next()
+                    {
+                        return Some(dp.bounds().collect());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Helper to check if a metric exists in exported metrics
+    fn metric_exists(exporter: &InMemoryMetricExporter, metric_name: &str) -> bool {
+        let Ok(metrics) = exporter.get_finished_metrics() else {
+            return false;
+        };
+        metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == metric_name)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_user_custom_buckets_are_applied() {
+        let exporter = InMemoryMetricExporter::default();
+        let custom_buckets = vec![0.005, 0.05, 0.5, 5.0];
+
+        // Create a view with custom histogram buckets
+        let view = MetricView {
+            name: "test.histogram".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: Some(MetricAggregation::Histogram {
+                buckets: custom_buckets.clone(),
+            }),
+            allowed_attribute_keys: None,
+        };
+
+        let meter_provider = MeterProviderBuilder::default()
+            .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+            .with_view(view.into_view_fn())
+            .build();
+
+        // Record a histogram value
+        let meter = meter_provider.meter("test");
+        let histogram = meter.f64_histogram("test.histogram").build();
+        histogram.record(0.1, &[]);
+
+        meter_provider.force_flush().unwrap();
+
+        let bounds =
+            get_histogram_bounds(&exporter, "test.histogram").expect("histogram should exist");
+        assert_eq!(
+            bounds, custom_buckets,
+            "histogram should use user-specified custom buckets"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_merged_view_inherits_default_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let default_buckets = vec![0.001, 0.01, 0.1, 1.0, 10.0];
+
+        // Create a default view with histogram buckets
+        let default_view =
+            MetricView::default_histogram("test.histogram".to_string(), default_buckets.clone());
+
+        // User view specifies only description, not aggregation
+        let user_view = MetricView {
+            name: "test.histogram".to_string(),
+            rename: None,
+            description: Some("Custom description".to_string()),
+            unit: None,
+            aggregation: None, // No aggregation specified - should inherit defaults
+            allowed_attribute_keys: None,
+        };
+
+        // Merge views - user view should inherit default buckets
+        let merged = default_view.merge(user_view);
+
+        let meter_provider = MeterProviderBuilder::default()
+            .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+            .with_view(merged.into_view_fn())
+            .build();
+
+        let meter = meter_provider.meter("test");
+        let histogram = meter.f64_histogram("test.histogram").build();
+        histogram.record(0.05, &[]);
+
+        meter_provider.force_flush().unwrap();
+
+        let bounds =
+            get_histogram_bounds(&exporter, "test.histogram").expect("histogram should exist");
+        assert_eq!(
+            bounds, default_buckets,
+            "merged view should inherit default buckets when user doesn't specify aggregation"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_drop_aggregation_suppresses_metric() {
+        let exporter = InMemoryMetricExporter::default();
+
+        // Create a view with Drop aggregation
+        let view = MetricView {
+            name: "dropped.histogram".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: Some(MetricAggregation::Drop),
+            allowed_attribute_keys: None,
+        };
+
+        let meter_provider = MeterProviderBuilder::default()
+            .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+            .with_view(view.into_view_fn())
+            .build();
+
+        let meter = meter_provider.meter("test");
+        let histogram = meter.f64_histogram("dropped.histogram").build();
+        histogram.record(1.0, &[]);
+
+        meter_provider.force_flush().unwrap();
+
+        assert!(
+            !metric_exists(&exporter, "dropped.histogram"),
+            "metric with Drop aggregation should not be exported"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_user_buckets_override_merged_defaults() {
+        let exporter = InMemoryMetricExporter::default();
+        let default_buckets = vec![0.001, 0.01, 0.1, 1.0, 10.0];
+        let user_buckets = vec![1.0, 5.0, 10.0, 50.0];
+
+        // Create a default view with histogram buckets
+        let default_view =
+            MetricView::default_histogram("test.histogram".to_string(), default_buckets);
+
+        // User view specifies custom aggregation - should override defaults
+        let user_view = MetricView {
+            name: "test.histogram".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: Some(MetricAggregation::Histogram {
+                buckets: user_buckets.clone(),
+            }),
+            allowed_attribute_keys: None,
+        };
+
+        // Merge views - user aggregation should take precedence
+        let merged = default_view.merge(user_view);
+
+        let meter_provider = MeterProviderBuilder::default()
+            .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+            .with_view(merged.into_view_fn())
+            .build();
+
+        let meter = meter_provider.meter("test");
+        let histogram = meter.f64_histogram("test.histogram").build();
+        histogram.record(2.5, &[]);
+
+        meter_provider.force_flush().unwrap();
+
+        let bounds =
+            get_histogram_bounds(&exporter, "test.histogram").expect("histogram should exist");
+        assert_eq!(
+            bounds, user_buckets,
+            "user-specified buckets should override default buckets in merged view"
+        );
     }
 }

@@ -1,0 +1,9 @@
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+  instrumentation:
+    instruments:
+      router:
+        http.server.response.body.size: true

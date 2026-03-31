@@ -4,7 +4,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.1:subgraph:user:type:Query:hash:715bf334e8cef01c70a374150a1f409cf5c4f57acd00664485ff8b8d6dd39e2c:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:user:type:Query:hash:85a339ee56dbbdc4b9275a69cac688a2e38a765929e974b1b1167f351dc58809:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "currentUser"
     ],
@@ -49,12 +49,12 @@ expression: cache_keys
             "title": "Cache-Control header documentation"
           }
         ],
-        "message": "The subgraph returned a Cache-Control header containing no-store, so the data was not cached"
+        "message": "Either the request or the subgraph response contained a Cache-Control header with no-store, so the data was not cached"
       }
     ]
   },
   {
-    "key": "version:1.1:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:b477abf3b559d50444a6790a53a232701071574572433de2f9424d902a402de6:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:f1c4656b71a19d7258d33702a4c232e5055bd833ed60cfcf94026a912cf49bf8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "organization",
       "organization-1"
@@ -96,7 +96,7 @@ expression: cache_keys
     "warnings": []
   },
   {
-    "key": "version:1.1:subgraph:orga:type:Organization:representation:07ea57c08f759cd09342c5a65d5d726fb5930a9796b1ec27a82189e5694dcc2b:hash:b477abf3b559d50444a6790a53a232701071574572433de2f9424d902a402de6:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:orga:type:Organization:representation:07ea57c08f759cd09342c5a65d5d726fb5930a9796b1ec27a82189e5694dcc2b:hash:f1c4656b71a19d7258d33702a4c232e5055bd833ed60cfcf94026a912cf49bf8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "organization",
       "organization-3"

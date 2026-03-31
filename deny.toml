@@ -23,13 +23,6 @@ git-fetch-with-cli = true
 # rustsec advisory exemptions
 ignore = [
     "RUSTSEC-2023-0071",
-    "RUSTSEC-2024-0376", # we do not use tonic::transport::Server
-    "RUSTSEC-2024-0421", # we only resolve trusted subgraphs
-
-    # protobuf is used only through prometheus crates, enforced by
-    # a `[bans]` entry below. in the prometheus crates, only the protobuf
-    # encoder is used, while only the decoder is affected by this advisory.
-    "RUSTSEC-2024-0437",
 
     # The following crates are unmaintained
     "RUSTSEC-2024-0320", # TODO replace the `yaml-rust` crate with a maintained equivalent
@@ -107,12 +100,7 @@ highlight = "all"
 
 # List of crates to deny
 deny = [
-  { crate = "openssl-sys" },
-  # Prevent adding new dependencies on protobuf that may use code with
-  # a security advisory in it (see `[advisories]`).
-  # If you *must* add a new crate to the "wrappers" here, carefully audit
-  # that it is *not* affected by any of the advisories above.
-  { crate = "protobuf:<3.7.2", wrappers = ["prometheus", "opentelemetry-prometheus"] },
+  { name = "openssl-sys" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

@@ -7,7 +7,7 @@ expression: body.extensions
     "version": "1.0",
     "data": [
       {
-        "key": "version:1.1:subgraph:stuff:type:Query:hash:d5c0f6a8c8761283e964c030813e6867f9370c1574677b0de5277102f41f02bb:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+        "key": "version:1.2:subgraph:stuff:type:Query:hash:[query-hash]:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
         "invalidationKeys": [],
         "kind": {
           "rootFields": [
@@ -48,7 +48,7 @@ expression: body.extensions
                 "title": "Cache-Control header documentation"
               }
             ],
-            "message": "The subgraph returned a Cache-Control header containing no-store, so the data was not cached"
+            "message": "Either the request or the subgraph response contained a Cache-Control header with no-store, so the data was not cached"
           },
           {
             "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",
@@ -77,7 +77,7 @@ expression: body.extensions
         ]
       },
       {
-        "key": "version:1.1:subgraph:status:type:Status:representation:db667609a8d53a2cd37059aed86e44088a10ec65213783b7aeac4ffe6cb761a4:hash:41749e92390f34c2c244668da28c61f4b680fd1997a98d547fe06e6b2a3c5af1:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+        "key": "version:1.2:subgraph:status:type:Status:representation:db667609a8d53a2cd37059aed86e44088a10ec65213783b7aeac4ffe6cb761a4:hash:[query-hash]:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
         "invalidationKeys": [
           "status-1-"
         ],
@@ -131,7 +131,7 @@ expression: body.extensions
                 "title": "Cache-Control header documentation"
               }
             ],
-            "message": "The subgraph returned a Cache-Control header containing no-store, so the data was not cached"
+            "message": "Either the request or the subgraph response contained a Cache-Control header with no-store, so the data was not cached"
           },
           {
             "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",

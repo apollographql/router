@@ -1,9 +1,11 @@
+use std::time::Duration;
+
 use opentelemetry::Context;
 use opentelemetry::trace::SpanContext;
-use opentelemetry::trace::TraceResult;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::Span;
+use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanProcessor;
 
 /// When using the Datadog agent we need spans to always be exported. However, the batch span processor will only export spans that are sampled.
@@ -39,12 +41,12 @@ impl<T: SpanProcessor> SpanProcessor for DatadogSpanProcessor<T> {
         self.delegate.on_end(span)
     }
 
-    fn force_flush(&self) -> TraceResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
 
-    fn shutdown(&self) -> TraceResult<()> {
-        self.delegate.shutdown()
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.delegate.shutdown_with_timeout(timeout)
     }
 
     fn set_resource(&mut self, resource: &Resource) {
@@ -55,6 +57,7 @@ impl<T: SpanProcessor> SpanProcessor for DatadogSpanProcessor<T> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
     use std::time::SystemTime;
 
     use opentelemetry::Context;
@@ -62,6 +65,7 @@ mod tests {
     use opentelemetry::trace::SpanKind;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
+    use opentelemetry_sdk::error::OTelSdkResult;
     use opentelemetry_sdk::trace::SpanEvents;
     use opentelemetry_sdk::trace::SpanLinks;
     use opentelemetry_sdk::trace::SpanProcessor;
@@ -89,11 +93,11 @@ mod tests {
             self.spans.lock().push(span);
         }
 
-        fn force_flush(&self) -> TraceResult<()> {
+        fn force_flush(&self) -> OTelSdkResult {
             Ok(())
         }
 
-        fn shutdown(&self) -> TraceResult<()> {
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
             Ok(())
         }
     }
@@ -103,15 +107,16 @@ mod tests {
         let mock_processor = MockSpanProcessor::new();
         let processor = DatadogSpanProcessor::new(mock_processor.clone());
         let span_context = SpanContext::new(
-            TraceId::from_u128(1),
-            SpanId::from_u64(1),
+            TraceId::from(1),
+            SpanId::from(1),
             TraceFlags::default(),
             false,
             Default::default(),
         );
         let span_data = SpanData {
             span_context,
-            parent_span_id: SpanId::from_u64(1),
+            parent_span_id: SpanId::from(1),
+            parent_span_is_remote: false,
             span_kind: SpanKind::Client,
             name: Default::default(),
             start_time: SystemTime::now(),
@@ -120,7 +125,7 @@ mod tests {
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: Default::default(),
-            instrumentation_lib: Default::default(),
+            instrumentation_scope: Default::default(),
             dropped_attributes_count: 0,
         };
 

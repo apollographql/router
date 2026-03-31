@@ -359,6 +359,9 @@ impl QueryGraphEdgeTransition {
         }
     }
 
+    // NOTE: This function is intended to be used when comparing edges from a
+    // federated query graph against edges from an API schema query graph. `other` should be from
+    // an API schema graph.
     pub(crate) fn matches_supergraph_transition(
         &self,
         other: &Self,
@@ -368,45 +371,40 @@ impl QueryGraphEdgeTransition {
             "Supergraphs shouldn't have a transition that doesn't collect elements; got {}",
             other,
         );
-        Ok(match self {
-            QueryGraphEdgeTransition::FieldCollection {
-                field_definition_position,
-                ..
-            } => {
-                let QueryGraphEdgeTransition::FieldCollection {
+
+        match (self, other) {
+            (
+                QueryGraphEdgeTransition::FieldCollection {
+                    field_definition_position,
+                    ..
+                },
+                QueryGraphEdgeTransition::FieldCollection {
                     field_definition_position: other_field_definition_position,
                     ..
-                } = other
-                else {
-                    return Ok(false);
-                };
-                field_definition_position.field_name()
-                    == other_field_definition_position.field_name()
-            }
-            QueryGraphEdgeTransition::Downcast {
-                to_type_position, ..
-            } => {
-                let QueryGraphEdgeTransition::Downcast {
+                },
+            ) => Ok(field_definition_position.field_name()
+                == other_field_definition_position.field_name()),
+            (
+                QueryGraphEdgeTransition::Downcast {
+                    to_type_position, ..
+                },
+                QueryGraphEdgeTransition::Downcast {
                     to_type_position: other_to_type_position,
                     ..
-                } = other
-                else {
-                    return Ok(false);
-                };
-                to_type_position.type_name() == other_to_type_position.type_name()
-            }
-            QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. } => {
-                let QueryGraphEdgeTransition::InterfaceObjectFakeDownCast {
-                    to_type_name: other_to_type_name,
+                },
+            ) => Ok(to_type_position.type_name() == other_to_type_position.type_name()),
+            // NOTE: We check against a downcast, not a fake downcast, as edges from API
+            // schemas graphs, which `other` should be from, don't contain interface objects.
+            // Thus, the comparison should against a regular downcast.
+            (
+                QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. },
+                QueryGraphEdgeTransition::Downcast {
+                    to_type_position: other_to_type_position,
                     ..
-                } = other
-                else {
-                    return Ok(false);
-                };
-                to_type_name == other_to_type_name
-            }
-            _ => false,
-        })
+                },
+            ) => Ok(to_type_name == other_to_type_position.type_name()),
+            _ => Ok(false),
+        }
     }
 }
 

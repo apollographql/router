@@ -36,20 +36,35 @@ pub(crate) fn register_memory_allocation_views(builder: &mut MetricsBuilder) {
     };
 
     // Register view for router request memory metric
-    let request_view = opentelemetry_sdk::metrics::new_view(
-        Instrument::new().name("apollo.router.request.memory"),
-        Stream::new().aggregation(aggregation.clone()),
-    )
-    .unwrap();
-    builder.with_view(MeterProviderType::Public, Box::new(request_view));
+    let agg_clone = aggregation.clone();
+    builder.with_view(MeterProviderType::Public, move |instrument: &Instrument| {
+        if instrument.name() == "apollo.router.request.memory" {
+            Some(
+                Stream::builder()
+                    .with_aggregation(agg_clone.clone())
+                    .build()
+                    .expect("Failed to create stream for apollo.router.request.memory metric"),
+            )
+        } else {
+            None
+        }
+    });
 
     // Register view for query planner memory metric
-    let query_planner_view = opentelemetry_sdk::metrics::new_view(
-        Instrument::new().name("apollo.router.query_planner.memory"),
-        Stream::new().aggregation(aggregation),
-    )
-    .unwrap();
-    builder.with_view(MeterProviderType::Public, Box::new(query_planner_view));
+    builder.with_view(MeterProviderType::Public, move |instrument: &Instrument| {
+        if instrument.name() == "apollo.router.query_planner.memory" {
+            Some(
+                Stream::builder()
+                    .with_aggregation(aggregation.clone())
+                    .build()
+                    .expect(
+                        "Failed to create stream for apollo.router.query_planner.memory metric",
+                    ),
+            )
+        } else {
+            None
+        }
+    });
 }
 
 /// Tower layer that adds memory allocation tracking to router requests.

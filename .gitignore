@@ -52,3 +52,7 @@ fuzz/timeout-*
 .agents/skills/rust-best-practices
 .github/instructions/docs.instructions.md
 .github/skills/rust-best-practices
+
+# Cursor plan docs and skills (local IDE configuration)
+.cursor/plan-docs/
+.cursor/skills/

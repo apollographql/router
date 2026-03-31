@@ -111,7 +111,13 @@ The subgraph service executes multiple times during query execution, with each e
 
 ### HTTP Client
 
-The HTTP client service also executes multiple times, with each execution representing a HTTP request to a single subgraph or REST service. Importantly, this service executes after any Rhai scripts that modify the subgraph requests, so these selectors can be used to observe any headers added by the Rhai script.
+The HTTP client service also executes multiple times. Each execution represents an HTTP request to a single subgraph or REST service. This service executes after any Rhai scripts that modify subgraph requests, so these selectors can observe headers added by scripts.
+
+<Note>
+
+The `http_client` service supports the `request_header` and `response_header` selectors. Conditions and the `static` selector are currently unavailable for this service. If you attempt to configure them, your router fails to start.
+
+</Note>
 
 | Selector           | Defaultable | Values | Description                   |
 |--------------------|-------------|--------|-------------------------------|
@@ -279,6 +285,23 @@ telemetry:
             # Capture the number of active subgraph requests as an attribute
             active_subgraph_requests:
               active_subgraph_requests: count
+```
+
+### Capture HTTP client request and response headers
+
+Use the `request_header` and `response_header` selectors on `http_client` spans to capture headers from HTTP requests sent to subgraphs and REST services. `http_client` executes after Rhai scripts, so these selectors observe headers added by scripts.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      http_client:
+        attributes:
+          "http.request.header.x-custom-header":
+            request_header: "x-custom-header"
+            default: "unknown"
+          "http.response.header.cache-control":
+            response_header: "cache-control"
 ```
 
 ### Getting GraphQL operation info

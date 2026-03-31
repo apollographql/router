@@ -100,6 +100,11 @@ impl Storage {
         Ok(s)
     }
 
+    /// Activate the Redis storage so it can start emitting metrics.
+    pub(crate) fn activate(&self) {
+        self.storage.activate();
+    }
+
     fn make_key<K: KeyType>(&self, key: K) -> String {
         self.storage.make_key(RedisKey(key))
     }

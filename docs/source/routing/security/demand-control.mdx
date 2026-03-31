@@ -210,9 +210,72 @@ When requesting 7 books:
 1 Query (0) + 7 book objects (7 * (1 book object (1) + 1 author object (1) + 1 publisher object (1) + 1 address object (5))) = 56 total cost
 ```
 
+#### Nested paths in `slicingArguments`
+
+<MinVersionBadge version="Router v2.12.0" />
+
+When the list size comes from an argument nested in an input object, use a dot-separated path in `slicingArguments`. The router resolves the path against the query arguments and variable values to determine the size.
+
+```graphql
+input PaginationInput {
+  first: Int
+  after: String
+}
+
+input SearchInput {
+  pagination: PaginationInput
+  query: String
+}
+
+type Query {
+  search(input: SearchInput!): [Book]
+    @listSize(slicingArguments: ["input.pagination.first"], requireOneSlicingArgument: true)
+}
+```
+
+For a query such as `search(input: { pagination: { first: 10 }, query: "fiction" })`, the router uses 10 as the list size. You can use deeper paths (for example, `input.level1.level2.count`).
+
+#### The `sizedFields` argument
+
+<MinVersionBadge version="Router v2.12.0" />
+
+When a field returns an object containing one or more list fields, use the `sizedFields` argument to specify which of those object's list fields use the list size to calculate cost. Only selections matching those paths are scaled by the size.
+
+```graphql
+type Query {
+  container(first: Int): ResultContainer
+    @listSize(slicingArguments: ["first"], 
+      sizedFields: ["page"], 
+      requireOneSlicingArgument: false)
+}
+
+type ResultContainer {
+  page: [Book]     # in sizedFields; uses list size from slicingArguments "first"
+  recent: [Book]   # not in sizedFields; uses default list size
+  metadata: String # not in sizedFields; cost is 1
+}
+```
+
+For nested lists, use a path in `sizedFields` such as `"results { page }"` so that the list size applies to the inner list when the query selects `deepContainer { results { page { ... } } }`:
+
+```graphql
+type Query {
+  deepContainer(first: Int): DeepContainer
+    @listSize(slicingArguments: ["first"], sizedFields: ["results { page }"], requireOneSlicingArgument: false)
+}
+
+type DeepContainer {
+  results: ResultContainer
+}
+
+type ResultContainer {
+  page: [Book]
+}
+```
+
 ## Subgraph-level demand control
 
-Requires Router v2.12.0 or later.
+<MinVersionBadge version="Router v2.12.0" />
 
 Subgraph-level demand control lets you enforce per-subgraph query cost limits in Apollo Router, in addition to the
 existing global cost limit for the whole supergraph. This helps you protect specific backend services that have different

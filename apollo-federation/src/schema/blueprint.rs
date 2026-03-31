@@ -1,8 +1,9 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use apollo_compiler::Name;
-use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::schema::Component;
 use apollo_compiler::ty;
 
 use crate::bail;
@@ -13,22 +14,25 @@ use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
+use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
+use crate::link::federation_spec_definition::fed1_link_imports;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
+use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::DirectiveDefinitionPosition;
-use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::schema::validators::access_control::validate_no_access_control_on_interfaces;
+use crate::schema::validators::cache_tag::validate_cache_tag_directives;
 use crate::schema::validators::context::validate_context_directives;
 use crate::schema::validators::cost::validate_cost_directives;
 use crate::schema::validators::external::validate_external_directives;
@@ -40,16 +44,16 @@ use crate::schema::validators::provides::validate_provides_directives;
 use crate::schema::validators::requires::validate_requires_directives;
 use crate::schema::validators::shareable::validate_shareable_directives;
 use crate::schema::validators::tag::validate_tag_directives;
+use crate::subgraph::typestate::has_federation_spec_link;
 use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
 use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
 
 pub(crate) struct FederationBlueprint {}
 
-#[allow(dead_code)]
 impl FederationBlueprint {
     pub(crate) fn on_missing_directive_definition(
         schema: &mut FederationSchema,
-        directive: &Node<Directive>,
+        directive: &Component<Directive>,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
         if directive.name == DEFAULT_LINK_NAME {
             let (alias, imports) =
@@ -66,16 +70,10 @@ impl FederationBlueprint {
     pub(crate) fn on_directive_definition_and_schema_parsed(
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        // PORT_NOTE: JS version calls `completeSubgraphSchema`. But, in Rust, it's implemented
-        //            directly in this method and `Subgraph::expand_links`.
-        let federation_spec = get_federation_spec_definition_from_subgraph(schema)?;
-        if federation_spec.is_fed1() {
-            Self::remove_federation_definitions_broken_in_known_ways(schema)?;
-        }
-        federation_spec.add_elements_to_schema(schema)?;
-        Self::expand_known_features(schema)
+        Self::complete_subgraph_schema(schema)
     }
 
+    #[allow(unused)]
     pub(crate) fn ignore_parsed_field(schema: &FederationSchema, field_name: &str) -> bool {
         // Historically, federation 1 has accepted invalid schema, including some where the Query
         // type included the definition of `_entities` (so `_entities(representations: [_Any!]!):
@@ -103,6 +101,7 @@ impl FederationBlueprint {
         Ok(())
     }
 
+    #[allow(unused)]
     fn on_added_core_feature(
         schema: &mut FederationSchema,
         feature: &Link,
@@ -116,11 +115,11 @@ impl FederationBlueprint {
         Ok(())
     }
 
-    pub(crate) fn on_validation(
-        schema: &ValidFederationSchema,
-        meta: &SubgraphMetadata,
-    ) -> Result<(), FederationError> {
+    pub(crate) fn on_validation(schema: &ValidFederationSchema) -> Result<(), FederationError> {
         let mut error_collector = MultipleFederationErrors { errors: Vec::new() };
+        let Some(meta) = schema.subgraph_metadata() else {
+            bail!("ValidFederationSchema should contain subgraph metadata");
+        };
 
         // We skip the rest of validation for fed1 schemas because there is a number of validations that is stricter than what fed 1
         // accepted, and some of those issues are fixed by `SchemaUpgrader`. So insofar as any fed 1 schma is ultimately converted
@@ -140,6 +139,7 @@ impl FederationBlueprint {
         validate_cost_directives(schema, &mut error_collector)?;
         validate_list_size_directives(schema, &mut error_collector)?;
         validate_tag_directives(schema, &mut error_collector)?;
+        validate_cache_tag_directives(schema, &mut error_collector)?;
         validate_no_access_control_on_interfaces(schema, meta, &mut error_collector)?;
 
         error_collector.into_result()
@@ -275,8 +275,62 @@ impl FederationBlueprint {
         }
     }
 
-    fn apply_directives_after_parsing() -> bool {
-        true
+    pub(crate) fn complete_subgraph_schema(
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        if schema.is_fed_2() {
+            // subgraph metadata was already computed which means we have @link with fed spec and its definition
+            Self::complete_fed_2_subgraph_schema(schema)
+        } else if has_federation_spec_link(schema.schema()) {
+            // we have @link with fed spec but we don't have @link directive definition
+            LinkSpecDefinition::latest().add_to_schema(schema, None)?;
+            Self::complete_fed_2_subgraph_schema(schema)
+        } else {
+            Self::complete_fed_1_subgraph_schema(schema)
+        }
+    }
+
+    fn complete_fed_2_subgraph_schema(
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(schema)?;
+        federation_spec.add_elements_to_schema(schema)?;
+        Self::expand_known_features(schema)
+    }
+
+    fn complete_fed_1_subgraph_schema(
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        Self::remove_federation_definitions_broken_in_known_ways(schema)?;
+        // fed 1 schema won't have @link so we cannot use FederationSpecDefinition#add_elements_to_schema
+        let mut errors = MultipleFederationErrors { errors: vec![] };
+        let fed_1_link_spec_definition = LinkSpecDefinition::fed1_latest();
+        let fed_1_link = Arc::new(Link {
+            url: Url {
+                identity: fed_1_link_spec_definition.url().identity.clone(),
+                version: fed_1_link_spec_definition.url().version.clone(),
+            },
+            imports: fed1_link_imports(),
+            spec_alias: None,
+            purpose: None,
+        });
+        for type_spec in &FED_1.type_specs() {
+            if let Err(err) = type_spec.check_or_add(schema, Some(&fed_1_link)) {
+                errors.push(err);
+            }
+        }
+
+        for directive_spec in &FED_1.directive_specs() {
+            if let Err(err) = directive_spec.check_or_add(schema, Some(&fed_1_link)) {
+                errors.push(err);
+            }
+        }
+
+        match errors.errors.as_slice() {
+            [] => Self::expand_known_features(schema),
+            [error] => Err(FederationError::SingleFederationError(error.clone())),
+            _ => Err(FederationError::MultipleFederationErrors(errors)),
+        }
     }
 
     fn remove_federation_definitions_broken_in_known_ways(
@@ -350,6 +404,11 @@ impl FederationBlueprint {
         }
 
         Ok(())
+    }
+
+    #[allow(unused)]
+    fn apply_directives_after_parsing() -> bool {
+        true
     }
 }
 

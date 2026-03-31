@@ -27,7 +27,7 @@ pub(crate) fn connect_spec_version_instrument(
                     )
                 })
             })
-            .init()
+            .build()
     })
 }
 

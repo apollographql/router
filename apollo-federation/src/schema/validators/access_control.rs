@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 
 use crate::bail;
 use crate::error::CompositionError;
@@ -15,6 +15,7 @@ use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
+use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
@@ -35,6 +36,7 @@ use crate::schema::field_set::parse_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
@@ -95,15 +97,15 @@ pub(crate) fn validate_no_access_control_on_interfaces(
 // need to verify usage of @requires and @fromContext on fields that require authorization
 pub(crate) fn validate_transitive_access_control_requirements_in_the_supergraph(
     join_spec_definition: &JoinSpecDefinition,
-    subgraph_names_to_join_spec_name: &HashMap<String, Name>,
+    subgraph_names_to_join_spec_name: &IndexMap<String, Name>,
     supergraph_schema: &FederationSchema,
     subgraphs: &[Subgraph<Validated>],
     errors: &mut Vec<CompositionError>,
 ) -> Result<(), FederationError> {
-    let mut fields_with_requires: HashSet<ObjectOrInterfaceFieldDefinitionPosition> =
-        HashSet::default();
-    let mut fields_with_from_context: HashSet<ObjectOrInterfaceFieldDefinitionPosition> =
-        HashSet::default();
+    let mut fields_with_requires: IndexSet<ObjectOrInterfaceFieldDefinitionPosition> =
+        Default::default();
+    let mut fields_with_from_context: IndexSet<ObjectOrInterfaceFieldDefinitionPosition> =
+        Default::default();
     // first we capture locations where @requires and @fromContext is applied as those will be
     // converted to arguments to @join__field in the supergraph
     for subgraph in subgraphs.iter() {
@@ -119,7 +121,12 @@ pub(crate) fn validate_transitive_access_control_requirements_in_the_supergraph(
         // @requires should only be present in the subgraphs on the object fields
         // but in the supergraph it could be either on object field or interface (object) field
         for field in &requires_referencers.object_fields {
-            fields_with_requires.insert(field.clone().into());
+            fields_with_requires.insert(
+                ObjectOrInterfaceTypeDefinitionPosition::try_from(
+                    supergraph_schema.get_type(field.type_name.clone())?,
+                )?
+                .field(field.field_name.clone()),
+            );
         }
 
         let from_context_directive_name = &subgraph
@@ -133,8 +140,13 @@ pub(crate) fn validate_transitive_access_control_requirements_in_the_supergraph(
             .get_directive(from_context_directive_name);
         // @fromContext should only be present in the subgraphs on the object field arguments
         // but in the supergraph it can be either on object field or interface (object) field
-        for field in &from_context_referencers.object_field_arguments {
-            fields_with_from_context.insert(field.parent().into());
+        for argument in &from_context_referencers.object_field_arguments {
+            fields_with_from_context.insert(
+                ObjectOrInterfaceTypeDefinitionPosition::try_from(
+                    supergraph_schema.get_type(argument.type_name.clone())?,
+                )?
+                .field(argument.field_name.clone()),
+            );
         }
     }
 
@@ -154,24 +166,24 @@ pub(crate) fn validate_transitive_access_control_requirements_in_the_supergraph(
 
 struct AccessControlValidator<'validator> {
     valid_schema: ValidFederationSchema,
-    join_spec_names_to_subgraph_names: HashMap<Name, String>,
+    join_spec_names_to_subgraph_names: IndexMap<Name, String>,
     join_spec_definition: &'validator JoinSpecDefinition,
     join_field_directive_name: Name,
     authenticated_directive_name: Option<Name>,
     requires_scopes_directive_name: Option<Name>,
     policy_directive_name: Option<Name>,
-    contexts: HashMap<String, HashSet<String>>,
+    contexts: IndexMap<String, IndexSet<Name>>,
 }
 
 impl<'validator> AccessControlValidator<'validator> {
     fn new(
         supergraph_schema: &FederationSchema,
         join_spec_definition: &'validator JoinSpecDefinition,
-        subgraph_names_to_join_spec_name: &HashMap<String, Name>,
+        subgraph_names_to_join_spec_name: &IndexMap<String, Name>,
     ) -> Result<Self, FederationError> {
         let valid_schema = ValidFederationSchema::new_assume_valid(supergraph_schema.clone())
             .map_err(|(_, err)| err)?;
-        let join_spec_names_to_subgraph_names: HashMap<Name, String> =
+        let join_spec_names_to_subgraph_names: IndexMap<Name, String> =
             subgraph_names_to_join_spec_name
                 .iter()
                 .map(|(k, v)| (v.clone(), k.clone()))
@@ -197,10 +209,10 @@ impl<'validator> AccessControlValidator<'validator> {
                                 supergraph_schema,
                                 &AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
                             )
-                            .ok()
+                            .transpose()
                     })
             })
-            .flatten();
+            .transpose()?;
         let requires_scopes_directive_name = links_metadata
             .for_identity(&Identity::requires_scopes_identity())
             .and_then(|requires_scopes_spec| {
@@ -212,10 +224,10 @@ impl<'validator> AccessControlValidator<'validator> {
                                 supergraph_schema,
                                 &REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
                             )
-                            .ok()
+                            .transpose()
                     })
             })
-            .flatten();
+            .transpose()?;
         let policy_directive_name = links_metadata
             .for_identity(&Identity::policy_identity())
             .and_then(|policy_spec| {
@@ -227,33 +239,32 @@ impl<'validator> AccessControlValidator<'validator> {
                                 supergraph_schema,
                                 &POLICY_DIRECTIVE_NAME_IN_SPEC,
                             )
-                            .ok()
+                            .transpose()
                     })
             })
-            .flatten();
+            .transpose()?;
 
-        let mut contexts: HashMap<String, HashSet<String>> = HashMap::default();
-        if let Some(context_spec_link) = links_metadata.for_identity(&Identity::context_identity())
+        let mut contexts: IndexMap<String, IndexSet<Name>> = IndexMap::default();
+        if let Some(context_spec_definition) = links_metadata
+            .for_identity(&Identity::context_identity())
+            .and_then(|context_spec| CONTEXT_VERSIONS.find(&context_spec.url.version))
+            && let Some(context_directive_name) = context_spec_definition
+                .directive_name_in_schema(supergraph_schema, &CONTEXT_DIRECTIVE_NAME)?
         {
-            let context_directive_name =
-                context_spec_link.directive_name_in_schema(&CONTEXT_DIRECTIVE_NAME);
             let references = supergraph_schema
                 .referencers
                 .get_directive(&context_directive_name);
-            for object_type in &references.object_types {
-                for context_directive in
-                    object_type.get_applied_directives(supergraph_schema, &context_directive_name)
+            for composite_type in references.composite_type_positions() {
+                for context_directive in composite_type
+                    .get_applied_directives(supergraph_schema, &context_directive_name)
                 {
-                    let Some(context_name) = context_directive
-                        .specified_argument_by_name("name")
-                        .and_then(|v| v.as_str())
-                    else {
-                        bail!("@context directive should specify name argument");
-                    };
+                    let context_name = context_spec_definition
+                        .context_directive_arguments(context_directive)?
+                        .name;
                     contexts
                         .entry(context_name.to_string())
                         .or_default()
-                        .insert(object_type.to_string());
+                        .insert(composite_type.type_name().clone());
                 }
             }
         }
@@ -275,7 +286,7 @@ impl<'validator> AccessControlValidator<'validator> {
         requires_position: ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<Vec<CompositionError>, FederationError> {
         let auth_requirements_on_requires = self
-            .calculate_auth_requirements_to_verify(&requires_position, &REQUIRES_DIRECTIVE_NAME);
+            .calculate_auth_requirements_to_verify(&requires_position, &REQUIRES_DIRECTIVE_NAME)?;
         let join_directives_on_requires = requires_position
             .get_applied_directives(&self.valid_schema.schema, &self.join_field_directive_name);
         let mut errors = vec![];
@@ -307,8 +318,10 @@ impl<'validator> AccessControlValidator<'validator> {
         &self,
         context_position: ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<Vec<CompositionError>, FederationError> {
-        let auth_requirements_on_context = self
-            .calculate_auth_requirements_to_verify(&context_position, &FROM_CONTEXT_DIRECTIVE_NAME);
+        let auth_requirements_on_context = self.calculate_auth_requirements_to_verify(
+            &context_position,
+            &FROM_CONTEXT_DIRECTIVE_NAME,
+        )?;
         let join_directives_on_from_context = context_position
             .get_applied_directives(&self.valid_schema.schema, &self.join_field_directive_name);
         let mut errors = vec![];
@@ -321,11 +334,10 @@ impl<'validator> AccessControlValidator<'validator> {
                     if let Some(target_type_names) = self.contexts.get(context_arg.context) {
                         // we need to verify against all possible contexts
                         for target_type_name in target_type_names {
-                            let target_type = self
-                                .valid_schema
-                                .get_type(Name::new_unchecked(target_type_name))?;
+                            let target_type =
+                                self.valid_schema.get_type(target_type_name.clone())?;
                             let target_type_auth_requirements =
-                                self.read_auth_requirements_from_element(&target_type);
+                                self.read_auth_requirements_from_element(&target_type)?;
                             if !auth_requirements_on_context
                                 .satisfies(&target_type_auth_requirements)
                             {
@@ -372,17 +384,17 @@ impl<'validator> AccessControlValidator<'validator> {
 
     fn calculate_auth_requirements_to_verify(
         &self,
-        requires_position: &ObjectOrInterfaceFieldDefinitionPosition,
+        target_position: &ObjectOrInterfaceFieldDefinitionPosition,
         target_directive: &Name,
-    ) -> AuthRequirements {
+    ) -> Result<AuthRequirements, FederationError> {
         let requires_authenticated =
             self.authenticated_directive_name
                 .as_ref()
                 .is_some_and(|directive_name| {
-                    let is_field_authenticated = !requires_position
+                    let is_field_authenticated = !target_position
                         .get_applied_directives(&self.valid_schema.schema, directive_name)
                         .is_empty();
-                    let is_type_authenticated = !requires_position
+                    let is_type_authenticated = !target_position
                         .parent()
                         .get_applied_directives(&self.valid_schema.schema, directive_name)
                         .is_empty();
@@ -391,34 +403,38 @@ impl<'validator> AccessControlValidator<'validator> {
         let required_scopes: Option<BTreeSet<BTreeSet<String>>> = self
             .requires_scopes_directive_name
             .as_ref()
-            .and_then(|directive_name| {
+            .map(|directive_name| {
                 calculate_disjunction_value(
-                    requires_position,
+                    target_position,
                     &self.valid_schema.schema,
                     directive_name,
                     &REQUIRES_SCOPES_SCOPES_ARGUMENT_NAME,
                 )
-            });
+            })
+            .transpose()?
+            .flatten();
         let required_policies: Option<BTreeSet<BTreeSet<String>>> = self
             .policy_directive_name
             .as_ref()
-            .and_then(|directive_name| {
+            .map(|directive_name| {
                 calculate_disjunction_value(
-                    requires_position,
+                    target_position,
                     &self.valid_schema.schema,
                     directive_name,
                     &POLICY_POLICIES_ARGUMENT_NAME,
                 )
-            });
-        AuthRequirements {
-            field_coordinate: requires_position.to_string(),
+            })
+            .transpose()?
+            .flatten();
+        Ok(AuthRequirements {
+            field_coordinate: target_position.to_string(),
             directive: target_directive.clone(),
             requirements: AuthRequirementsOnElement {
                 is_authenticated: requires_authenticated,
                 policies: required_policies,
                 scopes: required_scopes,
             },
-        }
+        })
     }
 
     fn verify_auth_requirements_on_selection_set(
@@ -459,11 +475,11 @@ impl<'validator> AccessControlValidator<'validator> {
         auth_requirements: &AuthRequirements,
     ) -> Result<(), FederationError> {
         let field_position = &field_selection.field.field_position;
-        let field_reqs = self.read_auth_requirements_from_element(field_position);
+        let field_reqs = self.read_auth_requirements_from_element(field_position)?;
 
         let field_return_type_position = field_selection.field.output_base_type()?;
         let field_return_type_reqs =
-            self.read_auth_requirements_from_element(&field_return_type_position);
+            self.read_auth_requirements_from_element(&field_return_type_position)?;
 
         if !auth_requirements.satisfies(&field_reqs)
             || !auth_requirements.satisfies(&field_return_type_reqs)
@@ -486,7 +502,7 @@ impl<'validator> AccessControlValidator<'validator> {
         condition_position: &CompositeTypeDefinitionPosition,
         auth_requirements: &AuthRequirements,
     ) -> Result<(), FederationError> {
-        let condition_reqs = self.read_auth_requirements_from_element(condition_position);
+        let condition_reqs = self.read_auth_requirements_from_element(condition_position)?;
         if !auth_requirements.satisfies(&condition_reqs) {
             Err(FederationError::SingleFederationError(
                 SingleFederationError::MissingTransitiveAuthRequirements {
@@ -504,7 +520,7 @@ impl<'validator> AccessControlValidator<'validator> {
     fn read_auth_requirements_from_element<T: HasAppliedDirectives>(
         &self,
         element: &T,
-    ) -> Option<AuthRequirementsOnElement> {
+    ) -> Result<Option<AuthRequirementsOnElement>, FederationError> {
         let requires_authenticated =
             self.authenticated_directive_name
                 .as_ref()
@@ -516,33 +532,37 @@ impl<'validator> AccessControlValidator<'validator> {
         let required_scopes: Option<BTreeSet<BTreeSet<String>>> = self
             .requires_scopes_directive_name
             .as_ref()
-            .and_then(|directive_name| {
+            .map(|directive_name| {
                 parse_optional_disjunction_value_from_element(
                     element,
                     &self.valid_schema.schema,
                     directive_name,
                     &REQUIRES_SCOPES_SCOPES_ARGUMENT_NAME,
                 )
-            });
+            })
+            .transpose()?
+            .flatten();
         let required_policies: Option<BTreeSet<BTreeSet<String>>> = self
             .policy_directive_name
             .as_ref()
-            .and_then(|directive_name| {
+            .map(|directive_name| {
                 parse_optional_disjunction_value_from_element(
                     element,
                     &self.valid_schema.schema,
                     directive_name,
                     &POLICY_POLICIES_ARGUMENT_NAME,
                 )
-            });
+            })
+            .transpose()?
+            .flatten();
         if requires_authenticated || required_scopes.is_some() || required_policies.is_some() {
-            Some(AuthRequirementsOnElement {
+            Ok(Some(AuthRequirementsOnElement {
                 is_authenticated: requires_authenticated,
                 scopes: required_scopes,
                 policies: required_policies,
-            })
+            }))
         } else {
-            None
+            Ok(None)
         }
     }
 
@@ -574,12 +594,13 @@ fn calculate_disjunction_value(
     schema: &FederationSchema,
     directive_name: &Name,
     argument_name: &Name,
-) -> Option<BTreeSet<BTreeSet<String>>> {
+) -> Result<Option<BTreeSet<BTreeSet<String>>>, FederationError> {
     let mut to_merge = vec![];
     if let Some(val) = position
         .get_applied_directives(schema, directive_name)
         .first()
-        .and_then(|directive| read_disjunction_argument_value(argument_name, directive).ok())
+        .map(|directive| read_disjunction_argument_value(argument_name, directive))
+        .transpose()?
     {
         to_merge.push(val.clone());
     }
@@ -587,16 +608,17 @@ fn calculate_disjunction_value(
         .parent()
         .get_applied_directives(schema, directive_name)
         .first()
-        .and_then(|directive| read_disjunction_argument_value(argument_name, directive).ok())
+        .map(|directive| read_disjunction_argument_value(argument_name, directive))
+        .transpose()?
     {
         to_merge.push(val.clone());
     }
 
     if to_merge.is_empty() {
-        None
+        Ok(None)
     } else {
         let merged = dnf_conjunction(&to_merge);
-        Some(parse_disjunction_value(&merged))
+        Ok(Some(parse_disjunction_value(&merged)))
     }
 }
 
@@ -605,14 +627,13 @@ fn parse_optional_disjunction_value_from_element<T: HasAppliedDirectives>(
     schema: &FederationSchema,
     directive_name: &Name,
     argument_name: &Name,
-) -> Option<BTreeSet<BTreeSet<String>>> {
-    element
+) -> Result<Option<BTreeSet<BTreeSet<String>>>, FederationError> {
+    Ok(element
         .get_applied_directives(schema, directive_name)
         .first()
-        .and_then(|directive| {
-            read_disjunction_argument_value(argument_name, directive.as_ref()).ok()
-        })
-        .map(parse_disjunction_value)
+        .map(|directive| read_disjunction_argument_value(argument_name, directive.as_ref()))
+        .transpose()?
+        .map(parse_disjunction_value))
 }
 
 fn read_disjunction_argument_value<'directive>(
@@ -645,6 +666,10 @@ fn parse_disjunction_value(value: &Value) -> BTreeSet<BTreeSet<String>> {
                 })
                 .collect::<BTreeSet<BTreeSet<String>>>()
         })
+        // Normally for DNF, you'd consider [] to be always false and [[]] to be always true,
+        // and code that uses any()/all() needs no special-casing to work with these
+        // definitions. However, router special-cases [] to also mean true, and so if we're
+        // about to do any evaluation on DNFs, we need to do these conversions beforehand.
         .filter(|dnf| !dnf.is_empty())
         .unwrap_or_else(|| EMPTY_DNF_SET.clone())
 }
@@ -694,10 +719,7 @@ impl AuthRequirementsOnElement {
         first: &Option<BTreeSet<BTreeSet<String>>>,
         second: &Option<BTreeSet<BTreeSet<String>>>,
     ) -> bool {
-        // Normally for DNF, you'd consider [] to be always false and [[]] to be always true,
-        // and code that uses any()/all() needs no special-casing to work with these
-        // definitions. However, router special-cases [] to also mean true, and so if we're
-        // about to do any evaluation on DNFs, we need to do these conversions beforehand.
+        // No requirements are the same as requirements that are always true.
         let first_normalized = first.as_ref().unwrap_or_else(|| &EMPTY_DNF_SET);
         let second_normalized = second.as_ref().unwrap_or_else(|| &EMPTY_DNF_SET);
 

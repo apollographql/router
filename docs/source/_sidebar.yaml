@@ -193,6 +193,8 @@ items:
             href: "./performance/traffic-shaping"
           - label: "Query Batching"
             href: "./performance/query-batching"
+          - label: "Circuit Breaking"
+            href: "./performance/circuit-breaking"
       - label: "Client Features"
         children:
           - label: "APQ"
@@ -277,6 +279,8 @@ items:
         children:
           - label: "Google Cloud Run"
             href: "./self-hosted/containerization/gcp"
+      - label: "Proxy Certificates"
+        href: "./self-hosted/containerization/proxy-certificates"
       - label: "Managed Hosting"
         children:
           - label: "Railway"
