@@ -1,3 +1,4 @@
+use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -68,7 +69,11 @@ impl Plugin for ContextData {
             .boxed()
     }
 
-    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        _name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         ServiceBuilder::new()
             .map_request(|req: subgraph::Request| {
                 // Pick up a value from the context that was populated earlier.
@@ -92,7 +97,7 @@ impl Plugin for ContextData {
                 }
                 resp
             })
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

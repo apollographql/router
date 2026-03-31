@@ -18,6 +18,7 @@ use super::entity::Ttl;
 use super::entity::hash_query;
 use super::entity::hash_vary_headers;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
 
@@ -27,15 +28,15 @@ pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
 impl CacheMetricsService {
     pub(crate) fn create(
         name: String,
-        service: subgraph::BoxService,
+        service: subgraph::BoxCloneSyncService,
         ttl: Option<&Ttl>,
         separate_per_type: bool,
-    ) -> subgraph::BoxService {
-        tower::util::BoxService::new(CacheMetricsService {
+    ) -> subgraph::BoxCloneSyncService {
+        tower::util::BoxCloneSyncService::new(CacheMetricsService {
             service: ServiceBuilder::new()
                 .buffered()
                 .service(service)
-                .boxed_clone(),
+                .boxed_clone_sync(),
             name: Arc::new(name),
             counter: Some(Arc::new(Mutex::new(CacheCounter::new(
                 ttl.map(|t| t.0).unwrap_or_else(|| Duration::from_secs(60)),
@@ -47,7 +48,7 @@ impl CacheMetricsService {
 
 #[derive(Clone)]
 pub(crate) struct CacheMetricsService {
-    service: subgraph::BoxCloneService,
+    service: subgraph::BoxCloneSyncService,
     name: Arc<String>,
     counter: Option<Arc<Mutex<CacheCounter>>>,
 }
@@ -55,7 +56,7 @@ pub(crate) struct CacheMetricsService {
 impl Service<subgraph::Request> for CacheMetricsService {
     type Response = subgraph::Response;
     type Error = BoxError;
-    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
+    type Future = <subgraph::BoxCloneSyncService as Service<subgraph::Request>>::Future;
 
     fn poll_ready(
         &mut self,

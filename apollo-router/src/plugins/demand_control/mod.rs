@@ -35,6 +35,7 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::demand_control::cost_calculator::CostBySubgraph;
@@ -655,8 +656,8 @@ impl Plugin for DemandControl {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         if !self.config.enabled {
             service
         } else {
@@ -712,7 +713,7 @@ impl Plugin for DemandControl {
                     },
                 )
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         }
     }
 }

@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use apollo_router::graphql;
+use apollo_router::layers::ServiceExt as _;
 use apollo_router::services::router;
 use apollo_router::services::router::body::RouterBody;
 use apollo_router::services::supergraph;
@@ -286,7 +287,7 @@ async fn harness(
                         counter.fetch_add(1, Ordering::Relaxed);
                         req
                     })
-                    .boxed()
+                    .boxed_clone_sync()
             } else {
                 service
             }

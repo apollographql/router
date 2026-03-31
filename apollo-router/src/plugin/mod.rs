@@ -402,8 +402,8 @@ pub trait Plugin: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         service
     }
 
@@ -476,8 +476,8 @@ pub trait PluginUnstable: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         service
     }
 
@@ -529,8 +529,8 @@ where
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         Plugin::subgraph_service(self, subgraph_name, service)
     }
 
@@ -607,8 +607,8 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         service
     }
 
@@ -678,8 +678,8 @@ where
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         PluginUnstable::subgraph_service(self, subgraph_name, service)
     }
 
@@ -730,8 +730,8 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService;
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService;
 
     /// This service handles HTTP communication
     fn http_client_service(
@@ -783,7 +783,11 @@ where
         self.execution_service(service)
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         self.subgraph_service(name, service)
     }
 

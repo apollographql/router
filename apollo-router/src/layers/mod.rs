@@ -460,8 +460,9 @@ pub trait ServiceExt<Request>: Service<Request> {
         MapFutureWithRequestDataService::new(self, req_fn, map_fn)
     }
 
-    /// See [`tower::util::boxed_clone`] for details.
-    /// This variant returns a [`BoxCloneSyncService`] instead of a [`BoxService`].
+    /// See [`tower::util::ServiceExt::boxed_clone`] for details.
+    /// This variant returns a [`tower::util::BoxCloneSyncService`] instead
+    /// of a [`tower::util::BoxCloneService`].
     fn boxed_clone_sync(self) -> BoxCloneSyncService<Request, Self::Response, Self::Error>
     where
         Self: Sized + Send + 'static,
