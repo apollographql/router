@@ -320,7 +320,9 @@ mod test_validate_source {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
             glob!("test_data", "**/*.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
+                let start_time = std::time::Instant::now();
                 let result = validate(schema.clone(), path.to_str().unwrap());
+                let end_time = std::time::Instant::now();
                 assert_debug_snapshot!(result.errors);
                 if path.parent().is_some_and(|parent| parent.ends_with("transformed")) {
                     assert_snapshot!(&diff::lines(&schema, &result.transformed).into_iter().filter_map(|res| match res {
@@ -331,6 +333,8 @@ mod test_validate_source {
                 } else {
                     assert_str_eq!(schema, result.transformed, "Schema should not have been transformed by validations")
                 }
+
+                assert!(end_time - start_time < std::time::Duration::from_millis(100));
             });
         });
     }

@@ -119,6 +119,10 @@ use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 /// Stored in request context so map_response can update the router span's name even if current span changed.
 #[derive(Clone)]
 struct RouterSpanForNaming(::tracing::Span);
+
+/// Set on the shared request [`Context`] after `router_service` telemetry has run its response path,
+/// so `router_http_service` can skip duplicate span attributes / status when the request reached the Router pipeline.
+struct RouterServiceTelemetryHandled;
 use crate::plugins::telemetry::error_counter::count_execution_errors;
 use crate::plugins::telemetry::error_counter::count_router_errors;
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
@@ -370,28 +374,71 @@ impl PluginPrivate for Telemetry {
     /// Router HTTP hook: when not using legacy request span, create the router span and store it in
     /// request context here so that the same context flows through any other router_http plugins
     /// (e.g. Rhai) and into the router pipeline, ensuring map_response finds RouterSpanForNaming.
+    ///
+    /// Also runs [`count_router_errors`] for every response so GraphQL errors are counted when the
+    /// request short-circuits at RouterHttp (e.g. license rate limiting) and never reaches
+    /// [`Self::router_service`]. When the Router pipeline ran, [`RouterServiceTelemetryHandled`] is
+    /// set so we skip duplicate `otel.status_code` / response span attributes here.
     fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
         let use_legacy_request_span =
             matches!(self.config.instrumentation.spans.mode, SpanMode::Deprecated);
+        let config = self.config.clone();
+
+        let with_http_error_count = ServiceBuilder::new()
+            .map_future_with_request_data(
+                move |request: &router::Request| request.context.clone(),
+                move |ctx: Context, fut| {
+                    let config = config.clone();
+                    async move {
+                        let response: Result<router::Response, BoxError> = fut.await;
+                        let handled_by_router_service = ctx
+                            .extensions()
+                            .with_lock(|ext| ext.get::<RouterServiceTelemetryHandled>().is_some());
+                        if !handled_by_router_service && let Ok(response) = &response {
+                            let span = Span::current();
+                            if response.response.status() >= StatusCode::BAD_REQUEST {
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                            } else {
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
+                            }
+                            span.set_span_dyn_attributes(
+                                config
+                                    .instrumentation
+                                    .spans
+                                    .router
+                                    .attributes
+                                    .on_response(response),
+                            );
+                        }
+                        match response {
+                            Ok(resp) => Ok(count_router_errors(resp, &config.apollo.errors).await),
+                            Err(e) => Err(e),
+                        }
+                    }
+                },
+            )
+            .service(service);
+
         if use_legacy_request_span {
-            return service;
+            with_http_error_count.boxed()
+        } else {
+            let span_mode = self.config.instrumentation.spans.mode;
+            ServiceBuilder::new()
+                .layer(InstrumentLayer::new(move |request: &router::Request| {
+                    let span = span_mode.create_router(&request.router_request);
+                    request
+                        .context
+                        .extensions()
+                        .with_lock(|ext| ext.insert(RouterSpanForNaming(span.clone())));
+                    span.set_span_dyn_attribute(
+                        HTTP_REQUEST_METHOD.into(),
+                        request.router_request.method().to_string().into(),
+                    );
+                    span
+                }))
+                .service(with_http_error_count)
+                .boxed()
         }
-        let span_mode = self.config.instrumentation.spans.mode;
-        ServiceBuilder::new()
-            .layer(InstrumentLayer::new(move |request: &router::Request| {
-                let span = span_mode.create_router(&request.router_request);
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|ext| ext.insert(RouterSpanForNaming(span.clone())));
-                span.set_span_dyn_attribute(
-                    HTTP_REQUEST_METHOD.into(),
-                    request.router_request.method().to_string().into(),
-                );
-                span
-            }))
-            .service(service)
-            .boxed()
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -796,6 +843,9 @@ impl PluginPrivate for Telemetry {
                             custom_instruments.on_error(err, &ctx);
                             custom_events.on_error(err, &ctx);
                         }
+
+                        ctx.extensions()
+                            .with_lock(|ext| ext.insert(RouterServiceTelemetryHandled));
 
                         if let Ok(resp) = response {
                             Ok(count_router_errors(resp, &config.apollo.errors).await)

@@ -90,17 +90,11 @@ where
     }
 }
 
-/// Returns true if the request is for the static landing page (GET with Accept: text/html).
-/// Used to route such requests around the RouterHttp plugin stack.
-pub(crate) fn is_static_landing_request(req: &router::Request) -> bool {
-    req.router_request.method() == Method::GET && accepts_html(req.router_request.headers())
-}
-
 /// Returns true if the given header map contains an `Accept` header which contains the "text/html"
 /// MIME type.
 ///
 /// `Accept` priorities or preferences are not considered.
-pub(crate) fn accepts_html(headers: &HeaderMap) -> bool {
+fn accepts_html(headers: &HeaderMap) -> bool {
     let text_html = MediaType::new(TEXT, HTML);
 
     headers.get_all(&http::header::ACCEPT).iter().any(|value| {

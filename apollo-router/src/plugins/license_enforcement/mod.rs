@@ -73,15 +73,6 @@ impl PluginPrivate for LicenseEnforcement {
                     match response {
                         Ok(ok) => Ok(ok),
                         Err(err) if err.is::<Overloaded>() => {
-                            // Emit the same metric that Telemetry's count_router_errors would emit.
-                            // We're in RouterHttp so the response never reaches the Router pipeline,
-                            // so we record it here to preserve the behavior from when this ran in router_service.
-                            u64_counter!(
-                                "apollo.router.graphql_error",
-                                "Number of GraphQL error responses returned by the router",
-                                1,
-                                code = "ROUTER_FREE_PLAN_RATE_LIMIT_REACHED"
-                            );
                             let error = graphql::Error::builder()
                                 .message("Your request has been rate limited. You've reached the limits for the Free plan. Consider upgrading to a higher plan for increased limits.")
                                 .extension_code("ROUTER_FREE_PLAN_RATE_LIMIT_REACHED")
@@ -112,8 +103,9 @@ register_private_plugin!("apollo", "license_enforcement", LicenseEnforcement);
 
 #[cfg(test)]
 mod test {
+    use http_body_util::BodyExt;
+
     use super::*;
-    use crate::metrics::FutureMetricsExt;
     use crate::plugins::test::PluginTestHarness;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
@@ -176,52 +168,47 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn it_emits_metrics_when_tps_enforced() {
-        async {
-            // GIVEN a license with TPS limits (1 req per 150ms) and the license enforcement plugin
-            let license = LicenseState::Licensed {
-                limits: Some(LicenseLimits {
-                    tps: Some(TpsLimit {
-                        capacity: 1,
-                        interval: Duration::from_millis(150),
-                    }),
-                    allowed_features: Default::default(),
+    async fn it_returns_graphql_error_when_tps_enforced() {
+        // GIVEN a license with TPS limits (1 req per 150ms) and the license enforcement plugin
+        let license = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: Some(TpsLimit {
+                    capacity: 1,
+                    interval: Duration::from_millis(150),
                 }),
-            };
+                allowed_features: Default::default(),
+            }),
+        };
 
-            let license_service = PluginTestHarness::<LicenseEnforcement>::builder()
-                .license(license)
-                .build()
-                .await
-                .unwrap()
-                .router_http_service(|req| async {
-                    Ok(router::Response::fake_builder()
-                        .data(serde_json::json!({"data": {"field": "value"}}))
-                        .header("x-custom-header", "test-value")
-                        .context(req.context)
-                        .build()
-                        .unwrap())
-                });
+        let license_service = PluginTestHarness::<LicenseEnforcement>::builder()
+            .license(license)
+            .build()
+            .await
+            .unwrap()
+            .router_http_service(|req| async {
+                Ok(router::Response::fake_builder()
+                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .header("x-custom-header", "test-value")
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
 
-            // WHEN we send two requests so the second is rate-limited
-            let _first_response = license_service.call_default().await;
-            let second_response = license_service.call_default().await.unwrap();
+        // WHEN we send two requests so the second is rate-limited
+        let _first_response = license_service.call_default().await;
+        let second_response = license_service.call_default().await.unwrap();
 
-            // THEN the second response is rate-limited and the plugin has emitted the metric
-            // (same metric that Telemetry's count_router_errors would emit when response has
-            // ROUTER_FREE_PLAN_RATE_LIMIT_REACHED; we emit it here because we run in RouterHttp
-            // and the response never reaches the Router pipeline).
-            assert_eq!(
-                second_response.response.status(),
-                StatusCode::SERVICE_UNAVAILABLE
-            );
-            assert_counter!(
-                "apollo.router.graphql_error",
-                1,
-                code = "ROUTER_FREE_PLAN_RATE_LIMIT_REACHED"
-            );
-        }
-        .with_metrics()
-        .await;
+        // THEN the second response is rate-limited with the expected extension code.
+        // `apollo.router.graphql_error` is recorded by the telemetry plugin when it wraps this
+        // plugin in the real router (see `router_factory` plugin order).
+        assert_eq!(
+            second_response.response.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let body = second_response.response.into_body();
+        let bytes = body.collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let code = v["errors"][0]["extensions"]["code"].as_str();
+        assert_eq!(code, Some("ROUTER_FREE_PLAN_RATE_LIMIT_REACHED"));
     }
 }

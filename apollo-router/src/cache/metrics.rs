@@ -229,10 +229,6 @@ impl RedisMetricsCollector {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use opentelemetry::KeyValue;
-
     use super::*;
     use crate::cache::redis::RedisCacheStorage;
     use crate::cache::redis::RedisKey;
@@ -338,26 +334,15 @@ mod tests {
                 &[],
             ));
 
-            // Queue length may lag briefly after work completes; poll (slow CI / Windows).
-            let queue_attrs = &[KeyValue::new("kind", "test")];
-            let mut queue_drained = false;
-            for _ in 0..50 {
-                if crate::metrics::collect_metrics().assert(
-                    "apollo.router.cache.redis.command_queue_length",
-                    MetricType::Gauge,
-                    0.0_f64,
-                    false,
-                    queue_attrs,
-                ) {
-                    queue_drained = true;
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(40)).await;
-            }
-            assert!(
-                queue_drained,
-                "apollo.router.cache.redis.command_queue_length did not reach 0 for kind=test within ~2s"
-            );
+            // Pause to ensure that queue length is zero & metrics have been exported
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert!(crate::metrics::collect_metrics().assert(
+                "apollo.router.cache.redis.command_queue_length",
+                MetricType::Gauge,
+                0.0_f64,
+                false,
+                &[opentelemetry::KeyValue::new("kind", "test")],
+            ));
 
             // Verify Redis average metrics are available (may be 0 initially)
             assert_gauge!(

@@ -857,6 +857,10 @@ pub(crate) async fn create_plugins(
     // plugins can be before it if they must run before telemetry at specific services.
     add_mandatory_apollo_plugin!("include_subgraph_errors");
     add_mandatory_apollo_plugin!("headers");
+    // License enforcement must be registered before telemetry so the RouterHttp fold wraps
+    // license inside telemetry: rate-limited responses still flow through telemetry's
+    // `router_http_service` (error counting, span status). License has no `router_service` hook.
+    add_mandatory_apollo_plugin!("license_enforcement");
     if apollo_telemetry_plugin_mandatory {
         match initial_telemetry_plugin {
             None => {
@@ -869,7 +873,6 @@ pub(crate) async fn create_plugins(
             }
         }
     }
-    add_mandatory_apollo_plugin!("license_enforcement");
     add_mandatory_apollo_plugin!("health_check");
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_mandatory_apollo_plugin!("limits");
