@@ -458,10 +458,7 @@ impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
         let field_specs = (self.fields)(schema);
         let resolved_specs: IndexMap<Name, ResolvedArgumentSpecification> = field_specs
             .into_iter()
-            .map(|spec| {
-                spec.resolve(schema, link)
-                    .and_then(|r| Ok((r.name.clone(), r)))
-            })
+            .map(|spec| spec.resolve(schema, link).map(|r| (r.name.clone(), r)))
             .collect::<Result<IndexMap<Name, ResolvedArgumentSpecification>, FederationError>>()?;
         let existing = schema.try_get_type(actual_name.clone());
         if let Some(existing) = existing {
@@ -506,7 +503,7 @@ impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
                     // to avoid some breaking change, but there's no such limitation in
                     // the case of input objects, so we always validate default values
                     // here.
-                    if !same_type(&ty, &existing_field_type) {
+                    if !same_type(ty, &existing_field_type) {
                         errors.push(
                             SingleFederationError::TypeDefinitionInvalid {
                                 message: format!("Invalid definition for type {}: input field \"{field_name}\" should have type \"{ty}\" but found type \"{}\"", self.name, existing_field.ty)
