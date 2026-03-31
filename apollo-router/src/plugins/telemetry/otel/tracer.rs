@@ -176,6 +176,7 @@ mod tests {
             event_attributes: None,
             forced_status: None,
             forced_span_name: None,
+            tracing_metadata_name: String::new(),
         });
         let span = cx.span();
         let span_context = span.span_context();
@@ -219,6 +220,7 @@ mod tests {
                 event_attributes: None,
                 forced_status: None,
                 forced_span_name: None,
+                tracing_metadata_name: String::new(),
             });
 
             assert_eq!(

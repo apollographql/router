@@ -1,0 +1,38 @@
+# Local Jaeger + OpenTelemetry (OTLP). Use with Jaeger all-in-one (e.g. otlp-router/docker-compose.yaml).
+# DEVELOPMENT.md and README run: cargo run -s <supergraph> -c examples/telemetry/jaeger.router.yaml
+# View traces at http://localhost:16686
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        jaeger: true
+      experimental_response_trace_id:
+        enabled: true
+        header_name: apollo-custom-trace-id
+      common:
+        service_name: router
+        resource:
+          env: local
+          service.version: local-example
+      otlp:
+        enabled: true
+        protocol: http
+        endpoint: http://127.0.0.1:4318
+        batch_processor:
+          scheduled_delay: 100ms
+    # Optional: Prometheus metrics on a separate port (router GraphQL stays on default 4000)
+    metrics:
+      prometheus:
+        enabled: true
+        listen: 127.0.0.1:9090
+        path: /metrics
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      supergraph:
+        attributes:
+          graphql.operation.name: true
+      subgraph:
+        attributes:
+          otel.name:
+            subgraph_operation_name: string

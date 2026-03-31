@@ -2,17 +2,20 @@
 //!
 //! Provides a customization mechanism for the router.
 //!
-//! Requests received by the router make their way through a processing pipeline. Each request is
-//! processed at:
-//!  - router
-//!  - execution
-//!  - subgraph (multiple in parallel if multiple subgraphs are accessed)
+//! Request execution order (earliest to latest) is the list below. Only GraphQL requests go through
+//! RouterHttp; static landing and health check are separate routes.
 //!
-//! stages.
+//! Stages at which a plugin can hook in:
+//!  1. **RouterHttp** — [`router_http_service`](Plugin::router_http_service) (raw HTTP, top-level hook)
+//!  2. **Router** — [`router_service`](Plugin::router_service)
+//!  3. **Supergraph** — [`supergraph_service`](Plugin::supergraph_service)
+//!  4. **Execution** — [`execution_service`](Plugin::execution_service)
+//!  5. **Subgraph** — [`subgraph_service`](Plugin::subgraph_service) (per subgraph, in parallel)
 //!
-//! A plugin can choose to interact with the flow of requests at any or all of these stages of
-//! processing. At each stage a [`Service`] is provided which provides an appropriate
-//! mechanism for interacting with the request and response.
+//! For the full request path and plugin order, see [Router request lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
+//!
+//! A plugin can choose to interact at any or all of these stages. At each stage a [`Service`] is
+//! provided which gives an appropriate mechanism for interacting with the request and response.
 
 pub mod serde;
 #[macro_use]
@@ -373,12 +376,23 @@ pub trait Plugin: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// Top-level hook: runs at the **RouterHttp** pipeline (raw HTTP layer), before the Router
+    /// pipeline. This is the earliest point at which plugins run for GraphQL requests. Use it for
+    /// logic that must run before telemetry, traffic shaping, and other built-in features. Only
+    /// GraphQL requests pass through; static landing and health check do not. See [request
+    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
     /// This function is EXPERIMENTAL and its signature is subject to change.
     ///
-    /// This service runs at the very beginning and very end of the request lifecycle.
-    /// It's the entrypoint of every requests and also the last hook before sending the response.
-    /// Define `router_service` if your customization needs to interact at the earliest or latest point possible.
-    /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    /// This service runs at the **Router** pipeline: after the [RouterHttp](Self::router_http_service)
+    /// pipeline and before supergraph/execution/subgraph. It is the first hook that sees a
+    /// deserialized `RouterRequest`. Define `router_service` for customizations that need to run
+    /// at this stage (e.g. JWT verification before the request proceeds). For the earliest
+    /// possible point (raw HTTP), use [router_http_service](Self::router_http_service) instead.
+    /// See [request lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         service
     }
@@ -447,12 +461,18 @@ pub trait PluginUnstable: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// Top-level hook: RouterHttp pipeline (raw HTTP), before the Router pipeline. See
+    /// [Plugin::router_http_service] and [request
+    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
     /// This function is EXPERIMENTAL and its signature is subject to change.
     ///
-    /// This service runs at the very beginning and very end of the request lifecycle.
-    /// It's the entrypoint of every requests and also the last hook before sending the response.
-    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
-    /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    /// Router pipeline hook: runs after [router_http_service](PluginUnstable::router_http_service)
+    /// and before supergraph/execution/subgraph. See [Plugin::router_service] and [request
+    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         service
     }
@@ -512,6 +532,10 @@ where
         Self: Sized,
     {
         Plugin::new(init).await
+    }
+
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        Plugin::router_http_service(self, service)
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -578,12 +602,16 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// Top-level hook: RouterHttp pipeline (raw HTTP), before the Router pipeline. See [request
+    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
     /// This function is EXPERIMENTAL and its signature is subject to change.
     ///
-    /// This service runs at the very beginning and very end of the request lifecycle.
-    /// It's the entrypoint of every requests and also the last hook before sending the response.
-    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
-    /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    /// Router pipeline hook: runs after router_http and before supergraph/execution/subgraph. See
+    /// [request lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         service
     }
@@ -663,6 +691,10 @@ where
         PluginUnstable::new(init).await
     }
 
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        PluginUnstable::router_http_service(self, service)
+    }
+
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         PluginUnstable::router_service(self, service)
     }
@@ -709,10 +741,12 @@ fn get_type_of<T>(_: &T) -> &'static str {
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub(crate) trait DynPlugin: Send + Sync + 'static {
-    /// This service runs at the very beginning and very end of the request lifecycle.
-    /// It's the entrypoint of every requests and also the last hook before sending the response.
-    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
-    /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    /// Top-level hook: RouterHttp pipeline (raw HTTP), before the Router pipeline. See [request
+    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService;
+
+    /// Router pipeline hook (after RouterHttp, before supergraph/execution/subgraph). See [request
+    /// lifecycle](https://www.apollographql.com/docs/graphos/routing/request-lifecycle).
     fn router_service(&self, service: router::BoxService) -> router::BoxService;
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
@@ -771,6 +805,10 @@ where
     T: PluginPrivate,
     for<'de> <T as PluginPrivate>::Config: Deserialize<'de>,
 {
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        PluginPrivate::router_http_service(self, service)
+    }
+
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         self.router_service(service)
     }

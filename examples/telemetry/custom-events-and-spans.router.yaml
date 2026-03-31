@@ -1,0 +1,100 @@
+# Example: custom spans (attributes) and custom events for all instrumented stages.
+# Use with Jaeger (e.g. otlp-router/docker-compose.yaml). View traces at http://localhost:16686.
+# The router span is the top-level span (created at the Axum HTTP boundary). Router HTTP is a
+# customization hook only (plugins, coprocessor, Rhai)—it has no separate telemetry config.
+# Custom events attach to the current span at each stage; they do not create new spans.
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        jaeger: true
+      experimental_response_trace_id:
+        enabled: true
+        header_name: apollo-custom-trace-id
+      common:
+        service_name: router
+        resource:
+          env: local
+          service.version: local-example
+      otlp:
+        enabled: true
+        protocol: http
+        endpoint: http://127.0.0.1:4318
+        batch_processor:
+          scheduled_delay: 100ms
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          "example.router.attr":
+            request_header: "x-custom"
+      supergraph:
+        attributes:
+          graphql.operation.name: true
+      subgraph:
+        attributes:
+          subgraph.name: true
+          otel.name:
+            subgraph_operation_name: string
+      connector:
+        attributes: {}
+      http_client:
+        attributes: {}
+    events:
+      router:
+        example.router.request:
+          message: "Router request received"
+          level: info
+          on: request
+          attributes:
+            http.request.body.size: true
+        example.router.response:
+          message: "Router response completed"
+          level: info
+          on: response
+          attributes:
+            http.response.body.size: true
+      supergraph:
+        example.supergraph.request:
+          message: "Supergraph request"
+          level: info
+          on: request
+        example.supergraph.response:
+          message: "Supergraph response"
+          level: info
+          on: response
+      subgraph:
+        example.subgraph.request:
+          message: "Subgraph request"
+          level: info
+          on: request
+          attributes:
+            subgraph.name: true
+        example.subgraph.response:
+          message: "Subgraph response"
+          level: info
+          on: response
+          attributes:
+            subgraph.name: true
+            response_status:
+              subgraph_response_status: code
+      connector:
+        example.connector.request:
+          message: "Connector request"
+          level: info
+          on: request
+          attributes:
+            subgraph.name: true
+            connector_source:
+              connector_source: name
+            http_method:
+              connector_http_method: true
+        example.connector.response:
+          message: "Connector response"
+          level: info
+          on: response
+          attributes:
+            subgraph.name: true
+            response_status:
+              connector_http_response_status: code

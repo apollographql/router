@@ -187,6 +187,36 @@ async fn get_batch_router_service(
     )
 }
 
+/// Asserts the connector trace has the expected shape: root span named "query" with
+/// graphql.operation.type, and a "router" span. This validates that the root HTTP/request span
+/// still receives OTEL_NAME and graphql.operation.type after the RouterHttp refactor (same
+/// behavior as before).
+fn assert_connector_trace_shape(report: &ExportTraceServiceRequest) {
+    let first_span = report
+        .resource_spans
+        .first()
+        .and_then(|rs| rs.scope_spans.first())
+        .and_then(|ss| ss.spans.first())
+        .expect("report must have at least one span");
+    assert_eq!(
+        first_span.name, "query",
+        "root span must be named 'query' (OTEL_NAME set on request span)"
+    );
+    assert!(
+        first_span
+            .attributes
+            .iter()
+            .any(|kv| kv.key == "graphql.operation.type"),
+        "root span must have graphql.operation.type attribute"
+    );
+    let has_router_span = report.resource_spans.iter().any(|rs| {
+        rs.scope_spans
+            .iter()
+            .any(|ss| ss.spans.iter().any(|s| s.name == "router"))
+    });
+    assert!(has_router_span, "trace must contain a span named 'router'");
+}
+
 macro_rules! assert_report {
         ($report: expr)=> {
             assert_report!($report, false)
@@ -415,6 +445,8 @@ where
         .expect("failed to find report")
 }
 
+/// Ensures the root HTTP/request span still receives OTEL_NAME and graphql.operation.type after
+/// the RouterHttp refactor, so the trace shape remains "query" -> "router" -> ... as before.
 #[tokio::test(flavor = "multi_thread")]
 async fn connector() {
     for use_legacy_request_span in [true, false] {
@@ -425,10 +457,12 @@ async fn connector() {
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
         let report = get_connector_trace_report(reports, req, use_legacy_request_span).await;
+        assert_connector_trace_shape(&report);
         assert_report!(report);
     }
 }
 
+/// Same contract as connector: root span "query" with graphql.operation.type, with connector errors.
 #[tokio::test(flavor = "multi_thread")]
 async fn connector_error() {
     for use_legacy_request_span in [true, false] {
@@ -439,6 +473,7 @@ async fn connector_error() {
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
         let report = get_connector_trace_report(reports, req, use_legacy_request_span).await;
+        assert_connector_trace_shape(&report);
         assert_report!(report);
     }
 }

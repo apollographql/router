@@ -5,3 +5,15 @@ expression: yaml
 - fields: {}
   level: INFO
   message: response
+  span:
+    apollo_private.request: true
+    http.request.method: GET
+    http.route: /
+    name: router
+    otel.kind: SERVER
+  spans:
+    - apollo_private.request: true
+      http.request.method: GET
+      http.route: /
+      name: router
+      otel.kind: SERVER

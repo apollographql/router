@@ -114,6 +114,14 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+
+/// Stored in request context so map_response can update the router span's name even if current span changed.
+#[derive(Clone)]
+struct RouterSpanForNaming(::tracing::Span);
+
+/// Set on the shared request [`Context`] after `router_service` telemetry has run its response path,
+/// so `router_http_service` can skip duplicate span attributes / status when the request reached the Router pipeline.
+struct RouterServiceTelemetryHandled;
 use crate::plugins::telemetry::error_counter::count_execution_errors;
 use crate::plugins::telemetry::error_counter::count_router_errors;
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
@@ -362,6 +370,76 @@ impl PluginPrivate for Telemetry {
         })
     }
 
+    /// Router HTTP hook: when not using legacy request span, create the router span and store it in
+    /// request context here so that the same context flows through any other router_http plugins
+    /// (e.g. Rhai) and into the router pipeline, ensuring map_response finds RouterSpanForNaming.
+    ///
+    /// Also runs [`count_router_errors`] for every response so GraphQL errors are counted when the
+    /// request short-circuits at RouterHttp (e.g. license rate limiting) and never reaches
+    /// [`Self::router_service`]. When the Router pipeline ran, [`RouterServiceTelemetryHandled`] is
+    /// set so we skip duplicate `otel.status_code` / response span attributes here.
+    fn router_http_service(&self, service: router::BoxService) -> router::BoxService {
+        let use_legacy_request_span =
+            matches!(self.config.instrumentation.spans.mode, SpanMode::Deprecated);
+        let config = self.config.clone();
+
+        let with_http_error_count = ServiceBuilder::new()
+            .map_future_with_request_data(
+                move |request: &router::Request| request.context.clone(),
+                move |ctx: Context, fut| {
+                    let config = config.clone();
+                    async move {
+                        let response: Result<router::Response, BoxError> = fut.await;
+                        let handled_by_router_service = ctx
+                            .extensions()
+                            .with_lock(|ext| ext.get::<RouterServiceTelemetryHandled>().is_some());
+                        if !handled_by_router_service && let Ok(response) = &response {
+                            let span = Span::current();
+                            if response.response.status() >= StatusCode::BAD_REQUEST {
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                            } else {
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
+                            }
+                            span.set_span_dyn_attributes(
+                                config
+                                    .instrumentation
+                                    .spans
+                                    .router
+                                    .attributes
+                                    .on_response(response),
+                            );
+                        }
+                        match response {
+                            Ok(resp) => Ok(count_router_errors(resp, &config.apollo.errors).await),
+                            Err(e) => Err(e),
+                        }
+                    }
+                },
+            )
+            .service(service);
+
+        if use_legacy_request_span {
+            with_http_error_count.boxed()
+        } else {
+            let span_mode = self.config.instrumentation.spans.mode;
+            ServiceBuilder::new()
+                .layer(InstrumentLayer::new(move |request: &router::Request| {
+                    let span = span_mode.create_router(&request.router_request);
+                    request
+                        .context
+                        .extensions()
+                        .with_lock(|ext| ext.insert(RouterSpanForNaming(span.clone())));
+                    span.set_span_dyn_attribute(
+                        HTTP_REQUEST_METHOD.into(),
+                        request.router_request.method().to_string().into(),
+                    );
+                    span
+                }))
+                .service(with_http_error_count)
+                .boxed()
+        }
+    }
+
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let config = self.config.clone();
         let supergraph_schema_id = self.supergraph_schema_id.clone();
@@ -396,42 +474,97 @@ impl PluginPrivate for Telemetry {
         ServiceBuilder::new()
             .layer(metrics::allocation::AllocationMetricsLayer::new())
             .map_response(move |response: router::Response| {
-                // The current span *should* be the request span as we are outside the instrument block.
-                let span = Span::current();
-                if let Some(span_name) = span.metadata().map(|metadata| metadata.name())
-                    && ((use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
-                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME))
-                {
-                    //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
+                // Set router span's otel.name (e.g. "query ExampleQuery") so OTLP export is correct.
+                // We stored the router span in request context so we update it even if Span::current()
+                // is a child span when map_response runs (e.g. with router_http plugins).
+                let otel_name = {
                     let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
                     let operation_name = response.context.get::<_, String>(OPERATION_NAME);
-
-                    if let Ok(Some(operation_kind)) = &operation_kind {
-                        span.record("graphql.operation.type", operation_kind);
-                    }
-                    if let Ok(Some(operation_name)) = &operation_name {
-                        span.record("graphql.operation.name", operation_name);
-                    }
                     match (&operation_kind, &operation_name) {
-                        (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
-                            OTEL_NAME.into(),
-                            format!("{kind} {name}").into(),
-                        ),
-                        (Ok(Some(kind)), _) => {
-                            span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
+                        (Ok(Some(kind)), Ok(Some(name))) => format!("{kind} {name}"),
+                        (Ok(Some(kind)), _) => kind.clone(),
+                        _ => "GraphQL Operation".to_string(),
+                    }
+                };
+                if let Some(RouterSpanForNaming(span)) = response
+                    .context
+                    .extensions()
+                    .with_lock(|ext| ext.remove::<RouterSpanForNaming>())
+                {
+                    if let Ok(Some(ref operation_kind)) =
+                        response.context.get::<_, String>(OPERATION_KIND)
+                    {
+                        span.record("graphql.operation.type", operation_kind.as_str());
+                    }
+                    if let Ok(Some(ref operation_name)) =
+                        response.context.get::<_, String>(OPERATION_NAME)
+                    {
+                        span.record("graphql.operation.name", operation_name.as_str());
+                    }
+                    span.record(OTEL_NAME, otel_name.as_str());
+                    span.set_span_dyn_attribute(OTEL_NAME.into(), otel_name.clone().into());
+                } else {
+                    // Fallback when no stored span (legacy request span path): update current span if it's the router span.
+                    let span = ::tracing::Span::current();
+                    if let Some(span_name) = span.metadata().map(|metadata| metadata.name())
+                        && ((use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
+                            || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME))
+                    {
+                        let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
+                        let operation_name = response.context.get::<_, String>(OPERATION_NAME);
+                        if let Ok(Some(operation_kind)) = &operation_kind {
+                            span.record("graphql.operation.type", operation_kind);
                         }
-                        _ => span
-                            .set_span_dyn_attribute(OTEL_NAME.into(), "GraphQL Operation".into()),
-                    };
+                        if let Ok(Some(operation_name)) = &operation_name {
+                            span.record("graphql.operation.name", operation_name);
+                        }
+                        span.record(OTEL_NAME, otel_name.as_str());
+                        span.set_span_dyn_attribute(OTEL_NAME.into(), otel_name.into());
+                    }
                 }
 
                 response
             })
-            .option_layer(use_legacy_request_span.then(move || {
+            .layer({
+                let use_legacy = use_legacy_request_span;
                 InstrumentLayer::new(move |request: &router::Request| {
-                    span_mode.create_router(&request.router_request)
+                    if use_legacy {
+                        // Root span is the "request" span (e.g. test harness or axum MakeSpan).
+                        // Store it so map_response can set OTEL_NAME. Also create and enter "router"
+                        // span so the trace contains it (test expects both root "query" and "router").
+                        let request_span = Span::current();
+                        request
+                            .context
+                            .extensions()
+                            .with_lock(|ext| ext.insert(RouterSpanForNaming(request_span.clone())));
+                        let router_span = span_mode.create_router(&request.router_request);
+                        router_span.set_span_dyn_attribute(
+                            HTTP_REQUEST_METHOD.into(),
+                            request.router_request.method().to_string().into(),
+                        );
+                        router_span
+                    } else {
+                        // Use span from context if router_http_service already set it; else create and store.
+                        request
+                            .context
+                            .extensions()
+                            .with_lock(|ext| ext.get::<RouterSpanForNaming>().cloned())
+                            .map(|s| s.0)
+                            .unwrap_or_else(|| {
+                                let s = span_mode.create_router(&request.router_request);
+                                request
+                                    .context
+                                    .extensions()
+                                    .with_lock(|ext| ext.insert(RouterSpanForNaming(s.clone())));
+                                s.set_span_dyn_attribute(
+                                    HTTP_REQUEST_METHOD.into(),
+                                    request.router_request.method().to_string().into(),
+                                );
+                                s
+                            })
+                    }
                 })
-            }))
+            })
             .checkpoint(move |req: router::Request| {
                 let library_name_valid = req
                     .router_request
@@ -567,9 +700,10 @@ impl PluginPrivate for Telemetry {
                     Self::plugin_metrics(&config);
 
                     async move {
-                        // NB: client name and version must be picked up here, rather than in the
-                        //  `req_fn` of this `map_future_with_request_data` call, to allow plugins
-                        //  at the router service to modify the name and version.
+                        // NB: client name and version must be picked up after the inner service
+                        // runs (from response context), so that router_service plugins (e.g. Rhai)
+                        // can override them. We set initial values from request context for the error
+                        // path where we have no response.
                         let get_from_context =
                             |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
                         let client_name = get_from_context(&ctx, CLIENT_NAME).or_else(|| {
@@ -626,6 +760,31 @@ impl PluginPrivate for Telemetry {
 
                         let expose_trace_id = &config.exporters.tracing.response_trace_id;
                         if let Ok(response) = &response {
+                            // Use response context so plugin overrides (e.g. Rhai) are reflected
+                            let response_ctx = &response.context;
+                            let client_name =
+                                get_from_context(response_ctx, CLIENT_NAME).or_else(|| {
+                                    get_from_context(
+                                        response_ctx,
+                                        crate::context::deprecated::DEPRECATED_CLIENT_NAME,
+                                    )
+                                });
+                            let client_version = get_from_context(response_ctx, CLIENT_VERSION)
+                                .or_else(|| {
+                                    get_from_context(
+                                        response_ctx,
+                                        crate::context::deprecated::DEPRECATED_CLIENT_VERSION,
+                                    )
+                                });
+                            if client_name.is_some() || client_version.is_some() {
+                                span.set_span_dyn_attributes([
+                                    KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or_default()),
+                                    KeyValue::new(
+                                        CLIENT_VERSION_KEY,
+                                        client_version.unwrap_or_default(),
+                                    ),
+                                ]);
+                            }
                             span.set_span_dyn_attributes(
                                 config
                                     .instrumentation
@@ -704,6 +863,9 @@ impl PluginPrivate for Telemetry {
                             custom_instruments.on_error(err, &ctx);
                             custom_events.on_error(err, &ctx);
                         }
+
+                        ctx.extensions()
+                            .with_lock(|ext| ext.insert(RouterServiceTelemetryHandled));
 
                         if let Ok(resp) = response {
                             Ok(count_router_errors(resp, &config.apollo.errors).await)

@@ -161,6 +161,23 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         })
     }
 
+    pub(crate) fn router_http_service<F>(
+        &self,
+        response_fn: impl Fn(router::Request) -> F + Send + Sync + Clone + 'static,
+    ) -> ServiceHandle<router::Request, router::BoxService>
+    where
+        F: Future<Output = Result<router::Response, BoxError>> + Send + 'static,
+    {
+        let service: router::BoxService = router::BoxService::new(
+            ServiceBuilder::new().service_fn(move |req: router::Request| {
+                let response_fn = response_fn.clone();
+                async move { (response_fn)(req).await }
+            }),
+        );
+
+        ServiceHandle::new(self.plugin.router_http_service(service))
+    }
+
     pub(crate) fn router_service<F>(
         &self,
         response_fn: impl Fn(router::Request) -> F + Send + Sync + Clone + 'static,

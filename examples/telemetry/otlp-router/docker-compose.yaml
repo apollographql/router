@@ -1,0 +1,12 @@
+# Jaeger all-in-one with OTLP enabled for local viewing of router traces.
+# Start with: docker compose up -d
+# Then run the router and send requests. Open http://localhost:16686 to view traces.
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.35
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP

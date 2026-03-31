@@ -97,6 +97,8 @@ Indicates which stage of the router's [request-handling lifecycle](/graphos/rout
 
 This value is one of the following:
 
+- `RouterHttpRequest`: The **RouterHttp** pipeline has received a raw HTTP request, before the Router pipeline. This runs at the earliest possible point, analogous to Rhai's `router_http` hook.
+- `RouterHttpResponse`: The **RouterHttp** pipeline is about to send the HTTP response to the client, before the Router pipeline.
 - `RouterRequest`: The `RouterService` has just received a client request.
 - `RouterResponse`: The `RouterService` is about to send response data to a client.
 - `SupergraphRequest`: The `SupergraphService` is about to send a GraphQL request.
@@ -107,6 +109,10 @@ This value is one of the following:
 - `SubgraphResponse`: The `SubgraphService` has just received a subgraph response.
 - `ConnectorRequest`: The `ConnectorRequestService` is about to send an HTTP request to a REST API.
 - `ConnectorResponse`: The `ConnectorRequestService` has just received an HTTP response from a REST API.
+
+<Caution>
+Using the **RouterHttp** stage (`RouterHttpRequest` / `RouterHttpResponse`) means your coprocessor runs *before* traffic shaping, limits, CSRF, and other router protections. Only use the **RouterHttp** stage if you accept that risk and your coprocessor can scale to handle the load.
+</Caution>
 
 **Do not return a _different_ value for this property.** If you do, the router treats the coprocessor request as if it failed.
 

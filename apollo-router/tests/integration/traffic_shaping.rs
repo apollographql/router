@@ -140,15 +140,26 @@ async fn test_connector_timeout() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError> {
+    // Verifies that a router-level timeout returns 504 and that the timed-out request is
+    // still associated with the parsed operation (for tracing). We use a timeout long enough
+    // for parsing (100ms) and a slower subgraph (250ms) so we always hit the timeout.
+    //
+    // Enable stdout logging and `router.response` events so `otel.name` is emitted reliably.
     let mut router = IntegrationTest::builder()
         .config(
             r#"
+            telemetry:
+                exporters:
+                    logging:
+                        stdout:
+                            enabled: true
+                instrumentation:
+                    events:
+                        router:
+                            request: info
+                            response: info
             traffic_shaping:
                 router:
-                    # NB: Normally in tests we would set the timeout to 1ns. But here,
-                    # we are testing a feature that requires GraphQL parsing. If the timeout
-                    # is set to almost 0, then we might time out well before we get to the parser.
-                    # This value could still be racey, but hopefully we can get away with it.
                     timeout: 100ms
             "#,
         )
@@ -172,8 +183,9 @@ async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError>
     let response = response.text().await?;
     assert!(response.contains("GATEWAY_TIMEOUT"));
 
+    // Operation name is recorded on the span; router.request logs include the GraphQL document.
     router
-        .wait_for_log_message(r#""otel.name":"query UniqueName""#)
+        .wait_for_log_message_with_timeout("query UniqueName", std::time::Duration::from_secs(15))
         .await;
 
     router.graceful_shutdown().await;

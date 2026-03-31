@@ -21,6 +21,9 @@ pub trait Verifier {
         if let Some(spec_id) = &self.spec().trace_id {
             assert_eq!(id.to_string(), *spec_id, "trace id");
         }
+        // Poll until the collector has received the full trace. The outermost span closes
+        // when the request completes; the batch processor then exports asynchronously, so
+        // we retry until all expected spans are present or we time out.
         for _ in 0..20 {
             if self.find_valid_trace(id).await.is_ok() {
                 break;

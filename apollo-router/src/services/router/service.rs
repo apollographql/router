@@ -897,20 +897,31 @@ impl RouterCreator {
             configuration.batching.clone(),
         ));
 
-        // NOTE: This is the start of the router pipeline (router_service)
-        let sb = Buffer::new(
-            ServiceBuilder::new()
-                .layer(static_page.clone())
-                .service(
-                    supergraph_creator
-                        .plugins()
-                        .iter()
-                        .rev()
-                        .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-                )
-                .boxed(),
-            DEFAULT_BUFFER_SIZE,
-        );
+        let plugins = supergraph_creator.plugins();
+
+        // 1. Build Router pipeline (router_service hooks). This is the inner part of the single
+        // request pipeline: plugins wrap the core RouterService. Same rev() convention: first in
+        // add order wraps last → outermost. Add order: router_factory.rs create_plugins().
+        let router_pipeline = plugins
+            .iter()
+            .rev()
+            .fold(router_service.boxed(), |acc, (_, plugin)| {
+                plugin.router_service(acc)
+            });
+
+        // 2. RouterHttp pipeline (router_http_service hooks), then StaticPageLayer outermost.
+        // Pipeline: [StaticPageLayer] → [RouterHttp plugins] → [Router plugins] → [RouterService].
+        // Static landing (GET + Accept: text/html) is served by StaticPageLayer before any plugin
+        // runs. Same rev() convention for RouterHttp plugins.
+        let router_http_pipeline = plugins
+            .iter()
+            .rev()
+            .fold(router_pipeline.boxed(), |acc, (_, plugin)| {
+                plugin.router_http_service(acc)
+            });
+        let full_service = static_page.layer(router_http_pipeline).boxed();
+
+        let sb = Buffer::new(full_service, DEFAULT_BUFFER_SIZE);
 
         Ok(Self {
             supergraph_creator,

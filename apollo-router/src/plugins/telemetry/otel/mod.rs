@@ -34,4 +34,11 @@ pub(crate) struct OtelData {
 
     /// Forced span name in case it's coming from the custom attributes
     pub(crate) forced_span_name: Option<String>,
+
+    /// [`tracing::Metadata::name`] at span creation.
+    ///
+    /// Preserved so `otel.original_name` can be set on export even after `otel.name` / `SpanBuilder::name`
+    /// has been updated to the semantic name (e.g. `query ExampleQuery`). Datadog `resource_mapping`
+    /// keys off the static tracing span name (`router`, `supergraph`, …).
+    pub(crate) tracing_metadata_name: String,
 }

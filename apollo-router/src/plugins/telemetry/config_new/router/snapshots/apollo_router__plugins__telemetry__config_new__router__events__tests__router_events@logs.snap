@@ -6,7 +6,33 @@ expression: yaml
     kind: my.request_event
   level: INFO
   message: my event message
+  span:
+    apollo_private.request: true
+    http.request.method: GET
+    http.route: /
+    name: router
+    otel.kind: SERVER
+  spans:
+    - apollo_private.request: true
+      http.request.method: GET
+      http.route: /
+      name: router
+      otel.kind: SERVER
 - fields:
     kind: my.response_event
   level: INFO
   message: my response event message
+  span:
+    apollo_private.duration_ns: "[duration]"
+    apollo_private.request: true
+    http.request.method: GET
+    http.route: /
+    name: router
+    otel.kind: SERVER
+  spans:
+    - apollo_private.duration_ns: "[duration]"
+      apollo_private.request: true
+      http.request.method: GET
+      http.route: /
+      name: router
+      otel.kind: SERVER

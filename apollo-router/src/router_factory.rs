@@ -837,29 +837,30 @@ pub(crate) async fn create_plugins(
     }
 
     // Be careful with this list! Moving things around can have subtle consequences.
+    // Execution order: RouterHttp pipeline runs first (router_http_service hooks, this add order),
+    // then Router pipeline (router_service hooks, this add order), then supergraph, execution,
+    // subgraph. See https://www.apollographql.com/docs/graphos/routing/request-lifecycle.
+    //
     // Requests flow through this list multiple times in two directions. First, they go "down"
     // through the list several times as requests at the different services. Then, they go
     // "up" through the list as a response several times, once for each service.
     //
-    // The order of this list determines the relative order of plugin hooks executing at each
-    // service. This is *not* the same as the order a request flows through the router.
-    // For example, assume these three plugins:
-    // 1. header propagation (has a hook at the subgraph service)
-    // 2. telemetry (has hooks at router, supergraph, and subgraph services)
-    // 3. rate limiting (has a hook at the router service)
-    // The order here means that header propagation happens before telemetry *at the subgraph
-    // service*. Depending on the requirements of plugins, it may have to be in this order. The
-    // *router service* hook for telemetry still happens well before header propagation. Similarly,
-    // header propagation being first does not mean that it's exempt from rate limiting, for the
-    // same reason. Rate limiting must be after telemetry, though, because telemetry and rate
-    // limiting both work at the router service, and requests rejected from the router service must
-    // flow through telemetry so we can record errors.
+    // The order of this list determines the relative order of plugin hooks at each service. A
+    // request flows "down" through the list at each stage and "up" on the response path. This is
+    // *not* the same as the order a request flows through the router. Example: header propagation
+    // (subgraph), telemetry (router + supergraph + subgraph), rate limiting (router). Here, header
+    // propagation runs before telemetry *at the subgraph service*; the *router* hook for
+    // telemetry still runs before header propagation (different stage). Rate limiting must be
+    // after telemetry so requests rejected at the router service still flow through telemetry.
     //
-    // Broadly, for telemetry to work, we must make sure that the telemetry plugin is the first
-    // plugin in this list *that adds a router service hook*. Other plugins can be before the
-    // telemetry plugin if they must do work *before* telemetry at specific services.
+    // Telemetry must be the first plugin in this list *that adds a router_service hook*. Other
+    // plugins can be before it if they must run before telemetry at specific services.
     add_mandatory_apollo_plugin!("include_subgraph_errors");
     add_mandatory_apollo_plugin!("headers");
+    // License enforcement must be registered before telemetry so the RouterHttp fold wraps
+    // license inside telemetry: rate-limited responses still flow through telemetry's
+    // `router_http_service` (error counting, span status). License has no `router_service` hook.
+    add_mandatory_apollo_plugin!("license_enforcement");
     if apollo_telemetry_plugin_mandatory {
         match initial_telemetry_plugin {
             None => {
@@ -872,7 +873,6 @@ pub(crate) async fn create_plugins(
             }
         }
     }
-    add_mandatory_apollo_plugin!("license_enforcement");
     add_mandatory_apollo_plugin!("health_check");
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_mandatory_apollo_plugin!("limits");

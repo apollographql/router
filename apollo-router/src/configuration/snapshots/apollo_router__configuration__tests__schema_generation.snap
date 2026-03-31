@@ -2946,6 +2946,14 @@ expression: "&schema"
           ],
           "description": "The router stage request/response configuration"
         },
+        "router_http": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouterHttpStage"
+            }
+          ],
+          "description": "The router_http stage request/response configuration (raw HTTP layer, before Router pipeline)"
+        },
         "subgraph": {
           "allOf": [
             {
@@ -8281,6 +8289,138 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "RouterHttpRequestConf": {
+      "additionalProperties": false,
+      "description": "Router HTTP stage request config (same shape as RouterRequestConf; deprecated context rejected at boot).",
+      "properties": {
+        "body": {
+          "default": false,
+          "description": "Send the body",
+          "type": "boolean"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConditionRouterSelector"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Condition to trigger this stage"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContextConf"
+            }
+          ],
+          "description": "Send the context"
+        },
+        "headers": {
+          "default": false,
+          "description": "Send the headers",
+          "type": "boolean"
+        },
+        "method": {
+          "default": false,
+          "description": "Send the method",
+          "type": "boolean"
+        },
+        "path": {
+          "default": false,
+          "description": "Send the path",
+          "type": "boolean"
+        },
+        "sdl": {
+          "default": false,
+          "description": "Send the SDL",
+          "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RouterHttpResponseConf": {
+      "additionalProperties": false,
+      "description": "Router HTTP stage response config (same shape as RouterResponseConf; deprecated context rejected at boot).",
+      "properties": {
+        "body": {
+          "default": false,
+          "description": "Send the body",
+          "type": "boolean"
+        },
+        "condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConditionRouterSelector"
+            }
+          ],
+          "description": "Condition to trigger this stage"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContextConf"
+            }
+          ],
+          "description": "Send the context"
+        },
+        "headers": {
+          "default": false,
+          "description": "Send the headers",
+          "type": "boolean"
+        },
+        "sdl": {
+          "default": false,
+          "description": "Send the SDL",
+          "type": "boolean"
+        },
+        "status_code": {
+          "default": false,
+          "description": "Send the HTTP status",
+          "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RouterHttpStage": {
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouterHttpRequestConf"
+            }
+          ],
+          "description": "The request configuration"
+        },
+        "response": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouterHttpResponseConf"
+            }
+          ],
+          "description": "The response configuration"
+        }
+      },
+      "type": "object"
+    },
     "RouterRequestConf": {
       "additionalProperties": false,
       "description": "What information is passed to a router request/response stage",
@@ -8831,6 +8971,7 @@ expression: "&schema"
       "type": "object"
     },
     "RouterStage": {
+      "additionalProperties": false,
       "properties": {
         "request": {
           "allOf": [

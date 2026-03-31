@@ -34,18 +34,16 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
         if let Some(request_event) = &mut self.request
             && request_event.condition.evaluate_request(request) == Some(true)
         {
-            request
-                .context
-                .extensions()
-                .with_lock(|ext| ext.insert(DisplayRouterRequest(request_event.level)));
+            request.context.extensions().with_lock(|ext| {
+                ext.insert(DisplayRouterRequest(request_event.level));
+            });
         }
         if let Some(response_event) = &mut self.response
             && response_event.condition.evaluate_request(request) != Some(false)
         {
-            request
-                .context
-                .extensions()
-                .with_lock(|ext| ext.insert(DisplayRouterResponse));
+            request.context.extensions().with_lock(|ext| {
+                ext.insert(DisplayRouterResponse);
+            });
         }
         for custom_event in &mut self.custom {
             custom_event.on_request(request);

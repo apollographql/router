@@ -325,9 +325,6 @@ mod tests {
             assert!(retrieved.is_ok(), "Should have retrieved value from mock");
             assert_eq!(retrieved.unwrap().0.data, "test_value");
 
-            // Pause to ensure that queue length is zero & metrics have been exported
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
             // Verify Redis connection metrics are emitted.
             // Since this metric is based on a global AtomicU64, it's not unique across tests - so
             // we can only reliably check for metric existence, rather than a specific value.
@@ -337,12 +334,15 @@ mod tests {
                 &[],
             ));
 
-            // Verify Redis gauge metrics are available (observables are created immediately)
-            assert_gauge!(
+            // Pause to ensure that queue length is zero & metrics have been exported
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert!(crate::metrics::collect_metrics().assert(
                 "apollo.router.cache.redis.command_queue_length",
-                0.0,
-                kind = "test"
-            );
+                MetricType::Gauge,
+                0.0_f64,
+                false,
+                &[opentelemetry::KeyValue::new("kind", "test")],
+            ));
 
             // Verify Redis average metrics are available (may be 0 initially)
             assert_gauge!(

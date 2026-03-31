@@ -26,6 +26,7 @@ mod oci;
 mod operation_limits;
 mod operation_name;
 mod query_planner;
+mod router_http_ordering;
 mod subgraph_response;
 mod supergraph;
 mod traffic_shaping;

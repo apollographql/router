@@ -60,7 +60,7 @@ flowchart TB;
 
 This diagram shows request execution proceeding "down" from a client, through the router, to individual subgraphs. Execution then proceeds back "up" to the client in the reverse order.
 
-As shown in the diagram, the `RouterService`, `SupergraphService`, `ExecutionService`, `SubgraphService`, and `ConnectorRequestService` steps of the [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle) can send these POST requests (also called "coprocessor requests").
+As shown in the diagram, the **RouterHttp** pipeline (when configured), `RouterService`, `SupergraphService`, `ExecutionService`, `SubgraphService`, and `ConnectorRequestService` steps of the [request-handling lifecycle](/graphos/routing/customization/rhai/#router-request-lifecycle) can send certain POST requests, also called "coprocessor requests". The RouterHttp stage runs at the raw HTTP layer before the Router pipeline, so you can inspect and modify requests at the earliest possible moment (analogous to Rhai's `router_http` hook).
 
 Each supported service can send its coprocessor requests at two different **stages**:
 
@@ -105,6 +105,22 @@ coprocessor:
 ```
 
 In this case, the `RouterService` only sends a coprocessor request whenever it receives a client request. The coprocessor request body includes _no_ data related to the client request (only "control" data, which is [covered below](#coprocessor-request-format)).
+
+To hook into the **RouterHttp** pipelin—which exists in the raw HTTP layer, before the Router pipeline—instead of or in addition to the Router stage, use the `router_http` key:
+
+<Caution>
+Using the **RouterHttp** stage means your coprocessor runs *before* traffic shaping, limits, CSRF, and other router protections. Only use the **RouterHttp** stage if you accept that risk and your coprocessor can scale to handle the load.
+</Caution>
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:8081
+  router_http:
+    request:
+      headers: false
+```
+
+With that configuration, the coprocessor receives requests at the `RouterHttpRequest` and, if you add a `response` block, `RouterHttpResponse` stages.
 
 ### Configure per-stage coprocessor URLs
 
