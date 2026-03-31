@@ -229,12 +229,13 @@ impl RedisMetricsCollector {
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry::KeyValue;
+
     use super::*;
     use crate::cache::redis::RedisCacheStorage;
     use crate::cache::redis::RedisKey;
     use crate::cache::redis::RedisValue;
     use crate::metrics::test_utils::MetricType;
-    use opentelemetry::KeyValue;
 
     #[test]
     fn test_weighted_sum_average() {
