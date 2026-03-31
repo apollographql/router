@@ -4,9 +4,9 @@ expression: "JSONSelection::parse(r#\"\n            id\n            created\n   
 ---
 Err(
     JSONSelectionParseError {
-        message: "Named path selection must either begin with alias or ..., or end with subselection",
-        fragment: "choices->first.message\n            model\n        ",
-        offset: 48,
-        spec: V0_2,
+        message: "SubSelection cannot contain multiple elements if it contains an anonymous NamedSelection",
+        fragment: "\n            id\n            created\n            choices->first.message\n            model\n        ",
+        offset: 0,
+        spec: V0_3,
     },
 )

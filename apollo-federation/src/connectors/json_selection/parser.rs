@@ -179,14 +179,14 @@ impl JSONSelection {
     pub fn named(sub: SubSelection) -> Self {
         Self {
             inner: TopLevelSelection::Named(sub),
-            spec: Self::default_connect_spec(),
+            spec: ConnectSpec::latest(),
         }
     }
 
     pub fn path(path: PathSelection) -> Self {
         Self {
             inner: TopLevelSelection::Path(path),
-            spec: Self::default_connect_spec(),
+            spec: ConnectSpec::latest(),
         }
     }
 
@@ -204,7 +204,7 @@ impl JSONSelection {
     pub fn empty() -> Self {
         Self {
             inner: TopLevelSelection::Named(SubSelection::default()),
-            spec: Self::default_connect_spec(),
+            spec: ConnectSpec::latest(),
         }
     }
 
@@ -221,11 +221,7 @@ impl JSONSelection {
     // as the input type and a custom JSONSelectionParseError type as the error
     // type, rather than using Span or nom::error::Error directly.
     pub fn parse(input: &str) -> Result<Self, JSONSelectionParseError> {
-        JSONSelection::parse_with_spec(input, Self::default_connect_spec())
-    }
-
-    pub(super) fn default_connect_spec() -> ConnectSpec {
-        ConnectSpec::V0_2
+        JSONSelection::parse_with_spec(input, ConnectSpec::latest())
     }
 
     pub fn parse_with_spec(
@@ -1696,11 +1692,8 @@ impl Display for Key {
 
 pub(super) fn is_identifier(input: &str) -> bool {
     // TODO Don't use the whole parser for this?
-    all_consuming(parse_identifier_no_space)(new_span_with_spec(
-        input,
-        JSONSelection::default_connect_spec(),
-    ))
-    .is_ok()
+    all_consuming(parse_identifier_no_space)(new_span_with_spec(input, ConnectSpec::latest()))
+        .is_ok()
 }
 
 fn parse_identifier(input: Span) -> ParseResult<WithRange<String>> {
@@ -1830,15 +1823,6 @@ mod tests {
     use crate::connectors::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::connectors::json_selection::location::new_span;
     use crate::selection;
-
-    #[test]
-    fn test_default_connect_spec() {
-        // We don't necessarily want to update what
-        // JSONSelection::default_connect_spec() returns just because
-        // ConnectSpec::latest() changes, but we want to know when it happens,
-        // so we can consider updating.
-        assert_eq!(JSONSelection::default_connect_spec(), ConnectSpec::latest());
-    }
 
     #[test]
     fn test_identifier() {
@@ -2768,12 +2752,13 @@ mod tests {
 
         #[track_caller]
         fn check_path_parse_error(
+            spec: ConnectSpec,
             input: &str,
             expected_offset: usize,
             expected_message: impl Into<String>,
         ) {
             let expected_message: String = expected_message.into();
-            match PathSelection::parse(new_span_with_spec(input, ConnectSpec::latest())) {
+            match PathSelection::parse(new_span_with_spec(input, spec)) {
                 Ok((remainder, path)) => {
                     panic!(
                         "Expected error at offset {expected_offset} with message '{expected_message}', but got path {path:?} and remainder {remainder:?}",
@@ -2787,7 +2772,7 @@ mod tests {
                     assert_eq!(
                         e.input.extra,
                         SpanExtra {
-                            spec: ConnectSpec::latest(),
+                            spec,
                             errors: vec![(expected_message, expected_offset)],
                             local_vars: Vec::new(),
                         }
@@ -2799,19 +2784,24 @@ mod tests {
             }
         }
 
+        // Single-key path ambiguity is only enforced in V0_1/V0_2; in V0_3+
+        // the ambiguity was resolved by unifying NamedSelection variants.
         let single_key_path_error_message =
             "Single-key path must be prefixed with $. to avoid ambiguity with field name";
         check_path_parse_error(
+            ConnectSpec::V0_2,
             new_span("naked").fragment(),
             0,
             single_key_path_error_message,
         );
         check_path_parse_error(
+            ConnectSpec::V0_2,
             new_span("naked { hi }").fragment(),
             0,
             single_key_path_error_message,
         );
         check_path_parse_error(
+            ConnectSpec::V0_2,
             new_span("  naked { hi }").fragment(),
             2,
             single_key_path_error_message,
@@ -2820,16 +2810,19 @@ mod tests {
         let path_key_ambiguity_error_message =
             "Path selection . must be followed by key (identifier or quoted string literal)";
         check_path_parse_error(
+            ConnectSpec::latest(),
             new_span("valid.$invalid").fragment(),
             5,
             path_key_ambiguity_error_message,
         );
         check_path_parse_error(
+            ConnectSpec::latest(),
             new_span("  valid.$invalid").fragment(),
             7,
             path_key_ambiguity_error_message,
         );
         check_path_parse_error(
+            ConnectSpec::latest(),
             new_span("  valid . $invalid").fragment(),
             8,
             path_key_ambiguity_error_message,
