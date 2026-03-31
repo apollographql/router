@@ -16,9 +16,9 @@ use apollo_compiler::response::JsonMap;
 use apollo_compiler::response::JsonValue;
 use apollo_compiler::validation::Valid;
 use tower::BoxError;
-use tower::ServiceExt;
 
 use crate::graphql;
+use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::response_cache::plugin::GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS;
@@ -115,7 +115,11 @@ impl PluginPrivate for MockSubgraphsPlugin {
         })
     }
 
-    fn subgraph_service(&self, name: &str, _: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        _: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         let config = self.per_subgraph_config.get(name).cloned();
         let subgraph_schema = self.subgraph_schemas[name].clone();
         tower::service_fn(move |request: subgraph::Request| {
@@ -159,7 +163,7 @@ impl PluginPrivate for MockSubgraphsPlugin {
                 ))
             }
         })
-        .boxed()
+        .boxed_clone_sync()
     }
 }
 

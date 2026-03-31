@@ -41,6 +41,7 @@ use crate::spec::QueryHash;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+pub type BoxCloneSyncService = tower::util::BoxCloneSyncService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 pub(crate) type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Send + Sync>>;
 /// unique id for a subgraph request and the related response

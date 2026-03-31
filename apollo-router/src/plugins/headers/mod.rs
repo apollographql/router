@@ -33,6 +33,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::serde::deserialize_header_name;
@@ -263,7 +264,11 @@ impl PluginPrivate for Headers {
         })
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(
                 self.subgraph_operations
@@ -272,7 +277,7 @@ impl PluginPrivate for Headers {
                     .unwrap_or_else(|| self.all_operations.clone()),
             ))
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn connector_request_service(
@@ -312,6 +317,7 @@ impl<S> Layer<S> for HeadersLayer {
         }
     }
 }
+#[derive(Clone)]
 struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,

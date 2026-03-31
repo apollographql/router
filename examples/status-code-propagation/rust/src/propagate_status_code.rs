@@ -1,3 +1,4 @@
+use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -33,7 +34,11 @@ impl Plugin for PropagateStatusCode {
         })
     }
 
-    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        _name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         let all_status_codes = self.status_codes.clone();
         service
             .map_response(move |res| {
@@ -57,7 +62,7 @@ impl Plugin for PropagateStatusCode {
                 }
                 res
             })
-            .boxed()
+            .boxed_clone_sync()
     }
 
     // At this point, all subgraph_services will have pushed their status codes if they match the `watch list`.
@@ -88,6 +93,7 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
+    use apollo_router::layers::ServiceExt as _;
     use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugin::PluginInit;
@@ -147,7 +153,7 @@ mod tests {
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
-            .subgraph_service("accounts", mock_service.boxed());
+            .subgraph_service("accounts", mock_service.boxed_clone_sync());
 
         let subgraph_request = subgraph::Request::fake_builder().build();
 
@@ -183,7 +189,7 @@ mod tests {
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
-            .subgraph_service("accounts", mock_service.boxed());
+            .subgraph_service("accounts", mock_service.boxed_clone_sync());
 
         let subgraph_request = subgraph::Request::fake_builder().build();
 

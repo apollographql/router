@@ -52,6 +52,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -354,8 +355,8 @@ impl PluginPrivate for EntityCache {
     fn subgraph_service(
         &self,
         name: &str,
-        mut service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        mut service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         let storage = match self.storage.get(name) {
             Some(storage) => storage.clone(),
             None => {
@@ -371,7 +372,7 @@ impl PluginPrivate for EntityCache {
                         response
                     })
                     .service(service)
-                    .boxed();
+                    .boxed_clone_sync();
             }
         };
 
@@ -407,7 +408,7 @@ impl PluginPrivate for EntityCache {
                     service: ServiceBuilder::new()
                         .buffered()
                         .service(service)
-                        .boxed_clone(),
+                        .boxed_clone_sync(),
                     entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage,
@@ -419,7 +420,7 @@ impl PluginPrivate for EntityCache {
                     supergraph_schema: self.supergraph_schema.clone(),
                     subgraph_enums: self.subgraph_enums.clone(),
                 });
-            tower::util::BoxService::new(inner)
+            tower::util::BoxCloneSyncService::new(inner)
         } else {
             ServiceBuilder::new()
                 .map_response(move |response: subgraph::Response| {
@@ -433,7 +434,7 @@ impl PluginPrivate for EntityCache {
                     response
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         }
     }
 
@@ -584,7 +585,7 @@ fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, Stri
 
 #[derive(Clone)]
 struct CacheService {
-    service: subgraph::BoxCloneService,
+    service: subgraph::BoxCloneSyncService,
     name: String,
     entity_type: Option<String>,
     storage: RedisCacheStorage,
@@ -600,7 +601,7 @@ struct CacheService {
 impl Service<subgraph::Request> for CacheService {
     type Response = subgraph::Response;
     type Error = BoxError;
-    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
+    type Future = <subgraph::BoxCloneSyncService as Service<subgraph::Request>>::Future;
 
     fn poll_ready(
         &mut self,

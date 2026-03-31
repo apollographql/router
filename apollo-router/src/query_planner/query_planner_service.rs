@@ -656,6 +656,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::layers::ServiceExt as _;
     use crate::metrics::FutureMetricsExt as _;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -1200,7 +1201,7 @@ mod tests {
                             .build())
                     }
                 })
-                .boxed()
+                .boxed_clone_sync()
             })
             .build_supergraph()
             .await

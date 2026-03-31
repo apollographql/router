@@ -20,6 +20,7 @@ use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
+use crate::layers::ServiceExt as _;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -278,7 +279,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::subgraph_service`]
     pub fn subgraph_hook(
         self,
-        callback: impl Fn(&str, subgraph::BoxService) -> subgraph::BoxService + Send + Sync + 'static,
+        callback: impl Fn(&str, subgraph::BoxCloneSyncService) -> subgraph::BoxCloneSyncService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(SubgraphServicePlugin(callback))
     }
@@ -490,7 +494,10 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for SubgraphServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(&str, subgraph::BoxService) -> subgraph::BoxService,
+    F: 'static
+        + Send
+        + Sync
+        + Fn(&str, subgraph::BoxCloneSyncService) -> subgraph::BoxCloneSyncService,
 {
     type Config = ();
 
@@ -501,8 +508,8 @@ where
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         (self.0)(subgraph_name, service)
     }
 }
@@ -529,11 +536,11 @@ impl Plugin for MockedSubgraphs {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        default: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        default: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         self.0
             .get(subgraph_name)
-            .map(|service| service.clone().boxed())
+            .map(|service| service.clone().boxed_clone_sync())
             .unwrap_or(default)
     }
 }

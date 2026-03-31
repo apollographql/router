@@ -59,6 +59,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -424,7 +425,11 @@ impl PluginPrivate for ResponseCache {
             .boxed()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         let subgraph_ttl = self
             .subgraph_ttl(name)
             .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin (except for tests)
@@ -450,7 +455,7 @@ impl PluginPrivate for ResponseCache {
                     service: ServiceBuilder::new()
                         .buffered()
                         .service(service)
-                        .boxed_clone(),
+                        .boxed_clone_sync(),
                     entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage: self.storage.clone(),
@@ -462,7 +467,7 @@ impl PluginPrivate for ResponseCache {
                     subgraph_enums: self.subgraph_enums.clone(),
                     lru_size_instrument: self.lru_size_instrument.clone(),
                 });
-            tower::util::BoxService::new(inner)
+            tower::util::BoxCloneSyncService::new(inner)
         } else {
             ServiceBuilder::new()
                 .map_response(move |response: subgraph::Response| {
@@ -476,7 +481,7 @@ impl PluginPrivate for ResponseCache {
                     response
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         }
     }
 
@@ -710,7 +715,7 @@ fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, Stri
 
 #[derive(Clone)]
 struct CacheService {
-    service: subgraph::BoxCloneService,
+    service: subgraph::BoxCloneSyncService,
     name: String,
     entity_type: Option<String>,
     storage: Arc<StorageInterface>,
@@ -726,7 +731,7 @@ struct CacheService {
 impl Service<subgraph::Request> for CacheService {
     type Response = subgraph::Response;
     type Error = BoxError;
-    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
+    type Future = <subgraph::BoxCloneSyncService as Service<subgraph::Request>>::Future;
 
     fn poll_ready(
         &mut self,
