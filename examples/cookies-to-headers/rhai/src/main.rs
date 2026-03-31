@@ -98,7 +98,7 @@ mod tests {
                             stream_item
                         })
                     })
-                    .boxed()
+                    .boxed_clone_sync()
             })
             .build_router()
             .await

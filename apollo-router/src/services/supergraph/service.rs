@@ -31,6 +31,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
@@ -78,7 +79,7 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 #[derive(Clone)]
 pub(crate) struct SupergraphService {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
-    execution_service: execution::BoxCloneService,
+    execution_service: execution::BoxCloneSyncService,
     schema: Arc<Schema>,
     strict_variable_validation: Mode,
 }
@@ -88,7 +89,7 @@ impl SupergraphService {
     #[builder]
     pub(crate) fn new(
         query_planner_service: CachingQueryPlanner<QueryPlannerService>,
-        execution_service: execution::BoxCloneService,
+        execution_service: execution::BoxCloneSyncService,
         schema: Arc<Schema>,
         strict_variable_validation: Mode,
     ) -> Self {
@@ -154,7 +155,7 @@ impl Service<SupergraphRequest> for SupergraphService {
 
 async fn service_call(
     planning: CachingQueryPlanner<QueryPlannerService>,
-    execution_service: execution::BoxCloneService,
+    execution_service: execution::BoxCloneSyncService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
     strict_variable_validation: Mode,
@@ -448,7 +449,7 @@ async fn plan_query(
 ///
 /// This is at the heart of the delegation of responsibility model for the router. A schema,
 /// collection of plugins, collection of subgraph services are assembled to generate a
-/// [`tower::util::BoxCloneService`] capable of processing a router request
+/// [`tower::util::BoxCloneSyncService`] capable of processing a router request
 /// through the entire stack to return a response.
 pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Arc<Plugins>,
@@ -583,7 +584,7 @@ impl PluggableSupergraphServiceBuilder {
             configuration: Arc::clone(&configuration),
         };
 
-        let execution_service: execution::BoxCloneService = ServiceBuilder::new()
+        let execution_service: execution::BoxCloneSyncService = ServiceBuilder::new()
             // We attach the subscription execution-side layer here instead of inside
             // the `ExecutionServiceFactory` because the subscription layer requires the
             // inner service is cloneable, and ESF does not produce a cloneable service.
@@ -592,7 +593,7 @@ impl PluggableSupergraphServiceBuilder {
             ))
             .buffered()
             .service(execution_service_factory.create())
-            .boxed_clone();
+            .boxed_clone_sync();
 
         let supergraph_service = SupergraphService::builder()
             .query_planner_service(query_planner_service.clone())
@@ -611,7 +612,7 @@ impl PluggableSupergraphServiceBuilder {
                     self.plugins
                         .iter()
                         .rev()
-                        .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                        .fold(supergraph_service.boxed_clone_sync(), |acc, (_, e)| {
                             e.supergraph_service(acc)
                         }),
                 )
@@ -658,24 +659,15 @@ impl HasSchema for SupergraphCreator {
 }
 
 impl ServiceFactory<supergraph::Request> for SupergraphCreator {
-    type Service = supergraph::BoxService;
+    type Service = supergraph::BoxCloneSyncService;
     fn create(&self) -> Self::Service {
-        self.make().boxed()
+        self.make()
     }
 }
 
 impl SupergraphCreator {
-    pub(crate) fn make(
-        &self,
-    ) -> impl Service<
-        supergraph::Request,
-        Response = supergraph::Response,
-        Error = BoxError,
-        Future = BoxFuture<'static, supergraph::ServiceResult>,
-    > + Send
-    + use<> {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
-        self.sb.clone().boxed()
+    pub(crate) fn make(&self) -> supergraph::BoxCloneSyncService {
+        self.sb.clone().boxed_clone_sync()
     }
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {

@@ -53,6 +53,7 @@ use crate::assert_errors_eq_ignoring_id;
 use crate::assert_response_eq_ignoring_error_id;
 use crate::assert_snapshot_subscriber;
 use crate::graphql;
+use crate::layers::ServiceExt as _;
 use crate::plugin::test;
 use crate::plugins::authentication::Issuers;
 use crate::plugins::authentication::jwks::Audiences;
@@ -164,7 +165,7 @@ async fn build_a_test_harness(
     match crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
-        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .supergraph_hook(move |_| mock_service.clone().boxed_clone_sync())
         .build_router()
         .await
     {
@@ -209,7 +210,7 @@ async fn it_rejects_when_there_is_no_auth_header() {
     let test_harness = crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
-        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .supergraph_hook(move |_| mock_service.clone().boxed_clone_sync())
         .build_router()
         .await
         .unwrap();
@@ -922,7 +923,7 @@ async fn it_extracts_the_token_from_cookies() {
     let test_harness = crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
-        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .supergraph_hook(move |_| mock_service.clone().boxed_clone_sync())
         .build_router()
         .await
         .unwrap();
@@ -1018,7 +1019,7 @@ async fn it_supports_multiple_sources() {
     let test_harness = crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
-        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .supergraph_hook(move |_| mock_service.clone().boxed_clone_sync())
         .build_router()
         .await
         .unwrap();

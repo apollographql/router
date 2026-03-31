@@ -9,7 +9,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 #[derive(Debug)]
 struct HelloWorld {
@@ -34,7 +33,10 @@ impl Plugin for HelloWorld {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         // Say hello when our service is added to the router_service
         // stage of the router plugin pipeline.
         #[cfg(test)]
@@ -50,7 +52,7 @@ impl Plugin for HelloWorld {
             // .checkpoint()
             // .timeout()
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn execution_service(

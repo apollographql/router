@@ -341,7 +341,7 @@ limits:
 
 async fn build_test_harness(
     limits_config: serde_json::Value,
-) -> (supergraph::BoxCloneService, impl Fn() -> u32) {
+) -> (supergraph::BoxCloneSyncService, impl Fn() -> u32) {
     let execution_count = Arc::new(AtomicU32::new(0));
     let execution_count_2 = execution_count.clone();
     let get_execution_count = move || execution_count_2.load(Ordering::Acquire);
@@ -376,7 +376,10 @@ async fn build_test_harness(
     (service, get_execution_count)
 }
 
-async fn run_request(service: &mut supergraph::BoxCloneService, query: &str) -> graphql::Response {
+async fn run_request(
+    service: &mut supergraph::BoxCloneSyncService,
+    query: &str,
+) -> graphql::Response {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .build()

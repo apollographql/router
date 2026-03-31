@@ -43,6 +43,7 @@ use crate::configuration::Batching;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
@@ -169,7 +170,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone_sync())
         .build_common()
         .await
         .unwrap();
@@ -219,7 +220,7 @@ pub(crate) async fn empty() -> impl Service<
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(Default::default())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone_sync())
         .build_common()
         .await
         .unwrap();

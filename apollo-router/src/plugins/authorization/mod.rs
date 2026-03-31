@@ -14,7 +14,6 @@ use serde::Serialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
 use self::authenticated::AuthenticatedCheckVisitor;
@@ -587,7 +586,10 @@ impl Plugin for AuthorizationPlugin {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         if self.require_authentication {
             ServiceBuilder::new()
                 .checkpoint(move |request: supergraph::Request| {
@@ -614,7 +616,7 @@ impl Plugin for AuthorizationPlugin {
                     }
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         } else {
             service
         }

@@ -386,7 +386,10 @@ pub trait Plugin: Send + Sync + 'static {
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define `supergraph_service` if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         service
     }
 
@@ -463,7 +466,10 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         service
     }
 
@@ -524,7 +530,10 @@ where
         Plugin::router_service(self, service)
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         Plugin::supergraph_service(self, service)
     }
 
@@ -600,7 +609,10 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         service
     }
 
@@ -679,7 +691,10 @@ where
         PluginUnstable::router_service(self, service)
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         PluginUnstable::supergraph_service(self, service)
     }
 
@@ -733,7 +748,10 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService;
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService;
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
@@ -793,7 +811,10 @@ where
         self.router_service(service)
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         self.supergraph_service(service)
     }
 

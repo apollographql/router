@@ -206,8 +206,8 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
 
     fn supergraph_service(
         &self,
-        service: services::supergraph::BoxService,
-    ) -> services::supergraph::BoxService {
+        service: services::supergraph::BoxCloneSyncService,
+    ) -> services::supergraph::BoxCloneSyncService {
         self.supergraph_service(service)
     }
 
@@ -296,8 +296,8 @@ where
 
     fn supergraph_service(
         &self,
-        service: services::supergraph::BoxService,
-    ) -> services::supergraph::BoxService {
+        service: services::supergraph::BoxCloneSyncService,
+    ) -> services::supergraph::BoxCloneSyncService {
         self.configuration.supergraph.as_service(
             self.http_client.clone(),
             service,

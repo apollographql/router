@@ -142,7 +142,8 @@ async fn rhai_plugin_supergraph_service() -> Result<(), BoxError> {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let mut router_service =
+            dyn_plugin.supergraph_service(BoxCloneSyncService::new(mock_service));
         let context = Context::new();
         context.insert("test", 5i64).unwrap();
         let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
@@ -780,7 +781,7 @@ async fn test_router_service_adds_timestamp_header() -> Result<(), BoxError> {
         .await
         .unwrap();
 
-    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let mut router_service = dyn_plugin.supergraph_service(BoxCloneSyncService::new(mock_service));
     let context = Context::new();
     context.insert("test", 5i64).unwrap();
     let supergraph_req = SupergraphRequest::fake_builder()
@@ -820,7 +821,7 @@ async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
         .await
         .unwrap();
 
-    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let mut router_service = dyn_plugin.supergraph_service(BoxCloneSyncService::new(mock_service));
     let context = Context::new();
     context.insert_estimated_cost(50.0).unwrap();
     context.insert_actual_cost(35.0).unwrap();
@@ -898,7 +899,7 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
         .await
         .unwrap();
 
-    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let mut router_service = dyn_plugin.supergraph_service(BoxCloneSyncService::new(mock_service));
     let context = Context::new();
     let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
 
@@ -935,7 +936,7 @@ async fn test_supergraph_error_logging(script_name: &str) -> Result<(), BoxError
 
     let dyn_plugin = create_plugin(script_name).await?;
 
-    let mut service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let mut service = dyn_plugin.supergraph_service(BoxCloneSyncService::new(mock_service));
     let req = SupergraphRequest::fake_builder()
         .context(Context::new())
         .build()?;

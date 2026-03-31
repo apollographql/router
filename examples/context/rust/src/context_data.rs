@@ -42,7 +42,10 @@ impl Plugin for ContextData {
         Ok(Self::default())
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
         //
         // These allow basic interception and transformation of request and response messages.
@@ -66,7 +69,7 @@ impl Plugin for ContextData {
                 }
                 response
             })
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn subgraph_service(

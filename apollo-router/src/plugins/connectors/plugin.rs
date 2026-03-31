@@ -10,7 +10,6 @@ use parking_lot::Mutex;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt as TowerServiceExt;
 
 use super::query_plans::get_connectors;
 use crate::layers::ServiceExt;
@@ -73,7 +72,10 @@ impl Plugin for Connectors {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneSyncService,
+    ) -> supergraph::BoxCloneSyncService {
         let conf_enabled = self.debug_extensions;
         let max_requests = self.max_requests;
         service
@@ -136,7 +138,7 @@ impl Plugin for Connectors {
                     res
                 },
             )
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn execution_service(

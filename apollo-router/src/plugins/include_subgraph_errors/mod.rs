@@ -23,7 +23,7 @@ use crate::plugin::PluginInit;
 use crate::services::SupergraphResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::fetch::SubgraphNameExt;
-use crate::services::supergraph::BoxService;
+use crate::services::supergraph::BoxCloneSyncService;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
@@ -57,7 +57,7 @@ impl Plugin for IncludeSubgraphErrors {
         Ok(IncludeSubgraphErrors { config })
     }
 
-    fn supergraph_service(&self, service: BoxService) -> BoxService {
+    fn supergraph_service(&self, service: BoxCloneSyncService) -> BoxCloneSyncService {
         let config = Arc::clone(&self.config);
 
         service
@@ -75,7 +75,7 @@ impl Plugin for IncludeSubgraphErrors {
                     graphql_response
                 })
             })
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn subgraph_service(
