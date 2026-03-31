@@ -1,4 +1,4 @@
-### Fix `exists` condition with `request_header` selector on response-stage coprocessor and event configurations ([PR #8964](https://github.com/apollographql/router/pull/8964))
+### Allow `exists` conditions with `request_header` selectors on response-stage coprocessor and event configurations ([PR #8964](https://github.com/apollographql/router/pull/8964))
 
 Using `exists: { request_header: <name> }` as a condition on response-stage coprocessor or telemetry event configurations (e.g. `on: response`) previously caused the router to reject the configuration at startup with a validation error, even though the condition is valid and works correctly at runtime.
 

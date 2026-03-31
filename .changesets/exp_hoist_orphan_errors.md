@@ -30,7 +30,6 @@ experimental_hoist_orphan_errors:
       enabled: false
 ```
 
-Using this feature should only happen if you know you have subgraphs that don't respond with the correct paths when making entity calls. If you're unsure, you probably don't need this!
-
+Use this feature only if you know you have subgraphs that don't respond with the correct paths when making entity calls. If you're unsure, you probably don't need this.
 
 By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/8998

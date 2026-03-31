@@ -1,8 +1,8 @@
-### Add `context_id` selector for telemetry to expose unique per-request identifier ([#8899](https://github.com/apollographql/router/pull/8899))
+### Add `context_id` selector for telemetry to expose unique per-request identifier ([PR #8899](https://github.com/apollographql/router/pull/8899))
 
-A new `context_id` selector is now available for router, supergraph, subgraph, and connector telemetry instrumentation. This selector exposes the unique per-request context ID that can be used to reliably correlate and debug requests in traces, logs, and custom events.
+A new `context_id` selector is now available for router, supergraph, subgraph, and connector telemetry instrumentation. This selector exposes the unique per-request context ID, which you can use to reliably correlate and debug requests in traces, logs, and custom events.
 
-Previously, while the context ID was accessible in Rhai scripts as `request.id`, there was no telemetry selector to expose it. With this change, users can now include `context_id: true` in their telemetry configuration to add the context ID to spans, logs, and custom events.
+The context ID was previously accessible in Rhai scripts as `request.id` but had no telemetry selector. You can now include `context_id: true` in your telemetry configuration to add the context ID to spans, logs, and custom events.
 
 Example configuration:
 
