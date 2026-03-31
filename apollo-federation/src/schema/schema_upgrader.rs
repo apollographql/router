@@ -164,8 +164,7 @@ impl SchemaUpgrader {
 
         self.remove_type_extensions(&upgrade_metadata, schema)?;
 
-        let interface_key_types =
-            self.remove_directives_on_interface(&upgrade_metadata, schema)?;
+        let interface_key_types = self.remove_directives_on_interface(&upgrade_metadata, schema)?;
 
         // Note that this rule rely on being after `remove_directives_on_interface` in practice (in that it doesn't check interfaces).
         self.remove_provides_on_non_composite(&upgrade_metadata, schema)?;
@@ -929,7 +928,9 @@ fn inner_upgrade_subgraphs_if_necessary(
         })
         .collect();
 
-    for (intf_object_name, subgraphs_using_interface_object) in &fed2_interface_object_types_to_subgraphs {
+    for (intf_object_name, subgraphs_using_interface_object) in
+        &fed2_interface_object_types_to_subgraphs
+    {
         if let Some(subgraphs_with_interface_keys_removed) =
             fed1_interface_key_types_to_subgraphs.get(intf_object_name)
         {
