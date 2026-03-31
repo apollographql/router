@@ -1,26 +1,34 @@
 use std::error::Error as _;
 use std::fmt::Display;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::task::Poll;
-use std::time::Duration;
 
 use ::serde::Deserialize;
+use bytes::Buf;
 use futures::future::BoxFuture;
 use http::HeaderValue;
 use http::Request;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
+use http_body::Body;
+use http_body::Frame;
 use http_body_util::BodyExt;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::rt::TokioTimer;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
 use opentelemetry::global::get_text_map_propagator;
 use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_STATUS_CODE;
+use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
 use tower::BoxError;
+use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
 #[cfg(unix)]
@@ -35,6 +43,7 @@ use super::HttpResponse;
 use crate::Configuration;
 use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
+use crate::configuration::shared::DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
@@ -47,14 +56,117 @@ use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 
+// Stores the wire (pre-decompression) body byte count in HTTP response extensions.
+#[derive(Clone)]
+pub(crate) struct WireByteCount(pub Arc<AtomicU64>);
+
+pin_project! {
+    /// A body wrapper that counts bytes flowing through before decompression.
+    struct ByteCountingBody<B> {
+        #[pin]
+        inner: B,
+        counter: Arc<AtomicU64>,
+    }
+}
+
+impl<B> Body for ByteCountingBody<B>
+where
+    B: Body,
+    B::Data: Buf,
+{
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.project();
+        match this.inner.poll_frame(cx) {
+            Poll::Ready(Some(Ok(frame))) => {
+                if let Some(data) = frame.data_ref() {
+                    this.counter
+                        .fetch_add(data.remaining() as u64, Ordering::Relaxed);
+                }
+                Poll::Ready(Some(Ok(frame)))
+            }
+            other => other,
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+/// Tower layer that wraps response bodies with [`ByteCountingBody`] to record
+/// the number of raw (wire) bytes before any decompression layer processes them.
+#[derive(Clone, Copy)]
+struct WireBodySizeLayer;
+
+impl<S> Layer<S> for WireBodySizeLayer {
+    type Service = WireBodySizeService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        WireBodySizeService { inner }
+    }
+}
+
+#[derive(Clone)]
+struct WireBodySizeService<S> {
+    inner: S,
+}
+
+impl<S, ReqBody, ResBody> tower::Service<http::Request<ReqBody>> for WireBodySizeService<S>
+where
+    S: tower::Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
+    S::Future: Send + 'static,
+    S::Error: Send + 'static,
+    ResBody: Body + Send + 'static,
+    ResBody::Data: Buf,
+{
+    type Response = http::Response<ByteCountingBody<ResBody>>;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
+        let fut = self.inner.call(req);
+        Box::pin(async move {
+            let response = fut.await?;
+            let (mut parts, body) = response.into_parts();
+            let counter = Arc::new(AtomicU64::new(0));
+            parts.extensions.insert(WireByteCount(counter.clone()));
+            Ok(http::Response::from_parts(
+                parts,
+                ByteCountingBody {
+                    inner: body,
+                    counter,
+                },
+            ))
+        })
+    }
+}
+
 type HTTPClient = Decompression<
-    hyper_util::client::legacy::Client<
-        HttpsConnector<HttpConnector<AsyncHyperResolver>>,
-        RouterBody,
+    WireBodySizeService<
+        hyper_util::client::legacy::Client<
+            HttpsConnector<HttpConnector<AsyncHyperResolver>>,
+            RouterBody,
+        >,
     >,
 >;
 #[cfg(unix)]
-type UnixHTTPClient = Decompression<hyper_util::client::legacy::Client<UnixConnector, RouterBody>>;
+type UnixHTTPClient = Decompression<
+    WireBodySizeService<hyper_util::client::legacy::Client<UnixConnector, RouterBody>>,
+>;
 #[cfg(unix)]
 type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
@@ -63,8 +175,6 @@ type MixedClient = HTTPClient;
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
-// TODO: make this configurable: ROUTER-1589
-const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -90,6 +200,8 @@ impl Display for Compression {
     }
 }
 
+/// A set of clients (http, unix) for talking with external services like coprocessors, subgraphs,
+/// connectors-connected subgraphs, and so on, implemented as a tower service
 #[derive(Clone)]
 pub(crate) struct HttpClientService {
     // Note: We use hyper_util::client::legacy::Client here in preference to reqwest to avoid expensive URL translation
@@ -102,6 +214,107 @@ pub(crate) struct HttpClientService {
 }
 
 impl HttpClientService {
+    /// Test-wrapper for HttpClientService::new()
+    ///
+    /// NOTE: this separation is primarily to keep us from exposing `new()`
+    /// when we don't need to
+    #[cfg_attr(test, allow(unreachable_pub))]
+    pub(crate) fn test_new(
+        service: impl Into<String>,
+        tls_config: ClientConfig,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        Self::new(service, tls_config, client_config)
+    }
+
+    /// Create a new HttpClientService using:
+    ///
+    /// - the service's name (eg, connector name, hardcoded "coprocessor", or the subgraph's name) for
+    ///   use in errors and potentially signing requests
+    /// - the tls config to be used in setting tls; though, this is actually rustls's and hyper
+    ///   figuring out which parts of a broader config to use for tls
+    /// - the client's config, which is _our_ set of options from the router config for use in
+    ///   enabling/disabling features like http/2
+    fn new(
+        service: impl Into<String>,
+        tls_config: ClientConfig,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let mut http_connector =
+            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+        http_connector.enforce_http(false);
+
+        let builder = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http();
+
+        let pool_idle_timeout = client_config.pool_idle_timeout;
+        let http2_keep_alive_interval = client_config.experimental_http2_keep_alive_interval;
+        let http2_keep_alive_timeout = client_config
+            .experimental_http2_keep_alive_timeout
+            .unwrap_or(DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT);
+
+        let http2 = client_config.experimental_http2.unwrap_or_default();
+        let connector = match http2 {
+            Http2Config::Enable => builder
+                .enable_http1()
+                .enable_http2()
+                .wrap_connector(http_connector),
+            Http2Config::Disable => builder.enable_http1().wrap_connector(http_connector),
+            Http2Config::Http2Only => builder.enable_http2().wrap_connector(http_connector),
+        };
+
+        let mut client_builder =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
+        client_builder
+            .pool_idle_timeout(pool_idle_timeout)
+            // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
+            // unless you're also removing `pool_idle_timeout`
+            .pool_timer(TokioTimer::new())
+            .http2_only(http2 == Http2Config::Http2Only);
+        if let Some(interval) = http2_keep_alive_interval {
+            client_builder
+                // WARN: http2 keep-alive requires a timer; don't remove this
+                .timer(TokioTimer::new())
+                .http2_keep_alive_interval(Some(interval))
+                .http2_keep_alive_timeout(http2_keep_alive_timeout)
+                // Send pings even when the connection is idle in the pool, so stale
+                // connections are detected before a request is made on them
+                .http2_keep_alive_while_idle(true);
+        }
+        let http_client = client_builder.build(connector);
+
+        #[cfg(unix)]
+        let unix_client = {
+            let unix_client_inner =
+                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                    .pool_idle_timeout(pool_idle_timeout)
+                    // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
+                    // unless you're also removing `pool_idle_timeout`
+                    .pool_timer(TokioTimer::new())
+                    .http2_only(http2 == Http2Config::Http2Only)
+                    .build(UnixConnector);
+
+            ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .layer(WireBodySizeLayer)
+                .service(unix_client_inner)
+        };
+
+        Ok(Self {
+            http_client: ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .layer(WireBodySizeLayer)
+                .service(http_client),
+            #[cfg(unix)]
+            unix_client,
+            service: Arc::new(service.into()),
+        })
+    }
+
+    /// Creates a client for talking to subgraphs
     pub(crate) fn from_config_for_subgraph(
         service: impl Into<String>,
         configuration: &Configuration,
@@ -137,9 +350,10 @@ impl HttpClientService {
         let tls_client_config =
             generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
 
-        HttpClientService::new(name, tls_client_config, client_config)
+        Self::new(name, tls_client_config, client_config)
     }
 
+    /// Creates a client for talking to connectors-connected subgraphs
     pub(crate) fn from_config_for_connector(
         source_name: impl Into<String>,
         configuration: &Configuration,
@@ -175,9 +389,12 @@ impl HttpClientService {
         let tls_client_config =
             generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
 
-        HttpClientService::new(name, tls_client_config, client_config)
+        Self::new(name, tls_client_config, client_config)
     }
 
+    /// Creates a client for talking to coprocessors
+    ///
+    /// NOTE: the service name is hardcoded to "coprocessor"
     pub(crate) fn from_config_for_coprocessor(
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
@@ -185,61 +402,13 @@ impl HttpClientService {
         // Coprocessors don't use client certificates, so use no client auth
         let tls_client_config = generate_tls_client_config(tls_root_store.clone(), None)?;
 
-        HttpClientService::new("coprocessor".to_string(), tls_client_config, client_config)
+        Self::new("coprocessor".to_string(), tls_client_config, client_config)
     }
 
-    pub(crate) fn new(
-        service: impl Into<String>,
-        tls_config: ClientConfig,
-        client_config: crate::configuration::shared::Client,
-    ) -> Result<Self, BoxError> {
-        let mut http_connector =
-            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
-        http_connector.set_nodelay(true);
-        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-        http_connector.enforce_http(false);
-
-        let builder = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
-            .https_or_http()
-            .enable_http1();
-
-        let http2 = client_config.experimental_http2.unwrap_or_default();
-        let connector = if http2 != Http2Config::Disable {
-            builder.enable_http2().wrap_connector(http_connector)
-        } else {
-            builder.wrap_connector(http_connector)
-        };
-
-        let http_client =
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                .http2_only(http2 == Http2Config::Http2Only)
-                .build(connector);
-
-        #[cfg(unix)]
-        let unix_client = {
-            let unix_client_inner =
-                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                    .http2_only(http2 == Http2Config::Http2Only)
-                    .build(UnixConnector);
-
-            ServiceBuilder::new()
-                .layer(DecompressionLayer::new())
-                .service(unix_client_inner)
-        };
-
-        Ok(Self {
-            http_client: ServiceBuilder::new()
-                .layer(DecompressionLayer::new())
-                .service(http_client),
-            #[cfg(unix)]
-            unix_client,
-            service: Arc::new(service.into()),
-        })
-    }
-
+    /// Creates a root certificate store with native certificates. These are used for root-of-trust
+    /// authentication for connections
+    ///
+    /// WARN: if no CA certificates are found, this function will panic
     pub(crate) fn native_roots_store() -> RootCertStore {
         let mut roots = rustls::RootCertStore::empty();
 
@@ -269,6 +438,19 @@ pub(crate) fn generate_tls_client_config(
             .with_root_certificates(tls_cert_store)
             .with_no_client_auth(),
     })
+}
+
+#[cfg(test)]
+impl HttpClientService {
+    pub(crate) fn from_client_config(
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        // No TLS config - provide empty root store
+        let tls_root_store = RootCertStore::empty();
+        let tls_client_config = generate_tls_client_config(tls_root_store, None)?;
+
+        HttpClientService::new("test".to_string(), tls_client_config, client_config)
+    }
 }
 
 impl tower::Service<HttpRequest> for HttpClientService {
@@ -460,6 +642,7 @@ mod tests {
     use crate::services::http::BoxService;
     use crate::services::http::HttpClientService;
     use crate::services::http::HttpRequest;
+    use crate::services::http::service::WireByteCount;
     use crate::services::router;
 
     async fn emulate_subgraph_with_status_code(listener: TcpListener, status_code: StatusCode) {
@@ -752,6 +935,90 @@ mod tests {
             Some(opentelemetry::Value::String(
                 "response-value".to_string().into()
             ))
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_wire_body_size_counts_compressed_bytes() {
+        use std::sync::atomic::Ordering;
+
+        use async_compression::tokio::write::GzipEncoder;
+        use http::header::CONTENT_ENCODING;
+        use tokio::io::AsyncWriteExt;
+
+        let uncompressed_body = r#"{"data":{"me":{"name":"Ada Lovelace"}}}"#;
+
+        let mut encoder = GzipEncoder::new(Vec::new());
+        encoder
+            .write_all(uncompressed_body.as_bytes())
+            .await
+            .unwrap();
+        encoder.shutdown().await.unwrap();
+        let compressed_body = encoder.into_inner();
+        let compressed_len = compressed_body.len();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        tokio::task::spawn(async move {
+            crate::services::http::tests::serve(listener, move |_| {
+                let compressed_body = compressed_body.clone();
+                async move {
+                    Ok(http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .header(CONTENT_ENCODING, "gzip")
+                        .status(StatusCode::OK)
+                        .body(compressed_body.into())
+                        .unwrap())
+                }
+            })
+            .await
+            .unwrap();
+        });
+
+        let http_client_service = HttpClientService::new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            crate::configuration::shared::Client::builder().build(),
+        )
+        .expect("can create a HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = http_client_service
+            .oneshot(HttpRequest {
+                http_request: http::Request::builder()
+                    .uri(url)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .body(router::body::from_bytes(r#"{"query":"{ me { name } }"#))
+                    .unwrap(),
+                context: Context::new(),
+            })
+            .await
+            .unwrap();
+
+        let (parts, body) = response.http_response.into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+
+        let wire_byte_count = parts
+            .extensions
+            .get::<WireByteCount>()
+            .expect("WireByteCount must be present in response extensions");
+        let counter = wire_byte_count.0.clone();
+
+        let decompressed = router::body::into_bytes(body).await.unwrap();
+        assert_eq!(
+            std::str::from_utf8(&decompressed).unwrap(),
+            uncompressed_body,
+            "body should be decompressed"
+        );
+
+        let wire_size = counter.load(Ordering::Relaxed);
+        assert_eq!(
+            wire_size, compressed_len as u64,
+            "WireByteCount should equal the compressed (wire) size, not the decompressed size"
         );
     }
 }

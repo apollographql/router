@@ -10,6 +10,7 @@ use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::type_and_directive_specification::DirectiveCompositionOptions;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
@@ -44,9 +45,13 @@ impl AuthenticatedSpecDefinition {
                 DirectiveLocation::Scalar,
                 DirectiveLocation::Enum,
             ],
-            true, // composes
-            Some(&|v| AUTHENTICATED_VERSIONS.get_dyn_minimum_required_version(v)),
-            None,
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|v| {
+                    AUTHENTICATED_VERSIONS.get_dyn_minimum_required_version(v)
+                },
+                static_argument_transform: None,
+                use_join_directive: false,
+            }),
         ))
     }
 }

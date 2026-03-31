@@ -3,10 +3,8 @@ use std::collections::HashSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
-use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
@@ -15,24 +13,21 @@ use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use tracing::instrument;
+use tracing::trace;
 
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
 use super::field_set::collect_target_fields_from_field_set;
-use super::position::DirectiveDefinitionPosition;
 use super::position::FieldDefinitionPosition;
 use super::position::HasAppliedDirectives;
-use super::position::HasDescription;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
-use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::link::spec_definition::SpecDefinition;
 use crate::schema::SchemaElement;
 use crate::schema::SubgraphMetadata;
 use crate::subgraph::SubgraphError;
@@ -40,8 +35,6 @@ use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
 use crate::subgraph::typestate::Validated;
-use crate::subgraph::typestate::expand_schema;
-use crate::subgraph::typestate::schema_as_fed2_subgraph;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
@@ -78,6 +71,11 @@ impl UpgradeMetadata {
     fn is_orphan_extension_type(&self, type_name: &Name) -> bool {
         self.orphan_extension_types.contains(type_name)
     }
+}
+
+pub(crate) struct UpgradeResult {
+    pub(crate) subgraph: Subgraph<Upgraded>,
+    pub(crate) interfaces_with_key_removed: IndexSet<Name>,
 }
 
 impl SchemaUpgrader {
@@ -120,7 +118,7 @@ impl SchemaUpgrader {
     pub(crate) fn upgrade(
         &self,
         subgraph: Subgraph<Expanded>,
-    ) -> Result<(Subgraph<Upgraded>, IndexSet<Name>), SubgraphError> {
+    ) -> Result<UpgradeResult, SubgraphError> {
         let subgraph_name = subgraph.name.clone();
         self.upgrade_inner(subgraph)
             .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))
@@ -129,7 +127,12 @@ impl SchemaUpgrader {
     pub(crate) fn upgrade_inner(
         &self,
         subgraph: Subgraph<Expanded>,
-    ) -> Result<(Subgraph<Upgraded>, IndexSet<Name>), FederationError> {
+    ) -> Result<UpgradeResult, FederationError> {
+        let orphan_extensions = subgraph.state.orphan_extension_types().clone();
+        // PORT NOTE: this logic was done in JS SchemaUpgrader constructor
+        trace!("upgrade_inner: into fed 2 subgraph");
+        let mut subgraph = subgraph.into_fed_2_subgraph()?;
+
         // Run pre-upgrade validations to check for issues that would prevent upgrade
         let mut upgrade_metadata = UpgradeMetadata {
             subgraph_name: subgraph.name.clone(),
@@ -138,57 +141,57 @@ impl SchemaUpgrader {
             provides_directive_name: subgraph.provides_directive_name()?.clone(),
             extends_directive_name: subgraph.extends_directive_name()?.clone(),
             metadata: subgraph.metadata().clone(),
-            orphan_extension_types: subgraph.state.orphan_extension_types().clone(),
+            orphan_extension_types: orphan_extensions,
         };
-        self.pre_upgrade_validations(&upgrade_metadata, &subgraph)?;
 
-        // TODO avoid cloning the schema here
-        let mut schema = self.upgrade_spec_links(subgraph.schema().clone())?;
+        self.pre_upgrade_validations(&upgrade_metadata, &subgraph)?;
+        let schema = subgraph.state.federation_schema_mut();
 
         // Fix federation directive arguments (fields) to ensure they're proper strings
         // Note: Implementation simplified for compilation purposes
-        self.fix_federation_directives_arguments(&mut schema)?;
+        self.fix_federation_directives_arguments(schema)?;
 
-        self.remove_external_on_interface(&mut schema);
+        trace!("upgrade_inner: removing unnecessary @external");
+        self.remove_external_on_interface(&mut upgrade_metadata, schema);
 
-        self.remove_external_on_object_types(&mut schema);
+        self.remove_external_on_object_types(&mut upgrade_metadata, schema);
 
         // Note that we remove all external on type extensions first, so we don't have to care about it later in @key, @provides and @requires.
-        self.remove_external_on_type_extensions(&mut upgrade_metadata, &mut schema)?;
+        self.remove_external_on_type_extensions(&mut upgrade_metadata, schema)?;
 
-        self.fix_inactive_provides_and_requires(&mut schema)?;
+        trace!("upgrade_inner: fixing provides and requires");
+        self.fix_inactive_provides_and_requires(schema)?;
 
-        self.remove_type_extensions(&upgrade_metadata, &mut schema)?;
+        self.remove_type_extensions(&upgrade_metadata, schema)?;
 
         let interface_key_types =
-            self.remove_directives_on_interface(&upgrade_metadata, &mut schema)?;
+            self.remove_directives_on_interface(&upgrade_metadata, schema)?;
 
         // Note that this rule rely on being after `remove_directives_on_interface` in practice (in that it doesn't check interfaces).
-        self.remove_provides_on_non_composite(&subgraph, &mut schema)?;
+        self.remove_provides_on_non_composite(&upgrade_metadata, schema)?;
 
         // Note that this should come _after_ all the other changes that may remove/update federation directives, since those may create unused
         // externals. Which is why this is toward  the end.
-        self.remove_unused_externals(&upgrade_metadata, &mut schema)?;
+        self.remove_unused_externals(&upgrade_metadata, schema)?;
 
-        self.add_shareable(&upgrade_metadata, &mut schema)?;
+        trace!("upgrade_inner: add shareable");
+        self.add_shareable(&upgrade_metadata, schema)?;
 
-        self.remove_tag_on_external(&upgrade_metadata, &mut schema)?;
+        self.remove_tag_on_external(&upgrade_metadata, schema)?;
 
         // Some type extensions are converted to definitions in the `remove_type_extensions`.
         // We need to update the orphan extension types accordingly.
-        let orphan_extension_types = Self::filter_orphan_extension_types(
-            subgraph.state.into_orphan_extension_types(),
-            &schema,
-        );
+        let filtered_orphan_extension_types =
+            Self::filter_orphan_extension_types(upgrade_metadata.orphan_extension_types, schema);
+        subgraph
+            .state
+            .update_orphan_extension_types(filtered_orphan_extension_types);
 
-        let upgraded_subgraph =
-            // These errors will be wrapped as SubgraphErrors in `Self::upgrade`
-            Subgraph::new(subgraph.name.as_str(), subgraph.url.as_str(), schema.schema, orphan_extension_types)
-                .map_err(|e| e.into_federation_error())?
-                .assume_expanded()
-                .map_err(|err| err.into_federation_error())?
-                .assume_upgraded();
-        Ok((upgraded_subgraph, interface_key_types))
+        trace!("upgrade_inner: complete");
+        Ok(UpgradeResult {
+            subgraph,
+            interfaces_with_key_removed: interface_key_types,
+        })
     }
 
     /// Compute a new `orphan_extension_types` with only types that still have an extension in the upgraded schema.
@@ -209,43 +212,11 @@ impl SchemaUpgrader {
             .collect()
     }
 
-    fn upgrade_spec_links(
-        &self,
-        mut schema: FederationSchema,
-    ) -> Result<FederationSchema, FederationError> {
-        // PORT_NOTE: This is a new step in Rust composition. Since JS implementation does not
-        //            validate using undefined directives, fed2 directives can be used without
-        //            matching definitions. In Rust, all directive applications must be defined in
-        //            the schema and valid.
-
-        // Fed1 links and definitions are removed here, so we can add fed2 links below.
-        // Save descriptions from federation directive definitions before removal.
-        let saved_directives = self.remove_fed1_links_and_definitions(&mut schema)?;
-
-        // Add link spec & federation 2 spec.
-        let inner_schema = schema_as_fed2_subgraph(schema, false)?;
-
-        // re-expand all federation directive definitions
-        let mut schema = expand_schema(inner_schema)?;
-
-        // Restore descriptions on federation directives from the original Fed1 definitions.
-        for (directive_name, directive_def) in saved_directives {
-            let pos = DirectiveDefinitionPosition {
-                directive_name: directive_name.clone(),
-            };
-            if pos.try_get(schema.schema()).is_some() {
-                pos.set_description(&mut schema, directive_def.description.clone())?;
-            }
-        }
-
-        Ok(schema)
-    }
-
     // integrates checkForExtensionWithNoBase from the JS code
     fn pre_upgrade_validations(
         &self,
         upgrade_metadata: &UpgradeMetadata,
-        subgraph: &Subgraph<Expanded>,
+        subgraph: &Subgraph<Upgraded>,
     ) -> Result<(), FederationError> {
         let schema = subgraph.schema();
 
@@ -353,94 +324,13 @@ impl SchemaUpgrader {
         Ok(())
     }
 
-    fn remove_fed1_links_and_definitions(
+    fn remove_external_on_interface(
         &self,
+        upgrade_metadata: &mut UpgradeMetadata,
         schema: &mut FederationSchema,
-    ) -> Result<HashMap<Name, Node<DirectiveDefinition>>, FederationError> {
-        let Some(metadata) = schema.metadata() else {
-            bail!("Schema must have metadata to upgrade");
-        };
-        let link_spec = metadata.link_spec_definition()?;
-        let Some(link_link) = link_spec.link_in_schema(schema)? else {
-            bail!("Schema must have a link spec link to upgrade");
-        };
-        let link_name_in_schema = link_link.spec_name_in_schema().clone();
-
-        // for @core, we want to remove both the definition and all references, but for other
-        // federation directives, just remove the definitions
-        let directives_to_remove = [
-            name!("extends"),
-            name!("key"),
-            name!("provides"),
-            name!("requires"),
-            name!("external"),
-            name!("tag"),
-        ];
-
-        // Save federation directives before removing them
-        let mut saved_directives: HashMap<Name, Node<DirectiveDefinition>> = HashMap::default();
-
-        let definitions: Vec<DirectiveDefinitionPosition> =
-            schema.get_directive_definitions().collect();
-        for definition in &definitions {
-            if directives_to_remove.contains(&definition.directive_name) {
-                // Save the directive before removing it
-                if let Some(directive_def) = schema
-                    .schema
-                    .directive_definitions
-                    .shift_remove(&definition.directive_name)
-                    && directive_def.description.is_some()
-                {
-                    saved_directives
-                        .insert(definition.directive_name.clone(), directive_def.clone());
-                }
-                schema
-                    .referencers
-                    .directives
-                    .shift_remove(&definition.directive_name)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for directive \"{}\"",
-                            &definition.directive_name
-                        ),
-                    })?;
-            } else if definition.directive_name == *link_name_in_schema {
-                definition.remove(schema)?;
-            }
-        }
-
-        // now remove other federation types
-        for type_spec in link_spec.type_specs() {
-            let type_name_in_schema = link_link.type_name_in_schema(type_spec.name());
-            if let Some(type_pos) = schema.try_get_type(type_name_in_schema.clone()) {
-                type_pos.remove(schema)?;
-            }
-        }
-        if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) =
-            schema.try_get_type(name!("_FieldSet"))
-        {
-            scalar_obj.remove(schema)?;
-        }
-        if let Some(TypeDefinitionPosition::Scalar(scalar_obj)) = schema.try_get_type(name!("_Any"))
-        {
-            scalar_obj.remove(schema)?;
-        }
-        if let Some(TypeDefinitionPosition::Object(obj)) = schema.try_get_type(name!("_Service")) {
-            obj.remove(schema)?;
-        }
-        if let Some(TypeDefinitionPosition::Union(union_obj)) =
-            schema.try_get_type(name!("_Entity"))
-        {
-            union_obj.remove(schema)?;
-        }
-        Ok(saved_directives)
-    }
-
-    fn remove_external_on_interface(&self, schema: &mut FederationSchema) {
-        let Some(metadata) = &schema.subgraph_metadata else {
-            return;
-        };
-        let Ok(external_directive) = metadata
+    ) {
+        let Ok(external_directive) = upgrade_metadata
+            .metadata
             .federation_spec_definition()
             .external_directive_definition(schema)
         else {
@@ -466,20 +356,26 @@ impl SchemaUpgrader {
         }
         for (pos, directive) in to_delete {
             pos.remove_directive(schema, &directive);
+            upgrade_metadata
+                .metadata
+                .remove_external_field(&FieldDefinitionPosition::Interface(pos));
         }
     }
 
-    fn remove_external_on_object_types(&self, schema: &mut FederationSchema) {
-        let Some(metadata) = &schema.subgraph_metadata else {
-            return;
-        };
-        let Ok(external_directive) = metadata
+    fn remove_external_on_object_types(
+        &self,
+        upgrade_metadata: &mut UpgradeMetadata,
+        schema: &mut FederationSchema,
+    ) {
+        let Ok(external_directive) = upgrade_metadata
+            .metadata
             .federation_spec_definition()
             .external_directive_definition(schema)
         else {
             return;
         };
         let mut to_delete: Vec<(ObjectTypeDefinitionPosition, Component<Directive>)> = vec![];
+        let mut fields_on_external_type: Vec<ObjectFieldDefinitionPosition> = vec![];
         for (obj_name, ty) in &schema.schema().types {
             let ExtendedType::Object(_) = ty else {
                 continue;
@@ -488,12 +384,18 @@ impl SchemaUpgrader {
             let object_pos = ObjectTypeDefinitionPosition::new(obj_name.clone());
             let directives = object_pos.get_applied_directives(schema, &external_directive.name);
             if !directives.is_empty() {
+                if let Ok(fields) = object_pos.fields(schema.schema()) {
+                    fields_on_external_type.extend(fields);
+                }
                 to_delete.push((object_pos, directives[0].clone()));
             }
         }
         for (pos, directive) in to_delete {
             pos.remove_directive(schema, &directive);
         }
+        upgrade_metadata
+            .metadata
+            .remove_external_type_fields(fields_on_external_type);
     }
 
     fn remove_external_on_type_extensions(
@@ -501,14 +403,13 @@ impl SchemaUpgrader {
         upgrade_metadata: &mut UpgradeMetadata,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        let Some(metadata) = &schema.subgraph_metadata else {
-            return Ok(());
-        };
         let types: Vec<_> = schema.get_types().collect();
-        let key_directive = metadata
+        let key_directive = upgrade_metadata
+            .metadata
             .federation_spec_definition()
             .key_directive_definition(schema)?;
-        let external_directive = metadata
+        let external_directive = upgrade_metadata
+            .metadata
             .federation_spec_definition()
             .external_directive_definition(schema)?;
 
@@ -524,7 +425,8 @@ impl SchemaUpgrader {
             let key_applications = ty.get_applied_directives(schema, &key_directive.name);
             if !key_applications.is_empty() {
                 for directive in key_applications {
-                    let args = metadata
+                    let args = upgrade_metadata
+                        .metadata
                         .federation_spec_definition()
                         .key_directive_arguments(directive)?;
                     for field in collect_target_fields_from_field_set(
@@ -574,7 +476,8 @@ impl SchemaUpgrader {
                         continue;
                     }
                     let directive = keys_in_other[0];
-                    let args = metadata
+                    let args = upgrade_metadata
+                        .metadata
                         .federation_spec_definition()
                         .key_directive_arguments(directive)?;
                     for field in collect_target_fields_from_field_set(
@@ -719,33 +622,33 @@ impl SchemaUpgrader {
 
     fn remove_provides_on_non_composite(
         &self,
-        subgraph: &Subgraph<Expanded>,
+        upgrade_metadata: &UpgradeMetadata,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        let Some(provides_directive) = subgraph.provides_directive_name()? else {
+        let Some(provides_directive) = &upgrade_metadata.provides_directive_name else {
             return Ok(());
         };
-        let Some(targets) = subgraph
-            .schema()
-            .referencers()
-            .directives
-            .get(&provides_directive)
-        else {
+        let Some(targets) = schema.referencers().directives.get(provides_directive) else {
             return Ok(());
         };
+        let mut candidates: IndexSet<ObjectFieldDefinitionPosition> = IndexSet::default();
         for obj_field_pos in targets.object_fields.iter() {
-            let field = obj_field_pos.make_mut(&mut schema.schema)?;
+            let field = obj_field_pos.get(schema.schema())?;
             let return_type = field.ty.inner_named_type();
-            if subgraph
-                .schema()
+            if schema
                 .try_get_type(return_type.clone())
                 .is_some_and(|t| !t.is_composite_type())
             {
-                let field = field.make_mut();
-                field
-                    .directives
-                    .retain(|d| d.name != provides_directive.as_str());
+                candidates.insert(obj_field_pos.clone());
             }
+        }
+
+        for candidate in candidates {
+            candidate
+                .make_mut(schema.schema_mut())?
+                .make_mut()
+                .directives
+                .retain(|d| d.name != provides_directive.as_str());
         }
         Ok(())
     }
@@ -806,15 +709,12 @@ impl SchemaUpgrader {
         upgrade_metadata: &UpgradeMetadata,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        let Some(metadata) = &schema.subgraph_metadata else {
-            return Ok(());
-        };
-
         let Some(key_directive_name) = &upgrade_metadata.key_directive_name else {
             return Ok(());
         };
 
-        let shareable_directive_name = metadata
+        let shareable_directive_name = upgrade_metadata
+            .metadata
             .federation_spec_definition()
             .shareable_directive_definition(schema)?
             .name
@@ -836,7 +736,7 @@ impl SchemaUpgrader {
             if has_key_directive || is_root_type {
                 for field in obj_pos.fields(schema.schema())? {
                     let obj_field = FieldDefinitionPosition::Object(field.clone());
-                    if metadata.is_field_shareable(&obj_field) {
+                    if upgrade_metadata.metadata.is_field_shareable(&obj_field) {
                         continue;
                     }
                     let Some(entries) = self.object_type_map.get(obj_name) else {
@@ -911,53 +811,55 @@ impl SchemaUpgrader {
     ) -> Result<(), FederationError> {
         let applications = schema.tag_directive_applications()?;
         let mut to_delete: Vec<(FieldDefinitionPosition, Node<Directive>)> = vec![];
-        if let Some(metadata) = &schema.subgraph_metadata {
-            applications
-                .iter()
-                .try_for_each(|application| -> Result<(), FederationError> {
-                    if let Ok(application) = application
-                        && let Ok(target) =
-                            FieldDefinitionPosition::try_from(application.target.clone())
-                        && metadata.external_metadata().is_external(&target)
-                    {
-                        let used_in_other_definitions = self.subgraphs.iter().fallible_any(
-                            |(name, subgraph)| -> Result<bool, FederationError> {
-                                if &upgrade_metadata.subgraph_name != name {
-                                    // check to see if the field is external in the other subgraphs
-                                    if let Some(other_metadata) =
-                                        &subgraph.schema().subgraph_metadata
-                                        && !other_metadata.external_metadata().is_external(&target)
-                                    {
-                                        // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
-                                        let other_applications =
-                                            subgraph.schema().tag_directive_applications()?;
-                                        return other_applications.iter().fallible_any(
-                                            |other_app_result| -> Result<bool, FederationError> {
-                                                if let Ok(other_tag_directive) =
-                                                    (*other_app_result).as_ref()
-                                                    && application.target
-                                                        == other_tag_directive.target
-                                                    && application.arguments.name
-                                                        == other_tag_directive.arguments.name
-                                                {
-                                                    return Ok(true);
-                                                }
-                                                Ok(false)
-                                            },
-                                        );
-                                    }
-                                }
-                                Ok(false)
-                            },
-                        );
-                        if used_in_other_definitions? {
-                            // remove @tag
-                            to_delete.push((target, application.directive.clone()));
-                        }
-                    }
-                    Ok(())
-                })?;
-        }
+
+        applications
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter_map(|application| {
+                FieldDefinitionPosition::try_from(application.target.clone())
+                    .ok()
+                    .map(|target| (target, application))
+            })
+            .filter(|(target, _)| upgrade_metadata.metadata.is_field_external(target))
+            .for_each(|(target, application)| {
+                let used_in_other_definitions = self
+                    .subgraphs
+                    .iter()
+                    // skip self
+                    .filter(|(name, _)| &upgrade_metadata.subgraph_name != *name)
+                    // check to see if the field is external in the other subgraphs
+                    .filter(|(_, other_subgraph)| {
+                        other_subgraph
+                            .schema()
+                            .subgraph_metadata
+                            .as_ref()
+                            .is_some_and(|other_metadata| {
+                                !other_metadata.is_field_external(&target)
+                            })
+                    })
+                    // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
+                    .fallible_any::<FederationError, _>(|(_, other_subgraph)| {
+                        Ok(other_subgraph
+                            .schema()
+                            .tag_directive_applications()?
+                            .iter()
+                            .any(|other_application_result| {
+                                (*other_application_result).as_ref().is_ok_and(
+                                    |other_tag_directive| {
+                                        application.target == other_tag_directive.target
+                                            && application.arguments.name
+                                                == other_tag_directive.arguments.name
+                                    },
+                                )
+                            }))
+                    })
+                    .is_ok_and(|found| found);
+                if used_in_other_definitions {
+                    // this @tag should be removed
+                    to_delete.push((target, application.directive.clone()));
+                }
+            });
+
         for (pos, directive) in to_delete {
             match pos {
                 FieldDefinitionPosition::Object(target) => {
@@ -997,25 +899,26 @@ fn inner_upgrade_subgraphs_if_necessary(
         .into_iter()
         .map(|subgraph| {
             if !subgraph.metadata().is_fed_2_schema() {
-                let subgraph_name = subgraph.name.clone();
-                let (upgraded, interface_key_types) = schema_upgrader.upgrade(subgraph)?;
-                for type_name in interface_key_types {
+                let result = schema_upgrader.upgrade(subgraph)?;
+                for type_name in result.interfaces_with_key_removed {
                     fed1_interface_key_types_to_subgraphs
                         .entry(type_name)
                         .or_default()
-                        .insert(subgraph_name.clone());
+                        .insert(result.subgraph.name.clone());
                 }
-                Ok(Either::Right(upgraded))
+                Ok(Either::Right(result.subgraph))
             } else {
                 if !all_fed_2 {
-                    for type_name in interface_object_types(&subgraph).map_err(|e| {
-                        SubgraphError::new_without_locations(subgraph.name.clone(), e)
-                    })? {
-                        fed2_interface_object_types_to_subgraphs
-                            .entry(type_name)
-                            .or_default()
-                            .insert(subgraph.name.clone());
-                    }
+                    subgraph
+                        .metadata()
+                        .interface_object_types()
+                        .iter()
+                        .for_each(|intf_object| {
+                            fed2_interface_object_types_to_subgraphs
+                                .entry(intf_object.clone())
+                                .or_default()
+                                .insert(subgraph.name.clone());
+                        });
                 }
                 Ok(Either::Left(subgraph))
             }
@@ -1026,19 +929,19 @@ fn inner_upgrade_subgraphs_if_necessary(
         })
         .collect();
 
-    for (type_name, subgraphs_with_interface_object) in &fed2_interface_object_types_to_subgraphs {
-        if let Some(subgraphs_with_interface_key) =
-            fed1_interface_key_types_to_subgraphs.get(type_name)
+    for (intf_object_name, subgraphs_using_interface_object) in &fed2_interface_object_types_to_subgraphs {
+        if let Some(subgraphs_with_interface_keys_removed) =
+            fed1_interface_key_types_to_subgraphs.get(intf_object_name)
         {
             errors.push(CompositionError::InterfaceObjectUsageError {
                 message: format!(
-                    "The @interfaceObject directive is used on type \"{type_name}\" in {}, \
+                    "The @interfaceObject directive is used on type \"{intf_object_name}\" in {}, \
                     which requires other subgraphs to resolve its type name via an interface @key. \
                     However, @key on an interface in a federation 1 subgraph does not mean it can \
                     fulfill the __typename-resolution requirement that @interfaceObject depends on. \
                     For {}, either upgrade them to federation 2 subgraphs or remove @key from the type.",
-                    human_readable_subgraph_names(subgraphs_with_interface_object.iter()),
-                    human_readable_subgraph_names(subgraphs_with_interface_key.iter()),
+                    human_readable_subgraph_names(subgraphs_using_interface_object.iter()),
+                    human_readable_subgraph_names(subgraphs_with_interface_keys_removed.iter()),
                 ),
             });
         }
@@ -1104,27 +1007,6 @@ pub fn upgrade_subgraphs_if_necessary(
     }
 }
 
-/// Returns a set of object type names that have @interfaceObject applied in the given subgraph.
-fn interface_object_types(
-    subgraph: &Subgraph<Expanded>,
-) -> Result<IndexSet<Name>, FederationError> {
-    let mut result = IndexSet::new();
-    if let Some(interface_object_def) = subgraph
-        .metadata()
-        .federation_spec_definition()
-        .interface_object_directive_definition(subgraph.schema())?
-    {
-        let referencers = subgraph
-            .schema()
-            .referencers()
-            .get_directive(interface_object_def.name.as_str());
-        for pos in &referencers.object_types {
-            result.insert(pos.type_name.clone());
-        }
-    }
-    Ok(result)
-}
-
 #[cfg(test)]
 mod tests {
     use apollo_compiler::coord;
@@ -1177,9 +1059,9 @@ mod tests {
             "",
             r#"
             type Product @key(fields: "upc") {
-            upc: ID!
-            name: String
-            description: String
+              upc: ID!
+              name: String
+              description: String
             }
         "#,
         )
@@ -1193,12 +1075,10 @@ mod tests {
             .expect("Expected 2 elements");
 
         insta::assert_snapshot!(
-            s1.schema().schema().to_string(), @r###"
+            s1.schema_string(), @r###"
         schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
           query: Query
         }
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
         directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
 
@@ -1208,9 +1088,11 @@ mod tests {
 
         directive @external(reason: String) on OBJECT | FIELD_DEFINITION
 
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
         directive @extends on OBJECT | INTERFACE
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
         directive @shareable repeatable on OBJECT | FIELD_DEFINITION
 
@@ -1247,6 +1129,16 @@ mod tests {
           description: String @external
         }
 
+        union _Entity = Product
+
+        scalar _Any
+
+        type _Service @shareable {
+          sdl: String
+        }
+
+        scalar federation__FieldSet
+
         enum link__Purpose {
           """
           `SECURITY` features provide metadata necessary to securely resolve fields.
@@ -1259,16 +1151,6 @@ mod tests {
         }
 
         scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar _Any
-
-        type _Service @shareable {
-          sdl: String
-        }
-
-        union _Entity = Product
         "###
         );
     }
@@ -1300,7 +1182,7 @@ mod tests {
             .expect("Expected 1 element");
 
         insta::assert_snapshot!(
-            s.schema().schema().to_string(),
+            s.schema_string(),
             r#"
             schema
                 FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED
@@ -1846,31 +1728,14 @@ mod tests {
             .expect("upgrades schema")
             .try_into()
             .expect("Expected 1 element");
-        // Note: this test mostly exists for dev awareness. By design, this will
-        // always require updating when the fed spec version is updated, so hopefully
-        // you're reading this comment. Existing schemas which don't include a @link
-        // directive usage will be upgraded to the latest version of the federation
-        // spec. The downstream effect of this auto-upgrading behavior is:
-        //
-        // GraphOS users who select the new build track you're going to introduce will
-        // immediately start composing with the latest specs without having to update
-        // their @link federation spec version in any of their subgraphs. For this to
-        // be ok, they need to first update to a router version which supports
-        // whatever changes you've introduced in the new spec version. Take care to
-        // ensure that things are released in the correct order.
-        //
-        // Ideally, in the future we ensure that GraphOS users are on a version of
-        // router that supports the build pipeline they're upgrading to, but that
-        // mechanism isn't in place yet.
-        // - Trevor
+
+        // fed 1 schemas are auto upgraded to fed v2.4
         insta::assert_snapshot!(
-            subgraph.schema().schema().to_string(),
+            subgraph.schema_string(),
             @r###"
         schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
           query: Query
         }
-
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
         directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
 
@@ -1880,9 +1745,11 @@ mod tests {
 
         directive @external(reason: String) on OBJECT | FIELD_DEFINITION
 
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
         directive @extends on OBJECT | INTERFACE
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
         directive @shareable repeatable on OBJECT | FIELD_DEFINITION
 
@@ -1899,6 +1766,14 @@ mod tests {
           _service: _Service!
         }
 
+        type _Service {
+          sdl: String
+        }
+
+        scalar _Any
+
+        scalar federation__FieldSet
+
         enum link__Purpose {
           """
           `SECURITY` features provide metadata necessary to securely resolve fields.
@@ -1911,14 +1786,6 @@ mod tests {
         }
 
         scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar _Any
-
-        type _Service {
-          sdl: String
-        }
         "###
         );
     }
@@ -1997,16 +1864,15 @@ mod tests {
     }
 
     #[test]
-    fn handle_renamed_core_directive() {
-        // This used to panic.
+    fn reject_incompatible_redeclared_link_directive() {
         let subgraph1 = Subgraph::parse(
             "subgraph1",
             "",
             r#"
                 extend schema
-                    @coreX(feature: "https://specs.apollo.dev/core/v0.2", as: "coreX")
+                    @link(url: "https://specs.apollo.dev/link/v1.0", as: "link")
 
-                directive @coreX(feature: String!, as: String) repeatable on SCHEMA
+                directive @link(url: String!, as: String) repeatable on SCHEMA
 
                 type Query {
                     test: Int!
@@ -2017,12 +1883,12 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
+        upgrade_subgraphs_if_necessary(vec![subgraph1])
+            .expect_err("Error: the argument `import` is not supported by `@link`");
     }
 
     #[test]
-    fn handle_renamed_link_directive() {
-        // This used to panic.
+    fn handle_compatible_renamed_link_directive() {
         let subgraph1 = Subgraph::parse(
             "subgraph1",
             "",
@@ -2030,7 +1896,7 @@ mod tests {
                 extend schema
                     @linkX(url: "https://specs.apollo.dev/link/v1.0", as: "linkX")
 
-                directive @linkX(url: String!, as: String) repeatable on SCHEMA
+                directive @linkX(url: String!, as: String, import: [String]) repeatable on SCHEMA
 
                 type Query {
                     test: Int!
@@ -2041,7 +1907,56 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
+        let [s1]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph1])
+            .expect("successfully upgraded")
+            .try_into()
+            .expect("single graph");
+        insta::assert_snapshot!(
+            s1.schema_string(),
+            @r###"
+                schema @linkX(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+                  query: Query
+                }
+
+                extend schema @linkX(url: "https://specs.apollo.dev/link/v1.0", as: "linkX")
+
+                directive @linkX(url: String!, as: String, import: [String]) repeatable on SCHEMA
+
+                directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+                directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+
+                directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                directive @extends on OBJECT | INTERFACE
+
+                directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+                directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                directive @override(from: String!) on FIELD_DEFINITION
+
+                directive @composeDirective(name: String) repeatable on SCHEMA
+
+                directive @interfaceObject on OBJECT
+
+                type Query {
+                  test: Int!
+                  _service: _Service!
+                }
+
+                type _Service {
+                  sdl: String
+                }
+
+                scalar _Any
+
+                scalar federation__FieldSet
+            "###);
     }
 
     #[test]
@@ -2065,7 +1980,70 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
+        // @core is not applied on the schema so it is treated as regular custom directive
+        let [upgraded] = upgrade_subgraphs_if_necessary(vec![subgraph1])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("single subgraph was upgraded");
+        insta::assert_snapshot!(
+            upgraded.schema_string(),
+            @r###"
+                schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+                  query: Query
+                }
+
+                directive @core(feature: String!) repeatable on SCHEMA
+
+                directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+                directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+
+                directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                directive @extends on OBJECT | INTERFACE
+
+                directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+                directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+                directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                directive @override(from: String!) on FIELD_DEFINITION
+
+                directive @composeDirective(name: String) repeatable on SCHEMA
+
+                directive @interfaceObject on OBJECT
+
+                type Query {
+                  test: Int!
+                  _service: _Service!
+                }
+
+                type _Service {
+                  sdl: String
+                }
+
+                scalar _Any
+
+                scalar federation__FieldSet
+
+                enum link__Purpose {
+                  """
+                  `SECURITY` features provide metadata necessary to securely resolve fields.
+                  """
+                  SECURITY
+                  """
+                  `EXECUTION` features provide metadata necessary for operation execution.
+                  """
+                  EXECUTION
+                }
+
+                scalar link__Import
+            "###);
     }
 
     #[test]
@@ -2090,7 +2068,70 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        upgrade_subgraphs_if_necessary(vec![subgraph1]).expect("upgrades schema");
+        let [upgraded] = upgrade_subgraphs_if_necessary(vec![subgraph1])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("single subgraph was upgraded");
+        // keeps user provided @link and adds federation directive aliased to link1
+        insta::assert_snapshot!(
+            upgraded.schema_string(),
+            @r###"
+                schema @link1(url: "https://specs.apollo.dev/link/v1.0", as: "link1") @link1(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+                  query: Query
+                }
+
+                directive @link(url: String!) repeatable on SCHEMA
+
+                directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+                directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+
+                directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                directive @extends on OBJECT | INTERFACE
+
+                directive @link1(url: String, as: String, for: link1__Purpose, import: [link1__Import]) repeatable on SCHEMA
+
+                directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+                directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                directive @override(from: String!) on FIELD_DEFINITION
+
+                directive @composeDirective(name: String) repeatable on SCHEMA
+
+                directive @interfaceObject on OBJECT
+
+                type Query {
+                  test: Int!
+                  _service: _Service!
+                }
+
+                type _Service {
+                  sdl: String
+                }
+
+                scalar _Any
+
+                scalar federation__FieldSet
+
+                enum link1__Purpose {
+                  """
+                  `SECURITY` features provide metadata necessary to securely resolve fields.
+                  """
+                  SECURITY
+                  """
+                  `EXECUTION` features provide metadata necessary for operation execution.
+                  """
+                  EXECUTION
+                }
+
+                scalar link1__Import
+            "###);
     }
 
     #[test]
@@ -2156,16 +2197,10 @@ mod tests {
         .expect("expands schema");
 
         // Type T should still be in the expanded schema
-        assert!(subgraph1.schema_string().contains("type T"));
+        assert!(subgraph1.schema().schema.get_object("T").is_some());
         insta::assert_snapshot!(
             subgraph1.schema_string(),
             @r###"
-        schema @core(feature: "https://specs.apollo.dev/core/v0.2") @core(feature: "https://specs.apollo.dev/federation/v1.0") {
-          query: Query
-        }
-
-        directive @core(feature: String, as: String, for: core__Purpose) repeatable on SCHEMA
-
         directive @key(fields: _FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
 
         directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
@@ -2180,17 +2215,6 @@ mod tests {
 
         type T {
           a: Int! @external
-        }
-
-        enum core__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
         }
 
         scalar _FieldSet
@@ -2220,8 +2244,6 @@ mod tests {
           query: Query
         }
 
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
         directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
 
         directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
@@ -2230,9 +2252,11 @@ mod tests {
 
         directive @external(reason: String) on OBJECT | FIELD_DEFINITION
 
-        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
         directive @extends on OBJECT | INTERFACE
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
         directive @shareable repeatable on OBJECT | FIELD_DEFINITION
 
@@ -2248,6 +2272,14 @@ mod tests {
           _service: _Service!
         }
 
+        scalar _Any
+
+        type _Service {
+          sdl: String
+        }
+
+        scalar federation__FieldSet
+
         enum link__Purpose {
           """
           `SECURITY` features provide metadata necessary to securely resolve fields.
@@ -2260,14 +2292,6 @@ mod tests {
         }
 
         scalar link__Import
-
-        scalar federation__FieldSet
-
-        scalar _Any
-
-        type _Service {
-          sdl: String
-        }
         "###);
     }
 
@@ -2341,6 +2365,284 @@ mod tests {
         assert!(
             !price_field.directives.has("external"),
             "price should not have @external"
+        );
+    }
+
+    #[test]
+    fn keeps_user_provided_directive_definitions() {
+        let sdl = r#"
+schema {
+  query: Query
+}
+
+"Marks the field, argument, input field or enum value as deprecated"
+directive @deprecated(
+    "The reason for the deprecation"
+    reason: String = "No longer supported"
+  ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+
+"Marks target object as extending part of the federated schema"
+directive @extends on OBJECT | INTERFACE
+
+"Marks target field as external meaning it will be resolved by federated schema"
+directive @external on FIELD_DEFINITION
+
+"Directs the executor to include this field or fragment only when the `if` argument is true"
+directive @include(
+    "Included when true."
+    if: Boolean!
+  ) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+"This is a custom definition for key"
+directive @key(fields: _FieldSet!) repeatable on OBJECT | INTERFACE
+
+"This is a custom definition for provides"
+directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
+
+"This is a custom definition for requires"
+directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
+
+"Directs the executor to skip this field or fragment when the `if`'argument is true."
+directive @skip(
+    "Skipped when true."
+    if: Boolean!
+  ) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+"Exposes a URL that specifies the behaviour of this scalar."
+directive @specifiedBy(
+    "The URL that specifies the behaviour of this scalar."
+    url: String!
+  ) on SCALAR
+
+"Allows users to annotate fields and types with additional metadata information"
+directive @tag(name: String!) repeatable on SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+union _Entity = T
+
+type Query @extends {
+  "Union of all types that use the @key directive, including both types native to the schema and extended types"
+  _entities(representations: [_Any!]!): [_Entity]!
+  _service: _Service!
+  t(id: ID!): T
+}
+
+type _Service {
+  sdl: String!
+}
+
+type T @key(fields: "id") {
+  id: ID!
+  name: String
+}
+
+"Federation scalar type used to represent any external entities passed to _entities query."
+scalar _Any
+
+"Federation type representing set of fields"
+scalar _FieldSet
+"#;
+
+        let s1 = Subgraph::parse("s1", "http://s1", sdl)
+            .expect("valid subgraph")
+            .expand_links()
+            .expect("expanded");
+        insta::assert_snapshot!(
+            s1.schema_string(),
+            @r###"
+                """
+                Directs the executor to skip this field or fragment when the `if`'argument is true.
+                """
+                directive @skip(
+                  """Skipped when true."""
+                  if: Boolean!,
+                ) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+                """
+                Directs the executor to include this field or fragment only when the `if` argument is true
+                """
+                directive @include(
+                  """Included when true."""
+                  if: Boolean!,
+                ) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+                """Marks the field, argument, input field or enum value as deprecated"""
+                directive @deprecated(
+                  """The reason for the deprecation"""
+                  reason: String = "No longer supported",
+                ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+
+                """Exposes a URL that specifies the behaviour of this scalar."""
+                directive @specifiedBy(
+                  """The URL that specifies the behaviour of this scalar."""
+                  url: String!,
+                ) on SCALAR
+
+                """Marks target object as extending part of the federated schema"""
+                directive @extends on OBJECT | INTERFACE
+
+                """
+                Marks target field as external meaning it will be resolved by federated schema
+                """
+                directive @external on FIELD_DEFINITION
+
+                """This is a custom definition for key"""
+                directive @key(fields: _FieldSet!) repeatable on OBJECT | INTERFACE
+
+                """This is a custom definition for provides"""
+                directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
+
+                """This is a custom definition for requires"""
+                directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
+
+                """
+                Allows users to annotate fields and types with additional metadata information
+                """
+                directive @tag(name: String!) repeatable on SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                union _Entity = T
+
+                type Query @extends {
+                  """
+                  Union of all types that use the @key directive, including both types native to the schema and extended types
+                  """
+                  _entities(representations: [_Any!]!): [_Entity]!
+                  _service: _Service!
+                  t(id: ID!): T
+                }
+
+                type _Service {
+                  sdl: String!
+                }
+
+                type T @key(fields: "id") {
+                  id: ID!
+                  name: String
+                }
+
+                """
+                Federation scalar type used to represent any external entities passed to _entities query.
+                """
+                scalar _Any
+
+                """Federation type representing set of fields"""
+                scalar _FieldSet
+            "###
+        );
+
+        let [upgraded]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![s1])
+            .expect("success")
+            .try_into()
+            .expect("single subgraph upgraded");
+        insta::assert_snapshot!(
+            upgraded.schema_string(),
+            @r###"
+                schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+                  query: Query
+                }
+
+                """
+                Directs the executor to skip this field or fragment when the `if`'argument is true.
+                """
+                directive @skip(
+                  """Skipped when true."""
+                  if: Boolean!,
+                ) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+                """
+                Directs the executor to include this field or fragment only when the `if` argument is true
+                """
+                directive @include(
+                  """Included when true."""
+                  if: Boolean!,
+                ) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+                """Marks the field, argument, input field or enum value as deprecated"""
+                directive @deprecated(
+                  """The reason for the deprecation"""
+                  reason: String = "No longer supported",
+                ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+
+                """Exposes a URL that specifies the behaviour of this scalar."""
+                directive @specifiedBy(
+                  """The URL that specifies the behaviour of this scalar."""
+                  url: String!,
+                ) on SCALAR
+
+                """Marks target object as extending part of the federated schema"""
+                directive @extends on OBJECT | INTERFACE
+
+                """
+                Marks target field as external meaning it will be resolved by federated schema
+                """
+                directive @external on FIELD_DEFINITION
+
+                """This is a custom definition for key"""
+                directive @key(fields: federation__FieldSet!) repeatable on OBJECT | INTERFACE
+
+                """This is a custom definition for provides"""
+                directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                """This is a custom definition for requires"""
+                directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                """
+                Allows users to annotate fields and types with additional metadata information
+                """
+                directive @tag(name: String!) repeatable on SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+                directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+                directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+                directive @override(from: String!) on FIELD_DEFINITION
+
+                directive @composeDirective(name: String) repeatable on SCHEMA
+
+                directive @interfaceObject on OBJECT
+
+                union _Entity = T
+
+                type Query @extends {
+                  """
+                  Union of all types that use the @key directive, including both types native to the schema and extended types
+                  """
+                  _entities(representations: [_Any!]!): [_Entity]!
+                  _service: _Service!
+                  t(id: ID!): T
+                }
+
+                type _Service {
+                  sdl: String!
+                }
+
+                type T @key(fields: "id") {
+                  id: ID!
+                  name: String
+                }
+
+                """
+                Federation scalar type used to represent any external entities passed to _entities query.
+                """
+                scalar _Any
+
+                """Federation type representing set of fields"""
+                scalar federation__FieldSet
+
+                enum link__Purpose {
+                  """
+                  `SECURITY` features provide metadata necessary to securely resolve fields.
+                  """
+                  SECURITY
+                  """
+                  `EXECUTION` features provide metadata necessary for operation execution.
+                  """
+                  EXECUTION
+                }
+
+                scalar link__Import
+            "###
         );
     }
 }

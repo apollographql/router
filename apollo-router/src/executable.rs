@@ -55,6 +55,12 @@ pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(fal
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const INITIAL_OCI_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
+const FORBIDDEN_OTEL_VARS: [&str; 3] = [
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+];
+
 /// Subcommands
 #[derive(Subcommand, Debug)]
 enum Commands {
@@ -286,6 +292,10 @@ impl Opt {
     fn err_require_opt(env_var: &str) -> anyhow::Error {
         anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
     }
+
+    fn prohibit_env_vars(env_vars: &[&'static str]) -> Result<(), anyhow::Error> {
+        reject_environment_variables(&env_variables_set(env_vars))
+    }
 }
 
 /// This is the main router entrypoint.
@@ -456,8 +466,13 @@ impl Executable {
         if apollo_telemetry_initialized {
             // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
             tokio::task::spawn_blocking(move || {
-                opentelemetry::global::shutdown_tracer_provider();
-                meter_provider_internal().shutdown();
+                // Setting a new default provider causes the old one to be dropped and shut down
+                opentelemetry::global::set_tracer_provider(
+                    opentelemetry_sdk::trace::SdkTracerProvider::default(),
+                );
+                if let Err(error) = meter_provider_internal().shutdown() {
+                    tracing::error!(%error, "Failed to shut down OTel meter provider cleanly");
+                }
             })
             .await?;
         }
@@ -474,6 +489,9 @@ impl Executable {
         let current_directory = std::env::current_dir()?;
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
+
+        // ROUTER-1609: prevent router from starting if OTEL environment variables are set.
+        Opt::prohibit_env_vars(&FORBIDDEN_OTEL_VARS)?;
 
         let configuration = match (config, opt.config_path.as_ref()) {
             (Some(_), Some(_)) => {
@@ -738,14 +756,6 @@ impl Executable {
             );
         }
 
-        // Warn users that OTEL_EXPORTER_OTLP_ENDPOINT takes precedence over default configurations
-        // and may override trace export to Apollo Studio
-        if std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
-            tracing::warn!(
-                "The OTEL_EXPORTER_OTLP_ENDPOINT environment variable is set. This takes precedence over default configurations and may override trace export to Apollo Studio."
-            );
-        }
-
         let router = RouterHttpServer::builder()
             .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
             .configuration(configuration)
@@ -766,6 +776,27 @@ impl Executable {
 fn graph_os() -> bool {
     crate::services::APOLLO_KEY.lock().is_some()
         && crate::services::APOLLO_GRAPH_REF.lock().is_some()
+}
+
+/// Of the environment variable names provided, return a list of those which are set in the environment.
+fn env_variables_set(variables: &[&'static str]) -> Vec<&'static str> {
+    variables
+        .iter()
+        .filter(|v| !matches!(std::env::var(v), Err(std::env::VarError::NotPresent)))
+        .cloned()
+        .collect()
+}
+
+/// Return an error if the list of environment variables provided is not empty
+fn reject_environment_variables(variables: &[&str]) -> Result<(), anyhow::Error> {
+    if variables.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "the following environment variables must not be set: {}",
+            variables.join(", ")
+        ))
+    }
 }
 
 fn setup_panic_handler() {
@@ -796,6 +827,8 @@ fn setup_panic_handler() {
 #[cfg(test)]
 mod tests {
     use crate::executable::add_log_filter;
+    use crate::executable::env_variables_set;
+    use crate::executable::reject_environment_variables;
 
     #[test]
     fn simplest_logging_modifications() {
@@ -919,6 +952,7 @@ mod tests {
                 experimental_chaos: Default::default(),
                 batching: Default::default(),
                 experimental_type_conditioned_fetching: false,
+                experimental_hoist_orphan_errors: Default::default(),
                 plugins: Default::default(),
                 apollo_plugins: Default::default(),
                 notify: Default::default(),
@@ -1000,6 +1034,7 @@ mod tests {
                 experimental_chaos: Default::default(),
                 batching: Default::default(),
                 experimental_type_conditioned_fetching: false,
+                experimental_hoist_orphan_errors: Default::default(),
                 plugins: Default::default(),
                 apollo_plugins: Default::default(),
                 notify: Default::default(),
@@ -1030,5 +1065,34 @@ mod tests {
                 "Error should mention the conflicting options"
             );
         }
+    }
+
+    #[test]
+    fn it_observes_environment_variables() {
+        const VALID_ENV_VAR: &str = "CARGO_HOME";
+
+        // if we're running tests, we should have a CARGO_HOME env variable present
+        assert!(std::env::var(VALID_ENV_VAR).is_ok());
+
+        // make sure the env_variables_set function can see that, both alone and in a list
+        assert!(env_variables_set(&[VALID_ENV_VAR]).contains(&VALID_ENV_VAR));
+        assert!(
+            env_variables_set(&[VALID_ENV_VAR, "ANOTHER_ENV_VARIABLE"]).contains(&VALID_ENV_VAR)
+        );
+
+        // make sure the env_variables_set variable doesn't find not-present environment variables
+        assert!(env_variables_set(&["AN_EXTREMELY_UNLIKELY_TO_BE_SET_VARIABLE"]).is_empty());
+    }
+
+    #[test]
+    fn it_returns_an_error_when_env_variable_provided() {
+        assert!(reject_environment_variables(&[]).is_ok());
+
+        let err = reject_environment_variables(&["env1"]).unwrap_err();
+        assert!(err.to_string().contains("env1"));
+
+        let err = reject_environment_variables(&["env1", "env2"]).unwrap_err();
+        assert!(err.to_string().contains("env1"));
+        assert!(err.to_string().contains("env2"));
     }
 }

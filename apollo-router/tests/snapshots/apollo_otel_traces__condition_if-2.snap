@@ -24,6 +24,7 @@ resourceSpans:
           value:
             stringValue: "[redacted]"
       droppedAttributesCount: 0
+      entityRefs: []
     scopeSpans:
       - scope:
           name: apollo-router
@@ -35,7 +36,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: query
             kind: 2
             startTimeUnixNano: "[start_time]"
@@ -62,7 +63,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: router
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -104,7 +105,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -122,7 +123,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: parse_query
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -140,7 +141,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: compute_job
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -158,7 +159,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: compute_job.execution
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -176,7 +177,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: supergraph
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -212,7 +213,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -230,7 +231,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: query_planning
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -248,7 +249,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: compute_job
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -266,7 +267,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: compute_job.execution
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -284,7 +285,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: execution
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -305,7 +306,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -323,7 +324,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: condition
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -344,7 +345,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: condition_if
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -362,7 +363,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: defer
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -380,7 +381,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: defer_primary
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -398,7 +399,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: fetch
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -422,7 +423,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: subgraph
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -449,7 +450,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -467,7 +468,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: subgraph_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -491,7 +492,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: http_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -512,7 +513,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: defer_deferred
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -539,7 +540,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: sequence
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -557,7 +558,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: flatten
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -578,7 +579,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: fetch
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -602,7 +603,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: subgraph
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -629,7 +630,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -647,7 +648,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: subgraph_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -671,7 +672,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: http_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -692,7 +693,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: flatten
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -713,7 +714,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: fetch
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -737,7 +738,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: subgraph
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -764,7 +765,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -782,7 +783,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: subgraph_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -806,7 +807,7 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 1
+            flags: 257
             name: http_request
             kind: 3
             startTimeUnixNano: "[start_time]"

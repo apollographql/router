@@ -44,6 +44,7 @@ use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
 use crate::register_private_plugin;
 use crate::services;
+use crate::services::PATH_QUERY_PARAM;
 use crate::services::external::Control;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
@@ -536,7 +537,7 @@ fn default_response_validation() -> bool {
 
 /// Validate a coprocessor URL.
 /// Returns an error if the URL is invalid or if it's a Unix socket URL with an empty path.
-fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(), BoxError> {
+pub(crate) fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(), BoxError> {
     if let Some(path) = url.strip_prefix("unix://") {
         if path.is_empty() {
             return Err(format!(
@@ -550,6 +551,15 @@ fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(), BoxError
                 "{config_path}: Unix socket path should be absolute (e.g., 'unix:///var/run/coprocessor.sock'), got 'unix://{path}'"
             )
             .into());
+        }
+
+        // WARN: this might cause us heart burn later, but since filenames can include `?` we
+        // should emit a warning if we have a `?` and yet no `path=` rather than return an error
+        // and hope that folks see this in their logs if they're getting a bunch of request errors
+        if path.contains('?') && !path.contains(PATH_QUERY_PARAM) {
+            tracing::warn!(
+                "{config_path}: Unix sockets should use valid query parameters if using `?` (e.g., 'unix:///var/run/coprocessor.sock?path=some_path'), got 'unix://{path}'"
+            );
         }
     } else {
         // Validate HTTP/HTTPS URLs can be parsed

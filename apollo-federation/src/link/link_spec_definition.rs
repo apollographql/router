@@ -202,7 +202,7 @@ impl LinkSpecDefinition {
     }
 
     pub(crate) fn extract_alias_and_imports_on_missing_link_directive_definition(
-        application: &Node<Directive>,
+        application: &Component<Directive>,
     ) -> Result<(Option<Name>, Vec<Arc<Import>>), FederationError> {
         // PORT_NOTE: This is really logic encapsulated from onMissingDirectiveDefinition() in the
         // JS codebase's FederationBlueprint, but moved here since it's all link-specific. The logic
@@ -334,7 +334,6 @@ impl LinkSpecDefinition {
         Ok(())
     }
 
-    #[allow(unused)]
     pub(crate) fn fed1_latest() -> &'static Self {
         // Note: The `unwrap()` calls won't panic, since `CORE_VERSIONS` will always have at
         // least one version.
@@ -362,8 +361,6 @@ impl SpecDefinition for LinkSpecDefinition {
             &self.create_definition_argument_specifications(),
             true,
             &[DirectiveLocation::Schema],
-            false,
-            None,
             None,
         ))]
     }

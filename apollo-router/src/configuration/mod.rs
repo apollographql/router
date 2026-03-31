@@ -223,6 +223,13 @@ pub struct Configuration {
     /// Type conditioned fetching configuration.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
+
+    /// When enabled for specific subgraphs, orphan errors (those without a valid
+    /// `_entities` path) are assigned to the nearest non-array ancestor in the
+    /// response path, preventing them from being duplicated across every array
+    /// element.
+    #[serde(default)]
+    pub(crate) experimental_hoist_orphan_errors: SubgraphConfiguration<HoistOrphanErrors>,
 }
 
 impl PartialEq for Configuration {
@@ -257,6 +264,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: chaos::Config,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
+            experimental_hoist_orphan_errors: SubgraphConfiguration<HoistOrphanErrors>,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -288,6 +296,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
+            experimental_hoist_orphan_errors: ad_hoc.experimental_hoist_orphan_errors,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
@@ -328,6 +337,7 @@ impl Configuration {
         chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
+        experimental_hoist_orphan_errors: Option<SubgraphConfiguration<HoistOrphanErrors>>,
         batching: Option<Batching>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
@@ -357,6 +367,7 @@ impl Configuration {
             batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            experimental_hoist_orphan_errors: experimental_hoist_orphan_errors.unwrap_or_default(),
             notify,
         };
 
@@ -501,6 +512,7 @@ impl Configuration {
             uplink,
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            experimental_hoist_orphan_errors: Default::default(),
             batching: batching.unwrap_or_default(),
             raw_yaml: None,
         };
@@ -1598,4 +1610,18 @@ impl Batching {
             None => false,
         }
     }
+}
+
+/// Per-subgraph configuration for hoisting orphan errors.
+///
+/// "Orphan errors" are errors from entity fetches that lack a valid `_entities` path.
+/// When hoisting is enabled, these errors are assigned to the nearest non-array
+/// ancestor in the response path, preventing them from being duplicated across
+/// every element in an array.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HoistOrphanErrors {
+    /// Enable hoisting of orphan errors for this subgraph.
+    #[serde(default)]
+    pub(crate) enabled: bool,
 }

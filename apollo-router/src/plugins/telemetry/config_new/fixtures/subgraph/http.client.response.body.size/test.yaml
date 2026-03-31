@@ -16,8 +16,6 @@ events:
         subgraph_name: "products"
     - subgraph_response:
         status: 200
-        headers:
-          content-length: "26"
         data:
           hello: "world"
     - supergraph_response:

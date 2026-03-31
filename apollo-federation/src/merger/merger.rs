@@ -31,6 +31,7 @@ use crate::api_schema;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::HasLocations;
 use crate::error::SubgraphLocation;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
@@ -91,7 +92,6 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::FallibleOnceCell;
 use crate::utils::MultiIndexMap;
-use crate::utils::first_max_by_key;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
 use crate::utils::iter_into_single_item;
@@ -163,6 +163,10 @@ pub(crate) struct Merger {
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
     pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
     pub(in crate::merger) join_directive_identities: HashSet<Identity>,
+    /// Directives that are composed via `@join__directive` in the supergraph. Populated by
+    /// `validate_and_maybe_add_specs` from composition spec `use_join_directive`. Matches JS
+    /// `directivesUsingJoinDirective` (federation PR #3274).
+    pub(in crate::merger) directives_using_join_directive: HashSet<Name>,
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
     pub(in crate::merger) latest_federation_version_used: Version,
     pub(in crate::merger) applied_directives_to_merge: AppliedDirectivesToMerge,
@@ -237,6 +241,7 @@ impl Merger {
             schema_to_import_to_feature_url,
             link_spec_definition,
             join_directive_identities,
+            directives_using_join_directive: HashSet::new(),
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
             latest_federation_version_used,
@@ -798,19 +803,19 @@ impl Merger {
                 };
             Some(type_kind_description)
         };
-        self.error_reporter
-            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition>(
-                CompositionError::TypeKindMismatch {
-                    message: format!(
-                        "Type \"{}\" has mismatched kind: it is defined as ",
-                        mismatched_type.type_name()
-                    ),
-                },
-                mismatched_type,
-                &sources,
-                |ty| Some(ty.kind().replace("Type", " Type")),
-                |ty, idx| type_kind_to_string(idx, ty),
-            );
+        self.error_reporter.report_mismatch_error(
+            CompositionError::TypeKindMismatch {
+                message: format!(
+                    "Type \"{}\" has mismatched kind: it is defined as ",
+                    mismatched_type.type_name()
+                ),
+            },
+            mismatched_type,
+            &sources,
+            &self.subgraphs,
+            |ty| Some(ty.kind().replace("Type", " Type")),
+            |ty, idx| type_kind_to_string(idx, ty),
+        );
     }
 
     fn add_directives_shallow(&mut self) -> Result<(), FederationError> {
@@ -960,14 +965,14 @@ impl Merger {
         if self
             .link_spec_definition
             .is_spec_type_name(&self.merged, name)
-            .unwrap_or(false)
+            .is_ok_and(|b| b)
         {
             return false;
         }
         if self
             .join_spec_definition
             .is_spec_type_name(&self.merged, name)
-            .unwrap_or(false)
+            .is_ok_and(|b| b)
         {
             return false;
         }
@@ -1573,9 +1578,7 @@ impl Merger {
                 && !self.are_all_fields_external(*idx, source)?
                 && !subgraph.is_interface_object_type(&source.clone().into())
             {
-                self.error_reporter.report_mismatch_hint::<
-                    ObjectOrInterfaceTypeDefinitionPosition,
-                    ObjectOrInterfaceTypeDefinitionPosition>(
+                self.error_reporter.report_mismatch_hint(
                         hint_id.clone(),
 format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\": ",
                             type_description,
@@ -1584,6 +1587,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         ),
                         dest,
                         sources,
+                        &self.subgraphs,
                         |_| Some("yes".to_string()),
                         |pos, idx| pos.field(field.field_name().clone())
                             .try_get(self.subgraphs[idx].schema().schema())
@@ -1607,28 +1611,29 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         let mut source_as_entity = Vec::new();
         let mut source_as_non_entity = Vec::new();
 
-        let mut sources: Sources<usize> = Default::default();
+        let mut sources: Sources<_> = Default::default();
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
             let Some(key_directive_name) = subgraph.key_directive_name()? else {
                 continue;
             };
-            if obj.try_get(subgraph.schema().schema()).is_some() {
-                sources.insert(idx, Some(idx));
+            if let Some(node) = obj.try_get(subgraph.schema().schema()) {
+                sources.insert(idx, Some(node));
                 if obj.has_applied_directive(subgraph.schema(), &key_directive_name) {
-                    source_as_entity.push(idx);
+                    source_as_entity.push(node);
                 } else {
-                    source_as_non_entity.push(idx);
+                    source_as_non_entity.push(node);
                 }
             }
         }
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize>(
+            self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentEntity,
                 format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
                     &obj.type_name,
                 ),
                 obj,
                 &sources,
+                &self.subgraphs,
                 // Categorize whether the source has a @key or not.
                 |_| Some("no".to_string()),
                 |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
@@ -1696,11 +1701,11 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             if self
                 .link_spec_definition
                 .is_spec_directive_name(&self.merged, &directive_name)
-                .unwrap_or(false)
+                .is_ok_and(|b| b)
                 || self
                     .join_spec_definition
                     .is_spec_directive_name(&self.merged, &directive_name)
-                    .unwrap_or(false)
+                    .is_ok_and(|b| b)
             {
                 continue;
             }
@@ -1887,7 +1892,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         is_input_position: bool,
     ) -> Result<bool, FederationError>
     where
-        T: Display + HasType + Debug,
+        T: HasLocations + Display + HasType + Debug,
     {
         if sources.is_empty() {
             self.error_reporter_mut()
@@ -1962,10 +1967,11 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 }
             };
 
-            self.error_reporter.report_mismatch_error::<Type, T>(
+            self.error_reporter.report_mismatch_error(
                 error,
                 &ty,
                 sources,
+                &self.subgraphs,
                 |d| Some(format!("type \"{d}\"")),
                 |s, idx| {
                     s.get_type(self.subgraphs[idx].schema())
@@ -1995,13 +2001,14 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 "subtype"
             };
 
-            self.error_reporter.report_mismatch_hint::<Type, T>(
+            self.error_reporter.report_mismatch_hint(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs: ",
                 ),
                 &ty,
                 sources,
+                &self.subgraphs,
                 |d| Some(d.to_string()),
                 |s, idx| {
                     s.get_type(self.subgraphs[idx].schema())
@@ -2198,85 +2205,98 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         dest: &T,
     ) -> Result<(), FederationError>
     where
-        T: HasDescription + Display,
+        T: HasLocations + HasDescription + Display,
     {
-        let mut descriptions: IndexMap<String, usize> = sources
-            .iter()
-            .map(|(idx, source)| {
-                source
-                    .as_ref()
-                    .and_then(|s| s.description(self.subgraphs[*idx].schema()))
-                    .map(|d| d.trim().to_string())
-                    .unwrap_or_default()
-            })
-            .fold(Default::default(), |mut acc, desc| {
-                if !desc.is_empty() {
-                    *acc.entry(desc).or_insert(0) += 1;
-                }
-                acc
-            });
+        let mut descriptions: IndexMap<&str, (usize, &str)> = Default::default();
+        for (idx, source) in sources.iter() {
+            let desc = source
+                .as_ref()
+                .and_then(|s| s.description(self.subgraphs[*idx].schema()))
+                .map(|d| d.trim())
+                .unwrap_or("");
+            if desc.is_empty() {
+                continue;
+            }
+            descriptions
+                .entry(desc)
+                .and_modify(|(count, _)| *count += 1)
+                .or_insert_with(|| (1, self.names[*idx].as_str()));
+        }
         // we don't want to raise a hint if a description is ""
         descriptions.shift_remove("");
 
         if !descriptions.is_empty() {
-            if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
-                dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
-            } else {
-                // Find the description with the highest count
-                if let Some((idx, _)) =
-                    first_max_by_key(descriptions.iter().enumerate(), |(_, (_, counts))| *counts)
-                {
-                    // Get the description at the found index
-                    if let Some((description, _)) = descriptions.iter().nth(idx) {
-                        dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
-                    }
-                }
-                // TODO: Currently showing full descriptions in the hint
-                // messages, which is probably fine in some cases. However this
-                // might get less helpful if the description appears to differ
-                // by a very small amount (a space, a single character typo) and
-                // even more so the bigger the description is, and we could
-                // improve the experience here. For instance, we could print the
-                // supergraph description but then show other descriptions as
-                // diffs from that (using, say,
-                // https://www.npmjs.com/package/diff). And we could even switch
-                // between diff/non-diff modes based on the levenshtein
-                // distances between the description we found. That said, we
-                // should decide if we want to bother here: maybe we can leave
-                // it to studio so handle a better experience (as it can more UX
-                // wise).
-                let name = if T::is_schema_definition() {
-                    "The schema definition".to_string()
+            let (chosen_description, single) =
+                if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
+                    (Some((*description).to_string()), true)
                 } else {
-                    format!("Element \"{dest}\"")
+                    // Sort deterministically: by count (desc), then description lex (asc = pick first),
+                    // then subgraph name (asc). First element is the chosen one.
+                    let chosen =
+                        descriptions
+                            .iter()
+                            .max_by(|(description_a, a), (description_b, b)| {
+                                b.0.cmp(&a.0)
+                                    .then_with(|| description_a.cmp(description_b))
+                                    .then_with(|| a.1.cmp(b.1))
+                            });
+                    (
+                        chosen.map(|(description, _)| (*description).to_string()),
+                        false,
+                    )
                 };
-                self.error_reporter.report_mismatch_hint::<T, T>(
-                    HintCode::InconsistentDescription,
-                    format!("{name} has inconsistent descriptions across subgraphs. "),
-                    dest,
-                    sources,
-                    |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
-                    |elem, idx| {
-                        elem.description(self.subgraphs[idx].schema())
-                            .map(|desc| desc.to_string())
-                    },
-                    |desc, subgraphs| {
-                        format!(
-                            "The supergraph will use description (from {}):\n{}",
-                            subgraphs.unwrap_or_else(|| "undefined".to_string()),
-                            Self::description_string(desc, "  ")
-                        )
-                    },
-                    |desc, subgraphs| {
-                        format!(
-                            "\nIn {}, the description is:\n{}",
-                            subgraphs,
-                            Self::description_string(desc, "  ")
-                        )
-                    },
-                    false,
-                    true,
-                );
+            drop(descriptions);
+            if let Some(chosen_description) = chosen_description {
+                dest.set_description(&mut self.merged, Some(Node::new_str(&chosen_description)))?;
+                if !single {
+                    // TODO: Currently showing full descriptions in the hint
+                    // messages, which is probably fine in some cases. However this
+                    // might get less helpful if the description appears to differ
+                    // by a very small amount (a space, a single character typo) and
+                    // even more so the bigger the description is, and we could
+                    // improve the experience here. For instance, we could print the
+                    // supergraph description but then show other descriptions as
+                    // diffs from that (using, say,
+                    // https://www.npmjs.com/package/diff). And we could even switch
+                    // between diff/non-diff modes based on the levenshtein
+                    // distances between the description we found. That said, we
+                    // should decide if we want to bother here: maybe we can leave
+                    // it to studio so handle a better experience (as it can more UX
+                    // wise).
+                    let name = if T::is_schema_definition() {
+                        "The schema definition".to_string()
+                    } else {
+                        format!("Element \"{dest}\"")
+                    };
+                    self.error_reporter.report_mismatch_hint(
+                        HintCode::InconsistentDescription,
+                        format!("{name} has inconsistent descriptions across subgraphs. "),
+                        dest,
+                        sources,
+                        &self.subgraphs,
+                        |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
+                        |elem, idx| {
+                            elem.description(self.subgraphs[idx].schema())
+                                .map(|desc| desc.to_string())
+                        },
+                        |desc, subgraphs| {
+                            format!(
+                                "The supergraph will use description (from {}):\n{}",
+                                subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                                Self::description_string(desc, "  ")
+                            )
+                        },
+                        |desc, subgraphs| {
+                            format!(
+                                "\nIn {}, the description is:\n{}",
+                                subgraphs,
+                                Self::description_string(desc, "  ")
+                            )
+                        },
+                        false,
+                        true,
+                    );
+                }
             }
         }
         Ok(())
@@ -2338,6 +2358,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         should_include_as_join_directive =
                             self.should_use_join_directive_for_url(&link.url);
 
+                        // Persist link when the spec uses @join__directive and the feature
+                        // identity is one of the known join-directive feature definitions.
                         if should_include_as_join_directive
                             && SPEC_REGISTRY.get_definition(&link.url).is_some()
                         {
@@ -2349,6 +2371,13 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 {
                     should_include_as_join_directive =
                         self.should_use_join_directive_for_url(&url_for_directive.link.url);
+                    if !should_include_as_join_directive
+                        && self
+                            .directives_using_join_directive
+                            .contains(&directive.name)
+                    {
+                        should_include_as_join_directive = true;
+                    }
                 }
 
                 if should_include_as_join_directive {

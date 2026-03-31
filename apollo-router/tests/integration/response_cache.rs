@@ -19,7 +19,6 @@ use http_body_util::BodyExt as _;
 use indexmap::IndexMap;
 use serde_json::Value;
 use serde_json::json;
-use tokio::time::sleep;
 use tokio_util::future::FutureExt;
 use tower::BoxError;
 use tower::Service as _;
@@ -27,6 +26,7 @@ use tower::ServiceExt as _;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::redact_cache_debug_query_hash;
 
 const REDIS_URL: &str = "redis://127.0.0.1:6379";
 const INVALIDATION_PATH: &str = "/invalidation";
@@ -42,6 +42,48 @@ async fn redis_client() -> Result<Client, BoxError> {
         Builder::from_config(fred::prelude::Config::from_url(REDIS_URL).unwrap()).build()?;
     client.init().await?;
     Ok(client)
+}
+
+fn extract_cache_keys_from_response(response: &graphql::Response) -> Vec<String> {
+    response
+        .extensions
+        .get("apolloCacheDebugging")
+        .and_then(|v| v.get("data"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| item.get("key"))
+                .filter_map(|k| k.as_str())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn extract_cache_keys_by_subgraph(
+    response: &graphql::Response,
+) -> std::collections::HashMap<String, Vec<String>> {
+    let mut result: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    if let Some(data) = response
+        .extensions
+        .get("apolloCacheDebugging")
+        .and_then(|v| v.get("data"))
+        .and_then(|v| v.as_array())
+    {
+        for item in data {
+            if let (Some(key), Some(subgraph)) = (
+                item.get("key").and_then(|k| k.as_str()),
+                item.get("subgraphName").and_then(|s| s.as_str()),
+            ) {
+                result
+                    .entry(subgraph.to_string())
+                    .or_default()
+                    .push(key.to_string());
+            }
+        }
+    }
+    result
 }
 
 fn base_config() -> Value {
@@ -887,6 +929,9 @@ async fn complex_entity_key_response_cache() {
     let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name":"Item"}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
     assert_eq!(body.data, Some(expectation));
     insta::assert_json_snapshot!(body.extensions, {
+        ".apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 }
@@ -977,6 +1022,9 @@ async fn test_cache_keys_nullable_data() {
     let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name": null}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
     assert_eq!(body.data, Some(expectation));
     insta::assert_json_snapshot!(body.extensions, {
+        ".apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 }
@@ -1019,10 +1067,12 @@ fn parse_max_age(cache_control: &str) -> u32 {
 
 macro_rules! check_cache_key {
     ($namespace: expr, $cache_key: expr, $client: expr) => {
-        let mut record: Option<String> = None;
         let key = format!("{}:{}", $namespace, $cache_key);
-        // Retry a few times because insert is asynchronous
+        let mut record: Option<String> = None;
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         for _ in 0..10 {
+            interval.tick().await;
             match $client
                 .get(key.clone())
                 .timeout(Duration::from_secs(5))
@@ -1032,22 +1082,44 @@ macro_rules! check_cache_key {
                     record = Some(resp);
                     break;
                 }
-                Ok(Err(_)) => {
-                    sleep(Duration::from_secs(1)).await;
-                }
-                Err(_) => {
-                    panic!("long timeout connecting to redis - did you call client.init()?");
-                }
+                Err(_) => panic!("long timeout connecting to redis - did you call client.init()?"),
+                _ => {}
             }
         }
-
         match record {
             Some(s) => {
                 let cache_value: Value = serde_json::from_str(&s).unwrap();
                 let v: Value = cache_value.get("data").unwrap().clone();
                 insta::assert_json_snapshot!(v);
             }
-            None => panic!("cannot get cache key {}", key),
+            None => panic!("cache key not found after retries: {}", key),
+        }
+    };
+}
+
+macro_rules! assert_cache_key_exists {
+    ($namespace: expr, $cache_key: expr, $client: expr) => {
+        let key = format!("{}:{}", $namespace, $cache_key);
+        let mut found = false;
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        for _ in 0..10 {
+            interval.tick().await;
+            match $client
+                .get::<Option<String>, _>(key.clone())
+                .timeout(Duration::from_secs(5))
+                .await
+            {
+                Ok(Ok(Some(_))) => {
+                    found = true;
+                    break;
+                }
+                Err(_) => panic!("long timeout connecting to redis - did you call client.init()?"),
+                _ => {}
+            }
+        }
+        if !found {
+            panic!("cache key not found after retries: {}", key);
         }
     };
 }
@@ -1179,15 +1251,30 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         .await
         .unwrap();
 
+    let cache_keys = extract_cache_keys_from_response(&response);
+    let cache_keys_by_subgraph = extract_cache_keys_by_subgraph(&response);
+
     insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let cache_key = "version:1.1:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
-    check_cache_key!(&namespace, cache_key, &client);
+    let products_cache_key = cache_keys_by_subgraph
+        .get("products")
+        .and_then(|v| v.first())
+        .unwrap();
+    let reviews_cache_keys = cache_keys_by_subgraph.get("reviews").unwrap();
 
-    let product_cache_key = "version:1.1:subgraph:reviews:type:Product:representation:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
-    check_cache_key!(&namespace, product_cache_key, &client);
+    // Snapshot specific cache entries
+    check_cache_key!(&namespace, products_cache_key, &client);
+    check_cache_key!(&namespace, reviews_cache_keys.last().unwrap(), &client);
+
+    // Verify all cache keys exist
+    for cache_key in &cache_keys {
+        assert_cache_key_exists!(&namespace, cache_key, &client);
+    }
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
@@ -1241,10 +1328,15 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         .await
         .unwrap();
     insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    check_cache_key!(&namespace, product_cache_key, &client);
+    for review_key in reviews_cache_keys {
+        assert_cache_key_exists!(&namespace, review_key, &client);
+    }
 
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
@@ -1338,11 +1430,12 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     assert!(response_status.is_success());
 
     // This should be in error because we invalidated this entity
-    assert!(!cache_key_exists(&namespace, product_cache_key, &client).await?);
+    for review_key in reviews_cache_keys {
+        assert!(!cache_key_exists(&namespace, review_key, &client).await?);
+    }
 
     // This entry should still be in redis because we didn't invalidate this entry
-    let cache_key = "version:1.1:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
-    assert!(cache_key_exists(&namespace, cache_key, &client).await?);
+    assert!(cache_key_exists(&namespace, products_cache_key, &client).await?);
 
     Ok(())
 }
@@ -1423,15 +1516,30 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
         .next_response()
         .await
         .unwrap();
+    let cache_keys = extract_cache_keys_from_response(&response);
+    let cache_keys_by_subgraph = extract_cache_keys_by_subgraph(&response);
+
     insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let query_cache_key = "version:1.1:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
-    check_cache_key!(&namespace, query_cache_key, &client);
+    let users_cache_keys = cache_keys_by_subgraph.get("users").unwrap();
+    let products_cache_key = cache_keys_by_subgraph
+        .get("products")
+        .and_then(|v| v.first())
+        .unwrap();
 
-    let user_cache_key = "version:1.1:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
-    check_cache_key!(&namespace, user_cache_key, &client);
+    // Snapshot specific cache entries
+    check_cache_key!(&namespace, products_cache_key, &client);
+    check_cache_key!(&namespace, users_cache_keys.first().unwrap(), &client);
+
+    // Verify all cache keys exist
+    for cache_key in &cache_keys {
+        assert_cache_key_exists!(&namespace, cache_key, &client);
+    }
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
@@ -1484,10 +1592,15 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
         .await
         .unwrap();
     insta::assert_json_snapshot!(response, {
+        ".extensions.apolloCacheDebugging.data[].key" => insta::dynamic_redaction(|value, _path| {
+            redact_cache_debug_query_hash(value.as_str().unwrap())
+        }),
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    check_cache_key!(&namespace, user_cache_key, &client);
+    for user_key in users_cache_keys {
+        assert_cache_key_exists!(&namespace, user_key, &client);
+    }
 
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
@@ -1582,11 +1695,16 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     assert!(response_status.is_success());
 
     // This should be in error because we invalidated this entity
-    assert!(!cache_key_exists(&namespace, user_cache_key, &client).await?);
+    for user_key in users_cache_keys {
+        assert!(!cache_key_exists(&namespace, user_key, &client).await?);
+    }
 
     // This entry should still be in redis because we didn't invalidate this entry
-    let cache_key = "version:1.1:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
-    assert!(cache_key_exists(&namespace, cache_key, &client).await?);
+    let products_cache_key = cache_keys_by_subgraph
+        .get("products")
+        .and_then(|v| v.first())
+        .unwrap();
+    assert!(cache_key_exists(&namespace, products_cache_key, &client).await?);
 
     Ok(())
 }

@@ -29,7 +29,7 @@ services:
 
   # redis cluster
   redis-cluster-7000:
-    image: cimg/redis:7.4.7
+    image: cimg/redis:7.4.8
     command:
       [
         "redis-server",
@@ -47,7 +47,7 @@ services:
       - redis-net
 
   redis-cluster-7001:
-    image: cimg/redis:7.4.7
+    image: cimg/redis:7.4.8
     command:
       [
         "redis-server",
@@ -65,7 +65,7 @@ services:
       - redis-net
 
   redis-cluster-7002:
-    image: cimg/redis:7.4.7
+    image: cimg/redis:7.4.8
     command:
       [
         "redis-server",
@@ -83,7 +83,7 @@ services:
       - redis-net
 
   redis-cluster-7003:
-    image: cimg/redis:7.4.7
+    image: cimg/redis:7.4.8
     command:
       [
         "redis-server",
@@ -101,7 +101,7 @@ services:
       - redis-net
 
   redis-cluster-7004:
-    image: cimg/redis:7.4.7
+    image: cimg/redis:7.4.8
     command:
       [
         "redis-server",
@@ -119,7 +119,7 @@ services:
       - redis-net
 
   redis-cluster-7005:
-    image: cimg/redis:7.4.7
+    image: cimg/redis:7.4.8
     command:
       [
         "redis-server",
@@ -150,7 +150,7 @@ services:
   # internal networking (in particular, different IPs for the services) but redis will hold on to cluster info (that's the
   # working theory, it might be wrong)
   redis-cluster-startup:
-    image: cimg/redis:7.4.7
+    image: cimg/redis:7.4.8
     depends_on:
       - redis-cluster-7000
       - redis-cluster-7001

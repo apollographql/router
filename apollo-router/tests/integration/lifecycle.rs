@@ -143,7 +143,7 @@ async fn test_force_config_reload_via_chaos() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             "experimental_chaos:
-                force_config_reload: 1s",
+                force_config_reload: 2s",
         )
         .build()
         .await;
@@ -159,7 +159,7 @@ async fn test_force_schema_reload_via_chaos() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             "experimental_chaos:
-                force_schema_reload: 1s",
+                force_schema_reload: 2s",
         )
         .build()
         .await;

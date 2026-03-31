@@ -1288,6 +1288,7 @@ impl TypeDefinitionPosition {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<bool, FederationError> {
         let is_some = match self {
             TypeDefinitionPosition::Scalar(scalar_pos) => scalar_pos.remove(schema)?.is_some(),
@@ -2746,6 +2747,9 @@ impl ScalarTypeDefinitionPosition {
                 pos.rename_type(schema, new_name.clone())?;
             }
             for pos in scalar_type_referencers.input_object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in scalar_type_referencers.directive_arguments.iter() {
                 pos.rename_type(schema, new_name.clone())?;
             }
             schema
@@ -5067,12 +5071,7 @@ impl InterfaceFieldDefinitionPosition {
         new_name: Name,
     ) -> Result<(), FederationError> {
         let field = self.make_mut(&mut schema.schema)?.make_mut();
-        match field.ty.clone() {
-            ast::Type::Named(_) => field.ty = ast::Type::Named(new_name),
-            ast::Type::NonNullNamed(_) => field.ty = ast::Type::NonNullNamed(new_name),
-            ast::Type::List(_) => todo!(),
-            ast::Type::NonNullList(_) => todo!(),
-        }
+        rename_type(&mut field.ty, new_name);
         Ok(())
     }
 }
@@ -5392,14 +5391,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
         new_name: Name,
     ) -> Result<(), FederationError> {
         let argument = self.make_mut(&mut schema.schema)?.make_mut();
-        match argument.ty.as_ref() {
-            ast::Type::Named(_) => *argument.ty.make_mut() = ast::Type::Named(new_name),
-            ast::Type::NonNullNamed(_) => {
-                *argument.ty.make_mut() = ast::Type::NonNullNamed(new_name)
-            }
-            ast::Type::List(_) => todo!(),
-            ast::Type::NonNullList(_) => todo!(),
-        }
+        rename_type(argument.ty.make_mut(), new_name);
         Ok(())
     }
 }
@@ -7622,6 +7614,16 @@ impl DirectiveArgumentDefinitionPosition {
                 .directive_arguments
                 .shift_remove(self);
         }
+    }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let input_value_definition = self.make_mut(&mut schema.schema)?.make_mut();
+        rename_type(input_value_definition.ty.make_mut(), new_name);
+        Ok(())
     }
 }
 
