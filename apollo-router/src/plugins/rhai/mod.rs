@@ -24,6 +24,7 @@ use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::util::BoxCloneSyncService;
 use tower::util::BoxService;
 
 use self::engine::RhaiService;
@@ -150,7 +151,10 @@ impl Plugin for Rhai {
         shared_service.take_unwrap()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         const FUNCTION_NAME_SERVICE: &str = "execution_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -202,7 +206,7 @@ impl Plugin for Rhai {
 pub(crate) enum ServiceStep {
     Router(SharedMut<router::BoxService>),
     Supergraph(SharedMut<supergraph::BoxService>),
-    Execution(SharedMut<execution::BoxService>),
+    Execution(SharedMut<execution::BoxCloneSyncService>),
     Subgraph(SharedMut<subgraph::BoxCloneSyncService>),
 }
 
@@ -498,9 +502,9 @@ macro_rules! gen_map_router_deferred_response {
 }
 
 macro_rules! gen_map_deferred_response {
-    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $service: ident) => {
         $borrow.replace(|service| {
-            BoxService::new(service.and_then(
+            $service::new(service.and_then(
                 |mapped_response: $base::Response| async move {
                     // we split the response stream into headers+first response, then a stream of deferred responses
                     // for which we will implement mapping later
@@ -618,7 +622,7 @@ impl ServiceStep {
                 gen_map_request!(supergraph, service, rhai_service, callback, boxed);
             }
             ServiceStep::Execution(service) => {
-                gen_map_request!(execution, service, rhai_service, callback, boxed);
+                gen_map_request!(execution, service, rhai_service, callback, boxed_clone_sync);
             }
             ServiceStep::Subgraph(service) => {
                 gen_map_request!(subgraph, service, rhai_service, callback, boxed_clone_sync);
@@ -632,10 +636,16 @@ impl ServiceStep {
                 gen_map_router_deferred_response!(router, service, rhai_service, callback);
             }
             ServiceStep::Supergraph(service) => {
-                gen_map_deferred_response!(supergraph, service, rhai_service, callback);
+                gen_map_deferred_response!(supergraph, service, rhai_service, callback, BoxService);
             }
             ServiceStep::Execution(service) => {
-                gen_map_deferred_response!(execution, service, rhai_service, callback);
+                gen_map_deferred_response!(
+                    execution,
+                    service,
+                    rhai_service,
+                    callback,
+                    BoxCloneSyncService
+                );
             }
             ServiceStep::Subgraph(service) => {
                 gen_map_response!(subgraph, service, rhai_service, callback, boxed_clone_sync);

@@ -164,7 +164,10 @@ impl Plugin for Replay {
             .boxed()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         let recorded = self.recording.formatted_query_plan.clone();
         let report = self.report.clone();
         ServiceBuilder::new()
@@ -186,7 +189,7 @@ impl Plugin for Replay {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn subgraph_service(

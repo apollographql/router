@@ -112,7 +112,10 @@ impl PluginPrivate for FileUploadsPlugin {
             .boxed()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         if !self.enabled {
             return service;
         }
@@ -130,7 +133,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 })
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn subgraph_service(

@@ -909,7 +909,10 @@ impl PluginPrivate for Telemetry {
             .boxed()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         let config = self.config.clone();
         let config_map_res_first = config.clone();
 
@@ -940,7 +943,7 @@ impl PluginPrivate for Telemetry {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn subgraph_service(
