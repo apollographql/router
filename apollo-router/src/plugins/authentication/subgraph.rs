@@ -31,8 +31,8 @@ use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
+use crate::layers::ServiceExt as _;
 use crate::services::SubgraphRequest;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
@@ -493,8 +493,8 @@ impl SubgraphAuth {
     pub(super) fn subgraph_service(
         &self,
         name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneSyncService,
+    ) -> crate::services::subgraph::BoxCloneSyncService {
         if let Some(signing_params) = self.params_for_service(name) {
             ServiceBuilder::new()
                 .map_request(move |req: SubgraphRequest| {
@@ -505,7 +505,7 @@ impl SubgraphAuth {
                     req
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         } else {
             service
         }
@@ -533,6 +533,7 @@ mod test {
     use http::header::HOST;
     use regex::Regex;
     use tower::Service;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Context;
@@ -675,7 +676,7 @@ mod test {
                 subgraphs: Default::default(),
             }),
         }
-        .subgraph_service("test_subgraph", mock.boxed());
+        .subgraph_service("test_subgraph", mock.boxed_clone_sync());
 
         service.ready().await?.call(subgraph_request).await?;
         Ok(())
@@ -728,7 +729,7 @@ mod test {
                 subgraphs: Default::default(),
             }),
         }
-        .subgraph_service("test_subgraph", mock.boxed());
+        .subgraph_service("test_subgraph", mock.boxed_clone_sync());
 
         service.ready().await?.call(subgraph_request).await?;
         Ok(())

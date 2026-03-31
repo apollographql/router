@@ -34,6 +34,7 @@ use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::RouterResponse;
@@ -404,7 +405,11 @@ impl PluginPrivate for TrafficShaping {
             .boxed()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
@@ -429,6 +434,7 @@ impl PluginPrivate for TrafficShaping {
                 });
 
             ServiceBuilder::new()
+                .buffered()
                 .map_future_with_request_data(
                     |req: &subgraph::Request| (req.context.clone(), req.subgraph_name.clone()),
                     move |(ctx, subgraph_name), future| {
@@ -479,7 +485,7 @@ impl PluginPrivate for TrafficShaping {
                 })
                 .buffered()
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         } else {
             service
         }
@@ -928,7 +934,7 @@ mod test {
         });
 
         let _response = plugin
-            .subgraph_service("test", test_service.boxed())
+            .subgraph_service("test", test_service.boxed_clone_sync())
             .oneshot(request)
             .await
             .unwrap();
@@ -1117,7 +1123,7 @@ mod test {
             graphql::Request::default() => graphql::Response::default()
         });
 
-        let mut svc = plugin.subgraph_service("test", test_service.boxed());
+        let mut svc = plugin.subgraph_service("test", test_service.boxed_clone_sync());
 
         assert!(
             svc.ready()

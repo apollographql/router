@@ -20,6 +20,7 @@ use tower::ServiceExt as TowerServiceExt;
 use super::recording::Recording;
 use crate::context::Context;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::TryIntoHeaderName;
@@ -191,8 +192,8 @@ impl Plugin for Replay {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         let subgraph_name = String::from(subgraph_name);
 
         let report = self.report.clone();
@@ -243,7 +244,7 @@ impl Plugin for Replay {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

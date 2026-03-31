@@ -475,7 +475,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -618,7 +618,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -771,7 +771,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -938,7 +938,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1022,7 +1022,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1086,7 +1086,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1143,7 +1143,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1261,7 +1261,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1377,7 +1377,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1505,7 +1505,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1654,7 +1654,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1791,7 +1791,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_subgraph_service.boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -3817,7 +3817,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_disabled_invalid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_invalid_subgraph_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -3840,7 +3840,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_enabled_valid() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_valid_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3861,7 +3861,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_enabled_empty() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_empty_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3884,7 +3884,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_enabled_invalid() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_invalid_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3907,7 +3907,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_disabled_valid() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_valid_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -3928,7 +3928,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_disabled_empty() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_empty_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -3948,7 +3948,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_disabled_invalid() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_invalid_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -3969,7 +3969,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_enabled_valid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_valid_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3989,7 +3989,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_enabled_empty() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_empty_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4006,7 +4006,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_enabled_invalid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_invalid_subgraph_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4023,7 +4023,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_disabled_valid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_valid_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4043,7 +4043,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_disabled_empty() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_empty_response(),
-            create_mock_subgraph_service().boxed(),
+            create_mock_subgraph_service().boxed_clone_sync(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4358,7 +4358,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed(),
+                    create_mock_subgraph_service().boxed_clone_sync(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -4387,7 +4387,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed(),
+                    create_mock_subgraph_service().boxed_clone_sync(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -4416,7 +4416,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed(),
+                    create_mock_subgraph_service().boxed_clone_sync(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -4442,7 +4442,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed(),
+                    create_mock_subgraph_service().boxed_clone_sync(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -4468,7 +4468,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed(),
+                    create_mock_subgraph_service().boxed_clone_sync(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -4484,7 +4484,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed(),
+                    create_mock_subgraph_service().boxed_clone_sync(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -4512,7 +4512,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed(),
+                    create_mock_subgraph_service().boxed_clone_sync(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
@@ -4541,7 +4541,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed(),
+                    create_mock_subgraph_service().boxed_clone_sync(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
@@ -4570,7 +4570,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed(),
+                    create_mock_subgraph_service().boxed_clone_sync(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
@@ -4586,7 +4586,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed(),
+                    create_mock_subgraph_service().boxed_clone_sync(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled

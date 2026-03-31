@@ -119,8 +119,8 @@ impl Plugin for HelloWorld {
     fn subgraph_service(
         &self,
         name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         service
     }
 }

@@ -20,6 +20,7 @@ use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::cache::redis::RedisCacheStorage;
+use crate::layers::ServiceExt as _;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
@@ -969,7 +970,7 @@ async fn no_data() {
                     .expect_call()
                     .times(1)
                     .returning(move |_req: subgraph::Request| Err("orga not found".into()));
-                subgraph.boxed()
+                subgraph.boxed_clone_sync()
             } else {
                 service
             }

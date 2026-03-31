@@ -18,6 +18,7 @@ use super::recording::RequestDetails;
 use super::recording::ResponseDetails;
 use super::recording::Subgraph;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::execution;
@@ -230,8 +231,8 @@ impl Plugin for Record {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         if !self.enabled {
             return service;
         }
@@ -293,7 +294,7 @@ impl Plugin for Record {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

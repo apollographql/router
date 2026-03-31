@@ -261,8 +261,8 @@ impl PluginPrivate for AuthenticationPlugin {
     fn subgraph_service(
         &self,
         name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneSyncService,
+    ) -> crate::services::subgraph::BoxCloneSyncService {
         // Return without layering if no subgraph config was defined
         let Some(subgraph) = &self.subgraph else {
             return service;

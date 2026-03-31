@@ -10,6 +10,7 @@ use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceExt;
 
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
@@ -75,8 +76,8 @@ impl Plugin for OverrideSubgraphUrl {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneSyncService,
+    ) -> subgraph::BoxCloneSyncService {
         let new_url = self.urls.get(subgraph_name).cloned();
         service
             .map_request(move |mut req: SubgraphRequest| {
@@ -86,7 +87,7 @@ impl Plugin for OverrideSubgraphUrl {
 
                 req
             })
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 
@@ -100,7 +101,7 @@ mod tests {
     use serde_json::Value;
     use tower::Service;
     use tower::ServiceExt;
-    use tower::util::BoxService;
+    use tower::util::BoxCloneSyncService;
 
     use crate::Context;
     use crate::plugin::DynPlugin;
@@ -138,7 +139,7 @@ mod tests {
             .await
             .unwrap();
         let mut subgraph_service =
-            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service));
+            dyn_plugin.subgraph_service("test_one", BoxCloneSyncService::new(mock_service));
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
         let subgraph_req = SubgraphRequest::fake_builder().context(context);
@@ -191,7 +192,7 @@ mod tests {
             .unwrap();
 
         let mut subgraph_service =
-            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service));
+            dyn_plugin.subgraph_service("test_one", BoxCloneSyncService::new(mock_service));
         let subgraph_req = SubgraphRequest::fake_builder().context(Context::new());
 
         let _subgraph_resp = subgraph_service
