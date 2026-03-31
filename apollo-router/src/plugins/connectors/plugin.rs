@@ -140,7 +140,10 @@ impl Plugin for Connectors {
             .boxed()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         if !self.expose_sources_in_context {
             return service;
         }
@@ -172,7 +175,7 @@ impl Plugin for Connectors {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

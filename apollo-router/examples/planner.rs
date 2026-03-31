@@ -2,6 +2,7 @@ use std::ops::ControlFlow;
 
 use anyhow::Result;
 use apollo_router::layers::ServiceBuilderExt;
+use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -41,7 +42,10 @@ impl Plugin for DoNotExecute {
             .boxed()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
                 Ok(ControlFlow::Break(
@@ -52,7 +56,7 @@ impl Plugin for DoNotExecute {
                 ))
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

@@ -26,7 +26,6 @@ use serde_json_bytes::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 use crate::Context;
 use crate::configuration::subgraph::SubgraphConfiguration;
@@ -45,7 +44,6 @@ use crate::plugins::demand_control::strategy::StrategyFactory;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::register_plugin;
 use crate::services::execution;
-use crate::services::execution::BoxService;
 use crate::services::subgraph;
 
 pub(crate) mod cost_calculator;
@@ -554,7 +552,10 @@ impl Plugin for DemandControl {
         })
     }
 
-    fn execution_service(&self, service: BoxService) -> BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         if !self.config.enabled {
             service
         } else {
@@ -649,7 +650,7 @@ impl Plugin for DemandControl {
                     resp
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         }
     }
 

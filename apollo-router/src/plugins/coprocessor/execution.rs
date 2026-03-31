@@ -69,11 +69,11 @@ impl ExecutionStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: execution::BoxService,
+        service: execution::BoxCloneSyncService,
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-    ) -> execution::BoxService
+    ) -> execution::BoxCloneSyncService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -174,7 +174,7 @@ impl ExecutionStage {
             .option_layer(response_layer)
             .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 
@@ -740,7 +740,7 @@ mod tests {
 
         let service = execution_stage.as_service(
             mock_http_client,
-            mock_execution_service.boxed(),
+            mock_execution_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -811,7 +811,7 @@ mod tests {
 
         let service = execution_stage.as_service(
             mock_http_client,
-            mock_execution_service.boxed(),
+            mock_execution_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -942,7 +942,7 @@ mod tests {
 
         let service = execution_stage.as_service(
             mock_http_client,
-            mock_execution_service.boxed(),
+            mock_execution_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -1057,7 +1057,7 @@ mod tests {
 
         let service = execution_stage.as_service(
             mock_http_client,
-            mock_execution_service.boxed(),
+            mock_execution_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -1271,7 +1271,7 @@ mod tests {
     async fn external_plugin_execution_response_validation_disabled_invalid() {
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1290,7 +1290,7 @@ mod tests {
     async fn external_plugin_execution_response_validation_disabled_empty() {
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1312,7 +1312,7 @@ mod tests {
     async fn external_plugin_execution_request_validation_enabled_valid() {
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_valid_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1331,7 +1331,7 @@ mod tests {
     async fn external_plugin_execution_request_validation_enabled_empty() {
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_empty_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1355,7 +1355,7 @@ mod tests {
     async fn external_plugin_execution_request_validation_enabled_invalid() {
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_invalid_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1379,7 +1379,7 @@ mod tests {
     async fn external_plugin_execution_request_validation_disabled_valid() {
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_valid_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1398,7 +1398,7 @@ mod tests {
     async fn external_plugin_execution_request_validation_disabled_empty() {
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_empty_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1419,7 +1419,7 @@ mod tests {
     async fn external_plugin_execution_request_validation_disabled_invalid() {
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_invalid_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1441,7 +1441,7 @@ mod tests {
     async fn external_plugin_execution_response_validation_enabled_valid() {
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_execution_response_valid_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1459,7 +1459,7 @@ mod tests {
     async fn external_plugin_execution_response_validation_enabled_empty() {
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1476,7 +1476,7 @@ mod tests {
     async fn external_plugin_execution_response_validation_enabled_invalid() {
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1493,7 +1493,7 @@ mod tests {
     async fn external_plugin_execution_response_validation_disabled_valid() {
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_execution_response_valid_response(),
-            create_mock_execution_service().boxed(),
+            create_mock_execution_service().boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled

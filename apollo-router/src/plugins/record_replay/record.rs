@@ -213,7 +213,10 @@ impl Plugin for Record {
             .boxed()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         ServiceBuilder::new()
             .map_request(|req: execution::Request| {
                 req.context.extensions().with_lock(|lock| {
@@ -225,7 +228,7 @@ impl Plugin for Record {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn subgraph_service(

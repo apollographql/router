@@ -60,7 +60,10 @@ impl Plugin for ExposeQueryPlan {
         })
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(
+        &self,
+        service: execution::BoxCloneSyncService,
+    ) -> execution::BoxCloneSyncService {
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
                 let setting = req
@@ -95,7 +98,7 @@ impl Plugin for ExposeQueryPlan {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
