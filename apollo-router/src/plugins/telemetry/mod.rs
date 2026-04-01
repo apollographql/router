@@ -1089,9 +1089,9 @@ impl PluginPrivate for Telemetry {
 
     fn connector_request_service(
         &self,
-        service: connector::request_service::BoxService,
+        service: connector::request_service::BoxCloneSyncService,
         source_name: String,
-    ) -> connector::request_service::BoxService {
+    ) -> connector::request_service::BoxCloneSyncService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
         let span_mode = self.config.instrumentation.spans.mode;
@@ -1197,7 +1197,7 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn http_client_service(
