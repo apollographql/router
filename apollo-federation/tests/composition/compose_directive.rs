@@ -796,9 +796,7 @@ mod inconsistent_imports {
             let errors = result.unwrap_err();
             let composition_errors: Vec<_> = errors
                 .iter()
-                .filter(|e| {
-                    e.code().definition().code() == "DIRECTIVE_COMPOSITION_ERROR"
-                })
+                .filter(|e| e.code().definition().code() == "DIRECTIVE_COMPOSITION_ERROR")
                 .collect();
             assert!(
                 !composition_errors.is_empty(),
