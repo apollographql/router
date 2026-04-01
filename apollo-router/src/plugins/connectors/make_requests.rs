@@ -602,11 +602,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -618,6 +618,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r###"
@@ -674,11 +675,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -690,6 +691,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r###"
@@ -775,11 +777,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -791,6 +793,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r###"
@@ -889,11 +892,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("field").unwrap(),
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
@@ -905,6 +908,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1002,11 +1006,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("field").unwrap(),
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
@@ -1018,6 +1022,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1096,11 +1101,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("field { field }").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1112,6 +1117,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1212,11 +1218,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1228,6 +1234,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1363,11 +1370,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1379,6 +1386,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1511,11 +1519,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1527,6 +1535,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1623,11 +1632,11 @@ mod tests {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
@@ -1639,6 +1648,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &operation, &variables, Some(&keys)).unwrap(), @r###"
@@ -1722,11 +1732,11 @@ mod tests {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
@@ -1738,6 +1748,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &operation, &variables, Some(&keys)).unwrap(), @r###"
@@ -1826,11 +1837,11 @@ mod tests {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
@@ -1842,6 +1853,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &operation, &variables, Some(&keys)).unwrap(), @r###"
@@ -1932,7 +1944,7 @@ mod tests {
             spec: DEFAULT_CONNECT_SPEC,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: StringTemplate::parse_with_spec(
                     "/path?id={$this.id}",
@@ -1940,7 +1952,7 @@ mod tests {
                 )
                 .unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse_with_spec("id field", DEFAULT_CONNECT_SPEC).unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
@@ -1952,6 +1964,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -2006,11 +2019,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -2022,6 +2035,7 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
+            mapping_only: false,
         };
 
         let requests: Vec<_> = super::make_requests(
@@ -2036,7 +2050,9 @@ mod tests {
         .unwrap()
         .into_iter()
         .map(|req| {
-            let TransportRequest::Http(http_request) = req.transport_request;
+            let TransportRequest::Http(http_request) = req.transport_request else {
+                panic!("expected Http transport request");
+            };
             let (parts, _body) = http_request.inner.into_parts();
             let new_req =
                 http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());

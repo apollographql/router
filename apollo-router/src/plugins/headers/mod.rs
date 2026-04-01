@@ -1656,11 +1656,12 @@ mod test {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
+            mapping_only: false,
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1750,7 +1751,9 @@ mod test {
             headers.push((HOST.as_str(), "rhost"));
             headers.push((CONTENT_LENGTH.as_str(), "22"));
             headers.push((CONTENT_TYPE.as_str(), "graphql"));
-            let TransportRequest::Http(ref http_request) = self.transport_request;
+            let TransportRequest::Http(ref http_request) = self.transport_request else {
+                panic!("expected Http transport request");
+            };
             let actual_headers = http_request
                 .inner
                 .headers()

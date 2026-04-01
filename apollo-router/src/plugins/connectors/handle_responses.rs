@@ -368,11 +368,12 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
+            mapping_only: false,
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -483,11 +484,12 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
+            mapping_only: false,
             selection: JSONSelection::parse("$.data { id }").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
@@ -597,13 +599,14 @@ mod tests {
             spec: ConnectSpec::V0_2,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
             schema_subtypes_map: Default::default(),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Post,
                 body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
                 ..Default::default()
-            },
+            }),
+            mapping_only: false,
             selection: JSONSelection::parse("$.data { id name }").unwrap(),
             entity_resolver: Some(EntityResolver::TypeBatch),
             config: Default::default(),
@@ -727,11 +730,12 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
+            mapping_only: false,
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Implicit),
             config: Default::default(),
@@ -858,11 +862,12 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
+            mapping_only: false,
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
@@ -1140,11 +1145,12 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
+            mapping_only: false,
             selection: selection.clone(),
             entity_resolver: None,
             config: Default::default(),
@@ -1238,11 +1244,12 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
+            mapping_only: false,
             selection: selection.clone(),
             entity_resolver: None,
             config: Default::default(),

@@ -481,11 +481,12 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: None,
                 connect_template: StringTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
                 ..Default::default()
-            },
+            }),
+            mapping_only: false,
             selection: JSONSelection::empty(),
             config: None,
             max_requests: None,
@@ -531,10 +532,10 @@ mod tests {
         Request {
             context: context.unwrap_or_default(),
             connector: Arc::new(connector()),
-            transport_request: TransportRequest::Http(HttpRequest {
+            transport_request: TransportRequest::Http(Box::new(HttpRequest {
                 inner: http_request,
                 debug: Default::default(),
-            }),
+            })),
             key: response_key(),
             mapping_problems: mapping_problems.unwrap_or_default(),
             supergraph_request: Default::default(),

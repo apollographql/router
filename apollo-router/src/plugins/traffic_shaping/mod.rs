@@ -840,11 +840,12 @@ mod test {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
+            mapping_only: false,
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -952,7 +953,9 @@ mod test {
 
         let test_service =
             MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
-                let TransportRequest::Http(ref http_request) = req.transport_request;
+                let TransportRequest::Http(ref http_request) = req.transport_request else {
+                    panic!("expected Http transport request");
+                };
 
                 assert_eq!(
                     http_request.inner.headers().get(&CONTENT_ENCODING).unwrap(),
