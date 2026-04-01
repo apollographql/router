@@ -15,12 +15,13 @@ use super::FetchRequest;
 use super::SubgraphRequest;
 use super::connector_service::ConnectorServiceFactory;
 use super::fetch::AddSubgraphNameExt;
-use super::fetch::BoxService;
+use super::fetch::BoxCloneSyncService;
 use super::new_service::ServiceFactory;
 use crate::configuration::HoistOrphanErrors;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
+use crate::layers::ServiceExt as _;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::fetch_service_handle_subscription;
 use crate::query_planner::FETCH_SPAN_NAME;
@@ -312,7 +313,7 @@ impl FetchServiceFactory {
 }
 
 impl ServiceFactory<Request> for FetchServiceFactory {
-    type Service = BoxService;
+    type Service = BoxCloneSyncService;
 
     fn create(&self) -> Self::Service {
         FetchService {
@@ -323,6 +324,6 @@ impl ServiceFactory<Request> for FetchServiceFactory {
             connector_service_factory: self.connector_service_factory.clone(),
             hoist_orphan_errors: self.hoist_orphan_errors.clone(),
         }
-        .boxed()
+        .boxed_clone_sync()
     }
 }
