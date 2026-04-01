@@ -15,7 +15,6 @@ use serde_json_bytes::Value;
 use tokio::fs;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt as TowerServiceExt;
 
 use super::recording::Recording;
 use crate::context::Context;
@@ -93,7 +92,7 @@ impl Plugin for Replay {
         unreachable!()
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         let report = self.report.clone();
         let recorded_headers = self.recording.client_response.headers.clone();
 
@@ -128,7 +127,7 @@ impl Plugin for Replay {
                 res
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn supergraph_service(

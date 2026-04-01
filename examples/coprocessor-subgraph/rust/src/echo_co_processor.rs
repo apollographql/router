@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -17,7 +18,6 @@ use serde::Deserialize;
 use serde_json::json;
 use tower::BoxError;
 use tower::Service;
-use tower::ServiceExt;
 
 #[derive(Debug)]
 struct EchoCoProcessor {
@@ -48,7 +48,7 @@ impl Plugin for EchoCoProcessor {
     // written in a language you're comfortable with.
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let web_endpoint =
-            Endpoint::from_router_service("/".to_string(), SimpleEndpoint {}.boxed());
+            Endpoint::from_router_service("/".to_string(), SimpleEndpoint {}.boxed_clone_sync());
 
         let mut endpoints = MultiMap::new();
         let socket_addr: SocketAddr = format!("127.0.0.1:{}", self.configuration.port)
@@ -62,6 +62,7 @@ impl Plugin for EchoCoProcessor {
 
 // This is a simple server, that will do a couple of transforms to payloads and return it.
 // In real life you will implement this outside the router, in your favorite language.
+#[derive(Clone)]
 struct SimpleEndpoint {}
 
 impl Service<router::Request> for SimpleEndpoint {

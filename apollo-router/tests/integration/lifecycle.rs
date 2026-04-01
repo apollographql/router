@@ -408,7 +408,10 @@ macro_rules! make_plugin {
                     Ok(Self)
                 }
 
-                fn router_service(&self, service: router::BoxService) -> router::BoxService {
+                fn router_service(
+                    &self,
+                    service: router::BoxCloneSyncService,
+                ) -> router::BoxCloneSyncService {
                     ServiceBuilder::new()
                         .map_request(|request: router::Request| {
                             test_plugin_ordering_push_trace(
@@ -425,7 +428,7 @@ macro_rules! make_plugin {
                             response
                         })
                         .service(service)
-                        .boxed()
+                        .boxed_clone_sync()
                 }
 
                 fn supergraph_service(

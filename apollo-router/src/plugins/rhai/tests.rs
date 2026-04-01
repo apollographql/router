@@ -17,7 +17,6 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
 use tower::util::BoxCloneSyncService;
-use tower::util::BoxService;
 use tracing_futures::WithSubscriber;
 use uuid::Uuid;
 
@@ -985,7 +984,7 @@ async fn test_router_error_logging(script_name: &str) -> Result<(), BoxError> {
 
     let dyn_plugin = create_plugin(script_name).await?;
 
-    let mut service = dyn_plugin.router_service(BoxService::new(mock_service));
+    let mut service = dyn_plugin.router_service(BoxCloneSyncService::new(mock_service));
     let req = crate::services::RouterRequest::fake_builder()
         .context(Context::new())
         .build()?;

@@ -526,7 +526,7 @@ impl PluginPrivate for ResponseCache {
                     let endpoint = Endpoint::from_router_service(
                         endpoint_config.path.clone(),
                         InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
-                            .boxed(),
+                            .boxed_clone_sync(),
                     );
                     tracing::info!(
                         "Response cache invalidation endpoint listening on: {}{}",

@@ -13,7 +13,6 @@ use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 use self::config::FileUploadsConfig;
 use self::config::MultipartRequestLimits;
@@ -60,7 +59,7 @@ impl PluginPrivate for FileUploadsPlugin {
         Ok(Self { enabled, limits })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         if !self.enabled {
             return service;
         }
@@ -83,7 +82,7 @@ impl PluginPrivate for FileUploadsPlugin {
             })
             .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn supergraph_service(

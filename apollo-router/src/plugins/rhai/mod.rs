@@ -25,7 +25,6 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::util::BoxCloneSyncService;
-use tower::util::BoxService;
 
 use self::engine::RhaiService;
 use self::engine::SharedMut;
@@ -108,7 +107,7 @@ impl Plugin for Rhai {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -206,7 +205,7 @@ impl Plugin for Rhai {
 
 #[derive(Clone, Debug)]
 pub(crate) enum ServiceStep {
-    Router(SharedMut<router::BoxService>),
+    Router(SharedMut<router::BoxCloneSyncService>),
     Supergraph(SharedMut<supergraph::BoxCloneSyncService>),
     Execution(SharedMut<execution::BoxCloneSyncService>),
     Subgraph(SharedMut<subgraph::BoxCloneSyncService>),
@@ -357,7 +356,7 @@ macro_rules! gen_map_router_deferred_request {
                     */
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         })
     };
 }
@@ -400,7 +399,7 @@ macro_rules! gen_map_response {
 macro_rules! gen_map_router_deferred_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
-            BoxService::new(service.and_then(
+            BoxCloneSyncService::new(service.and_then(
                 |mapped_response: $base::Response| async move {
                     // we split the response stream into headers+first response, then a stream of deferred responses
                     // for which we will implement mapping later

@@ -1498,15 +1498,21 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
                 .into(),
         )
     })
-    .boxed_clone();
+    .boxed_clone_sync();
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.clone().boxed()),
+        Endpoint::from_router_service(
+            "/a-custom-path".to_string(),
+            endpoint.clone().boxed_clone_sync(),
+        ),
     );
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/an-other-custom-path".to_string(), endpoint.boxed()),
+        Endpoint::from_router_service(
+            "/an-other-custom-path".to_string(),
+            endpoint.boxed_clone_sync(),
+        ),
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
@@ -1605,16 +1611,19 @@ async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
                 .into(),
         )
     })
-    .boxed_clone();
+    .boxed_clone_sync();
 
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.clone().boxed()),
+        Endpoint::from_router_service(
+            "/a-custom-path".to_string(),
+            endpoint.clone().boxed_clone_sync(),
+        ),
     );
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.boxed()),
+        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.boxed_clone_sync()),
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
@@ -2516,11 +2525,11 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
                 .into(),
         )
     })
-    .boxed_clone();
+    .boxed_clone_sync();
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/health".to_string(), endpoint.boxed()),
+        Endpoint::from_router_service("/health".to_string(), endpoint.boxed_clone_sync()),
     );
 
     let error = init_with_config(
