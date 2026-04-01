@@ -263,8 +263,8 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         + Clone
         + 'static,
     ) -> Result<connector::request_service::Response, BoxError> {
-        let service: connector::request_service::BoxService =
-            connector::request_service::BoxService::new(ServiceBuilder::new().service_fn(
+        let service: connector::request_service::BoxCloneSyncService =
+            connector::request_service::BoxCloneSyncService::new(ServiceBuilder::new().service_fn(
                 move |req: connector::request_service::Request| {
                     let response_fn = response_fn.clone();
                     async move { Ok((response_fn)(req)) }

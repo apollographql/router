@@ -493,9 +493,9 @@ impl PluginPrivate for TrafficShaping {
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneSyncService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneSyncService {
         let all_config = self.config.connector.all.as_ref();
         let source_config = self.config.connector.sources.get(&source_name).cloned();
         let final_config = Self::merge_config(all_config, source_config.as_ref());
@@ -515,6 +515,7 @@ impl PluginPrivate for TrafficShaping {
             });
 
             ServiceBuilder::new()
+                .buffered()
                 .map_future_with_request_data(
                     |req: &Request| (req.context.clone(), req.key.clone()),
                     move |(context, response_key), future| {
@@ -560,7 +561,7 @@ impl PluginPrivate for TrafficShaping {
                 })
                 .buffered()
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         } else {
             service
         }
@@ -969,7 +970,7 @@ mod test {
 
         let _response = plugin
             .connector_request_service(
-                test_service.boxed(),
+                test_service.boxed_clone_sync(),
                 "test_subgraph.test_sourcename".to_string(),
             )
             .oneshot(request)
@@ -1186,7 +1187,7 @@ mod test {
         });
 
         let mut svc = plugin.connector_request_service(
-            test_service.boxed(),
+            test_service.boxed_clone_sync(),
             "test_subgraph.test_sourcename".to_string(),
         );
 

@@ -648,9 +648,9 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneSyncService,
         _source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneSyncService {
         service
     }
 
@@ -779,9 +779,9 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneSyncService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService;
+    ) -> crate::services::connector::request_service::BoxCloneSyncService;
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
@@ -844,9 +844,9 @@ where
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneSyncService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneSyncService {
         self.connector_request_service(service, source_name)
     }
 
