@@ -252,7 +252,9 @@ fn transform_operation(
     let mut selections: Vec<Selection> = vec![];
     let mut new_variables: Vec<Node<VariableDefinition>> = vec![];
     operation.variables.iter().for_each(|v| {
-        if arguments.contains(v.name.as_str()) {
+        if v.name.as_str() == "representations" || arguments.contains(v.name.as_str()) {
+            // Clone both contextual arguments and the representations variable
+            // into per-context copies (e.g. representations_0, representations_1, ...).
             for i in 0..*count {
                 new_variables.push(Node::new(VariableDefinition {
                     name: Name::new_unchecked(&format!("{}_{}", v.name.as_str(), i)),
@@ -301,6 +303,17 @@ fn transform_operation(
             op = field_selection.name
         )));
 
+        // Rename $representations to $representations_i for this alias
+        for arg in cfs.arguments.iter_mut() {
+            let arg = arg.make_mut();
+            if let Some(v) = arg.value.as_variable() {
+                if v.as_str() == "representations" {
+                    arg.value = Node::new(ast::Value::Variable(Name::new_unchecked(&format!(
+                        "representations_{i}"
+                    ))));
+                }
+            }
+        }
         transform_field_arguments(&mut cfs.arguments, arguments, i);
         transform_selection_set(&mut cfs.selection_set, arguments, i);
         selections.push(Selection::Field(cloned));
