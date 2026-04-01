@@ -56,7 +56,7 @@ ci = []
 snapshot = []
 
 [dependencies]
-addr2line = "0.25.0"
+addr2line = "0.26.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.13.0" }
