@@ -105,7 +105,7 @@ fred = { version = "10.1.0", features = [
 # "tcp-user-timeouts" feature to work: https://github.com/aembke/fred.rs/pull/369
 socket2 = { version = "0.5", features = ["all"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
-graphql_client = "0.14.0"
+graphql_client = "0.16.0"
 # Not used directly, but declared here to enforce a minimum version floor for this
 # transitive dependency and to allow Renovate to manage future version bumps.
 h2 = "0.4.13"
