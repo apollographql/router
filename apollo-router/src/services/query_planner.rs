@@ -134,9 +134,8 @@ impl Response {
 }
 
 pub(crate) type ServiceError = MaybeBackPressureError<QueryPlannerError>;
-pub(crate) type BoxService = tower::util::BoxService<Request, Response, ServiceError>;
-#[allow(dead_code)]
-pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, ServiceError>;
+pub(crate) type BoxCloneSyncService =
+    tower::util::BoxCloneSyncService<Request, Response, ServiceError>;
 #[allow(dead_code)]
 pub(crate) type ServiceResult = Result<Response, ServiceError>;
 
@@ -144,5 +143,5 @@ pub(crate) type ServiceResult = Result<Response, ServiceError>;
 pub(crate) trait QueryPlannerPlugin: Send + Sync + 'static {
     /// This service runs right after the query planner cache, which means that it will be called once per unique
     /// query, unless the cache entry was evicted
-    fn query_planner_service(&self, service: BoxService) -> BoxService;
+    fn query_planner_service(&self, service: BoxCloneSyncService) -> BoxCloneSyncService;
 }

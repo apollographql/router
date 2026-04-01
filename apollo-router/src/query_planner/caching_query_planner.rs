@@ -35,6 +35,7 @@ use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
+use crate::layers::ServiceExt as _;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::limits;
@@ -143,7 +144,7 @@ fn init_query_plan_from_redis(
     Ok(())
 }
 
-impl<T: Clone + 'static> CachingQueryPlanner<T>
+impl<T: Clone + Sync + 'static> CachingQueryPlanner<T>
 where
     T: tower::Service<
             QueryPlannerRequest,
@@ -218,7 +219,7 @@ where
             self.plugins
                 .iter()
                 .rev()
-                .fold(self.delegate.clone().boxed(), |acc, (_, e)| {
+                .fold(self.delegate.clone().boxed_clone_sync(), |acc, (_, e)| {
                     e.query_planner_service(acc)
                 }),
         );
