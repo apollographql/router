@@ -22,7 +22,6 @@ use sha2::Sha256;
 use tokio::sync::RwLock;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Level;
@@ -457,7 +456,7 @@ impl PluginPrivate for EntityCache {
                     let endpoint = Endpoint::from_router_service(
                         endpoint_config.path.clone(),
                         InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
-                            .boxed(),
+                            .boxed_clone_sync(),
                     );
                     tracing::info!(
                         "Entity caching invalidation endpoint listening on: {}{}",

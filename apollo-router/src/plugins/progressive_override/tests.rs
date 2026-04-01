@@ -151,7 +151,7 @@ async fn plugin_router_service_adds_all_arbitrary_labels_to_context() {
     ))
     .await
     .unwrap()
-    .router_service(mock_service.boxed());
+    .router_service(mock_service.boxed_clone_sync());
 
     let _ = service_stack
         .oneshot(router::Request::fake_builder().build().unwrap())

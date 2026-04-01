@@ -9,7 +9,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use uuid::Uuid;
 
 use self::callback::CallbackService;
@@ -318,7 +317,7 @@ impl Plugin for Subscription {
             let endpoint = Endpoint::from_router_service(
                 format!("{path}/{{callback}}"),
                 CallbackService::new(self.notify.clone(), path.to_string(), callback_hmac_key)
-                    .boxed(),
+                    .boxed_clone_sync(),
             );
             map.insert(listen.clone().unwrap_or_else(default_listen_addr), endpoint);
         }

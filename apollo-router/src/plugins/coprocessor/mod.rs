@@ -24,7 +24,6 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower::timeout::TimeoutLayer;
 use tower::util::MapFutureLayer;
 
@@ -200,7 +199,7 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
         CoprocessorPlugin::new(client, init.config, init.supergraph_sdl)
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         self.router_service(service)
     }
 
@@ -284,7 +283,7 @@ where
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         self.configuration.router.as_service(
             self.http_client.clone(),
             service,
@@ -689,11 +688,11 @@ impl RouterStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: router::BoxService,
+        service: router::BoxCloneSyncService,
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-    ) -> router::BoxService
+    ) -> router::BoxCloneSyncService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -792,7 +791,7 @@ impl RouterStage {
             .option_layer(response_layer)
             .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 
