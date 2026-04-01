@@ -338,7 +338,7 @@ opentelemetry-proto = { version = "0.31", features = [
 opentelemetry-datadog = { version = "0.19", features = ["reqwest-client"] }
 p256 = "0.13.2"
 pretty_assertions = "1.4.1"
-reqwest = { version = "0.12.9", default-features = false, features = [
+reqwest = { version = "0.13.0", default-features = false, features = [
     "json",
     "multipart",
     "stream",
