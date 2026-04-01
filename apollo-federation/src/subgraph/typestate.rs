@@ -46,7 +46,6 @@ use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
-use crate::schema::position::HasType;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -962,7 +961,11 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     //            It seems to make sense for it to be a part of expansion stage. We can create
     //            a separate stage for it between `Expanded` and `Validated` if we need a stage
     //            that is expanded, but federation operations are not added.
-    trace!("expand_links: add_federation_operations");
+    trace!(
+        is_fed_1_subgraph = schema.is_fed_1_subgraph(),
+        is_fed_2_link = schema.is_fed_2(),
+        "expand_links: add_federation_operations"
+    );
     schema.add_federation_operations()?;
 
     schema.add_implicit_root_operations()?;
@@ -1027,13 +1030,27 @@ impl FederationSchema {
             query_root_pos.get(self.schema())?.name.clone()
         };
 
+        // PORT_NOTE: For Fed 1 subgraphs, the JS implementation ignores `Query._entities` and
+        //            `Query._service` inside `buildNamedTypeInner` when building object types (they
+        //            are not kept from the parsed SDL in that path). We remove those fields here
+        //            for Fed 1 so behavior matches federation-js.
+        //            See: https://github.com/apollographql/federation/blob/9283b4c43575839d8d7d575c8fc5c1d42f581b37/internals-js/src/buildSchema.ts#L449
+        //            Related: `FederationBlueprint::ignore_parsed_field` drops these fields during
+        //            parse for the same Fed 1 case.
+
         // Add or remove `Query._entities` (if applicable)
         let entity_field_pos = ObjectFieldDefinitionPosition {
             type_name: query_root_type_name.clone(),
             field_name: FEDERATION_ENTITIES_FIELD_NAME,
         };
         if let Some(_entity_type) = self.entity_type()? {
-            if entity_field_pos.try_get(self.schema()).is_none() {
+            if self
+                .subgraph_metadata()
+                .is_some_and(|meta| !meta.is_fed_2_schema())
+            {
+                // Fed 1: match JS `buildNamedTypeInner` — do not retain `_entities` (see PORT_NOTE above).
+                entity_field_pos.remove(self)?;
+            } else if entity_field_pos.try_get(self.schema()).is_none() {
                 entity_field_pos
                     .insert(self, Component::new(self.entities_field_spec()?.into()))?;
             }
@@ -1050,12 +1067,12 @@ impl FederationSchema {
             type_name: query_root_type_name,
             field_name: FEDERATION_SERVICE_FIELD_NAME,
         };
-        // JS does not keep the user provided _service field
-        if service_field_pos.try_get(self.schema()).is_some() {
-            if !service_field_pos.get_type(self)?.is_non_null() {
-                service_field_pos
-                    .set_type(self, Type::NonNullNamed(self.service_type()?.type_name))?;
-            }
+        // Fed 1: match JS `buildNamedTypeInner` — do not retain `_service` (see PORT_NOTE above).
+        if self
+            .subgraph_metadata()
+            .is_some_and(|meta| !meta.is_fed_2_schema())
+        {
+            service_field_pos.remove(self)?;
         } else {
             service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
         }
