@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: result.errors
+input_file: apollo-federation/src/connectors/validation/test_data/mapping_only_with_http.graphql
+---
+[
+    Message {
+        code: MappingOnlyWithHttp,
+        message: "`@connect` on `Query.me` cannot use both `mappingOnly: true` and `http:`. Use `mappingOnly: true` without `http:` to skip the HTTP request.",
+        locations: [
+            10:5..17:6,
+        ],
+    },
+]

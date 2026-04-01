@@ -545,8 +545,9 @@ impl PluginPrivate for TrafficShaping {
                 ))
                 .option_layer(rate_limit)
                 .map_request(move |mut req: connector::request_service::Request| {
-                    if let Some(compression) = config.compression {
-                        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+                    if let Some(compression) = config.compression
+                        && let TransportRequest::Http(ref mut http_request) = req.transport_request
+                    {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
                         http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }

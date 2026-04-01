@@ -399,7 +399,9 @@ impl<S> HeadersService<S> {
     fn modify_connector_request(&self, req: &mut connector::request_service::Request) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
-        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+        let TransportRequest::Http(ref mut http_request) = req.transport_request else {
+            return;
+        };
         let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
         let supergraph_headers = req.supergraph_request.headers();
         let context = &req.context;

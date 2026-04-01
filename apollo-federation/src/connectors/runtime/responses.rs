@@ -244,6 +244,27 @@ fn is_success(
     )
 }
 
+/// Returns a response for a mapping-only connector by applying the selection against `{}`.
+///
+/// Used when `mappingOnly: true` is set on a `@connect` directive, skipping the HTTP transport.
+pub fn handle_mapping_only_response(
+    key: ResponseKey,
+    connector: &Connector,
+    context: impl ContextReader,
+    client_headers: &HeaderMap<HeaderValue>,
+) -> MappedResponse {
+    let data = Value::Object(Map::new());
+    let inputs = key
+        .inputs()
+        .clone()
+        .merger(&connector.response_variable_keys)
+        .config(connector.config.as_ref())
+        .context(context)
+        .request(&connector.response_headers, client_headers)
+        .merge();
+    map_response(&data, key, inputs, Vec::new())
+}
+
 /// Returns a response with data transformed by the selection mapping.
 pub(super) fn map_response(
     data: &Value,

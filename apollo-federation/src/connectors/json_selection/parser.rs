@@ -296,7 +296,9 @@ impl JSONSelection {
     fn parse_span(input: Span) -> ParseResult<Self> {
         match get_connect_spec(&input) {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_span_v0_2(input),
-            ConnectSpec::V0_3 | ConnectSpec::V0_4 => Self::parse_span_v0_3(input),
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
+                Self::parse_span_v0_3(input)
+            }
         }
     }
 
@@ -547,7 +549,7 @@ impl NamedSelection {
         match get_connect_spec(&input) {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_v0_2(input),
             ConnectSpec::V0_3 => Self::parse_v0_3(input),
-            ConnectSpec::V0_4 => Self::parse_v0_4(input),
+            ConnectSpec::V0_4 | ConnectSpec::V0_5 => Self::parse_v0_4(input),
         }
     }
 
@@ -1132,7 +1134,7 @@ impl PathList {
                     // a single struct in connect/v0.3, the ambiguity between
                     // single-key paths and field selections is no longer a
                     // problem, since they are now represented the same way.
-                    ConnectSpec::V0_3 | ConnectSpec::V0_4 => {
+                    ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
                         let full_range = merge_ranges(key.range(), rest.range());
                         Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)))
                     }
@@ -1173,7 +1175,7 @@ impl PathList {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
                 // The ? token was not introduced until connect/v0.3.
             }
-            ConnectSpec::V0_3 | ConnectSpec::V0_4 => {
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
                 if let Ok((suffix, question)) = ranged_span("?")(input.clone()) {
                     let (remainder, rest) = Self::parse_with_depth(suffix.clone(), depth + 1)?;
 
@@ -2959,7 +2961,7 @@ mod tests {
         // When this assertion fails, don't panic, but it's time to decide how
         // the next-next version should behave in these error cases (possibly
         // exactly the same).
-        assert_eq!(spec, ConnectSpec::next());
+        assert_eq!(ConnectSpec::V0_5, ConnectSpec::next());
 
         // The .data shorthand is no longer allowed, since it can be mistakenly
         // parsed as a continuation of a previous selection. Instead, use $.data

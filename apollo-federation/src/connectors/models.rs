@@ -44,14 +44,16 @@ use crate::connectors::spec::extract_connect_directive_arguments;
 use crate::connectors::spec::extract_source_directive_arguments;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 
 // --- Connector ---------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct Connector {
     pub id: ConnectId,
-    pub transport: HttpJsonTransport,
+    /// HTTP transport configuration. `None` when `mapping_only` is true.
+    pub transport: Option<HttpJsonTransport>,
+    /// When true, no HTTP request is made; only the selection mapping is applied against `{}`.
+    pub mapping_only: bool,
     pub selection: JSONSelection,
     pub config: Option<CustomConfiguration>,
     pub max_requests: Option<usize>,
@@ -198,12 +200,14 @@ impl Connector {
             .and_then(|name| source_arguments.iter().find(|s| s.name == name));
         let source_name = source.map(|s| s.name.clone());
 
-        // Create our transport
-        let connect_http = connect
-            .http
-            .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
+        let mapping_only = connect.mapping_only;
+
+        // Create our transport (absent for mapping-only connectors)
         let source_http = source.map(|s| &s.http);
-        let transport = HttpJsonTransport::from_directive(connect_http, source_http, spec)?;
+        let transport = connect
+            .http
+            .map(|connect_http| HttpJsonTransport::from_directive(connect_http, source_http, spec))
+            .transpose()?;
 
         // Get our batch and error settings
         let batch_settings = connect.batch;
@@ -219,8 +223,10 @@ impl Connector {
             ConnectorErrorsSettings::from_directive(connect_errors, source_errors, is_success);
 
         // Collect all variables and subselections used in the request mappings
-        let request_references: IndexSet<VariableReference<Namespace>> =
-            transport.variable_references().collect();
+        let request_references: IndexSet<VariableReference<Namespace>> = transport
+            .as_ref()
+            .map(|t| t.variable_references().collect())
+            .unwrap_or_default();
 
         // Collect all variables and subselections used in response mappings (including errors.message and errors.extensions)
         let response_references: IndexSet<VariableReference<Namespace>> = connect
@@ -248,7 +254,7 @@ impl Connector {
         let label = Label::new(
             subgraph_name,
             source_name.as_ref(),
-            &transport,
+            transport.as_ref(),
             entity_resolver.as_ref(),
         );
         let id = ConnectId {
@@ -261,6 +267,7 @@ impl Connector {
         Ok(Connector {
             id,
             transport,
+            mapping_only,
             selection: connect.selection,
             entity_resolver,
             config: None,
@@ -317,12 +324,17 @@ impl Connector {
     }
 
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
-        self.transport.variable_references().chain(
-            self.selection
-                .external_var_paths()
-                .into_iter()
-                .flat_map(PathSelection::variable_reference),
-        )
+        let transport_refs = self
+            .transport
+            .as_ref()
+            .into_iter()
+            .flat_map(|t| t.variable_references());
+        let selection_refs = self
+            .selection
+            .external_var_paths()
+            .into_iter()
+            .flat_map(PathSelection::variable_reference);
+        transport_refs.chain(selection_refs)
     }
 
     /// Create a field set for a `@key` using `$args`, `$this`, or `$batch` variables.
@@ -418,7 +430,7 @@ impl Label {
     fn new(
         subgraph_name: &str,
         source: Option<&SourceName>,
-        transport: &HttpJsonTransport,
+        transport: Option<&HttpJsonTransport>,
         entity_resolver: Option<&EntityResolver>,
     ) -> Self {
         let source = source.map(SourceName::as_str).unwrap_or_default();
@@ -426,10 +438,10 @@ impl Label {
             Some(EntityResolver::TypeBatch) => "[BATCH] ",
             _ => "",
         };
-        Self(format!(
-            "{batch}{subgraph_name}.{source} {}",
-            transport.label()
-        ))
+        let transport_label = transport
+            .map(|t| t.label())
+            .unwrap_or_else(|| "mappingOnly".to_string());
+        Self(format!("{batch}{subgraph_name}.{source} {transport_label}"))
     }
 }
 
@@ -536,7 +548,7 @@ mod tests {
         let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
         let subgraph = subgraphs.get("connectors").unwrap();
         let connectors = Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
-        assert_debug_snapshot!(&connectors, @r###"
+        assert_debug_snapshot!(&connectors, @r#"
         [
             Connector {
                 id: ConnectId {
@@ -553,61 +565,64 @@ mod tests {
                         },
                     ),
                 },
-                transport: HttpJsonTransport {
-                    source_template: Some(
-                        StringTemplate {
+                transport: Some(
+                    HttpJsonTransport {
+                        source_template: Some(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "https://jsonplaceholder.typicode.com/",
+                                            location: 0..37,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                        connect_template: StringTemplate {
                             parts: [
                                 Constant(
                                     Constant {
-                                        value: "https://jsonplaceholder.typicode.com/",
-                                        location: 0..37,
+                                        value: "/users",
+                                        location: 0..6,
                                     },
                                 ),
                             ],
                         },
-                    ),
-                    connect_template: StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "/users",
-                                    location: 0..6,
-                                },
-                            ),
-                        ],
-                    },
-                    method: Get,
-                    headers: [
-                        Header {
-                            name: "authtoken",
-                            source: From(
-                                "x-auth-token",
-                            ),
-                        },
-                        Header {
-                            name: "user-agent",
-                            source: Value(
-                                HeaderValue(
-                                    StringTemplate {
-                                        parts: [
-                                            Constant(
-                                                Constant {
-                                                    value: "Firefox",
-                                                    location: 0..7,
-                                                },
-                                            ),
-                                        ],
-                                    },
+                        method: Get,
+                        headers: [
+                            Header {
+                                name: "authtoken",
+                                source: From(
+                                    "x-auth-token",
                                 ),
-                            ),
-                        },
-                    ],
-                    body: None,
-                    source_path: None,
-                    source_query_params: None,
-                    connect_path: None,
-                    connect_query_params: None,
-                },
+                            },
+                            Header {
+                                name: "user-agent",
+                                source: Value(
+                                    HeaderValue(
+                                        StringTemplate {
+                                            parts: [
+                                                Constant(
+                                                    Constant {
+                                                        value: "Firefox",
+                                                        location: 0..7,
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                ),
+                            },
+                        ],
+                        body: None,
+                        source_path: None,
+                        source_query_params: None,
+                        connect_path: None,
+                        connect_query_params: None,
+                    },
+                ),
+                mapping_only: false,
                 selection: JSONSelection {
                     inner: Named(
                         SubSelection {
@@ -711,61 +726,64 @@ mod tests {
                         },
                     ),
                 },
-                transport: HttpJsonTransport {
-                    source_template: Some(
-                        StringTemplate {
+                transport: Some(
+                    HttpJsonTransport {
+                        source_template: Some(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "https://jsonplaceholder.typicode.com/",
+                                            location: 0..37,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                        connect_template: StringTemplate {
                             parts: [
                                 Constant(
                                     Constant {
-                                        value: "https://jsonplaceholder.typicode.com/",
-                                        location: 0..37,
+                                        value: "/posts",
+                                        location: 0..6,
                                     },
                                 ),
                             ],
                         },
-                    ),
-                    connect_template: StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "/posts",
-                                    location: 0..6,
-                                },
-                            ),
-                        ],
-                    },
-                    method: Get,
-                    headers: [
-                        Header {
-                            name: "authtoken",
-                            source: From(
-                                "x-auth-token",
-                            ),
-                        },
-                        Header {
-                            name: "user-agent",
-                            source: Value(
-                                HeaderValue(
-                                    StringTemplate {
-                                        parts: [
-                                            Constant(
-                                                Constant {
-                                                    value: "Firefox",
-                                                    location: 0..7,
-                                                },
-                                            ),
-                                        ],
-                                    },
+                        method: Get,
+                        headers: [
+                            Header {
+                                name: "authtoken",
+                                source: From(
+                                    "x-auth-token",
                                 ),
-                            ),
-                        },
-                    ],
-                    body: None,
-                    source_path: None,
-                    source_query_params: None,
-                    connect_path: None,
-                    connect_query_params: None,
-                },
+                            },
+                            Header {
+                                name: "user-agent",
+                                source: Value(
+                                    HeaderValue(
+                                        StringTemplate {
+                                            parts: [
+                                                Constant(
+                                                    Constant {
+                                                        value: "Firefox",
+                                                        location: 0..7,
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                ),
+                            },
+                        ],
+                        body: None,
+                        source_path: None,
+                        source_query_params: None,
+                        connect_path: None,
+                        connect_query_params: None,
+                    },
+                ),
+                mapping_only: false,
                 selection: JSONSelection {
                     inner: Named(
                         SubSelection {
@@ -881,7 +899,7 @@ mod tests {
                 ),
             },
         ]
-        "###);
+        "#);
     }
 
     #[test]

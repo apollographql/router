@@ -8,6 +8,7 @@ use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::http_json_transport::HttpJsonTransportError;
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::http_json_transport::make_request;
 use apollo_federation::connectors::runtime::inputs::RequestInputs;
 use apollo_federation::connectors::runtime::key::ResponseKey;
@@ -64,19 +65,29 @@ fn request_params_to_requests(
     let mut results = vec![];
     for response_key in request_params {
         let connector = connector.clone();
-        let (transport_request, mapping_problems) = make_request(
-            &connector.transport,
-            response_key
-                .inputs()
-                .clone()
-                .merger(&connector.request_variable_keys)
-                .config(connector.config.as_ref())
-                .context(context)
-                .request(&connector.request_headers, supergraph_request.headers())
-                .merge(),
-            supergraph_request.headers(),
-            debug,
-        )?;
+
+        let (transport_request, mapping_problems) = if connector.mapping_only {
+            (TransportRequest::MappingOnly, Vec::new())
+        } else {
+            let transport = connector.transport.as_ref().ok_or_else(|| {
+                MakeRequestError::InvalidOperation(
+                    "connector has no transport and is not mapping_only".into(),
+                )
+            })?;
+            make_request(
+                transport,
+                response_key
+                    .inputs()
+                    .clone()
+                    .merger(&connector.request_variable_keys)
+                    .config(connector.config.as_ref())
+                    .context(context)
+                    .request(&connector.request_headers, supergraph_request.headers())
+                    .merge(),
+                supergraph_request.headers(),
+                debug,
+            )?
+        };
 
         results.push(Request {
             context: context.clone(),

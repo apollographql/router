@@ -184,20 +184,26 @@ impl Selector for ConnectorSelector {
                 .map(opentelemetry::Value::from),
             ConnectorSelector::ConnectorHttpMethod {
                 connector_http_method,
-            } if *connector_http_method => Some(opentelemetry::Value::from(
-                request.connector.transport.method.as_str().to_string(),
-            )),
+            } if *connector_http_method => request
+                .connector
+                .transport
+                .as_ref()
+                .map(|t| opentelemetry::Value::from(t.method.as_str().to_string())),
             ConnectorSelector::ConnectorUrlTemplate {
                 connector_url_template,
-            } if *connector_url_template => Some(opentelemetry::Value::from(
-                request.connector.transport.connect_template.to_string(),
-            )),
+            } if *connector_url_template => request
+                .connector
+                .transport
+                .as_ref()
+                .map(|t| opentelemetry::Value::from(t.connect_template.to_string())),
             ConnectorSelector::HttpRequestHeader {
                 connector_http_request_header: connector_request_header,
                 default,
                 ..
             } => {
-                let TransportRequest::Http(ref http_request) = request.transport_request;
+                let TransportRequest::Http(ref http_request) = request.transport_request else {
+                    return default.clone().map(opentelemetry::Value::from);
+                };
                 http_request
                     .inner
                     .headers()

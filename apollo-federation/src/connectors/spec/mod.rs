@@ -107,6 +107,7 @@ pub enum ConnectSpec {
     V0_2,
     V0_3,
     V0_4,
+    V0_5,
 }
 
 impl PartialOrd for ConnectSpec {
@@ -127,7 +128,7 @@ impl ConnectSpec {
     /// Test-only!
     #[cfg(test)]
     pub(crate) fn next() -> Self {
-        Self::V0_4
+        Self::V0_5
     }
 
     pub const fn as_str(self) -> &'static str {
@@ -136,6 +137,7 @@ impl ConnectSpec {
             Self::V0_2 => "0.2",
             Self::V0_3 => "0.3",
             Self::V0_4 => "0.4",
+            Self::V0_5 => "0.5",
         }
     }
 
@@ -162,6 +164,7 @@ impl TryFrom<&Version> for ConnectSpec {
             (0, 2) => Ok(Self::V0_2),
             (0, 3) => Ok(Self::V0_3),
             (0, 4) => Ok(Self::V0_4),
+            (0, 5) => Ok(Self::V0_5),
             _ => Err(format!("Unknown connect version: {version}")),
         }
     }
@@ -180,6 +183,7 @@ impl From<ConnectSpec> for Version {
             ConnectSpec::V0_2 => Version { major: 0, minor: 2 },
             ConnectSpec::V0_3 => Version { major: 0, minor: 3 },
             ConnectSpec::V0_4 => Version { major: 0, minor: 4 },
+            ConnectSpec::V0_5 => Version { major: 0, minor: 5 },
         }
     }
 }
@@ -270,6 +274,13 @@ pub(crate) static CONNECT_VERSIONS: LazyLock<SpecDefinitions<ConnectSpecDefiniti
             Version {
                 major: 2,
                 minor: 13,
+            },
+        ));
+        definitions.add(ConnectSpecDefinition::new(
+            Version { major: 0, minor: 5 },
+            Version {
+                major: 2,
+                minor: 14,
             },
         ));
         definitions
