@@ -22,7 +22,6 @@ use serde::Serialize;
 use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use url::Url;
 
 use self::jwks::JwksManager;
@@ -31,6 +30,7 @@ use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::serde::deserialize_header_name;
@@ -230,7 +230,7 @@ impl PluginPrivate for AuthenticationPlugin {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         // Return without layering if no router config was defined
         let Some(router_config) = &self.router else {
             return service;
@@ -255,7 +255,7 @@ impl PluginPrivate for AuthenticationPlugin {
                 Ok(authenticate(&configuration, &jwks_manager, request))
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn subgraph_service(

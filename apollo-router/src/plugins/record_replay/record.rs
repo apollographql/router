@@ -11,7 +11,6 @@ use http_body_util::BodyExt;
 use tokio::fs;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt as TowerServiceExt;
 
 use super::recording::Recording;
 use super::recording::RequestDetails;
@@ -80,7 +79,7 @@ impl Plugin for Record {
         Ok(plugin)
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         if !self.enabled {
             return service;
         }
@@ -141,7 +140,7 @@ impl Plugin for Record {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn supergraph_service(

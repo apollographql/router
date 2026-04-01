@@ -260,7 +260,7 @@ impl PluginPrivate for FleetDetector {
         }
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         service
             // Count the number of request bytes from clients to the router
             .map_request(move |req: router::Request| router::Request {
@@ -329,7 +329,7 @@ impl PluginPrivate for FleetDetector {
                     .build()
                     .unwrap()
             })
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn http_client_service(
@@ -619,7 +619,7 @@ mod tests {
                         .build()
                 });
             let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed());
+                plugin.router_service(mock_bad_request_service.boxed_clone_sync());
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_bytes("request"))
                 .build()
@@ -918,7 +918,7 @@ nodev   cgroup
                         .build()
                 });
 
-            let mut router_service = plugin.router_service(mock_service.boxed());
+            let mut router_service = plugin.router_service(mock_service.boxed_clone_sync());
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_bytes("test request"))
                 .build()
@@ -975,7 +975,7 @@ nodev   cgroup
                         .build()
                 });
 
-            let mut router_service = plugin.router_service(mock_service.boxed());
+            let mut router_service = plugin.router_service(mock_service.boxed_clone_sync());
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_result_stream(futures::stream::once(
                     async { Ok::<_, Infallible>(bytes::Bytes::from("streaming request")) },

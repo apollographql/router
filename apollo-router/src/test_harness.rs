@@ -255,7 +255,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::router_service`]
     pub fn router_hook(
         self,
-        callback: impl Fn(router::BoxService) -> router::BoxService + Send + Sync + 'static,
+        callback: impl Fn(router::BoxCloneSyncService) -> router::BoxCloneSyncService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(RouterServicePlugin(callback))
     }
@@ -452,7 +455,7 @@ struct SubgraphServicePlugin<F>(F);
 #[async_trait::async_trait]
 impl<F> Plugin for RouterServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(router::BoxService) -> router::BoxService,
+    F: 'static + Send + Sync + Fn(router::BoxCloneSyncService) -> router::BoxCloneSyncService,
 {
     type Config = ();
 
@@ -460,7 +463,7 @@ where
         unreachable!()
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         (self.0)(service)
     }
 }

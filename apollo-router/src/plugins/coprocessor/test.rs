@@ -216,7 +216,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://127.0.0.1:8081".to_string(), // global URL - should NOT be used
             Arc::new("".to_string()),
             true,
@@ -292,7 +292,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -356,7 +356,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -419,7 +419,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2210,7 +2210,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2358,7 +2358,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2492,7 +2492,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2623,7 +2623,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2699,7 +2699,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2785,7 +2785,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2920,7 +2920,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed(),
+            mock_router_service.boxed_clone_sync(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -3001,7 +3001,7 @@ mod tests {
         let service_stack = router_stage
             .as_service(
                 mock_http_client,
-                mock_router_service.boxed(),
+                mock_router_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation - doesn't matter for router stage
@@ -3219,7 +3219,7 @@ mod tests {
         }
     }
 
-    async fn create_mock_router_service_for_validation_test() -> router::BoxService {
+    async fn create_mock_router_service_for_validation_test() -> router::BoxCloneSyncService {
         router::service::from_supergraph_mock_callback(move |req| {
             Ok(supergraph::Response::builder()
                 .data(json!({"test": 42}))
@@ -3228,7 +3228,7 @@ mod tests {
                 .unwrap())
         })
         .await
-        .boxed()
+        .boxed_clone_sync()
     }
 
     // Helper function to create working router service mock
@@ -4618,7 +4618,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed(),
+                        mock_router_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -4647,7 +4647,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed(),
+                        mock_router_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -4677,7 +4677,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed(),
+                        mock_router_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -4707,7 +4707,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed(),
+                        mock_router_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -4737,7 +4737,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed(),
+                        mock_router_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -4757,7 +4757,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed(),
+                        mock_router_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -4789,7 +4789,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed(),
+                        mock_router_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -4818,7 +4818,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed(),
+                        mock_router_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -4851,7 +4851,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed(),
+                        mock_router_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -4871,7 +4871,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed(),
+                        mock_router_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage

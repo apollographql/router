@@ -94,8 +94,8 @@ impl Plugin for HelloWorld {
     // implementation returns its associated service with no changes.
     fn router_service(
         &self,
-        service: router::BoxService,
-    ) -> router::BoxService {
+        service: router::BoxCloneSyncService,
+    ) -> router::BoxCloneSyncService {
         service
     }
 
@@ -139,8 +139,8 @@ use apollo_router::ServiceBuilderExt as ApolloServiceBuilderExt;
 
 fn supergraph_service(
     &self,
-    service: router::BoxService,
-) -> router::BoxService {
+    service: router::BoxCloneSyncService,
+) -> router::BoxCloneSyncService {
     // Always use service builder to compose your plugins.
     // It provides off-the-shelf building blocks for your plugin.
     ServiceBuilder::new()
@@ -151,7 +151,7 @@ fn supergraph_service(
         // .checkpoint()
         // .timeout()
         .service(service)
-        .boxed()
+        .boxed_clone_sync()
 }
 ```
 

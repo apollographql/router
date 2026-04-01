@@ -9,9 +9,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
@@ -101,7 +101,7 @@ impl Plugin for Csrf {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
@@ -130,7 +130,7 @@ impl Plugin for Csrf {
                     }
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         } else {
             service
         }

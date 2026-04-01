@@ -56,7 +56,6 @@ use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use uuid::Uuid;
 
 use self::apollo::ForwardValues;
@@ -363,7 +362,7 @@ impl PluginPrivate for Telemetry {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         let config = self.config.clone();
         let supergraph_schema_id = self.supergraph_schema_id.clone();
         let config_later = self.config.clone();
@@ -715,7 +714,7 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn supergraph_service(
@@ -2118,7 +2117,6 @@ mod tests {
     use tower::Service;
     use tower::ServiceExt;
     use tower::util::BoxCloneSyncService;
-    use tower::util::BoxService;
 
     use super::CustomTraceIdPropagator;
     use super::EnabledFeatures;
@@ -2477,7 +2475,7 @@ mod tests {
                         .unwrap())
                 });
             let mut bad_request_router_service =
-                plugin.router_service(BoxService::new(mock_bad_request_service));
+                plugin.router_service(BoxCloneSyncService::new(mock_bad_request_service));
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2554,7 +2552,7 @@ mod tests {
                         .unwrap())
                 });
             let mut bad_request_router_service =
-                plugin.router_service(BoxService::new(mock_bad_request_service));
+                plugin.router_service(BoxCloneSyncService::new(mock_bad_request_service));
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
