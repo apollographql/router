@@ -363,7 +363,7 @@ tracing-subscriber = { version = "0.3.20", default-features = false, features = 
     "fmt",
 ] }
 tracing-opentelemetry = "0.32"
-tracing-test = "=0.2.5"
+tracing-test = "=0.2.6"
 tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.6"
