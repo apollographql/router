@@ -12,12 +12,12 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower::limit::RateLimitLayer;
 use tower::load_shed::error::Overloaded;
 
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::RouterResponse;
@@ -64,8 +64,9 @@ impl PluginPrivate for LicenseEnforcement {
         Ok(Self { tps })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         ServiceBuilder::new()
+            .buffered()
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| async {
@@ -95,7 +96,7 @@ impl PluginPrivate for LicenseEnforcement {
                     .map(|config| RateLimitLayer::new(config.capacity.into(), config.interval)),
             )
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 

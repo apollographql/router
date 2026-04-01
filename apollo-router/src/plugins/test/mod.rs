@@ -165,11 +165,11 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     pub(crate) fn router_service<F>(
         &self,
         response_fn: impl Fn(router::Request) -> F + Send + Sync + Clone + 'static,
-    ) -> ServiceHandle<router::Request, router::BoxService>
+    ) -> ServiceHandle<router::Request, router::BoxCloneSyncService>
     where
         F: Future<Output = Result<router::Response, BoxError>> + Send + 'static,
     {
-        let service: router::BoxService = router::BoxService::new(
+        let service: router::BoxCloneSyncService = router::BoxCloneSyncService::new(
             ServiceBuilder::new().service_fn(move |req: router::Request| {
                 let response_fn = response_fn.clone();
                 async move { (response_fn)(req).await }
@@ -300,7 +300,7 @@ where
     service: Arc<tokio::sync::Mutex<S>>,
 }
 
-impl Clone for ServiceHandle<router::Request, router::BoxService> {
+impl Clone for ServiceHandle<router::Request, router::BoxCloneSyncService> {
     fn clone(&self) -> Self {
         Self {
             _phantom: Default::default(),
@@ -463,7 +463,7 @@ mod test_for_harness {
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::Plugin;
     use crate::services::router;
-    use crate::services::router::BoxService;
+    use crate::services::router::BoxCloneSyncService;
     use crate::services::router::body;
 
     /// Config for the test plugin
@@ -482,12 +482,12 @@ mod test_for_harness {
             Ok(Self {})
         }
 
-        fn router_service(&self, service: BoxService) -> BoxService {
+        fn router_service(&self, service: BoxCloneSyncService) -> BoxCloneSyncService {
             ServiceBuilder::new()
                 .load_shed()
                 .concurrency_limit(1)
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         }
 
         fn supergraph_service(

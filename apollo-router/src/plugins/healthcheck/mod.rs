@@ -21,11 +21,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower::service_fn;
 
 use crate::Endpoint;
 use crate::configuration::ListenAddr;
+use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::register_private_plugin;
@@ -226,7 +226,7 @@ impl PluginPrivate for HealthCheck {
 
     // Track rejected requests due to traffic shaping.
     // We always do this; even if the health check is disabled.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         let my_rejected = self.rejected.clone();
 
         ServiceBuilder::new()
@@ -239,7 +239,7 @@ impl PluginPrivate for HealthCheck {
                 res
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     // Support the health-check endpoint for the router, incorporating both live and ready.
@@ -301,7 +301,7 @@ impl PluginPrivate for HealthCheck {
                             .build()
                     }
                 })
-                .boxed(),
+                .boxed_clone_sync(),
             );
 
             map.insert(self.config.listen.clone(), endpoint);
@@ -345,7 +345,7 @@ mod test {
         response_status_code: StatusCode,
     ) -> (
         Option<Endpoint>,
-        Option<ServiceHandle<router::Request, router::BoxService>>,
+        Option<ServiceHandle<router::Request, router::BoxCloneSyncService>>,
         PluginTestHarness<HealthCheck>,
     ) {
         let test_harness: PluginTestHarness<HealthCheck> = PluginTestHarness::builder()

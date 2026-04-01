@@ -143,7 +143,9 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     Response = router::Response,
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
-> + Send {
+> + Send
++ Sync
++ Clone {
     let mut supergraph_service = MockSupergraphService::new();
 
     supergraph_service.expect_clone().returning(move || {
@@ -183,7 +185,9 @@ pub(crate) async fn from_supergraph_mock_callback(
     Response = router::Response,
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
-> + Send {
+> + Send
++ Sync
++ Clone {
     from_supergraph_mock_callback_and_configuration(
         supergraph_callback,
         Arc::new(Configuration::default()),
@@ -829,14 +833,14 @@ pub(crate) struct RouterCreator {
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
-    type Service = router::BoxService;
+    type Service = router::BoxCloneSyncService;
     fn create(&self) -> Self::Service {
-        self.make().boxed()
+        self.make().boxed_clone_sync()
     }
 }
 
 impl RouterFactory for RouterCreator {
-    type RouterService = router::BoxService;
+    type RouterService = router::BoxCloneSyncService;
 
     type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
         router::Request,
@@ -909,9 +913,11 @@ impl RouterCreator {
                         .plugins()
                         .iter()
                         .rev()
-                        .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
+                        .fold(router_service.boxed_clone_sync(), |acc, (_, e)| {
+                            e.router_service(acc)
+                        }),
                 )
-                .boxed(),
+                .boxed_clone_sync(),
             DEFAULT_BUFFER_SIZE,
         );
 
@@ -923,17 +929,8 @@ impl RouterCreator {
         })
     }
 
-    pub(crate) fn make(
-        &self,
-    ) -> impl Service<
-        router::Request,
-        Response = router::Response,
-        Error = BoxError,
-        Future = BoxFuture<'static, router::ServiceResult>,
-    > + Send
-    + use<> {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
-        self.sb.clone().boxed()
+    pub(crate) fn make(&self) -> router::BoxCloneSyncService {
+        self.sb.clone().boxed_clone_sync()
     }
 }
 

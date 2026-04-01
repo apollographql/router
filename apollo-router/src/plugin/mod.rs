@@ -379,7 +379,7 @@ pub trait Plugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define `router_service` if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         service
     }
 
@@ -459,7 +459,7 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         service
     }
 
@@ -526,7 +526,7 @@ where
         Plugin::new(init).await
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         Plugin::router_service(self, service)
     }
 
@@ -602,7 +602,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         service
     }
 
@@ -687,7 +687,7 @@ where
         PluginUnstable::new(init).await
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         PluginUnstable::router_service(self, service)
     }
 
@@ -743,7 +743,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService;
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService;
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
@@ -807,7 +807,7 @@ where
     T: PluginPrivate,
     for<'de> <T as PluginPrivate>::Config: Deserialize<'de>,
 {
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         self.router_service(service)
     }
 
@@ -958,12 +958,12 @@ macro_rules! register_private_plugin {
 pub(crate) struct Handler {
     service: UnconstrainedBuffer<
         router::Request,
-        <router::BoxService as Service<router::Request>>::Future,
+        <router::BoxCloneSyncService as Service<router::Request>>::Future,
     >,
 }
 
 impl Handler {
-    pub(crate) fn new(service: router::BoxService) -> Self {
+    pub(crate) fn new(service: router::BoxCloneSyncService) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
         }
@@ -984,8 +984,8 @@ impl Service<router::Request> for Handler {
     }
 }
 
-impl From<router::BoxService> for Handler {
-    fn from(original: router::BoxService) -> Self {
+impl From<router::BoxCloneSyncService> for Handler {
+    fn from(original: router::BoxCloneSyncService) -> Self {
         Self::new(original)
     }
 }

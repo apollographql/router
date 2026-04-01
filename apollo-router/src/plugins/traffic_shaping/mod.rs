@@ -22,7 +22,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower::limit::ConcurrencyLimitLayer;
 use tower::limit::RateLimitLayer;
 use tower::load_shed::error::Overloaded;
@@ -327,10 +326,11 @@ impl PluginPrivate for TrafficShaping {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         // NB: consider each triplet (map_future_with_request_data, load_shed, layer) as a unit of
         //  behavior
         ServiceBuilder::new()
+            .buffered()
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| async {
@@ -402,7 +402,7 @@ impl PluginPrivate for TrafficShaping {
                     .map(|limit| RateLimitLayer::new(limit.capacity.into(), limit.interval))
             }))
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 
     fn subgraph_service(
@@ -663,6 +663,7 @@ mod test {
     use tokio::task::JoinSet;
     use tokio::time::sleep;
     use tower::Service;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Configuration;
@@ -695,7 +696,7 @@ mod test {
     async fn execute_router_test(
         query: &str,
         body: &Bytes,
-        mut router_service: router::BoxService,
+        mut router_service: router::BoxCloneSyncService,
     ) {
         let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
@@ -722,7 +723,7 @@ mod test {
 
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
-    ) -> router::BoxService {
+    ) -> router::BoxCloneSyncService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -817,7 +818,7 @@ mod test {
         .await
         .unwrap()
         .make()
-        .boxed()
+        .boxed_clone_sync()
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
@@ -1259,7 +1260,7 @@ mod test {
             .returning(MockRouterService::new);
 
         // let mut svc = plugin.router_service(mock_service.clone().boxed());
-        let mut svc = plugin.router_service(mock_service.boxed());
+        let mut svc = plugin.router_service(mock_service.boxed_clone_sync());
 
         let response: RouterResponse = svc
             .ready()
@@ -1320,7 +1321,7 @@ mod test {
                     .data(json!({ "test": 1234_u32 }))
                     .build()
             })
-            .boxed();
+            .boxed_clone_sync();
 
         let mut rs = plugin.router_service(svc);
 
@@ -1611,7 +1612,7 @@ mod test {
                 sleep(Duration::from_millis(500)).await;
                 RouterResponse::fake_builder().build()
             })
-            .boxed();
+            .boxed_clone_sync();
 
         let mut router_service = plugin.router_service(svc);
 

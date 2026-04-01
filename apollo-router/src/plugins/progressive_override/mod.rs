@@ -15,7 +15,6 @@ use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 use self::layers::query_analysis::ParsedDocument;
 use self::visitor::OverrideLabelVisitor;
@@ -143,7 +142,7 @@ impl Plugin for ProgressiveOverridePlugin {
 
     // Add all arbitrary labels (non-percentage-based labels) from the schema to
     // the context so coprocessors can resolve their values
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
         if !self.enabled {
             service
         } else {
@@ -156,7 +155,7 @@ impl Plugin for ProgressiveOverridePlugin {
                     request
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone_sync()
         }
     }
 
