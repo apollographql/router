@@ -30,7 +30,6 @@ use serde_json_bytes::path::JsonPathInst;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::layers::ServiceExt as _;
@@ -282,9 +281,9 @@ impl PluginPrivate for Headers {
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneSyncService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneSyncService {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(
                 self.connector_source_operations
@@ -293,7 +292,7 @@ impl PluginPrivate for Headers {
                     .unwrap_or_else(|| self.all_connector_operations.clone()),
             ))
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 
@@ -629,6 +628,7 @@ mod test {
     use serde_json_bytes::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Context;

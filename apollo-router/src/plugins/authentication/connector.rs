@@ -4,9 +4,9 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
 
 use super::subgraph::AuthConfig;
+use crate::layers::ServiceExt as _;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::services::connector;
 use crate::services::connector_service::ConnectorSourceRef;
@@ -18,8 +18,8 @@ pub(super) struct ConnectorAuth {
 impl ConnectorAuth {
     pub(super) fn connector_request_service(
         &self,
-        service: connector::request_service::BoxService,
-    ) -> connector::request_service::BoxService {
+        service: connector::request_service::BoxCloneSyncService,
+    ) -> connector::request_service::BoxCloneSyncService {
         let signing_params = self.signing_params.clone();
         ServiceBuilder::new()
             .map_request(move |req: connector::request_service::Request| {
@@ -38,7 +38,7 @@ impl ConnectorAuth {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone_sync()
     }
 }
 
