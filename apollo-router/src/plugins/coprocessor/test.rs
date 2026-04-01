@@ -5271,6 +5271,7 @@ mod tests {
         use tower::BoxError;
         use tower::ServiceExt;
 
+        use crate::layers::ServiceExt as _;
         use crate::metrics::FutureMetricsExt;
         use crate::plugin::test::MockInternalHttpClientService;
         use crate::plugins::coprocessor::ContextConf;
@@ -5420,7 +5421,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -5471,7 +5472,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -5522,7 +5523,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -5586,7 +5587,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -5659,7 +5660,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                inner_service.boxed(),
+                inner_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -5715,7 +5716,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -5763,7 +5764,7 @@ mod tests {
 
                     let service = connector_stage.as_service(
                         mock_http_client,
-                        mock_connector_service.boxed(),
+                        mock_connector_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
                     );
@@ -5816,7 +5817,7 @@ mod tests {
 
                     let service = connector_stage.as_service(
                         mock_http_client,
-                        mock_connector_service.boxed(),
+                        mock_connector_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
                     );
@@ -5863,7 +5864,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -5906,7 +5907,7 @@ mod tests {
 
                     let service = connector_stage.as_service(
                         mock_http_client,
-                        mock_connector_service.boxed(),
+                        mock_connector_service.boxed_clone_sync(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
                     );
@@ -5964,7 +5965,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6012,7 +6013,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6070,7 +6071,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6131,7 +6132,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6177,7 +6178,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6222,7 +6223,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed(),
+                mock_connector_service.boxed_clone_sync(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6238,9 +6239,11 @@ mod tests {
             }
         }
 
-        fn create_error_connector_service()
-        -> tower::util::BoxService<request_service::Request, request_service::Response, BoxError>
-        {
+        fn create_error_connector_service() -> tower::util::BoxCloneSyncService<
+            request_service::Request,
+            request_service::Response,
+            BoxError,
+        > {
             tower::service_fn(|req: request_service::Request| async {
                 Ok(request_service::Response {
                     context: req.context,
@@ -6259,7 +6262,7 @@ mod tests {
                     },
                 })
             })
-            .boxed()
+            .boxed_clone_sync()
         }
 
         #[tokio::test]

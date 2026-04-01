@@ -229,9 +229,9 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneSyncService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneSyncService {
         self.connector_request_service(&source_name, service)
     }
 }
@@ -338,8 +338,8 @@ where
     fn connector_request_service(
         &self,
         source_name: &str,
-        service: crate::services::connector::request_service::BoxService,
-    ) -> crate::services::connector::request_service::BoxService {
+        service: crate::services::connector::request_service::BoxCloneSyncService,
+    ) -> crate::services::connector::request_service::BoxCloneSyncService {
         self.configuration.connector.all.as_service(
             self.http_client.clone(),
             service,
