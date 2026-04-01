@@ -585,6 +585,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
+    use bytes::Bytes;
     use futures::StreamExt;
     use futures::future::join_all;
     use oci_client::client::ClientConfig;
@@ -631,7 +632,7 @@ mod tests {
         oci_manifest: OciManifest,
         manifest_digest: String,
         blob_digest: String,
-        schema_data: Vec<u8>,
+        schema_data: Bytes,
     }
 
     fn create_manifest_from_schema_layer(
@@ -639,7 +640,7 @@ mod tests {
         annotations: Option<BTreeMap<String, String>>,
     ) -> SchemaLayerManifest {
         let schema_layer = ImageLayer {
-            data: schema_data.to_string().into_bytes(),
+            data: Bytes::from(schema_data.to_string()),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -842,7 +843,7 @@ mod tests {
             ..Default::default()
         });
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: Bytes::from("test schema"),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -896,7 +897,7 @@ mod tests {
             ..Default::default()
         });
         let random_layer = ImageLayer {
-            data: "foo_bar".to_string().into_bytes(),
+            data: Bytes::from("foo_bar"),
             media_type: "foo_bar".to_string(),
             annotations: None,
         };
@@ -1105,7 +1106,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
 
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: Bytes::from("test schema"),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1137,7 +1138,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
 
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: Bytes::from("test schema"),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1165,7 +1166,7 @@ mod tests {
         let mock_server = &MockServer::start().await;
 
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: Bytes::from("test schema"),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1291,7 +1292,7 @@ mod tests {
     async fn test_create_oci_schema_stream_tag_with_hot_reload() {
         let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: Bytes::from("test schema"),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1327,7 +1328,7 @@ mod tests {
     async fn test_create_oci_schema_stream_tag_without_hot_reload() {
         let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: Bytes::from("test schema"),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
@@ -1386,7 +1387,7 @@ mod tests {
     async fn test_create_oci_schema_stream_digest_without_hot_reload() {
         let mock_server = &MockServer::start().await;
         let schema_layer = ImageLayer {
-            data: "test schema".to_string().into_bytes(),
+            data: Bytes::from("test schema"),
             media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
             annotations: None,
         };
