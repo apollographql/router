@@ -25,27 +25,27 @@ mod scalars;
 
 use std::fmt;
 use std::fs;
-use std::fs::remove_file;
 use std::fs::DirEntry;
+use std::fs::remove_file;
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use ::reqwest::Client;
 use anyhow::Result;
 use console::style;
-use dialoguer::console::Term;
-use dialoguer::theme::ColorfulTheme;
 use dialoguer::Confirm;
 use dialoguer::Editor;
 use dialoguer::Input;
 use dialoguer::Select;
+use dialoguer::console::Term;
+use dialoguer::theme::ColorfulTheme;
 use itertools::Itertools;
+use matching_pull_request::MatchingPullRequest;
 use matching_pull_request::matching_pull_request::ResponseData;
 use matching_pull_request::matching_pull_request::Variables;
-use matching_pull_request::MatchingPullRequest;
 use serde::Serialize;
-use tinytemplate::format_unescaped;
 use tinytemplate::TinyTemplate;
+use tinytemplate::format_unescaped;
 use xtask::PKG_PROJECT_ROOT;
 
 #[derive(Serialize)]
@@ -235,14 +235,14 @@ impl Create {
             .block_on(async {
                 let items = Classification::ORDERED_ALL;
 
-                let selected_classification: Classification = if self.classification.is_some() {
+                let selected_classification: Classification = if let Some(classification) = self.classification {
                     println!(
                         "{} {} {}",
                         style("Using").yellow(),
-                        style(self.classification.unwrap()).cyan(),
+                        style(classification).cyan(),
                         style("classification from CLI arguments").yellow()
                     );
-                    self.classification.unwrap()
+                    classification
                 } else {
                     let selection = Select::with_theme(&ColorfulTheme::default())
                         .with_prompt("What is the classification?")
@@ -350,13 +350,13 @@ impl Create {
                     body: String::from("A description of the fix which stands on its own separate from the title.  It should embrace the use of Markdown to stylize the commentary so it looks great on the GitHub Releases, when shared on social cards, etc."),
                 };
 
-                let context: TemplateContext = if use_gh_cli && branch_name.is_some() {
+                let context: TemplateContext = if use_gh_cli && let Some(branch_name) = &branch_name {
                     match get_token_from_gh_cli(gh_cli_path.unwrap()) {
                         Err(_) => default_context,
                         Ok(gh_token) => {
                             // Good for testing. ;)
                             // let search = format!("repo:{} is:open is:pr head:{}", REPO_WITH_OWNER, "garypen/stricter-jwt-authentication");
-                            let search = format!("repo:{} is:open is:pr head:{}", REPO_WITH_OWNER, &branch_name.as_ref().unwrap());
+                            let search = format!("repo:{} is:open is:pr head:{}", REPO_WITH_OWNER, branch_name);
                             let query = <MatchingPullRequest as graphql_client::GraphQLQuery>::build_query(Variables { search });
                             let response = github_graphql_post_request(&gh_token, "https://api.github.com/graphql", &query).await?;
 
@@ -419,7 +419,7 @@ impl Create {
                                         style("The changeset will be").magenta(),
                                         style("generic").red().bold(),
                                         style("as we didn't find any PRs on GitHub for").magenta(),
-                                        style(&branch_name.as_ref().unwrap()).green(),
+                                        style(branch_name).green(),
                                         style("! (We don't support forks right now.)")
                                     );
                                     default_context

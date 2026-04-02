@@ -262,6 +262,8 @@ impl Plugin for Subscription {
             init.notify
                 .set_ttl(callback.heartbeat_interval.into_option())
                 .await?;
+            #[cfg(test)]
+            let _ = callback;
         }
 
         Ok(Subscription {
