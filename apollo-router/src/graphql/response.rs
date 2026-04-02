@@ -119,7 +119,7 @@ impl Response {
             if error.classify() == serde_json::error::Category::Syntax
                 && reason.contains("unexpected end of hex escape")
             {
-                reason.push_str("; the subgraph response contains an unpaired Unicode surrogate");
+                reason.push_str("; the response contains an unpaired Unicode surrogate");
             }
             MalformedResponseError { reason }
         })?;
