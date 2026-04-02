@@ -286,8 +286,8 @@ pub enum Code {
     MissingSchemaType,
     /// `mappingOnly: true` cannot be combined with `http:` argument
     MappingOnlyWithHttp,
-    /// `mappingOnly: true` requires connect spec v0.5 or later
-    MappingOnlyRequiresV0_5,
+    /// `mappingOnly: true` requires connect spec v0.4 or later
+    MappingOnlyRequiresV0_4,
 }
 
 impl Code {

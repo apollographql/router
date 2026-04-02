@@ -275,13 +275,13 @@ impl<'schema> Connect<'schema> {
         if mapping_only {
             let mut mapping_only_errors: Vec<Message> = Vec::new();
 
-            // Require spec v0.5+
-            if schema.connect_link.spec < ConnectSpec::V0_5 {
+            // Require spec v0.4+
+            if schema.connect_link.spec < ConnectSpec::V0_4 {
                 mapping_only_errors.push(Message {
-                    code: Code::MappingOnlyRequiresV0_5,
+                    code: Code::MappingOnlyRequiresV0_4,
                     message: format!(
-                        "{coordinate} uses `mappingOnly: true` which requires connect spec v0.5 or later. \
-                        Use `@link(url: \"https://specs.apollo.dev/connect/v0.5\")` to enable this feature."
+                        "{coordinate} uses `mappingOnly: true` which requires connect spec v0.4 or later. \
+                        Use `@link(url: \"https://specs.apollo.dev/connect/v0.4\")` to enable this feature."
                     ),
                     locations: coordinate
                         .directive

@@ -1,6 +1,6 @@
 extend schema
   @link(
-    url: "https://specs.apollo.dev/connect/v0.5"
+    url: "https://specs.apollo.dev/connect/v0.4"
     import: ["@connect", "@source"]
   )
   @source(name: "v1", http: { baseURL: "http://127.0.0.1" })
