@@ -103,7 +103,7 @@ fred = { version = "10.1.0", features = [
 ] }
 # We don't use this dependency, but the "all" feature is required for fred's
 # "tcp-user-timeouts" feature to work: https://github.com/aembke/fred.rs/pull/369
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.16.0"
 # Not used directly, but declared here to enforce a minimum version floor for this
