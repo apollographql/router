@@ -56,7 +56,7 @@ ci = []
 snapshot = []
 
 [dependencies]
-addr2line = "0.25.0"
+addr2line = "0.26.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.13.0" }
@@ -105,7 +105,7 @@ fred = { version = "10.1.0", features = [
 # "tcp-user-timeouts" feature to work: https://github.com/aembke/fred.rs/pull/369
 socket2 = { version = "0.5", features = ["all"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
-graphql_client = "0.14.0"
+graphql_client = "0.16.0"
 # Not used directly, but declared here to enforce a minimum version floor for this
 # transitive dependency and to allow Renovate to manage future version bumps.
 h2 = "0.4.13"
@@ -232,7 +232,7 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum = { version = "0.28.0", features = ["derive"] }
 sys-info = "0.9.1"
-sysinfo = { version = "0.37.0", features = [
+sysinfo = { version = "0.38.0", features = [
     "system",
     "windows",
 ], default-features = false }
