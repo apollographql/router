@@ -2959,7 +2959,7 @@ mod tests {
         // When this assertion fails, don't panic, but it's time to decide how
         // the next-next version should behave in these error cases (possibly
         // exactly the same).
-        assert_eq!(ConnectSpec::V0_4, ConnectSpec::next());
+        assert_eq!(spec, ConnectSpec::next());
 
         // The .data shorthand is no longer allowed, since it can be mistakenly
         // parsed as a continuation of a previous selection. Instead, use $.data
