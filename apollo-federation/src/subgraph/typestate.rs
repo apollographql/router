@@ -46,6 +46,7 @@ use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
+use crate::schema::position::HasType;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -1030,13 +1031,14 @@ impl FederationSchema {
             query_root_pos.get(self.schema())?.name.clone()
         };
 
-        // PORT_NOTE: For Fed 1 subgraphs, the JS implementation ignores `Query._entities` and
-        //            `Query._service` inside `buildNamedTypeInner` when building object types (they
-        //            are not kept from the parsed SDL in that path). We remove those fields here
-        //            for Fed 1 so behavior matches federation-js.
-        //            See: https://github.com/apollographql/federation/blob/9283b4c43575839d8d7d575c8fc5c1d42f581b37/internals-js/src/buildSchema.ts#L449
-        //            Related: `FederationBlueprint::ignore_parsed_field` drops these fields during
-        //            parse for the same Fed 1 case.
+        let is_fed_1_subgraph = self.is_fed_1_subgraph();
+
+        // PORT_NOTE: Fed 1 — JS first **ignores** user `Query._service` / `Query._entities` while
+        //            building types (`buildNamedTypeInner` in buildSchema.ts; Rust:
+        //            `FederationBlueprint::ignore_parsed_field`). Later, JS `addFederationOperations`
+        //            **checks and adds** the canonical `_service` field for **both** Fed 1 and Fed 2.
+        //            This function is that second step: when we return, the root query type must
+        //            expose `_service: _Service!` (plus `_entities` when `_Entity` exists).
 
         // Add or remove `Query._entities` (if applicable)
         let entity_field_pos = ObjectFieldDefinitionPosition {
@@ -1044,13 +1046,7 @@ impl FederationSchema {
             field_name: FEDERATION_ENTITIES_FIELD_NAME,
         };
         if let Some(_entity_type) = self.entity_type()? {
-            if self
-                .subgraph_metadata()
-                .is_some_and(|meta| !meta.is_fed_2_schema())
-            {
-                // Fed 1: match JS `buildNamedTypeInner` — do not retain `_entities` (see PORT_NOTE above).
-                entity_field_pos.remove(self)?;
-            } else if entity_field_pos.try_get(self.schema()).is_none() {
+            if entity_field_pos.try_get(self.schema()).is_none() {
                 entity_field_pos
                     .insert(self, Component::new(self.entities_field_spec()?.into()))?;
             }
@@ -1064,17 +1060,38 @@ impl FederationSchema {
 
         // Add `Query._service` (if not already present)
         let service_field_pos = ObjectFieldDefinitionPosition {
-            type_name: query_root_type_name,
+            type_name: query_root_type_name.clone(),
             field_name: FEDERATION_SERVICE_FIELD_NAME,
         };
-        // Fed 1: match JS `buildNamedTypeInner` — do not retain `_service` (see PORT_NOTE above).
-        if self
-            .subgraph_metadata()
-            .is_some_and(|meta| !meta.is_fed_2_schema())
-        {
-            service_field_pos.remove(self)?;
+        // JS does not keep a user-provided nullable `_service` field type; normalize to `_Service!`.
+        if service_field_pos.try_get(self.schema()).is_some() {
+            if !service_field_pos.get_type(self)?.is_non_null() {
+                service_field_pos
+                    .set_type(self, Type::NonNullNamed(self.service_type()?.type_name))?;
+            }
         } else {
             service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
+        }
+
+        // Fed 1 parse often strips federation fields from `Query` before injection; any empty root
+        // query object is invalid GraphQL — recover with `_service` if still missing.
+        let query_object_pos = ObjectTypeDefinitionPosition {
+            type_name: query_root_type_name,
+        };
+        if let Some(query_obj) = query_object_pos.try_get(self.schema()) {
+            if query_obj.fields.is_empty() {
+                trace!(
+                    is_fed_1_subgraph,
+                    "add_federation_operations: recovering empty root query type"
+                );
+                let recovery_pos = ObjectFieldDefinitionPosition {
+                    type_name: query_object_pos.type_name.clone(),
+                    field_name: FEDERATION_SERVICE_FIELD_NAME,
+                };
+                if recovery_pos.try_get(self.schema()).is_none() {
+                    recovery_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
+                }
+            }
         }
 
         Ok(())
