@@ -549,7 +549,7 @@ impl PluginPrivate for Telemetry {
                         request.context.clone(),
                     )
                 },
-                move |(mut custom_attributes, custom_instruments, mut custom_events, ctx): (
+                move |(custom_attributes, custom_instruments, mut custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
                     RouterEvents,
@@ -566,34 +566,6 @@ impl PluginPrivate for Telemetry {
                     Self::plugin_metrics(&config);
 
                     async move {
-                        // NB: client name and version must be picked up here, rather than in the
-                        //  `req_fn` of this `map_future_with_request_data` call, to allow plugins
-                        //  at the router service to modify the name and version.
-                        let get_from_context =
-                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
-                        let client_name = get_from_context(&ctx, CLIENT_NAME).or_else(|| {
-                            get_from_context(
-                                &ctx,
-                                crate::context::deprecated::DEPRECATED_CLIENT_NAME,
-                            )
-                        });
-                        let client_version = get_from_context(&ctx, CLIENT_VERSION).or_else(|| {
-                            get_from_context(
-                                &ctx,
-                                crate::context::deprecated::DEPRECATED_CLIENT_VERSION,
-                            )
-                        });
-
-                        if let Some(key) = client_name_key {
-                            custom_attributes
-                                .push(KeyValue::new(key, client_name.unwrap_or_default()));
-                        }
-
-                        if let Some(key) = client_version_key {
-                            custom_attributes
-                                .push(KeyValue::new(key, client_version.unwrap_or_default()));
-                        }
-
                         if let Some(http_server_response_body_size) =
                             &custom_instruments.http_server_response_body_size
                         {
@@ -617,6 +589,44 @@ impl PluginPrivate for Telemetry {
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
                         let response: Result<router::Response, BoxError> = fut.await;
+
+                        // Client name and version must be picked up after awaiting
+                        // the inner service future, because router service plugins
+                        // (e.g. rhai) may modify these values in the shared context
+                        // during request processing. With buffered service layers,
+                        // that processing is deferred until the future is polled.
+                        let get_from_context =
+                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
+                        let client_name = get_from_context(&ctx, CLIENT_NAME).or_else(|| {
+                            get_from_context(
+                                &ctx,
+                                crate::context::deprecated::DEPRECATED_CLIENT_NAME,
+                            )
+                        });
+                        let client_version = get_from_context(&ctx, CLIENT_VERSION).or_else(|| {
+                            get_from_context(
+                                &ctx,
+                                crate::context::deprecated::DEPRECATED_CLIENT_VERSION,
+                            )
+                        });
+
+                        if let Some(key) = client_name_key {
+                            span.set_span_dyn_attribute(
+                                key,
+                                opentelemetry::Value::String(
+                                    client_name.unwrap_or_default().into(),
+                                ),
+                            );
+                        }
+
+                        if let Some(key) = client_version_key {
+                            span.set_span_dyn_attribute(
+                                key,
+                                opentelemetry::Value::String(
+                                    client_version.unwrap_or_default().into(),
+                                ),
+                            );
+                        }
 
                         span.record(
                             APOLLO_PRIVATE_DURATION_NS,
