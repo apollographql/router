@@ -89,6 +89,9 @@ static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
         .expect("this regex to check the path is valid")
 });
 
+static TRAILING_SLASH: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"/+$").expect("this regex to check the path has no trailing slash"));
+
 /// Configuration error.
 #[derive(Debug, Error, Display)]
 #[non_exhaustive]
@@ -868,6 +871,13 @@ impl Supergraph {
             let new_path = SUPERGRAPH_ENDPOINT_REGEX
                 .replace(&self.path, "${first_path}${sub_path}{supergraph_route}");
             path = new_path.to_string();
+        } else if TRAILING_SLASH.is_match(&self.path) {
+            let new_path = TRAILING_SLASH.replace(&self.path, "");
+            if new_path.is_empty() {
+                path = "/".to_string();
+            } else {
+                path = new_path.to_string();
+            }
         }
 
         path

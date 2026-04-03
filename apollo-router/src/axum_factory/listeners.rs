@@ -23,6 +23,8 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tokio_util::time::FutureExt;
+use tower::Layer;
+use tower_http::normalize_path::NormalizePathLayer;
 use tower_service::Service;
 
 use crate::ListenAddr;
@@ -339,7 +341,7 @@ pub(super) fn serve_router_on_listen_addr(
                     break;
                 }
                 res = listener.accept() => {
-                    let app = router.clone();
+                    let app = NormalizePathLayer::trim_trailing_slash().layer(router.clone());
                     let connection_shutdown = connection_shutdown.clone();
                     let connection_stop_signal = all_connections_stopped_sender.clone();
                     let address = address.clone();
@@ -561,6 +563,11 @@ mod tests {
     use std::sync::Arc;
 
     use axum::BoxError;
+    use http::HeaderMap;
+    use http::HeaderValue;
+    use mime::APPLICATION_JSON;
+    use reqwest::header::CONTENT_TYPE;
+    use serde_json::json;
     use tower::ServiceExt;
     use tower::service_fn;
 
@@ -568,6 +575,8 @@ mod tests {
     use crate::axum_factory::tests::init_with_config;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
+    use crate::graphql;
+    use crate::services::SupergraphResponse;
     use crate::services::router;
     use crate::services::router::body;
 
@@ -666,5 +675,112 @@ mod tests {
             "tried to register two endpoints on `127.0.0.1:4010/`",
             error.to_string()
         )
+    }
+
+    async fn run_trailing_slash_test(path: &str, without_slash: &str) {
+        let configuration = Arc::new(
+            Configuration::fake_builder()
+                .supergraph(Supergraph::fake_builder().path(path.to_string()).build())
+                .build()
+                .unwrap(),
+        );
+
+        let router_service = router::service::from_supergraph_mock_callback_and_configuration(
+            move |req| {
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(json!({"response": "yay"}))
+                        .build(),
+                    req.context,
+                ))
+            },
+            configuration.clone(),
+        )
+        .await;
+
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+        );
+
+        let (server, _) = init_with_config(router_service, configuration, MultiMap::new())
+            .await
+            .unwrap();
+
+        let client = reqwest::Client::builder()
+            .default_headers(default_headers)
+            .build()
+            .unwrap();
+
+        let url_without_slash = format!(
+            "{}{}",
+            server.graphql_listen_address().as_ref().unwrap(),
+            without_slash
+        );
+
+        let response_without_slash = client
+            .post(&url_without_slash)
+            .body(json!({ "query": "query { __typename }" }).to_string())
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response_without_slash.status(), reqwest::StatusCode::OK);
+
+        let url_with_slash = format!(
+            "{}{}/",
+            server.graphql_listen_address().as_ref().unwrap(),
+            without_slash
+        );
+
+        let response_with_slash = client
+            .post(&url_with_slash)
+            .body(json!({ "query": "query { __typename }" }).to_string())
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response_with_slash.status(), reqwest::StatusCode::OK);
+
+        let url_with_multuple_slash = format!(
+            "{}{}///",
+            server.graphql_listen_address().as_ref().unwrap(),
+            without_slash
+        );
+
+        let response_with_multiple_slash = client
+            .post(&url_with_multuple_slash)
+            .body(json!({ "query": "query { __typename }" }).to_string())
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response_with_multiple_slash.status(),
+            reqwest::StatusCode::OK
+        );
+
+        server.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn trailing_slash_normalization_graphql_path_without_slash() {
+        run_trailing_slash_test("/graphql", "/graphql").await;
+    }
+
+    #[tokio::test]
+    async fn trailing_slash_normalization_graphql_path_with_trailing_slash() {
+        run_trailing_slash_test("/graphql/", "/graphql").await;
+    }
+
+    #[tokio::test]
+    async fn trailing_slash_normalization_graphql_path_with_multiple_trailing_slash() {
+        run_trailing_slash_test("/graphql///", "/graphql").await;
+    }
+
+    #[tokio::test]
+    async fn trailing_slash_normalization_root_path() {
+        run_trailing_slash_test("/", "").await;
     }
 }
