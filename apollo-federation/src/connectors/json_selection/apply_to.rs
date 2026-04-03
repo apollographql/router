@@ -221,7 +221,7 @@ pub(crate) struct ShapeContext {
 impl ShapeContext {
     pub(crate) fn new(source_id: SourceId) -> Self {
         Self {
-            spec: JSONSelection::default_connect_spec(),
+            spec: ConnectSpec::latest(),
             named_shapes: IndexMap::default(),
             source_id,
         }
