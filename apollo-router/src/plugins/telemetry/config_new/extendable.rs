@@ -370,6 +370,8 @@ mod test {
                 datadog_trace_id: None,
                 trace_id: None,
                 baggage: None,
+                client_name: None,
+                client_version: None,
                 common: HttpCommonAttributes {
                     http_request_method: Some(StandardAttribute::Bool(true)),
                     http_response_status_code: Some(StandardAttribute::Bool(true)),
