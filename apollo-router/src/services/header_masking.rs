@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use http::HeaderMap;
 use http::HeaderValue;
 
-use crate::configuration::header_masking::HeaderMaskingConfig;
+use crate::configuration::header_masking_config::HeaderMaskingConfig;
 
 const MASKED_VALUE: &str = "***MASKED***";
 
