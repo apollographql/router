@@ -51,6 +51,8 @@ mod to_string;
 pub(crate) use to_string::ToStringMethod;
 mod parse_int;
 pub(crate) use parse_int::ParseIntMethod;
+mod properties_to_camel_case;
+pub(crate) use properties_to_camel_case::PropertiesToCamelCaseMethod;
 mod contains;
 pub(crate) use contains::ContainsMethod;
 mod arithmetic;
