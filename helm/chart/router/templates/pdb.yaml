@@ -12,7 +12,8 @@ metadata:
 spec:
 {{- if not (kindIs "invalid" .Values.podDisruptionBudget.maxUnavailable) }}
   maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
-{{- else if not (kindIs "invalid" .Values.podDisruptionBudget.minAvailable) }}
+{{- end }}
+{{- if not (kindIs "invalid" .Values.podDisruptionBudget.minAvailable) }}
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
 {{- end }}
   selector:
