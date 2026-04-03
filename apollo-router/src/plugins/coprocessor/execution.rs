@@ -17,6 +17,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::services::execution;
+use crate::services::header_masking::HeaderMaskingRules;
 
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -73,6 +74,7 @@ impl ExecutionStage {
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
+        header_masking_rules: Option<Arc<HeaderMaskingRules>>,
     ) -> execution::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -87,12 +89,14 @@ impl ExecutionStage {
             let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
+            let header_masking_rules = header_masking_rules.clone();
 
             AsyncCheckpointLayer::new(move |request: execution::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
                 let sdl = sdl.clone();
+                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
                     let mut succeeded = true;
@@ -105,6 +109,7 @@ impl ExecutionStage {
                         request_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -123,12 +128,14 @@ impl ExecutionStage {
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
+            let header_masking_rules = header_masking_rules.clone();
 
             MapFutureLayer::new(move |fut| {
                 let coprocessor_url = coprocessor_url.clone();
                 let sdl: Arc<String> = sdl.clone();
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
+                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
                     let response: execution::Response = fut.await?;
@@ -143,6 +150,7 @@ impl ExecutionStage {
                         response_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -193,6 +201,7 @@ async fn process_execution_request_stage<C>(
     request_config: ExecutionRequestConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
 ) -> Result<ControlFlow<execution::Response, execution::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -211,6 +220,16 @@ where
     let headers_to_send = request_config
         .headers
         .then(|| externalize_header_map(&parts.headers));
+
+    // Log headers with masking for security
+    if request_config.headers {
+        if let Some(rules) = header_masking_rules.as_deref() {
+            tracing::debug!(
+                headers = %rules.mask_headers_debug(&parts.headers),
+                "Execution request headers (masked)"
+            );
+        }
+    }
 
     let body_to_send = request_config
         .body
@@ -346,6 +365,7 @@ async fn process_execution_response_stage<C>(
     response_config: ExecutionResponseConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
 ) -> Result<execution::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -373,6 +393,17 @@ where
     let headers_to_send = response_config
         .headers
         .then(|| externalize_header_map(&parts.headers));
+
+    // Log headers with masking for security
+    if response_config.headers {
+        if let Some(rules) = header_masking_rules.as_deref() {
+            tracing::debug!(
+                headers = %rules.mask_headers_debug(&parts.headers),
+                "Execution response headers (masked)"
+            );
+        }
+    }
+
     let body_to_send = response_config
         .body
         .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));

@@ -400,6 +400,9 @@ where
 }
 
 /// Convert a HeaderMap into a HashMap
+/// This is used to send headers to external services (coprocessors, subgraphs)
+/// Headers are NOT masked here - they are sent with full values for functionality.
+/// Masking should be applied only in logging/tracing statements.
 pub(crate) fn externalize_header_map(
     input: &HeaderMap<HeaderValue>,
 ) -> HashMap<String, Vec<String>> {
