@@ -4,10 +4,14 @@ use apollo_compiler::parser::LineColumn;
 use indexmap::IndexMap;
 
 use crate::error::CompositionError;
+use crate::error::HasLocations;
+use crate::error::Locations;
 use crate::error::SingleFederationError;
 use crate::error::SubgraphLocation;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Sources;
+use crate::subgraph::typestate::HasMetadata;
+use crate::subgraph::typestate::Subgraph;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::JoinStringsOptions;
 use crate::utils::human_readable::human_readable_subgraph_names;
@@ -69,22 +73,24 @@ impl ErrorReporter {
         (self.errors, self.hints)
     }
 
-    pub(crate) fn report_mismatch_error<D, S>(
+    pub(crate) fn report_mismatch_error<D, S: HasLocations, T: HasMetadata>(
         &mut self,
         error: CompositionError,
         mismatched_element: &D,
         subgraph_elements: &Sources<S>,
+        subgraphs: &[Subgraph<T>],
         supergraph_mismatch_accessor: impl Fn(&D) -> Option<String>,
         subgraph_mismatch_accessor: impl Fn(&S, usize) -> Option<String>,
     ) {
-        self.report_mismatch::<D, S>(
+        self.report_mismatch(
             Some(mismatched_element),
             subgraph_elements,
+            subgraphs,
             supergraph_mismatch_accessor,
             subgraph_mismatch_accessor,
             |elt, names| format!("{} in {}", elt, names.unwrap_or("undefined".to_string())),
             |elt, names| format!("{elt} in {names}"),
-            |myself, distribution| {
+            |myself, distribution, locations| {
                 let distribution_str = join_strings(
                     distribution.iter(),
                     JoinStringsOptions {
@@ -94,26 +100,32 @@ impl ErrorReporter {
                         output_length_limit: None,
                     },
                 );
-                myself.add_error(error.append_message(distribution_str));
+                myself.add_error(
+                    error
+                        .append_message(distribution_str)
+                        .append_locations(locations),
+                );
             },
             false,
         );
     }
 
-    pub(crate) fn report_mismatch_error_without_supergraph<T>(
+    pub(crate) fn report_mismatch_error_without_supergraph<T: HasLocations, S: HasMetadata>(
         &mut self,
         error: CompositionError,
         subgraph_elements: &Sources<T>,
+        subgraphs: &[Subgraph<S>],
         mismatch_accessor: impl Fn(&T, usize) -> Option<String>,
     ) {
-        self.report_mismatch::<String, T>(
+        self.report_mismatch::<T, T, _>(
             None,
             subgraph_elements,
+            subgraphs,
             |_| None,
             mismatch_accessor,
             |_, _| String::new(),
             |elt, names| format!("{elt} in {names}"),
-            |myself, distribution| {
+            |myself, distribution, locations| {
                 let distribution_str = join_strings(
                     distribution.iter(),
                     JoinStringsOptions {
@@ -123,32 +135,38 @@ impl ErrorReporter {
                         output_length_limit: None,
                     },
                 );
-                myself.add_error(error.append_message(distribution_str));
+                myself.add_error(
+                    error
+                        .append_message(distribution_str)
+                        .append_locations(locations),
+                );
             },
             false,
         );
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn report_mismatch_error_with_specifics<D, S>(
+    pub(crate) fn report_mismatch_error_with_specifics<D, S: HasLocations, T: HasMetadata>(
         &mut self,
         error: CompositionError,
         mismatched_element: &D,
         subgraph_elements: &Sources<S>,
+        subgraphs: &[Subgraph<T>],
         supergraph_mismatch_accessor: impl Fn(&D) -> Option<String>,
         subgraph_mismatch_accessor: impl Fn(&S, usize) -> Option<String>,
         supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
         other_elements_printer: impl Fn(&str, &str) -> String,
         include_missing_sources: bool,
     ) {
-        self.report_mismatch::<D, S>(
+        self.report_mismatch(
             Some(mismatched_element),
             subgraph_elements,
+            subgraphs,
             supergraph_mismatch_accessor,
             subgraph_mismatch_accessor,
             supergraph_element_printer,
             other_elements_printer,
-            |myself, mut distribution| {
+            |myself, mut distribution, locations| {
                 let mut distribution_str = distribution.remove(0);
                 distribution_str.push_str(&join_strings(
                     distribution.iter(),
@@ -159,19 +177,24 @@ impl ErrorReporter {
                         output_length_limit: None,
                     },
                 ));
-                myself.add_error(error.append_message(distribution_str));
+                myself.add_error(
+                    error
+                        .append_message(distribution_str)
+                        .append_locations(locations),
+                );
             },
             include_missing_sources,
         );
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn report_mismatch_hint<D, S>(
+    pub(crate) fn report_mismatch_hint<D, S: HasLocations, T: HasMetadata>(
         &mut self,
         code: HintCode,
         message: String,
         supergraph_element: &D,
         subgraph_elements: &Sources<S>,
+        subgraphs: &[Subgraph<T>],
         supergraph_element_to_string: impl Fn(&D) -> Option<String>,
         subgraph_element_to_string: impl Fn(&S, usize) -> Option<String>,
         supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
@@ -179,14 +202,15 @@ impl ErrorReporter {
         include_missing_sources: bool,
         no_end_of_message_dot: bool,
     ) {
-        self.report_mismatch::<D, S>(
+        self.report_mismatch(
             Some(supergraph_element),
             subgraph_elements,
+            subgraphs,
             supergraph_element_to_string,
             subgraph_element_to_string,
             supergraph_element_printer,
             other_elements_printer,
-            |myself, mut distribution| {
+            |myself, mut distribution, locations| {
                 let mut distribution_str = distribution.remove(0);
                 distribution_str.push_str(&join_strings(
                     distribution.iter(),
@@ -201,7 +225,7 @@ impl ErrorReporter {
                 myself.add_hint(CompositionHint {
                     code: code.code().to_string(),
                     message: format!("{message}{distribution_str}{suffix}"),
-                    locations: Default::default(), // TODO
+                    locations,
                 });
             },
             include_missing_sources,
@@ -211,10 +235,11 @@ impl ErrorReporter {
     /// Reports a mismatch between a supergraph element and subgraph elements.
     /// Not meant to be used directly: use `report_mismatch_error` or `report_mismatch_hint` instead.
     #[allow(clippy::too_many_arguments)]
-    fn report_mismatch<D, S>(
+    fn report_mismatch<D, S: HasLocations, T: HasMetadata>(
         &mut self,
         supergraph_element: Option<&D>,
         subgraph_elements: &Sources<S>,
+        subgraphs: &[Subgraph<T>],
         // Note that these two parameters used to be `mismatchAccessor`, which took a boolean
         // indicating whether it was a supergraph element or a subgraph element. Now, we have two
         // separate functions, which allows us to use different types for the destination and
@@ -223,16 +248,23 @@ impl ErrorReporter {
         subgraph_mismatch_accessor: impl Fn(&S, usize) -> Option<String>,
         supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
         other_elements_printer: impl Fn(&str, &str) -> String,
-        reporter: impl FnOnce(&mut Self, Vec<String>),
+        reporter: impl FnOnce(&mut Self, Vec<String>, Locations),
         include_missing_sources: bool,
     ) {
         let mut distribution_map = Default::default();
-        let process_subgraph_element =
+        let mut locations = Locations::new();
+        let mut process_subgraph_element =
             |name: &str,
              idx: usize,
              subgraph_element: &S,
              distribution_map: &mut IndexMap<String, Vec<String>>| {
                 if let Some(element) = subgraph_mismatch_accessor(subgraph_element, idx) {
+                    locations.extend(
+                        subgraphs
+                            .get(idx)
+                            .map(|sg| subgraph_element.locations(sg))
+                            .unwrap_or_default(),
+                    );
                     distribution_map
                         .entry(element)
                         .or_default()
@@ -279,6 +311,6 @@ impl ErrorReporter {
             let names_str = human_readable_subgraph_names(names.iter());
             distribution.push(other_elements_printer(v, &names_str));
         }
-        reporter(self, distribution);
+        reporter(self, distribution, locations);
     }
 }

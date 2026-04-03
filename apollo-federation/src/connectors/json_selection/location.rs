@@ -38,7 +38,7 @@ pub(crate) fn new_span(input: &str) -> Span<'_> {
     Span::new_extra(
         input,
         SpanExtra {
-            spec: super::JSONSelection::default_connect_spec(),
+            spec: ConnectSpec::latest(),
             local_vars: Vec::new(),
             errors: Vec::new(),
         },
