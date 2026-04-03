@@ -1057,3 +1057,345 @@ fn test_type_conditioned_fetching_with_interface_object_does_not_crash() {
       "###
     );
 }
+
+// Tests for @interfaceObject with multiple root-field aliases.
+//
+// OWNER subgraph owns the Product interface + concrete types.
+// Two additional subgraphs declare Product via @interfaceObject.
+// Variant A: resolvable: false, no extra fields.
+// Variant B: resolvable: true, extra fields (exercises the entity-fetch+alias path).
+
+const MULTI_ALIAS_IOBJ_OWNER: &str = r#"
+  type Query {
+    products: [Product]
+  }
+
+  interface Product @key(fields: "id") {
+    id: ID!
+    name: String
+    sku: String
+    type: ProductType!
+  }
+
+  enum ProductType { SERVICE BUNDLE CATEGORY }
+
+  type Service implements Product @key(fields: "id") {
+    id: ID!
+    name: String
+    sku: String
+    type: ProductType!
+  }
+
+  type Bundle implements Product @key(fields: "id") {
+    id: ID!
+    name: String
+    sku: String
+    type: ProductType!
+  }
+
+  type Category implements Product @key(fields: "id") {
+    id: ID!
+    name: String
+    sku: String
+    type: ProductType!
+  }
+"#;
+
+// resolvable: false + no fields: should never generate entity fetches
+const MULTI_ALIAS_IOBJ_B_NO_FIELDS: &str = r#"
+  type Product @interfaceObject @key(fields: "id", resolvable: false) {
+    id: ID!
+  }
+"#;
+
+const MULTI_ALIAS_IOBJ_C_NO_FIELDS: &str = r#"
+  type Product @interfaceObject @key(fields: "id", resolvable: false) {
+    id: ID!
+  }
+"#;
+
+// resolvable: true + extra fields: generates entity fetches — tests alias path correctness
+const MULTI_ALIAS_IOBJ_B_WITH_FIELDS: &str = r#"
+  type Product @interfaceObject @key(fields: "id") {
+    id: ID!
+    score: Float
+  }
+"#;
+
+const MULTI_ALIAS_IOBJ_C_WITH_FIELDS: &str = r#"
+  type Product @interfaceObject @key(fields: "id") {
+    id: ID!
+    rank: Int
+  }
+"#;
+
+// Single alias, two @interfaceObject subgraphs that are resolvable: false.
+// Expected: single Fetch to OWNER only — no Flatten nodes because B and C have
+// resolvable: false and contribute no fields.
+#[test]
+fn single_alias_two_interface_object_subgraphs_resolvable_false() {
+    let planner = planner!(
+        OWNER: MULTI_ALIAS_IOBJ_OWNER,
+        B: MULTI_ALIAS_IOBJ_B_NO_FIELDS,
+        C: MULTI_ALIAS_IOBJ_C_NO_FIELDS,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            products {
+              id
+              name
+              type
+            }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Fetch(service: "OWNER") {
+              {
+                products {
+                  __typename
+                  id
+                  name
+                  type
+                }
+              }
+            },
+          }
+        "###
+    );
+}
+
+// Two aliases, two @interfaceObject subgraphs that are resolvable: false.
+// Expected: single Fetch to OWNER with both aliases — no Flatten nodes.
+// Verifies alias names are preserved and no spurious entity fetches are generated.
+#[test]
+fn two_aliases_two_interface_object_subgraphs_resolvable_false() {
+    let planner = planner!(
+        OWNER: MULTI_ALIAS_IOBJ_OWNER,
+        B: MULTI_ALIAS_IOBJ_B_NO_FIELDS,
+        C: MULTI_ALIAS_IOBJ_C_NO_FIELDS,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            p1: products {
+              id
+              name
+              type
+            }
+            p2: products {
+              id
+              name
+              type
+            }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Fetch(service: "OWNER") {
+              {
+                p1: products {
+                  __typename
+                  id
+                  name
+                  type
+                }
+                p2: products {
+                  __typename
+                  id
+                  name
+                  type
+                }
+              }
+            },
+          }
+        "###
+    );
+}
+
+// Single alias, two @interfaceObject subgraphs with extra fields.
+// Establishes the baseline: alias name is used correctly in Flatten paths for a single alias.
+#[test]
+fn single_alias_two_interface_object_subgraphs_with_fields() {
+    let planner = planner!(
+        OWNER: MULTI_ALIAS_IOBJ_OWNER,
+        B: MULTI_ALIAS_IOBJ_B_WITH_FIELDS,
+        C: MULTI_ALIAS_IOBJ_C_WITH_FIELDS,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            p1: products {
+              id
+              name
+              score
+              rank
+            }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Sequence {
+              Fetch(service: "OWNER") {
+                {
+                  p1: products {
+                    __typename
+                    id
+                    name
+                  }
+                }
+              },
+              Parallel {
+                Flatten(path: "p1.@") {
+                  Fetch(service: "B") {
+                    {
+                      ... on Product {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Product {
+                        score
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "p1.@") {
+                  Fetch(service: "C") {
+                    {
+                      ... on Product {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Product {
+                        rank
+                      }
+                    }
+                  },
+                },
+              },
+            },
+          }
+        "###
+    );
+}
+
+// Two aliases, two @interfaceObject subgraphs with extra fields.
+// Verifies that Flatten paths use alias names ("p1", "p2") rather than the
+// original field name, and that both aliases each get their own Flatten nodes.
+#[test]
+fn two_aliases_two_interface_object_subgraphs_with_fields() {
+    let planner = planner!(
+        OWNER: MULTI_ALIAS_IOBJ_OWNER,
+        B: MULTI_ALIAS_IOBJ_B_WITH_FIELDS,
+        C: MULTI_ALIAS_IOBJ_C_WITH_FIELDS,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            p1: products {
+              id
+              name
+              score
+              rank
+            }
+            p2: products {
+              id
+              name
+              score
+              rank
+            }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Sequence {
+              Fetch(service: "OWNER") {
+                {
+                  p1: products {
+                    __typename
+                    id
+                    name
+                  }
+                  p2: products {
+                    __typename
+                    id
+                    name
+                  }
+                }
+              },
+              Parallel {
+                Flatten(path: "p2.@") {
+                  Fetch(service: "B") {
+                    {
+                      ... on Product {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Product {
+                        score
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "p2.@") {
+                  Fetch(service: "C") {
+                    {
+                      ... on Product {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Product {
+                        rank
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "p1.@") {
+                  Fetch(service: "B") {
+                    {
+                      ... on Product {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Product {
+                        score
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "p1.@") {
+                  Fetch(service: "C") {
+                    {
+                      ... on Product {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Product {
+                        rank
+                      }
+                    }
+                  },
+                },
+              },
+            },
+          }
+        "###
+    );
+}
