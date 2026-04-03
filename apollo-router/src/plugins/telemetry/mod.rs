@@ -46,7 +46,7 @@ use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
-use rand::Rng;
+use rand::RngExt as _;
 use regex::Regex;
 use reload::activation::Activation;
 use reload::tracing::TracingConfigurator;
