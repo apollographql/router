@@ -51,11 +51,14 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
+use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedCounter;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterRequest;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterResponse;
 use crate::protocols::multipart::Multipart;
@@ -377,13 +380,26 @@ impl RouterService {
                         ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
                     let response = match response.subscribed {
-                        Some(true) => http::Response::from_parts(
-                            parts,
-                            router::body::from_result_stream(Multipart::new(
-                                body,
-                                ProtocolMode::Subscription,
-                            )),
-                        ),
+                        Some(true) => {
+                            let subgraph_name: Option<String> = context
+                                .get(SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY)
+                                .ok()
+                                .flatten();
+                            let client_name: Option<String> =
+                                context.get(CLIENT_NAME).ok().flatten();
+                            let terminated_counter = context.extensions().with_lock(|lock| {
+                                lock.get::<SubscriptionsTerminatedCounter>().cloned()
+                            });
+                            http::Response::from_parts(
+                                parts,
+                                router::body::from_result_stream(
+                                    Multipart::new(body, ProtocolMode::Subscription)
+                                        .with_subgraph_name(subgraph_name)
+                                        .with_client_name(client_name)
+                                        .with_terminated_counter(terminated_counter),
+                                ),
+                            )
+                        }
                         _ => http::Response::from_parts(
                             parts,
                             router::body::from_result_stream(Multipart::new(

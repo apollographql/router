@@ -36,6 +36,8 @@ pub(crate) mod notification;
 pub(crate) mod subgraph;
 
 pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
+pub(crate) use execution::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
+pub(crate) use execution::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
 pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
 pub(crate) use fetch::fetch_service_handle_subscription;
@@ -45,6 +47,8 @@ pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
 pub(crate) const SUBSCRIPTION_ERROR_EXTENSION_KEY: &str = "apollo::subscriptions::fatal_error";
 pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
     "apollo.subscription.custom_connection_params";
+pub(crate) const SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY: &str =
+    "apollo::subscription::subgraph_name";
 
 #[derive(Debug, Clone)]
 pub(crate) struct Subscription {

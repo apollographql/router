@@ -26,6 +26,7 @@ use crate::context::OPERATION_NAME;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::metrics::FutureMetricsExt;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
@@ -331,6 +332,7 @@ async fn call_websocket(
             "WebSocket connection failed"
         );
 
+        increment_subgraph_rejected_counter(service_name);
         FetchError::SubrequestWsError {
             service: service_name.to_string(),
             reason: format!("cannot connect websocket to subgraph: {error_details}"),
@@ -344,43 +346,62 @@ async fn call_websocket(
         connection_params,
     )
     .await
-    .map_err(|err| FetchError::SubrequestWsError {
-        service: service_name.to_string(),
-        reason: format!("cannot get the GraphQL websocket stream: {}", err.message),
+    .map_err(|err| {
+        increment_subgraph_rejected_counter(service_name);
+        FetchError::SubrequestWsError {
+            service: service_name.to_string(),
+            reason: format!("cannot get the GraphQL websocket stream: {}", err.message),
+        }
     })?;
 
     let gql_stream = gql_socket
         .into_subscription(body, subgraph_cfg.heartbeat_interval.into_option())
         .await
-        .map_err(|err| FetchError::SubrequestWsError {
-            service: service_name.to_string(),
-            reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
+        .map_err(|err| {
+            increment_subgraph_rejected_counter(service_name);
+            FetchError::SubrequestWsError {
+                service: service_name.to_string(),
+                reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
+            }
         })?;
 
     let (handle_sink, handle_stream) = handle.split();
+    let service_name_for_task = service_name.to_string();
     // Forward GraphQL subscription stream to WebSocket handle
     // Connection lifecycle is managed by the WebSocket infrastructure,
     // so we don't need to handle connection_closed_signal here
-    tokio::task::spawn(async move {
-        select! {
-            // We prefer to specify the order of checks within the select
-            biased;
-            // gql_stream is the stream opened from router to subgraph to receive events
-            // handle_sink is just a broadcast sender to send the events received from subgraphs to the router's client
-            // if all router's clients are closed the sink will be closed too and then the .forward future will end
-            // It will then also trigger poll_close on the gql_stream which will initiate the termination process (like properly closing ws connection cf protocols/websocket.rs)
-            _ = gql_stream
-                .map(Ok::<_, graphql::Error>)
-                .forward(handle_sink) => {
-                tracing::debug!("gql_stream empty");
-            },
-            // This branch handles subscription termination signals. Unlike callback mode,
-            // passthrough mode maintains persistent connections that require explicit cleanup.
-            _ = subscription_closing_signal.recv() => {
-                tracing::debug!("subscription_closing_signal triggered");
+    tokio::task::spawn(
+        async move {
+            select! {
+                // We prefer to specify the order of checks within the select
+                biased;
+                // gql_stream is the stream opened from router to subgraph to receive events
+                // handle_sink is just a broadcast sender to send the events received from subgraphs to the router's client
+                // if all router's clients are closed the sink will be closed too and then the .forward future will end
+                // It will then also trigger poll_close on the gql_stream which will initiate the termination process (like properly closing ws connection cf protocols/websocket.rs)
+                result = gql_stream
+                    .map(Ok::<_, graphql::Error>)
+                    .forward(handle_sink) => {
+                    tracing::debug!("gql_stream empty");
+                    // Ok means the subgraph stream ended naturally (subgraph closed the WebSocket).
+                    // Err means the sink errored because all client handles were dropped first.
+                    if result.is_ok() {
+                        increment_subgraph_ended_counter(&service_name_for_task);
+                    }
+                    // We only record metrics for subgraphs ending subscriptions,
+                    // not for clients disconnecting, so no metrics are incremented here.
+                },
+                // This branch handles subscription termination signals. Unlike callback mode,
+                // passthrough mode maintains persistent connections that require explicit cleanup.
+                // Similar to above, we don't increment any metrics here because the
+                // subscription was ended by all clients disconnecting.
+                _ = subscription_closing_signal.recv() => {
+                    tracing::debug!("subscription_closing_signal triggered");
+                }
             }
         }
-    });
+        .with_current_meter_provider(),
+    );
 
     subscription_stream_tx.send(Box::pin(handle_stream)).await?;
 
@@ -497,7 +518,7 @@ async fn setup_callback(
         1,
         subscriptions.mode = "callback",
         subscriptions.deduplicated = !created,
-        subgraph.service.name = service_name.to_string()
+        subgraph.name = service_name.to_string()
     );
     if !created {
         // Dedup happens here
@@ -625,4 +646,23 @@ async fn subgraph_request(
     } else {
         Ok(ControlFlow::Continue(request))
     }
+}
+
+fn increment_subgraph_rejected_counter(service_name: &str) {
+    u64_counter!(
+        "apollo.router.operations.subscriptions.rejected",
+        "Number of subscription requests rejected",
+        1,
+        reason = "subgraph",
+        subgraph.name = service_name.to_string()
+    );
+}
+
+fn increment_subgraph_ended_counter(service_name: &str) {
+    u64_counter!(
+        "apollo.router.operations.subscriptions.ended.subgraph",
+        "Number of subscriptions ended by the subgraph closing the WebSocket connection",
+        1,
+        subgraph.name = service_name.to_string()
+    );
 }
