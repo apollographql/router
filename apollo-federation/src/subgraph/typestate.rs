@@ -1078,19 +1078,19 @@ impl FederationSchema {
         let query_object_pos = ObjectTypeDefinitionPosition {
             type_name: query_root_type_name,
         };
-        if let Some(query_obj) = query_object_pos.try_get(self.schema()) {
-            if query_obj.fields.is_empty() {
-                trace!(
-                    is_fed_1_subgraph,
-                    "add_federation_operations: recovering empty root query type"
-                );
-                let recovery_pos = ObjectFieldDefinitionPosition {
-                    type_name: query_object_pos.type_name.clone(),
-                    field_name: FEDERATION_SERVICE_FIELD_NAME,
-                };
-                if recovery_pos.try_get(self.schema()).is_none() {
-                    recovery_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
-                }
+        if let Some(query_obj) = query_object_pos.try_get(self.schema())
+            && query_obj.fields.is_empty()
+        {
+            trace!(
+                is_fed_1_subgraph = is_fed_1_subgraph,
+                "add_federation_operations: recovering empty root query type"
+            );
+            let recovery_pos = ObjectFieldDefinitionPosition {
+                type_name: query_object_pos.type_name.clone(),
+                field_name: FEDERATION_SERVICE_FIELD_NAME,
+            };
+            if recovery_pos.try_get(self.schema()).is_none() {
+                recovery_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
             }
         }
 
