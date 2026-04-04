@@ -243,6 +243,43 @@ async fn test_cli_config_preview() {
     );
 }
 
+/// Test `router info` output: contains version, OS/arch, and never exposes env var values (only names or "(set)").
+#[tokio::test(flavor = "multi_thread")]
+async fn test_cli_router_info() {
+    let output = Command::new(IntegrationTest::router_location())
+        .arg("info")
+        .env("RUST_BACKTRACE", "")
+        .output()
+        .await
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "router info should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("Router version:"),
+        "output should contain version: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("OS / architecture:"),
+        "output should contain OS/arch: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("Environment variables set:"),
+        "output should contain env section: {}",
+        stdout
+    );
+    // Secret-bearing env vars must not show values: APOLLO_KEY and similar must appear as "(set)" or name-only, never as a long token
+    assert!(
+        !stdout.contains("sk_live_") && !stdout.contains("sk_"),
+        "output must not contain API key values"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_experimental_notice() {
     let mut router = IntegrationTest::builder()

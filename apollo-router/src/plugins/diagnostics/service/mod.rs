@@ -7,9 +7,10 @@
 //!
 //! **Dashboard & Configuration:**
 //! - `GET /` - Interactive HTML dashboard
-//! - `GET /system_info.txt` - System diagnostic information
+//! - `GET /report.txt` - Full diagnostic report (time-dependent: memory, CPU, load, etc.)
 //! - `GET /router_config.yaml` - Active router configuration
 //! - `GET /supergraph.graphql` - Supergraph schema
+//! - `GET /system_info` - Router system info (static, JSON only; no memory/CPU)
 //! - `GET /export` - Complete diagnostic archive (.tar.gz)
 //!
 //! **Memory Profiling:**
@@ -43,6 +44,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::routing::post;
 use http::StatusCode;
+use mime::APPLICATION_JSON;
 use mime::TEXT_HTML_UTF_8;
 use mime::TEXT_PLAIN_UTF_8;
 
@@ -51,6 +53,7 @@ use super::export::Exporter;
 use super::html_generator::HtmlGenerator;
 use super::memory::MemoryService;
 use super::static_resources::StaticResourceHandler;
+use crate::info::get_router_system_info;
 
 #[cfg(test)]
 mod tests;
@@ -86,7 +89,8 @@ pub(super) fn create_router(
         // Dashboard
         .route("/", get(handle_dashboard))
         // System information and configuration
-        .route("/system_info.txt", get(handle_system_info))
+        .route("/system_info", get(handle_router_system_info_json))
+        .route("/report.txt", get(handle_system_info))
         .route("/router_config.yaml", get(handle_router_config))
         .route("/supergraph.graphql", get(handle_supergraph_schema))
         // Export
@@ -156,10 +160,34 @@ async fn handle_dashboard() -> Response {
     }
 }
 
-/// GET /system_info.txt - Collect and return system information
+/// GET /system_info - Return static router system info as JSON (no memory/CPU)
+async fn handle_router_system_info_json() -> Response {
+    match get_router_system_info() {
+        Some(info) => match serde_json::to_string_pretty(info) {
+            Ok(json) => (
+                StatusCode::OK,
+                [(http::header::CONTENT_TYPE, APPLICATION_JSON.as_ref())],
+                json,
+            )
+                .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to serialize system info: {}", e),
+            )
+                .into_response(),
+        },
+        None => (
+            StatusCode::NOT_FOUND,
+            "Router system info not available (router may not have completed startup)",
+        )
+            .into_response(),
+    }
+}
+
+/// GET /report.txt - Collect and return full diagnostic report (memory, CPU, load, env, etc.)
 async fn handle_system_info() -> Response {
     result_to_response(
-        super::system_info::collect().await.map(|info| {
+        super::system_info::collect_resources().await.map(|info| {
             (
                 StatusCode::OK,
                 [(http::header::CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())],

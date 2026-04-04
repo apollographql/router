@@ -1,3 +1,7 @@
+# Enable diagnostics for local debugging (http://127.0.0.1:8089/diagnostics/)
+experimental_diagnostics:
+  enabled: true
+
 telemetry:
   exporters:
     tracing:

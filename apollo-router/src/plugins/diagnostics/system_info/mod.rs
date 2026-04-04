@@ -9,13 +9,9 @@
 //!   - Target family (unix, windows, etc.)
 //!   - Container environment detection (Docker, Podman, Kubernetes, generic containers)
 //!
-//! - **Rust & Build Information**
+//! - **Rust & Version Information** (static build info is in [`crate::info::RouterSystemInfo`])
 //!   - Router version
 //!   - Rust version
-//!   - Build type (Debug/Release)
-//!   - Build profile
-//!   - Target triple
-//!   - Optimization level
 //!
 //! - **Memory Information**
 //!   - Total memory
@@ -51,11 +47,8 @@
 //!   - Individual CPU core usage percentages
 //!   - Average CPU usage
 //!
-//! - **Environment Variables**
-//!   - Apollo-specific configuration variables (APOLLO_GRAPH_REF)
+//! Static deployment info (OS, arch, version, env var names) is in [`crate::info::RouterSystemInfo`].
 
-use std::env::consts::ARCH;
-use std::env::consts::OS;
 use std::fmt;
 use std::time::Duration;
 
@@ -63,203 +56,33 @@ use sysinfo::System;
 
 use crate::plugins::diagnostics::DiagnosticsResult;
 
-/// Complete system diagnostic information
-struct SystemDiagnostics {
-    basic_system: BasicSystemInfo,
-    rust: RustInfo,
+/// Active resource and load info (memory, CPU, system load). Use [`collect_resources()`].
+struct ResourceAndLoadInfo {
     memory: MemoryInfo,
     jemalloc: JemallocInfo,
     cpu: CpuInfo,
     system_load: SystemLoadInfo,
-    environment: EnvironmentInfo,
 }
 
-impl SystemDiagnostics {
-    /// Collect all system diagnostic information
-    async fn new() -> Self {
-        // Create a single System instance for all system info collection
+impl ResourceAndLoadInfo {
+    async fn collect() -> Self {
         let mut system = System::new_all();
-
         Self {
-            basic_system: BasicSystemInfo::new().await,
-            rust: RustInfo::new(),
             memory: MemoryInfo::new(&system).await,
             jemalloc: JemallocInfo::new(),
             cpu: CpuInfo::new(&system).await,
             system_load: SystemLoadInfo::new(&mut system).await,
-            environment: EnvironmentInfo::new(),
         }
     }
 }
 
-impl fmt::Display for SystemDiagnostics {
+impl fmt::Display for ResourceAndLoadInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}{}{}{}{}{}{}",
-            self.basic_system,
-            self.rust,
-            self.memory,
-            self.jemalloc,
-            self.cpu,
-            self.system_load,
-            self.environment
+            "{}{}{}{}",
+            self.memory, self.jemalloc, self.cpu, self.system_load
         )
-    }
-}
-
-/// Basic system information
-struct BasicSystemInfo {
-    operating_system: &'static str,
-    architecture: &'static str,
-    target_family: &'static str,
-    container_environment: Vec<String>,
-}
-
-impl BasicSystemInfo {
-    /// Collect basic system information
-    async fn new() -> Self {
-        let container_environment = Self::collect_container_environment_info().await;
-        Self {
-            operating_system: OS,
-            architecture: ARCH,
-            target_family: std::env::consts::FAMILY,
-            container_environment,
-        }
-    }
-
-    /// Enhanced container environment detection
-    async fn collect_container_environment_info() -> Vec<String> {
-        let mut container_indicators = Vec::new();
-
-        // Docker
-        if std::path::Path::new("/.dockerenv").exists() {
-            container_indicators.push("Docker".to_string());
-        }
-
-        // Podman
-        if std::path::Path::new("/run/.containerenv").exists() {
-            container_indicators.push("Podman".to_string());
-        }
-
-        // Generic container indicators
-        if std::env::var("container").is_ok() {
-            container_indicators.push("Generic Container".to_string());
-        }
-
-        // Kubernetes
-        if std::env::var("KUBERNETES_SERVICE_HOST").is_ok() {
-            container_indicators.push("Kubernetes".to_string());
-        }
-
-        container_indicators
-    }
-}
-
-impl fmt::Display for BasicSystemInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "SYSTEM INFORMATION")?;
-        writeln!(f, "==================")?;
-        writeln!(f)?;
-        writeln!(f, "Operating System: {}", self.operating_system)?;
-        writeln!(f, "Architecture: {}", self.architecture)?;
-        writeln!(f, "Target Family: {}", self.target_family)?;
-
-        if self.container_environment.is_empty() {
-            writeln!(
-                f,
-                "Container Environment: Not detected (likely bare metal/VM)"
-            )?;
-        } else {
-            writeln!(
-                f,
-                "Container Environment: {} detected",
-                self.container_environment.join(", ")
-            )?;
-        }
-
-        writeln!(f)
-    }
-}
-
-/// Rust and build information
-struct RustInfo {
-    router_version: &'static str,
-    rust_version: &'static str,
-    build: BuildInfo,
-}
-
-impl RustInfo {
-    /// Collect Rust and Cargo information
-    fn new() -> Self {
-        Self {
-            router_version: env!("CARGO_PKG_VERSION"),
-            rust_version: env!("CARGO_PKG_RUST_VERSION"),
-            build: BuildInfo::new(),
-        }
-    }
-}
-
-impl fmt::Display for RustInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Router Version: {}", self.router_version)?;
-        writeln!(f, "Rust Version: {}", self.rust_version)?;
-        writeln!(f, "{}", self.build)?;
-        writeln!(f)
-    }
-}
-
-/// Build and debug information
-struct BuildInfo {
-    build_type: &'static str,
-    build_profile: Option<String>,
-    target_triple: Option<String>,
-    optimization_level: Option<String>,
-}
-
-impl BuildInfo {
-    /// Collect build and debug symbol information
-    fn new() -> Self {
-        // Check if running in debug vs release mode
-        let build_type = if cfg!(debug_assertions) {
-            "Debug (with debug assertions)"
-        } else {
-            "Release (optimized)"
-        };
-
-        // Build profile information
-        let build_profile = std::env::var("CARGO_BUILD_PROFILE").ok();
-
-        // Target information
-        let target_triple = std::env::var("CARGO_CFG_TARGET_TRIPLE").ok();
-        let optimization_level = std::env::var("CARGO_CFG_OPT_LEVEL").ok();
-
-        Self {
-            build_type,
-            build_profile,
-            target_triple,
-            optimization_level,
-        }
-    }
-}
-
-impl fmt::Display for BuildInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f)?;
-        writeln!(f, "BUILD INFORMATION")?;
-        writeln!(f, "-----------------")?;
-        writeln!(f, "Build Type: {}", self.build_type)?;
-
-        if let Some(ref profile) = self.build_profile {
-            writeln!(f, "Build Profile: {}", profile)?;
-        }
-        if let Some(ref target) = self.target_triple {
-            writeln!(f, "Target Triple: {}", target)?;
-        }
-        if let Some(ref opt_level) = self.optimization_level {
-            writeln!(f, "Optimization Level: {}", opt_level)?;
-        }
-        Ok(())
     }
 }
 
@@ -915,72 +738,12 @@ impl fmt::Display for SystemLoadInfo {
     }
 }
 
-/// Environment variables information
-struct EnvironmentInfo {
-    relevant_vars: Vec<(String, String)>,
-}
-
-impl EnvironmentInfo {
-    /// Collect relevant environment variables
-    ///
-    /// SECURITY: Limited environment variable exposure
-    /// Only expose specifically allowlisted environment variables that are safe for diagnostics.
-    /// Never expose variables that might contain secrets, tokens, passwords, or API keys.
-    fn new() -> Self {
-        // SECURITY: Explicit allowlist of safe environment variables
-        // Only Apollo-specific configuration variables are included
-        // DO NOT add variables that might contain secrets (API keys, passwords, etc.)
-        let relevant_vars = ["APOLLO_GRAPH_REF"];
-        let mut collected_vars = Vec::new();
-
-        for var in &relevant_vars {
-            if let Ok(value) = std::env::var(var) {
-                // SECURITY: Truncate long values to prevent log injection or excessive output
-                let display_value = if value.len() > 200 {
-                    format!(
-                        "{}... (truncated, {} chars total)",
-                        &value[..200],
-                        value.len()
-                    )
-                } else {
-                    value
-                };
-                collected_vars.push((var.to_string(), display_value));
-            }
-        }
-
-        Self {
-            relevant_vars: collected_vars,
-        }
-    }
-}
-
-impl fmt::Display for EnvironmentInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "RELEVANT ENVIRONMENT VARIABLES")?;
-        writeln!(f, "------------------------------")?;
-
-        if self.relevant_vars.is_empty() {
-            writeln!(f, "No relevant Apollo environment variables set")?;
-        } else {
-            for (var, value) in &self.relevant_vars {
-                writeln!(f, "{}: {}", var, value)?;
-            }
-        }
-
-        writeln!(f)
-    }
-}
-
-/// Collect system information
+/// Collect active resource and load information (memory, jemalloc, CPU, system load).
 ///
-/// SECURITY WARNING: This function collects extensive system information that may be sensitive:
-/// - Memory layout, CPU details, container environment
-/// - Environment variables, filesystem paths, system architecture
-/// - Should only be used in development/debugging environments with proper access controls
-pub(crate) async fn collect() -> DiagnosticsResult<String> {
-    let diagnostics = SystemDiagnostics::new().await;
-    Ok(diagnostics.to_string())
+/// Used for the Resources tab and report.txt. Static deployment info is in [`crate::info::RouterSystemInfo`].
+pub(crate) async fn collect_resources() -> DiagnosticsResult<String> {
+    let info = ResourceAndLoadInfo::collect().await;
+    Ok(info.to_string())
 }
 
 /// CGroup version enumeration

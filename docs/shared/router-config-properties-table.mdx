@@ -320,6 +320,22 @@ experimental_chaos:
 
 ---
 
+### `experimental_diagnostics`
+
+Configuration for the experimental diagnostics plugin (dashboard and API for configuration, system info, memory profiling, and export). See [Diagnostics (experimental)](/graphos/routing/self-hosted/diagnostics).
+
+- **Type:** `object`
+
+```yaml title="experimental_diagnostics"
+experimental_diagnostics:
+  enabled: false
+  listen: 127.0.0.1:8089
+  output_directory: /tmp/router-diagnostics
+```
+
+
+---
+
 ### `experimental_type_conditioned_fetching`
 
 Type conditioned fetching configuration.

@@ -4,7 +4,7 @@
 //! - `manifest.txt` - Archive metadata and system information
 //! - `router.yaml` - Current router configuration
 //! - `supergraph.graphql` - Supergraph schema
-//! - `system_info.txt` - Detailed system information
+//! - `report.txt` - Full diagnostic report (system information, memory, CPU, load, etc.)
 //! - `memory/` - Memory profiling data (heap dumps on Unix platforms with jemalloc)
 //! - `diagnostics_report.html` - Self-contained HTML report with all diagnostic data embedded
 //!
@@ -172,7 +172,7 @@ impl Exporter {
     /// - `manifest.txt` - Archive metadata and system information
     /// - `router.yaml` - Current router configuration
     /// - `supergraph.graphql` - Supergraph schema
-    /// - `system_info.txt` - Detailed system information
+    /// - `report.txt` - Full diagnostic report
     /// - `memory/` - Memory profiling data (heap dumps on Unix platforms with jemalloc)
     /// - `diagnostics_report.html` - Self-contained HTML report with all diagnostic data embedded
     ///
@@ -241,12 +241,24 @@ impl Exporter {
         ArchiveUtils::add_text_file(tar, "supergraph.graphql", supergraph_schema).await
     }
 
-    /// Add system information to the archive with async I/O
+    /// Add system information to the archive with async I/O.
+    /// Prepend static router system info block when available, then full collect_resources() (memory/CPU/etc.).
     async fn add_system_info_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
     ) -> DiagnosticsResult<()> {
-        let system_info = crate::plugins::diagnostics::system_info::collect().await?;
-        ArchiveUtils::add_text_file(tar, "system_info.txt", &system_info).await
+        let full_system_info =
+            crate::plugins::diagnostics::system_info::collect_resources().await?;
+        let content = if let Some(router_info) = crate::info::get_router_system_info() {
+            format!(
+                "ROUTER SYSTEM INFO (static)\n{}\n{}\n\n{}",
+                "----------------------------",
+                router_info.format_for_cli(),
+                full_system_info
+            )
+        } else {
+            full_system_info
+        };
+        ArchiveUtils::add_text_file(tar, "report.txt", &content).await
     }
 
     /// Add memory profiling data to the archive with async I/O
@@ -274,7 +286,8 @@ impl Exporter {
         let generator = HtmlGenerator::new()?;
 
         // Get system info content
-        let system_info_content = crate::plugins::diagnostics::system_info::collect().await?;
+        let system_info_content =
+            crate::plugins::diagnostics::system_info::collect_resources().await?;
 
         // Read memory dumps from the directory using the memory module
         let memory_directory = Path::new(&config.output_directory).join("memory");
@@ -316,7 +329,7 @@ impl Exporter {
             Memory Output Directory: {}\n\
             {}\n\
             \n\
-            Contents: manifest.txt, router.yaml, supergraph.graphql, system_info.txt, memory/, diagnostics_report.html\n",
+            Contents: manifest.txt, router.yaml, supergraph.graphql, report.txt, memory/, diagnostics_report.html\n",
             timestamp,
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,

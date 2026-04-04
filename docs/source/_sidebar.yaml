@@ -327,6 +327,8 @@ items:
             href: "./self-hosted/resource-estimator"
           - label: "Health Checks"
             href: "./self-hosted/health-checks"
+          - label: "Diagnostics"
+            href: "./self-hosted/diagnostics"
           - label: "Resource Management"
             href: "./self-hosted/resource-management"
   - label: "Releases"

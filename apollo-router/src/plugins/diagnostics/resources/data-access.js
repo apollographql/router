@@ -45,7 +45,7 @@ const DATA_CONFIG = {
     useLocalFiles: false, // Set to false to use embedded data
     basePath: './', // Base path for data files
     files: {
-        systemInfo: 'system_info.txt',
+        systemInfo: 'report.txt',
         routerConfig: 'router.yaml',
         schema: 'supergraph.graphql',
         memoryDumps: [
@@ -166,7 +166,7 @@ async function loadApiData() {
     try {
         // Fetch data from API endpoints
         const [systemInfoResponse, routerConfigResponse, schemaResponse, dumpsResponse] = await Promise.all([
-            fetch(API_BASE + 'system_info.txt'),
+            fetch(API_BASE + 'report.txt'),
             fetch(API_BASE + 'router_config.yaml'),
             fetch(API_BASE + 'supergraph.graphql'),
             fetch(API_BASE + 'memory/dumps')
@@ -197,6 +197,81 @@ async function loadApiData() {
         console.error('Failed to load data from API:', error);
         throw error;
     }
+}
+
+/**
+ * Fetch static router system info (JSON).
+ * Returns null if endpoint is unavailable (e.g. router not fully started).
+ */
+async function fetchRouterSystemInfo() {
+    try {
+        const response = await fetch(API_BASE + 'system_info');
+        if (!response.ok) return null;
+        return await response.json();
+    } catch (error) {
+        console.error('Failed to fetch router system info:', error);
+        return null;
+    }
+}
+
+/**
+ * Fetch router system info and return minimal summary for dashboard home (version, OS, arch, config/supergraph one-liner).
+ */
+async function fetchRouterSystemInfoSummary() {
+    const data = await fetchRouterSystemInfo();
+    return data ? formatRouterSystemInfoSummary(data) : null;
+}
+
+/**
+ * Fetch router system info and return full formatted text for System info tab / copy-paste.
+ */
+async function fetchRouterSystemInfoFormatted() {
+    const data = await fetchRouterSystemInfo();
+    return data ? formatRouterSystemInfoForDisplay(data) : null;
+}
+
+/**
+ * Minimal summary for dashboard home: version, OS/arch, config and supergraph one-liner.
+ */
+function formatRouterSystemInfoSummary(data) {
+    const lines = [];
+    lines.push('Router version: ' + (data.version || ''));
+    lines.push('OS / architecture: ' + (data.os || '') + ' / ' + (data.arch || '') + (data.target_family ? ' (' + data.target_family + ')' : ''));
+    const config = data.config_path ? 'path=' + data.config_path + (data.config_hash ? ' hash=' + data.config_hash : '') : 'default or not from file';
+    const supergraph = data.supergraph_source ? 'source=' + data.supergraph_source + (data.supergraph_hash ? ' hash=' + data.supergraph_hash : '') : '(not set)';
+    lines.push('Config: ' + config + ' · Supergraph: ' + supergraph);
+    return lines.join('\n');
+}
+
+/**
+ * Format RouterSystemInfo JSON into copy-paste friendly text (full detail for System info tab).
+ * Lists every static option (flags and env) whether set or not, so the UI matches the JSON.
+ */
+function formatRouterSystemInfoForDisplay(data) {
+    const lines = [];
+    lines.push('Router version: ' + (data.version || ''));
+    lines.push('OS / architecture: ' + (data.os || '') + ' / ' + (data.arch || '') + ' (' + (data.target_family || '') + ')');
+    lines.push('');
+    lines.push('Startup options (flags / env):');
+    const opts = data.startup_options || {};
+    lines.push('  --log: ' + (opts.log_level != null && opts.log_level !== '' ? opts.log_level : '(not set)'));
+    lines.push('  --hot-reload: ' + (opts.hot_reload ? 'yes' : 'no'));
+    lines.push('  --dev: ' + (opts.dev ? 'yes' : 'no'));
+    lines.push('  --listen: ' + (opts.listen_address != null && opts.listen_address !== '' ? opts.listen_address : '(not set)'));
+    lines.push('  --config: ' + (opts.config_path !== undefined && opts.config_path !== null ? '(set)' : '(not set)'));
+    lines.push('  --supergraph: ' + (opts.supergraph_path !== undefined && opts.supergraph_path !== null ? '(set)' : '(not set)'));
+    lines.push('  --supergraph-urls: ' + (opts.supergraph_urls !== undefined && opts.supergraph_urls !== null ? '(set)' : '(not set)'));
+    lines.push('  APOLLO_KEY: ' + (opts.apollo_key_set ? '(set)' : '(not set)'));
+    lines.push('  APOLLO_GRAPH_REF: ' + (opts.apollo_graph_ref_set ? '(set)' : '(not set)'));
+    lines.push('  APOLLO_ROUTER_LICENSE: ' + (opts.apollo_router_license_set ? '(set)' : '(not set)'));
+    lines.push('  APOLLO_ROUTER_LICENSE_PATH: ' + (opts.apollo_router_license_path_set ? '(set)' : '(not set)'));
+    lines.push('  APOLLO_GRAPH_ARTIFACT_REFERENCE: ' + (opts.graph_artifact_reference_set ? '(set)' : '(not set)'));
+    lines.push('  APOLLO_TELEMETRY_DISABLED: ' + (opts.anonymous_telemetry_disabled ? '(set)' : '(not set)'));
+    lines.push('');
+    lines.push('Config file: ' + (data.config_path ? 'path=' + data.config_path + (data.config_hash ? ' hash=' + data.config_hash : ' (hash not available)') : '(default or not from file)'));
+    lines.push('Supergraph: ' + (data.supergraph_source ? 'source=' + data.supergraph_source + (data.supergraph_hash ? ' hash=' + data.supergraph_hash : ' (hash not available)') : '(not set)'));
+    lines.push('Environment variables set: ' + (data.set_env_var_names && data.set_env_var_names.length ? data.set_env_var_names.join(', ') : '(none)'));
+    return lines.join('\n');
 }
 
 // ===== Dashboard API Functions =====
@@ -339,6 +414,15 @@ async function exportDiagnostics() {
 
 // Centralized data access - abstracts away embedded vs API mode
 const DataAccess = {
+    // Fetch minimal router system info for dashboard summary card
+    async fetchRouterSystemInfoSummary() {
+        return fetchRouterSystemInfoSummary();
+    },
+    // Fetch full formatted router system info for System info tab
+    async fetchRouterSystemInfoFormatted() {
+        return fetchRouterSystemInfoFormatted();
+    },
+
     // Get memory dumps list
     async getMemoryDumps() {
         if (this.isDashboardMode()) {
