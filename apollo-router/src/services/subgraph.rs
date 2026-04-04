@@ -425,7 +425,11 @@ impl Response {
 }
 
 impl Request {
-    pub(crate) fn to_sha256(&self, ignored_headers: &HashSet<String>) -> String {
+    pub(crate) fn to_sha256(
+        &self,
+        ignored_headers: &HashSet<String>,
+        ignore_auth_context: bool,
+    ) -> String {
         let mut hasher = Sha256::new();
         let http_req = &self.subgraph_request;
         hasher.update(http_req.method().as_str().as_bytes());
@@ -460,9 +464,10 @@ impl Request {
             hasher.update(name.as_str().as_bytes());
             hasher.update(value.to_str().unwrap_or("ERROR").as_bytes());
         }
-        if let Some(claim) = self
-            .context
-            .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        if !ignore_auth_context
+            && let Some(claim) = self
+                .context
+                .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
         {
             hasher.update(format!("{claim:?}").as_bytes());
         }
@@ -513,8 +518,8 @@ mod tests {
         let mut ignored_headers = HashSet::new();
         ignored_headers.insert("public_header".to_string());
         assert_eq!(
-            subgraph_req_1.to_sha256(&ignored_headers),
-            subgraph_req_2.to_sha256(&ignored_headers)
+            subgraph_req_1.to_sha256(&ignored_headers, false),
+            subgraph_req_2.to_sha256(&ignored_headers, false)
         );
 
         let subgraph_req_1 = Request::fake_builder()
@@ -537,8 +542,54 @@ mod tests {
             .build();
         let ignored_headers = HashSet::new();
         assert_ne!(
-            subgraph_req_1.to_sha256(&ignored_headers),
-            subgraph_req_2.to_sha256(&ignored_headers)
+            subgraph_req_1.to_sha256(&ignored_headers, false),
+            subgraph_req_2.to_sha256(&ignored_headers, false)
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_ignore_auth_context() {
+        use serde_json_bytes::json;
+
+        // Build two requests with different JWT claims in context.
+        let req_with_claims_a = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        req_with_claims_a
+            .context
+            .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, json!({"sub": "user-a"}))
+            .expect("insert JWT claims");
+
+        let req_with_claims_b = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        req_with_claims_b
+            .context
+            .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, json!({"sub": "user-b"}))
+            .expect("insert JWT claims");
+
+        let ignored_headers = HashSet::new();
+
+        // Different claims → different hashes when auth context is included.
+        assert_ne!(
+            req_with_claims_a.to_sha256(&ignored_headers, false),
+            req_with_claims_b.to_sha256(&ignored_headers, false),
+            "requests with different JWT claims must hash differently by default"
+        );
+
+        // Same hash when auth context is ignored.
+        assert_eq!(
+            req_with_claims_a.to_sha256(&ignored_headers, true),
+            req_with_claims_b.to_sha256(&ignored_headers, true),
+            "requests with different JWT claims must hash identically when ignore_auth_context is true"
         );
     }
 }
