@@ -1317,3 +1317,173 @@ mod pool_idle_timeout {
         );
     }
 }
+
+mod http_connection_pool {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
+    use super::*;
+
+    #[derive(Copy, Clone)]
+    enum ServerMode {
+        Http1,
+        Http2 { max_concurrent_streams: u32 },
+    }
+
+    /// Test server that counts accepted TCP connections and responds with a minimal GraphQL
+    /// response. Supports both HTTP/1 and HTTP/2 via `ServerMode`; in HTTP/2 mode the
+    /// server advertises the given `max_concurrent_streams` limit.
+    async fn connection_counting_server(
+        server_mode: ServerMode,
+        listener: TcpListener,
+        connection_count: Arc<AtomicUsize>,
+    ) -> Result<(), std::io::Error> {
+        loop {
+            let (stream, _) = listener.accept().await?;
+            connection_count.fetch_add(1, Ordering::SeqCst);
+            let io = TokioIo::new(stream);
+
+            // spawn thread to handle this connection
+            tokio::spawn(async move {
+                let svc = hyper::service::service_fn(|_req| async {
+                    Ok::<_, Infallible>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .body::<Body>(r#"{"data":null}"#.into())
+                            .unwrap(),
+                    )
+                });
+
+                let mut builder =
+                    hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+
+                match server_mode {
+                    ServerMode::Http1 => {
+                        builder.http1();
+                    }
+                    ServerMode::Http2 {
+                        max_concurrent_streams,
+                    } => {
+                        builder
+                            .http2()
+                            .max_concurrent_streams(max_concurrent_streams);
+                    }
+                }
+
+                let _ = builder.serve_connection(io, svc).await;
+            });
+        }
+    }
+
+    /// Confirms that HTTP/1 opens a new TCP connection for each concurrent request.
+    /// This is the expected baseline behavior — HTTP/1 has no multiplexing, so
+    /// 50 concurrent requests produce 50 connections. Used as a control to contrast
+    /// with the HTTP/2 single-connection behavior demonstrated in
+    /// `test_http2_uses_multiple_connections`.
+    #[rstest::rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_http1_uses_multiple_connections(
+        #[values(Some(Http2Config::Disable), Some(Http2Config::Enable), None)]
+        experimental_http2_config: Option<Http2Config>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let connection_count = Arc::new(AtomicUsize::new(0));
+
+        tokio::task::spawn(connection_counting_server(
+            ServerMode::Http1,
+            listener,
+            connection_count.clone(),
+        ));
+
+        let service = HttpClientService::test_new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            crate::configuration::shared::Client {
+                experimental_http2: experimental_http2_config,
+                ..Default::default()
+            },
+        )
+        .expect("can create HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+
+        const NUM_REQUESTS: usize = 50;
+
+        // Send concurrent requests — all should not share one TCP connection
+        let futs: Vec<_> = (0..NUM_REQUESTS)
+            .map(|_| send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#))
+            .collect();
+
+        let results = futures::future::join_all(futs).await;
+        assert!(
+            results
+                .into_iter()
+                .all(|r| r.http_response.status().is_success())
+        );
+
+        assert_eq!(
+            connection_count.load(Ordering::SeqCst),
+            NUM_REQUESTS,
+            "HTTP/1 should not multiplex so each request should open a connection"
+        );
+    }
+
+    /// Demonstrates ROUTER-779: hyper's HTTP/2 client only ever opens one TCP connection
+    /// per host, multiplexing all requests as streams over it. Even when the server
+    /// advertises a low `max_concurrent_streams` limit, hyper queues excess requests
+    /// on the single connection rather than opening additional connections.
+    ///
+    /// This test currently fails — the assertion that `connection_count > 1` is never
+    /// satisfied because hyper always uses exactly one HTTP/2 connection.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_http2_uses_multiple_connections() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let connection_count = Arc::new(AtomicUsize::new(0));
+
+        tokio::task::spawn(connection_counting_server(
+            ServerMode::Http2 {
+                max_concurrent_streams: 5,
+            },
+            listener,
+            connection_count.clone(),
+        ));
+
+        let service = HttpClientService::test_new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            crate::configuration::shared::Client {
+                experimental_http2: Some(Http2Config::Http2Only),
+                ..Default::default()
+            },
+        )
+        .expect("can create HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+
+        // Send 5000 concurrent requests — all should not share one TCP connection
+        let futs: Vec<_> = (0..50)
+            .map(|_| send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#))
+            .collect();
+
+        let results = futures::future::join_all(futs).await;
+        assert!(
+            results
+                .into_iter()
+                .all(|r| r.http_response.status().is_success())
+        );
+
+        assert!(
+            connection_count.load(Ordering::SeqCst) > 1,
+            "HTTP/2 should not multiplex all requests over a single TCP connection"
+        );
+    }
+}
