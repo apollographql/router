@@ -30,7 +30,8 @@ pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
 pub(crate) use crate::services::supergraph::service::SupergraphCreator;
 
 pub(crate) mod connect;
-pub(crate) mod connector;
+/// Services for Apollo Connectors.
+pub mod connector;
 pub(crate) mod connector_service;
 pub mod execution;
 pub(crate) mod external;

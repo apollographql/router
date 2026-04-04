@@ -1,4 +1,5 @@
 //! Service which makes individual requests to Apollo Connectors over some transport
+#![allow(missing_docs)] // FIXME
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -46,8 +47,8 @@ use crate::services::Plugins;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
 
-pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-pub(crate) type ServiceResult = Result<Response, BoxError>;
+pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+pub type ServiceResult = Result<Response, BoxError>;
 
 assert_impl_all!(Request: Send);
 assert_impl_all!(Response: Send);
@@ -56,7 +57,7 @@ assert_impl_all!(Response: Send);
 #[derive(Debug)]
 pub struct Request {
     /// The request context
-    pub(crate) context: Context,
+    pub context: Context,
 
     /// The connector associated with this request
     // If this service moves into the public API, consider whether this exposes too much
@@ -65,7 +66,7 @@ pub struct Request {
     pub(crate) connector: Arc<Connector>,
 
     /// The request to the underlying transport
-    pub(crate) transport_request: TransportRequest,
+    pub transport_request: TransportRequest,
 
     /// Information about how to map the response to GraphQL
     pub(crate) key: ResponseKey,
@@ -74,7 +75,7 @@ pub struct Request {
     pub(crate) mapping_problems: Vec<Problem>,
 
     /// Original request to the Router.
-    pub(crate) supergraph_request: Arc<http::Request<graphql::Request>>,
+    pub supergraph_request: Arc<http::Request<graphql::Request>>,
 
     /// The operation being executed. Together with
     /// req.connector.schema_subtypes_map, this document enables GraphQL
@@ -89,7 +90,7 @@ pub struct Response {
     pub(crate) context: Context,
 
     /// The result of the transport request
-    pub(crate) transport_result: Result<TransportResponse, Error>,
+    pub transport_result: Result<TransportResponse, Error>,
 
     /// The mapped response, including any mapping problems encountered when processing the response
     pub(crate) mapped_response: MappedResponse,

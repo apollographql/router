@@ -37,12 +37,12 @@ use crate::graphql;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
+use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
-use crate::register_private_plugin;
+use crate::register_plugin;
 use crate::services;
 use crate::services::PATH_QUERY_PARAM;
 use crate::services::external::Control;
@@ -72,7 +72,7 @@ const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZAT
 type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClientService>;
 
 #[async_trait::async_trait]
-impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
+impl Plugin for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -232,11 +232,11 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
 }
 
 // This macro allows us to use it in our plugin registry!
-// register_private_plugin takes a group name, and a plugin name.
+// register_plugin takes a group name, and a plugin name.
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_private_plugin!(
+register_plugin!(
     "apollo",
     "coprocessor",
     CoprocessorPlugin<HTTPClientService>
