@@ -3610,15 +3610,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "instant"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
-dependencies = [
- "cfg-if",
-]
-
-[[package]]
 name = "inventory"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5678,13 +5669,12 @@ dependencies = [
 
 [[package]]
 name = "rhai"
-version = "1.23.6"
+version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4e35aaaa439a5bda2f8d15251bc375e4edfac75f9865734644782c9701b5709"
+checksum = "1f9ef5dabe4c0b43d8f1187dc6beb67b53fe607fff7e30c5eb7f71b814b8c2c1"
 dependencies = [
  "ahash",
  "bitflags 2.11.0",
- "instant",
  "no-std-compat",
  "num-traits",
  "once_cell",
@@ -5693,6 +5683,7 @@ dependencies = [
  "smallvec",
  "smartstring",
  "thin-vec",
+ "web-time",
 ]
 
 [[package]]
