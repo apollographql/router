@@ -33,6 +33,7 @@ use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
 use futures::Stream;
 use futures::future::join_all;
+use parking_lot::RwLock;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
 use tower::BoxError;
@@ -45,7 +46,6 @@ use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
 
 pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
-
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "redis",
     "rediss",
@@ -61,7 +61,7 @@ const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(10);
 /// Interval on which we send PING commands to the Redis servers.
 const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
-/// Record a Redis error as a metric, independent of having an active connection
+/// Record a Redis error as a metric and emits an error-level log for it, independent of having an active connection
 fn record_redis_error(error: &RedisError, caller: &'static str, context: &'static str) {
     // Don't track NotFound errors as they're expected for cache misses
 
@@ -127,8 +127,11 @@ where
 //   when each clone is dropped, only when the last instance is dropped.
 struct DropSafeRedisPool {
     pool: Arc<RedisPool>,
+    // the caller is whatever feature is using redis (eg, response-cache is a caller); used in
+    // metrics and so on
     caller: &'static str,
     heartbeat_abort_handle: AbortHandle,
+    watcher_abort_handle: AbortHandle,
     // Metrics collector handles its own abort and spawns a background task for gauge updates
     metrics_collector: RedisMetricsCollector,
 }
@@ -153,23 +156,42 @@ impl Drop for DropSafeRedisPool {
         let inner = self.pool.clone();
         let caller = self.caller;
         self.heartbeat_abort_handle.abort();
+        self.watcher_abort_handle.abort();
+
         tokio::spawn(async move {
+            let clients_aborted = inner.clients().len() as u64;
             let _ = inner
                 .quit()
                 .await
                 .inspect_err(|err| record_redis_error(err, caller, "shutdown"));
+            ACTIVE_CLIENT_COUNT.fetch_sub(clients_aborted, Ordering::Relaxed);
         });
         // Metrics collector will be dropped automatically and its Drop impl will abort the task
     }
 }
 
+// TODO: comment
+#[derive(Clone)]
+struct RedisClientConfig {
+    client_config: RedisConfig,
+    timeout: Duration,
+    pool_size: usize,
+    caller: &'static str,
+    metrics_interval: Duration,
+    required_to_start: bool,
+}
+
+// TODO: comment
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
-    inner: Arc<DropSafeRedisPool>,
+    // TODO: notes on why parking_lot::RwLock, see reverted commit
+    inner: Arc<RwLock<Option<DropSafeRedisPool>>>,
     namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
     is_cluster: bool,
     reset_ttl: bool,
+    // TODO: comment
+    redis_client_config: RedisClientConfig,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -254,6 +276,7 @@ where
 }
 
 impl RedisCacheStorage {
+    /// Create a new RedisCacheStorage without an inner client. To create an inner client, you must call `create_client`
     pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)
             .inspect_err(|err| record_redis_error(err, caller, "startup"))?;
@@ -284,19 +307,23 @@ impl RedisCacheStorage {
             });
         }
 
-        Self::create_client(
+        let redis_client_config = RedisClientConfig {
             client_config,
-            config.timeout,
-            config.pool_size as usize,
-            config.namespace,
-            config.ttl,
-            config.reset_ttl,
-            is_cluster,
+            timeout: config.timeout,
+            pool_size: config.pool_size as usize,
             caller,
-            config.metrics_interval,
-            config.required_to_start,
-        )
-        .await
+            metrics_interval: config.metrics_interval,
+            required_to_start: config.required_to_start,
+        };
+
+        Ok(Self {
+            inner: Arc::new(RwLock::new(None)),
+            redis_client_config,
+            namespace: config.namespace.map(Arc::new),
+            ttl: config.ttl,
+            reset_ttl: config.reset_ttl,
+            is_cluster,
+        })
     }
 
     #[cfg(test)]
@@ -330,43 +357,52 @@ impl RedisCacheStorage {
             ..Default::default()
         };
 
-        Self::create_client(
+        let redis_client_config = RedisClientConfig {
             client_config,
-            config.timeout,
-            config.pool_size as usize,
-            config.namespace,
-            config.ttl,
-            config.reset_ttl,
-            is_cluster,
+            timeout: config.timeout,
+            pool_size: config.pool_size as usize,
             caller,
-            config.metrics_interval,
-            true,
-        )
-        .await
+            metrics_interval: config.metrics_interval,
+            required_to_start: config.required_to_start,
+        };
+
+        let storage = Self {
+            inner: Arc::new(RwLock::new(None)),
+            namespace: config.namespace.map(Arc::new),
+            ttl: config.ttl,
+            is_cluster,
+            reset_ttl: config.reset_ttl,
+            redis_client_config,
+        };
+
+        storage.create_client().await
     }
 
+    /// Creates an inner client alongside some metadata (namespace, ttl, whether it's a clustered
+    /// client, ttl reset) to create a fully fledged RedisCacheStorage
+    // NOTE: this splits up the actual inner's creation from the RedisCacheStorage creation because
+    // we need to have a way to recreate the inner client when it errors out but we don't need to
+    // recreate all of RedisCacheStorage
     #[allow(clippy::too_many_arguments)]
-    async fn create_client(
-        client_config: RedisConfig,
-        timeout: Duration,
-        pool_size: usize,
-        namespace: Option<String>,
-        ttl: Option<Duration>,
-        reset_ttl: bool,
-        is_cluster: bool,
-        caller: &'static str,
-        metrics_interval: Duration,
-        required_to_start: bool,
-    ) -> Result<Self, BoxError> {
-        let pooled_client = Builder::from_config(client_config)
+    pub(crate) async fn create_client(self) -> Result<Self, BoxError> {
+        let inner = self.create_inner_client().await?;
+        *self.inner.write() = inner;
+        Ok(self)
+    }
+
+    /// Creates the inner redis client for RedisCacheStorage
+    async fn create_inner_client(&self) -> Result<Option<DropSafeRedisPool>, BoxError> {
+        let pooled_client = Builder::from_config(self.redis_client_config.client_config.clone())
             .with_config(|client_config| {
-                if is_cluster {
+                if self.is_cluster {
                     // use `ClusterDiscoveryPolicy::ConfigEndpoint` - explicit in case the default changes.
                     // this determines how the clients discover other cluster nodes
                     let _ = client_config
                         .server
                         .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint)
-                        .inspect_err(|err| record_redis_error(err, caller, "startup"));
+                        .inspect_err(|err| {
+                            record_redis_error(err, self.redis_client_config.caller, "startup")
+                        });
                 }
             })
             .with_connection_config(|config| {
@@ -378,7 +414,7 @@ impl RedisCacheStorage {
                 config.reconnect_on_auth_error = true;
                 config.tcp = TcpConfig {
                     #[cfg(target_os = "linux")]
-                    user_timeout: Some(timeout),
+                    user_timeout: Some(self.redis_client_config.timeout),
                     ..Default::default()
                 };
                 config.unresponsive = UnresponsiveConfig {
@@ -390,90 +426,56 @@ impl RedisCacheStorage {
                 // PR-8671: must only disable lazy connections in cluster mode. otherwise, fred will
                 //  try to connect to unreachable replicas and fall over.
                 //  https://github.com/aembke/fred.rs/blob/f222ad7bfba844dbdc57e93da61b0a5483858df9/src/router/replicas.rs#L34
-                if is_cluster {
+                if self.is_cluster {
                     config.replica.lazy_connections = false;
                 }
             })
             .with_performance_config(|config| {
-                config.default_command_timeout = timeout;
+                config.default_command_timeout = self.redis_client_config.timeout;
             })
             .set_policy(ReconnectPolicy::new_exponential(0, 1, 2000, 5))
-            .build_pool(pool_size)?;
+            .build_pool(self.redis_client_config.pool_size)?;
 
         for client in pooled_client.clients() {
-            // spawn tasks that listen for connection close or reconnect events
-            let mut error_rx = client.error_rx();
-            let mut reconnect_rx = client.reconnect_rx();
-            let mut unresponsive_rx = client.unresponsive_rx();
-
+            setup_event_listeners(self.redis_client_config.caller, client);
             ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
-
-            tokio::spawn(async move {
-                loop {
-                    match error_rx.recv().await {
-                        Ok((error, _)) => record_redis_error(&error, caller, "client"),
-                        Err(RecvError::Lagged(_)) => continue,
-                        Err(RecvError::Closed) => break,
-                    }
-                }
-            });
-
-            tokio::spawn(async move {
-                loop {
-                    match unresponsive_rx.recv().await {
-                        Ok(server) => {
-                            tracing::debug!("Redis client ({server:?}) unresponsive");
-                            u64_counter_with_unit!(
-                                "apollo.router.cache.redis.unresponsive",
-                                "Counter for Redis client unresponsive events",
-                                "{event}",
-                                1,
-                                kind = caller,
-                                server = server.to_string()
-                            );
-                        }
-                        Err(RecvError::Lagged(_)) => continue,
-                        Err(RecvError::Closed) => break,
-                    }
-                }
-            });
-
-            tokio::spawn(async move {
-                loop {
-                    match reconnect_rx.recv().await {
-                        Ok(server) => {
-                            u64_counter_with_unit!(
-                                "apollo.router.cache.redis.reconnection",
-                                "Counter for Redis client reconnection events",
-                                "{reconnection}",
-                                1,
-                                kind = caller,
-                                server = server.to_string()
-                            );
-                            tracing::info!("Redis client connected to {server:?}")
-                        }
-                        Err(RecvError::Lagged(_)) => continue,
-                        Err(RecvError::Closed) => break,
-                    }
-                }
-            });
         }
 
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
         let client_handles = pooled_client.connect_pool();
-        if required_to_start {
+        if self.redis_client_config.required_to_start {
             pooled_client.wait_for_connect().await?;
             tracing::trace!("redis connections established");
         }
 
-        tokio::spawn(async move {
-            // the handles will resolve when the clients finish terminating. per the `fred` docs:
-            // > [the connect] function returns a `JoinHandle` to a task that drives the connection.
-            // > It will not resolve until the connection closes, or if a reconnection policy with
-            // > unlimited attempts is provided then it will run until `QUIT` is called.
+        // We spawn a task for watching pool shutdown; shutdown can happen either when reconnection
+        // attempts are exhausted or, if configured to never stop trying to reconnect, when quit()
+        // is called by us (it's never called within fred)
+        //
+        // Don't mistake connections for clients. This is a pool of clients that handles
+        // connections, and if a connection breaks, fred will internally (attempt to) recreate it.
+        // Configuration for that is governed below in the ReconnectPolicy struct
+        //
+        // WARN: we need a weak reference to the data (ie, Weak), not one that keeps the data around
+        // as long as it's being referenced (ie, Arc). This matters because when a config reload
+        // happens via hot-reload and the watcher holds a strong reference (Arc), the total
+        // refcount can be 2 for the previous config's pool; when RedisCacheStorage is dropped,
+        // that refcount goes down to 1, but that's not 0--it leaks the old pool. When using a weak
+        // reference, we don't increment the refcount by 1 for what's held in the watcher; rather,
+        // we have to upgrade() to see if that data still exists; this means that we can drop the
+        // RedisCacheStorage from the previous config without leaking it
+        let client_pool = Arc::downgrade(&self.inner);
+        let watcher_handle = tokio::spawn(async move {
+            // WARN: the client_handles returning is the signal that fred has been aborted; don't
+            // remove it!
             let results = join_all(client_handles).await;
             ACTIVE_CLIENT_COUNT.fetch_sub(results.len() as u64, Ordering::Relaxed);
+            if let Some(inner) = client_pool.upgrade() {
+                inner.write().take();
+                tracing::info!("redis client aborted; marking for recreation");
+            }
         });
+
         let heartbeat_clients = pooled_client.clone();
         let heartbeat_handle = tokio::spawn(async move {
             heartbeat_clients
@@ -482,21 +484,19 @@ impl RedisCacheStorage {
         });
 
         let pooled_client_arc = Arc::new(pooled_client);
-        let metrics_collector =
-            RedisMetricsCollector::new(pooled_client_arc.clone(), caller, metrics_interval);
+        let metrics_collector = RedisMetricsCollector::new(
+            pooled_client_arc.clone(),
+            self.redis_client_config.caller,
+            self.redis_client_config.metrics_interval,
+        );
 
-        Ok(Self {
-            inner: Arc::new(DropSafeRedisPool {
-                pool: pooled_client_arc,
-                caller,
-                heartbeat_abort_handle: heartbeat_handle.abort_handle(),
-                metrics_collector,
-            }),
-            namespace: namespace.map(Arc::new),
-            ttl,
-            is_cluster,
-            reset_ttl,
-        })
+        Ok(Some(DropSafeRedisPool {
+            pool: pooled_client_arc,
+            caller: self.redis_client_config.caller,
+            heartbeat_abort_handle: heartbeat_handle.abort_handle(),
+            watcher_abort_handle: watcher_handle.abort_handle(),
+            metrics_collector,
+        }))
     }
 
     pub(crate) fn ttl(&self) -> Option<Duration> {
@@ -508,12 +508,15 @@ impl RedisCacheStorage {
     /// This MUST be called after `Telemetry.activate()` to ensure gauges are
     /// registered with the correct meter provider.
     pub(crate) fn activate(&self) {
-        self.inner.activate();
+        if let Some(inner) = self.inner.read().as_ref() {
+            inner.activate();
+        }
     }
 
-    /// Helper method to record Redis errors for metrics
+    /// Helper method to record Redis errors for metrics. Calls `record_redis_error` for both
+    /// metrics recording but also emitting an error-level log for the error
     fn record_query_error(&self, error: &RedisError) {
-        record_redis_error(error, self.inner.caller, "query");
+        record_redis_error(error, self.redis_client_config.caller, "query");
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
@@ -601,12 +604,95 @@ impl RedisCacheStorage {
         self.ttl = ttl;
     }
 
-    pub(crate) fn client(&self) -> Client {
-        self.inner.next().clone()
+    // TODO: note on why RedisError for ease/compatibility/fewest changes for now
+    pub(crate) async fn client(&self) -> Result<Client, RedisError> {
+        // WARN: this looks funky but is important to leave alone: this creates a read guard, gets
+        // the client out of the pool, and then drops the guard; this avoids a deadlock below when
+        // we try to take a write guard out in scenarios where we're recreating the client
+        let maybe_client = {
+            let pool = self.inner.read();
+            pool.as_ref().map(|pool| pool.next().clone())
+        };
+
+        match maybe_client {
+            Some(client) => Ok(client),
+            None => {
+                let new_inner = match self.create_inner_client().await {
+                    Ok(new_inner) => new_inner,
+                    Err(e) => {
+                        let error = RedisError::new(
+                            RedisErrorKind::Unknown,
+                            format!("Error attempting to recreate client: {e:?}"),
+                        );
+                        record_redis_error(&error, self.redis_client_config.caller, "client");
+                        return Err(error);
+                    }
+                };
+
+                {
+                    let mut guard = self.inner.write();
+                    *guard = new_inner;
+                    if let Some(inner) = guard.as_ref() {
+                        inner.activate();
+                    }
+                }
+
+                // rather than get into either recursion or a loop, we just return an error and let
+                // the current attempt to reach redis fail. We have a new client waiting for the
+                // next attempt, so this should be a temporary failure
+                let error = RedisError::new(
+                    RedisErrorKind::Unknown,
+                    "client being recreated after connection interrupt",
+                );
+                record_redis_error(&error, self.redis_client_config.caller, "client");
+                Err(error)
+            }
+        }
     }
 
-    pub(crate) fn pipeline(&self) -> Pipeline<Client> {
-        self.inner.next().pipeline()
+    pub(crate) async fn pipeline(&self) -> Result<Pipeline<Client>, RedisError> {
+        // WARN: this looks funky but is important to leave alone: this creates a read guard, gets
+        // the client out of the pool, and then drops the guard; this avoids a deadlock below when
+        // we try to take a write guard out in scenarios where we're recreating the client
+        let maybe_pipeline = {
+            let pool = self.inner.read();
+            pool.as_ref().map(|pool| pool.next().pipeline())
+        };
+
+        match maybe_pipeline {
+            Some(pipeline) => Ok(pipeline),
+            None => {
+                let new_inner = match self.create_inner_client().await {
+                    Ok(new_inner) => new_inner,
+                    Err(e) => {
+                        let error = RedisError::new(
+                            RedisErrorKind::Unknown,
+                            format!("Error attempting to recreate client: {e:?}"),
+                        );
+                        record_redis_error(&error, self.redis_client_config.caller, "client");
+                        return Err(error);
+                    }
+                };
+
+                {
+                    let mut guard = self.inner.write();
+                    *guard = new_inner;
+                    if let Some(inner) = guard.as_ref() {
+                        inner.activate();
+                    }
+                }
+
+                // rather than get into either recursion or a loop, we just return an error and let
+                // the current attempt to reach redis fail. We have a new client waiting for the
+                // next attempt, so this should be a temporary failure
+                let error = RedisError::new(
+                    RedisErrorKind::Unknown,
+                    "client being recreated after connection interrupt",
+                );
+                record_redis_error(&error, self.redis_client_config.caller, "client");
+                Err(error)
+            }
+        }
     }
 
     fn expiration(&self, ttl: Option<Duration>) -> Option<Expiration> {
@@ -637,7 +723,7 @@ impl RedisCacheStorage {
         if self.reset_ttl
             && let Some(ttl) = self.ttl
         {
-            let pipeline = self.pipeline().with_options(&options);
+            let pipeline = self.pipeline().await?.with_options(&options);
             let _: () = pipeline
                 .get(&key)
                 .await
@@ -653,13 +739,13 @@ impl RedisCacheStorage {
                 .inspect_err(|e| self.record_query_error(e))?;
             Ok(value)
         } else if self.is_cluster {
-            let client = self.client().replicas().with_options(&options);
+            let client = self.client().await?.replicas().with_options(&options);
             client
                 .get(key)
                 .await
                 .inspect_err(|e| self.record_query_error(e))
         } else {
-            let client = self.client().with_options(&options);
+            let client = self.client().await?.with_options(&options);
             client
                 .get(key)
                 .await
@@ -680,9 +766,6 @@ impl RedisCacheStorage {
     ///
     /// The outer `Result` covers total failures (ie the standalone node is down), while the inner
     /// `Result`s cover partial cluster failures and values not being found.
-    ///
-    /// TODO: in the future gateway, we will probably have to make this `Result<Vec<Result<Option<Value>>>>`
-    ///  because `NotFound` shouldn't be considered an error.
     pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
@@ -699,7 +782,7 @@ impl RedisCacheStorage {
 
             // then we query all the key groups at the same time
             // use `client.replicas()` since we're in a cluster and can take advantage of read-replicas
-            let client = self.client().replicas().with_options(&options);
+            let client = self.client().await?.replicas().with_options(&options);
             let mut tasks = Vec::with_capacity(len);
             for (index, key) in keys.into_iter().enumerate() {
                 let client = client.clone();
@@ -723,6 +806,7 @@ impl RedisCacheStorage {
                 .collect::<Vec<_>>();
             let values: Vec<Option<RedisValue<V>>> = self
                 .client()
+                .await?
                 .with_options(&options)
                 .mget(keys)
                 .await
@@ -744,28 +828,37 @@ impl RedisCacheStorage {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
 
         // NOTE: we need a writer, so don't use replicas() here
-        let result: Result<(), _> = self
-            .client()
-            .set(key, value, self.expiration(ttl), None, false)
-            .await;
-        tracing::trace!("insert result {:?}", result);
+        match self.client().await {
+            Ok(client) => {
+                let result: Result<(), _> = client
+                    .set(key, value, self.expiration(ttl), None, false)
+                    .await;
 
-        if let Err(err) = result {
-            self.record_query_error(&err);
+                tracing::trace!("insert result {:?}", result);
+
+                if let Err(err) = result {
+                    self.record_query_error(&err);
+                }
+            }
+            Err(err) => {
+                self.record_query_error(&err);
+            }
         }
     }
 
+    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
+    /// inserts, and otherwise an error and error traces and error-level log
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
         ttl: Option<Duration>,
-    ) {
+    ) -> Result<(), RedisError> {
         tracing::trace!("inserting into redis: {:#?}", data);
         let expiration = self.expiration(ttl);
 
         // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
         // seems to split the pipeline by hash slot in the background.
-        let pipeline = self.pipeline();
+        let pipeline = self.pipeline().await?;
         for (key, value) in data {
             let key = self.make_key(key.clone());
             let _: Result<(), _> = pipeline
@@ -781,6 +874,8 @@ impl RedisCacheStorage {
                 self.record_query_error(&err);
             }
         }
+
+        Ok(())
     }
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
@@ -812,7 +907,7 @@ impl RedisCacheStorage {
 
         // then we execute against all the key groups at the same time
         let results: Vec<Result<u32, RedisError>> = join_all(h.into_values().map(|keys| async {
-            let client = self.client().with_options(&options);
+            let client = self.client().await?.with_options(&options);
             client.del(keys).await
         }))
         .await;
@@ -827,20 +922,83 @@ impl RedisCacheStorage {
     }
 
     /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
-    pub(crate) fn scan_with_namespaced_results(
+    pub(crate) async fn scan_with_namespaced_results(
         &self,
         pattern: String,
         count: Option<u32>,
-    ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>>, RedisError>
+    {
         let pattern = self.make_key(RedisKey(pattern));
         if self.is_cluster {
             // NOTE: scans might be better send to only the read replicas, but the read-only client
             // doesn't have a scan_cluster(), just a paginated version called scan_page()
-            Box::pin(self.client().scan_cluster(pattern, count, None))
+            Ok(Box::pin(
+                self.client().await?.scan_cluster(pattern, count, None),
+            ))
         } else {
-            Box::pin(self.client().scan(pattern, count, None))
+            Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
         }
     }
+}
+
+/// TODO: add docs
+fn setup_event_listeners(caller: &'static str, client: &Client) {
+    let mut error_rx = client.error_rx();
+    let mut reconnect_rx = client.reconnect_rx();
+    let mut unresponsive_rx = client.unresponsive_rx();
+
+    // listen for error events
+    tokio::spawn(async move {
+        loop {
+            match error_rx.recv().await {
+                Ok((error, _)) => record_redis_error(&error, caller, "client"),
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+
+    // listen for unresponsive client events
+    tokio::spawn(async move {
+        loop {
+            match unresponsive_rx.recv().await {
+                Ok(server) => {
+                    tracing::debug!("Redis client ({server:?}) unresponsive");
+                    u64_counter_with_unit!(
+                        "apollo.router.cache.redis.unresponsive",
+                        "Counter for Redis client unresponsive events",
+                        "{event}",
+                        1,
+                        kind = caller,
+                        server = server.to_string()
+                    );
+                }
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+
+    // listen for reconnection events
+    tokio::spawn(async move {
+        loop {
+            match reconnect_rx.recv().await {
+                Ok(server) => {
+                    u64_counter_with_unit!(
+                        "apollo.router.cache.redis.reconnection",
+                        "Counter for Redis client reconnection events",
+                        "{reconnection}",
+                        1,
+                        kind = caller,
+                        server = server.to_string()
+                    );
+                    tracing::info!("Redis client connected to {server:?}")
+                }
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 #[cfg(all(
@@ -858,7 +1016,7 @@ impl RedisCacheStorage {
 
         // find all members of this namespace via `SCAN`
         let pattern = self.make_key(RedisKey("*"));
-        let client = self.client();
+        let client = self.client().await?;
         let mut stream: Pin<Box<dyn Stream<Item = Result<Key, RedisError>>>> = if self.is_cluster {
             Box::pin(client.scan_cluster_buffered(pattern, None, None))
         } else {
@@ -1039,6 +1197,7 @@ mod test {
     mod test_against_redis {
         use std::collections::HashMap;
 
+        use fred::interfaces::ClientLike;
         use fred::types::cluster::ClusterRouting;
         use itertools::Itertools;
         use rand::Rng as _;
@@ -1073,6 +1232,319 @@ mod test {
             serde_json::from_value(config_json).expect("invalid redis cache configuration")
         }
 
+        async fn create_and_connect(clustered: bool) -> Result<RedisCacheStorage, BoxError> {
+            RedisCacheStorage::new(redis_config(clustered), "test")
+                .await?
+                .create_client()
+                .await
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn new_starts_empty_and_create_client_populates(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            assert!(storage.inner.read().is_none());
+
+            let storage = storage.create_client().await?;
+            assert!(storage.inner.read().is_some());
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn accessor_recreates_when_inner_is_none(
+            #[values(true, false)] clustered: bool,
+            #[values("client", "pipeline")] method: &str,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            storage.inner.write().take();
+            assert!(storage.inner.read().is_none());
+
+            let first_call_failed = match method {
+                "client" => storage.client().await.is_err(),
+                "pipeline" => storage.pipeline().await.is_err(),
+                _ => unreachable!(),
+            };
+            assert!(first_call_failed, "expected error during recreation");
+            assert!(storage.inner.read().is_some());
+
+            let second_call_ok = match method {
+                "client" => storage.client().await.is_ok(),
+                "pipeline" => storage.pipeline().await.is_ok(),
+                _ => unreachable!(),
+            };
+            assert!(second_call_ok, "expected success after recreation");
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn client_works_after_recreation(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            let key = RedisKey("recreation_test_key".to_string());
+            storage
+                .insert(key.clone(), RedisValue("before".to_string()), None)
+                .await;
+
+            storage.inner.write().take();
+            let _ = storage.client().await;
+
+            storage
+                .insert(key.clone(), RedisValue("after".to_string()), None)
+                .await;
+            let fetched: RedisValue<String> = storage.get(key).await?;
+            assert_eq!(fetched.0, "after");
+            Ok(())
+        }
+
+        /// Recreation via client() or pipeline() should stop old tasks and activate new ones
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn recreation_stops_old_tasks_and_starts_new_ones(
+            #[values(true, false)] clustered: bool,
+            #[values("client", "pipeline")] method: &str,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+            storage.activate();
+
+            let (old_heartbeat, old_metrics) = {
+                let guard = storage.inner.read();
+                let inner = guard.as_ref().unwrap();
+                (
+                    inner.heartbeat_abort_handle.clone(),
+                    inner
+                        .metrics_collector
+                        .abort_handle()
+                        .expect("metrics not activated"),
+                )
+            };
+            assert!(!old_heartbeat.is_finished());
+            assert!(!old_metrics.is_finished());
+
+            storage.inner.write().take();
+            match method {
+                "client" => {
+                    let _ = storage.client().await;
+                }
+                "pipeline" => {
+                    let _ = storage.pipeline().await;
+                }
+                _ => unreachable!(),
+            }
+
+            assert!(old_heartbeat.is_finished());
+            assert!(old_metrics.is_finished());
+
+            let guard = storage.inner.read();
+            let new_inner = guard.as_ref().unwrap();
+            assert!(!new_inner.heartbeat_abort_handle.is_finished());
+            let new_metrics = new_inner
+                .metrics_collector
+                .abort_handle()
+                .expect("metrics not activated after recreation");
+            assert!(!new_metrics.is_finished());
+            Ok(())
+        }
+
+        /// activate() on an empty inner (None) should be a no-op and not panic
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn activate_on_none_inner_is_noop(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            assert!(storage.inner.read().is_none());
+            storage.activate();
+            Ok(())
+        }
+
+        /// activate() after initial create_client() populates the metrics abort handle
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn activate_after_create_client_starts_metrics(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            // before activate, metrics abort handle should be None
+            assert!(
+                storage
+                    .inner
+                    .read()
+                    .as_ref()
+                    .unwrap()
+                    .metrics_collector
+                    .abort_handle()
+                    .is_none()
+            );
+
+            storage.activate();
+
+            let handle = storage
+                .inner
+                .read()
+                .as_ref()
+                .unwrap()
+                .metrics_collector
+                .abort_handle()
+                .expect("metrics should be activated");
+            assert!(!handle.is_finished());
+            Ok(())
+        }
+
+        /// Calling activate() twice should abort the first metrics task before starting a new one,
+        /// not orphan it
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn activate_twice_does_not_orphan_old_task(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+            storage.activate();
+
+            let first_handle = storage
+                .inner
+                .read()
+                .as_ref()
+                .unwrap()
+                .metrics_collector
+                .abort_handle()
+                .expect("first activate should populate handle");
+            assert!(!first_handle.is_finished());
+
+            storage.activate();
+            tokio::task::yield_now().await;
+
+            assert!(
+                first_handle.is_finished(),
+                "first metrics task should be aborted"
+            );
+
+            let second_handle = storage
+                .inner
+                .read()
+                .as_ref()
+                .unwrap()
+                .metrics_collector
+                .abort_handle()
+                .expect("second activate should populate handle");
+            assert!(!second_handle.is_finished());
+            Ok(())
+        }
+
+        /// Pipeline operations (batched commands) should work after client recreation.
+        /// insert_multiple uses pipeline() under the hood.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn pipeline_operations_work_after_recreation(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            storage.inner.write().take();
+            let _ = storage.client().await;
+
+            let data = vec![
+                (
+                    RedisKey("pipe_key_1".to_string()),
+                    RedisValue("val_1".to_string()),
+                ),
+                (
+                    RedisKey("pipe_key_2".to_string()),
+                    RedisValue("val_2".to_string()),
+                ),
+            ];
+            storage.insert_multiple(&data, None).await?;
+
+            let fetched1: RedisValue<String> =
+                storage.get(RedisKey("pipe_key_1".to_string())).await?;
+            let fetched2: RedisValue<String> =
+                storage.get(RedisKey("pipe_key_2".to_string())).await?;
+            assert_eq!(fetched1.0, "val_1");
+            assert_eq!(fetched2.0, "val_2");
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn clones_share_recreated_client(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+            let clone = storage.clone();
+
+            storage.inner.write().take();
+            assert!(clone.inner.read().is_none(), "clone should also see None");
+
+            let _ = storage.client().await;
+            assert!(
+                clone.inner.read().is_some(),
+                "clone should see the recreated client"
+            );
+            assert!(clone.client().await.is_ok());
+            Ok(())
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        #[rstest::rstest]
+        async fn concurrent_recreation_does_not_panic_or_deadlock(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+            storage.inner.write().take();
+
+            let handles: Vec<_> = (0..10)
+                .map(|_| {
+                    let s = storage.clone();
+                    tokio::spawn(async move { s.client().await })
+                })
+                .collect();
+
+            for result in futures::future::join_all(handles).await {
+                assert!(result.is_ok(), "task panicked");
+            }
+            assert!(storage.inner.read().is_some());
+            assert!(storage.client().await.is_ok());
+            Ok(())
+        }
+
+        /// scan_with_namespaced_results should work after client recreation
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn scan_works_after_recreation(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            use fred::types::scan::Scanner;
+            use futures::StreamExt;
+
+            let storage = create_and_connect(clustered).await?;
+            let key = RedisKey("scan_test_key".to_string());
+            storage
+                .insert(key, RedisValue("value".to_string()), None)
+                .await;
+
+            storage.inner.write().take();
+            let _ = storage.client().await;
+
+            let mut stream = storage
+                .scan_with_namespaced_results("*".to_string(), Some(100))
+                .await?;
+            let mut found_keys = Vec::new();
+            while let Some(result) = stream.next().await {
+                if let Some(keys) = result?.take_results() {
+                    found_keys.extend(keys);
+                }
+            }
+            assert!(!found_keys.is_empty(), "scan should find at least one key");
+            Ok(())
+        }
+
         /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
         ///
         /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
@@ -1084,8 +1556,10 @@ mod test {
         #[tokio::test(flavor = "multi_thread")]
         async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
             let clustered = true;
-            let storage =
-                RedisCacheStorage::new(redis_config(clustered), "test_redis_storage").await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test_redis_storage")
+                .await?
+                .create_client()
+                .await?;
 
             // insert values which reflect different cluster slots
             let mut data = HashMap::default();
@@ -1111,7 +1585,7 @@ mod test {
             // insert values
             let keys: Vec<_> = data.keys().cloned().collect();
             let data: Vec<_> = data.into_iter().collect();
-            storage.insert_multiple(&data, None).await;
+            let _ = storage.insert_multiple(&data, None).await;
 
             // make a `get` call for each key and ensure that it has the expected value. this tests both
             // the `get` and `insert_multiple` functions
@@ -1130,6 +1604,102 @@ mod test {
             Ok(())
         }
 
+        /// Calling create_client() on an already-connected storage replaces the pool. The old
+        /// pool's watcher must not clear the new pool from `inner`.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn create_client_replaces_existing_inner(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+
+            let (old_heartbeat, old_watcher) = {
+                let guard = storage.inner.read();
+                let inner = guard.as_ref().unwrap();
+                (
+                    inner.heartbeat_abort_handle.clone(),
+                    inner.watcher_abort_handle.clone(),
+                )
+            };
+            assert!(!old_heartbeat.is_finished());
+            assert!(!old_watcher.is_finished());
+
+            let storage = storage.create_client().await?;
+            tokio::task::yield_now().await;
+
+            assert!(old_heartbeat.is_finished());
+            assert!(old_watcher.is_finished());
+            assert!(
+                storage.inner.read().is_some(),
+                "new pool should not have been cleared by old watcher"
+            );
+            assert!(storage.client().await.is_ok());
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn independent_storages_simulate_config_reload(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let old_storage = create_and_connect(clustered).await?;
+            let (old_heartbeat, old_watcher) = {
+                let guard = old_storage.inner.read();
+                let inner = guard.as_ref().unwrap();
+                (
+                    inner.heartbeat_abort_handle.clone(),
+                    inner.watcher_abort_handle.clone(),
+                )
+            };
+
+            let new_storage = create_and_connect(clustered).await?;
+
+            // drop the old storage, simulating the router swapping to a new config
+            drop(old_storage);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            // old pool's tasks should be cleaned up (no leak)
+            assert!(old_heartbeat.is_finished());
+            assert!(old_watcher.is_finished());
+
+            // new storage is unaffected and can still operate
+            assert!(new_storage.inner.read().is_some());
+            assert!(new_storage.client().await.is_ok());
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn pool_shutdown_marks_inner_for_recreation(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = create_and_connect(clustered).await?;
+            assert!(storage.inner.read().is_some());
+
+            let pool_clone = {
+                let guard = storage.inner.read();
+                guard.as_ref().unwrap().pool.clone()
+            };
+            pool_clone.quit().await?;
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            assert!(
+                storage.inner.read().is_none(),
+                "inner should be None after pool shutdown"
+            );
+
+            let result = storage.client().await;
+
+            assert!(result.is_err(), "first call after abort should error");
+            assert!(
+                storage.inner.read().is_some(),
+                "inner should be repopulated after recreation"
+            );
+            assert!(storage.client().await.is_ok());
+            Ok(())
+        }
+
         /// Test that `get_multiple` returns items in the correct order.
         #[tokio::test]
         #[rstest::rstest]
@@ -1138,11 +1708,13 @@ mod test {
         ) -> Result<(), BoxError> {
             let storage =
                 RedisCacheStorage::new(redis_config(clustered), "test_get_multiple_is_ordered")
+                    .await?
+                    .create_client()
                     .await?;
 
             let data = [("a", "1"), ("b", "2"), ("c", "3")]
                 .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
-            storage.insert_multiple(&data, None).await;
+            let _ = storage.insert_multiple(&data, None).await;
 
             // check different orders of fetches to make everything is ordered correctly, including
             // when some values are none

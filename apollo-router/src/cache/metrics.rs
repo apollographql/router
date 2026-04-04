@@ -124,6 +124,15 @@ pub(crate) struct RedisMetricsCollector {
     metrics_interval: Duration,
 }
 
+/// Test-only accessor for checking whether the metrics task has been aborted
+#[cfg(test)]
+impl RedisMetricsCollector {
+    #[allow(dead_code)]
+    pub(crate) fn abort_handle(&self) -> Option<AbortHandle> {
+        self.abort_handle.lock().clone()
+    }
+}
+
 impl Drop for RedisMetricsCollector {
     fn drop(&mut self) {
         if let Some(handle) = self.abort_handle.lock().take() {
@@ -174,7 +183,11 @@ impl RedisMetricsCollector {
             .with_current_meter_provider(),
         );
 
-        *self.abort_handle.lock() = Some(handle.abort_handle());
+        let mut guard = self.abort_handle.lock();
+        if let Some(old) = guard.take() {
+            old.abort();
+        }
+        *guard = Some(handle.abort_handle());
     }
 
     /// Collect metrics from all Redis clients

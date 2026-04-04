@@ -86,10 +86,18 @@ impl Storage {
         //  on the same cache tag multiple times a second, and perhaps a world where we actually want multiple
         //  consumers running at the same time.
 
+        // NOTE: this is a bit of a dance, but we have to create a RedisCacheStorage before we can
+        // create its wrapped client because we want that client to be replaceable and need a
+        // standalone data container for certain fields used for its creation (and thus
+        // recreation)
         let storage = RedisCacheStorage::new(config.into(), "response-cache").await?;
+        // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
+        // for wrapped client
+        let storage_client = storage.create_client().await?;
+
         let (cache_tag_tx, cache_tag_rx) = mpsc::channel(1000);
         let s = Self {
-            storage,
+            storage: storage_client.to_owned(),
             cache_tag_tx,
             fetch_timeout: config.fetch_timeout,
             insert_timeout: config.insert_timeout,
@@ -114,7 +122,7 @@ impl Storage {
             timeout: Some(self.invalidate_timeout()),
             ..Options::default()
         };
-        let pipeline = self.storage.pipeline().with_options(&options);
+        let pipeline = self.storage.pipeline().await?.with_options(&options);
         for invalidation_key in &invalidation_keys {
             let invalidation_key =
                 format!("version:{RESPONSE_CACHE_VERSION}:cache-tag:{invalidation_key}");
@@ -207,6 +215,7 @@ impl Storage {
         Ok(self
             .storage
             .client()
+            .await?
             .with_options(&options)
             .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff_time)
             .await?)
@@ -312,7 +321,7 @@ impl CacheStorage for Storage {
             timeout: Some(self.insert_timeout()),
             ..Options::default()
         };
-        let pipeline = self.storage.client().pipeline().with_options(&options);
+        let pipeline = self.storage.pipeline().await?.with_options(&options);
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             self.send_to_maintenance_queue(cache_tag_key.clone());
 
@@ -361,7 +370,7 @@ impl CacheStorage for Storage {
         }
 
         // phase 3
-        let pipeline = self.storage.client().pipeline().with_options(&options);
+        let pipeline = self.storage.pipeline().await?.with_options(&options);
         for (document, cache_tags) in batch_docs.into_iter().zip(original_cache_tags.into_iter()) {
             let value = CacheValue {
                 data: document.data,
@@ -520,7 +529,10 @@ impl Storage {
 
         let mut scan_stream = self
             .storage
-            .scan_with_namespaced_results(String::from("*"), None);
+            .scan_with_namespaced_results(String::from("*"), None)
+            .await
+            .map_err(BoxError::from)?;
+
         let mut keys = Vec::default();
         while let Some(result) = scan_stream.next().await {
             if let Some(page_keys) = result?.take_results() {
@@ -538,35 +550,45 @@ impl Storage {
 
     async fn ttl(&self, key: &str) -> StorageResult<i64> {
         let key = self.make_key(key);
-        Ok(self.storage.client().ttl(key).await?)
+        Ok(self.storage.client().await?.ttl(key).await?)
     }
 
     async fn expire_time(&self, key: &str) -> StorageResult<i64> {
         let key = self.make_key(key);
-        Ok(self.storage.client().expire_time(key).await?)
+        Ok(self.storage.client().await?.expire_time(key).await?)
     }
 
     async fn zscore(&self, sorted_set_key: &str, member: &str) -> Result<i64, BoxError> {
         let sorted_set_key = self.make_key(sorted_set_key);
-        let score: String = self.storage.client().zscore(sorted_set_key, member).await?;
+        let score: String = self
+            .storage
+            .client()
+            .await?
+            .zscore(sorted_set_key, member)
+            .await?;
         Ok(score.parse()?)
     }
 
     async fn zcard(&self, sorted_set_key: &str) -> StorageResult<u64> {
         let sorted_set_key = self.make_key(sorted_set_key);
-        let cardinality = self.storage.client().zcard(sorted_set_key).await?;
+        let cardinality = self.storage.client().await?.zcard(sorted_set_key).await?;
         Ok(cardinality)
     }
 
     async fn zexists(&self, sorted_set_key: &str, member: &str) -> StorageResult<bool> {
         let sorted_set_key = self.make_key(sorted_set_key);
-        let score: Option<String> = self.storage.client().zscore(sorted_set_key, member).await?;
+        let score: Option<String> = self
+            .storage
+            .client()
+            .await?
+            .zscore(sorted_set_key, member)
+            .await?;
         Ok(score.is_some())
     }
 
     async fn exists(&self, key: &str) -> StorageResult<bool> {
         let key = self.make_key(key);
-        Ok(self.storage.client().exists(key).await?)
+        Ok(self.storage.client().await?.exists(key).await?)
     }
 }
 
@@ -1048,6 +1070,7 @@ mod tests {
                 let _: () = storage
                     .storage
                     .client()
+                    .await?
                     .set(namespaced_key, 1, Some(Expiration::EX(60)), None, false)
                     .await?;
                 Ok::<(), BoxError>(())

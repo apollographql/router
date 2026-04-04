@@ -221,8 +221,30 @@ impl PluginPrivate for EntityCache {
             let required_to_start = redis_config.required_to_start;
             // we need to explicitly disable TTL reset because it is managed directly by this plugin
             redis_config.reset_ttl = false;
+
+            // NOTE: this is a bit of a dance, but we have to create a RedisCacheStorage before we can
+            // create its wrapped client because we want that client to be replaceable and need a
+            // standalone data container for certain fields used for its creation (and thus
+            // recreation)
             all = match RedisCacheStorage::new(redis_config, "entity").await {
-                Ok(storage) => Some(storage),
+                Ok(storage) => {
+                    // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
+                    // for wrapped client
+                    match storage.create_client().await {
+                        Ok(storage_client) => Some(storage_client),
+                        Err(e) => {
+                            tracing::error!(
+                                cache = "entity",
+                                e,
+                                "could not open connection to Redis for caching",
+                            );
+                            if required_to_start {
+                                return Err(e);
+                            }
+                            None
+                        }
+                    }
+                }
                 Err(e) => {
                     tracing::error!(
                         cache = "entity",
@@ -236,6 +258,7 @@ impl PluginPrivate for EntityCache {
                 }
             };
         }
+
         let mut subgraph_storages = HashMap::new();
         for (subgraph, config) in &init.config.subgraph.subgraphs {
             if let Some(redis) = &config.redis {
@@ -243,8 +266,28 @@ impl PluginPrivate for EntityCache {
                 // we need to explicitly disable TTL reset because it is managed directly by this plugin
                 let mut redis_config = redis.clone();
                 redis_config.reset_ttl = false;
+
+                // NOTE: this is a bit of a dance, but we have to create a RedisCacheStorage before we can
+                // create its wrapped client because we want that client to be replaceable and need a
+                // standalone data container for certain fields used for its creation (and thus
+                // recreation)
                 let storage = match RedisCacheStorage::new(redis_config, "entity").await {
-                    Ok(storage) => Some(storage),
+                    // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
+                    // for wrapped client
+                    Ok(storage) => match storage.create_client().await {
+                        Ok(storage_client) => Some(storage_client),
+                        Err(e) => {
+                            tracing::error!(
+                                cache = "entity",
+                                e,
+                                "could not open connection to Redis for caching",
+                            );
+                            if required_to_start {
+                                return Err(e);
+                            }
+                            None
+                        }
+                    },
                     Err(e) => {
                         tracing::error!(
                             cache = "entity",
@@ -1770,10 +1813,13 @@ async fn insert_entities_in_result(
         let span = tracing::info_span!("cache_store");
 
         tokio::spawn(async move {
-            cache
+            let _ = cache
                 .insert_multiple(&to_insert, ttl)
                 .instrument(span)
-                .await;
+                .await
+                .inspect_err(|e| {
+                    tracing::error!("error inserting multiple to entity cache: {e:?}")
+                });
         });
     }
 
