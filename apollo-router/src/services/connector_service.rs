@@ -159,19 +159,23 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             // TODO: apollo.connector.field.alias
             // TODO: apollo.connector.field.return_type
             // TODO: apollo.connector.field.selection_set
-            let transport = &connector.transport;
-            if let Ok(detail) = serde_json::to_string(
-                &serde_json::json!({ transport.method.as_str(): transport.connect_template.to_string() }),
-            ) {
-                span.record("apollo.connector.detail", detail);
-            }
-            if let Some(source_name) = connector.id.source_name.as_ref() {
-                span.record("apollo.connector.source.name", source_name.as_str());
+            if let Some(transport) = &connector.transport {
                 if let Ok(detail) = serde_json::to_string(
-                    &serde_json::json!({ "baseURL": transport.source_template.as_ref().map(|uri| uri.to_string()) }),
+                    &serde_json::json!({ transport.method.as_str(): transport.connect_template.to_string() }),
                 ) {
+                    span.record("apollo.connector.detail", detail);
+                }
+                if connector.id.source_name.is_some()
+                    && let Ok(detail) = serde_json::to_string(
+                        &serde_json::json!({ "baseURL": transport.source_template.as_ref().map(|uri| uri.to_string()) }),
+                    )
+                {
                     span.record("apollo.connector.source.detail", detail);
                 }
+            }
+            // Record source name regardless of transport (it comes from the connector ID, not transport)
+            if let Some(source_name) = connector.id.source_name.as_ref() {
+                span.record("apollo.connector.source.name", source_name.as_str());
             }
 
             execute(&connector_request_service_factory, request, connector)

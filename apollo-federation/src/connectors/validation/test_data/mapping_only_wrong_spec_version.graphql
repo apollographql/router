@@ -1,0 +1,20 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.3"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "v1", http: { baseURL: "http://127.0.0.1" })
+
+type Query {
+  me: User
+    @connect(
+      mappingOnly: true
+      selection: """
+        id: "user-123"
+      """
+    )
+}
+
+type User {
+  id: ID!
+}

@@ -20,13 +20,16 @@ use super::Message;
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::errors::ErrorsCoordinate;
 use super::errors::IsSuccessArgument;
+use crate::connectors::ConnectSpec;
 use crate::connectors::Namespace;
 use crate::connectors::SourceName;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
 use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::spec::connect::CONNECT_ID_ARGUMENT_NAME;
+use crate::connectors::spec::connect::CONNECT_MAPPING_ONLY_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::connectors::validation::connect::http::Http;
 use crate::connectors::validation::errors::Errors;
@@ -128,7 +131,8 @@ pub(super) fn fields_seen_by_all_connects(
 /// A parsed `@connect` directive
 struct Connect<'schema> {
     selection: Selection<'schema>,
-    http: Http<'schema>,
+    /// `None` when `mappingOnly: true` (no HTTP transport involved)
+    http: Option<Http<'schema>>,
     errors: Errors<'schema>,
     is_success: Option<IsSuccessArgument<'schema>>,
     coordinate: ConnectDirectiveCoordinate<'schema>,
@@ -260,13 +264,70 @@ impl<'schema> Connect<'schema> {
             }]);
         }
 
+        // Check if mappingOnly is set
+        let mapping_only = coordinate
+            .directive
+            .specified_argument_by_name(&CONNECT_MAPPING_ONLY_ARGUMENT_NAME)
+            .and_then(|arg| arg.to_bool())
+            .unwrap_or(false);
+
+        // Validate mappingOnly constraints
+        if mapping_only {
+            let mut mapping_only_errors: Vec<Message> = Vec::new();
+
+            // Require spec v0.4+
+            if schema.connect_link.spec < ConnectSpec::V0_4 {
+                mapping_only_errors.push(Message {
+                    code: Code::MappingOnlyRequiresV0_4,
+                    message: format!(
+                        "{coordinate} uses `mappingOnly: true` which requires connect spec v0.4 or later. \
+                        Use `@link(url: \"https://specs.apollo.dev/connect/v0.4\")` to enable this feature."
+                    ),
+                    locations: coordinate
+                        .directive
+                        .line_column_range(&schema.sources)
+                        .into_iter()
+                        .collect(),
+                });
+            }
+
+            // Error if http: is also present
+            if coordinate
+                .directive
+                .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
+                .is_some()
+            {
+                mapping_only_errors.push(Message {
+                    code: Code::MappingOnlyWithHttp,
+                    message: format!(
+                        "{coordinate} cannot use both `mappingOnly: true` and `http:`. \
+                        Use `mappingOnly: true` without `http:` to skip the HTTP request."
+                    ),
+                    locations: coordinate
+                        .directive
+                        .line_column_range(&schema.sources)
+                        .into_iter()
+                        .collect(),
+                });
+            }
+
+            if !mapping_only_errors.is_empty() {
+                return Err(mapping_only_errors);
+            }
+        }
+
         let (selection, http, errors, is_success) = Selection::parse(coordinate, schema)
             .map_err(|err| vec![err])
-            .and_try(
+            .and_try(if mapping_only {
+                // For mapping-only connectors, skip Http::parse entirely
+                Ok(None)
+            } else {
                 validate_source_name(coordinate, source_names, schema)
                     .map_err(|err| vec![err])
-                    .and_then(|source_name| Http::parse(coordinate, source_name.as_ref(), schema)),
-            )
+                    .and_then(|source_name| {
+                        Http::parse(coordinate, source_name.as_ref(), schema).map(Some)
+                    })
+            })
             .and_try(Errors::parse(
                 ErrorsCoordinate::Connect {
                     connect: coordinate,
@@ -299,10 +360,15 @@ impl<'schema> Connect<'schema> {
     fn type_check(self) -> Result<Vec<ResolvedField>, Vec<Message>> {
         let mut messages = Vec::new();
 
+        let http_variables: Box<dyn Iterator<Item = Namespace>> = self
+            .http
+            .as_ref()
+            .map(|h| -> Box<dyn Iterator<Item = Namespace>> { Box::new(h.variables()) })
+            .unwrap_or_else(|| Box::new(std::iter::empty()));
         let all_variables = self
             .selection
             .variables()
-            .chain(self.http.variables())
+            .chain(http_variables)
             .chain(self.errors.variables())
             .collect::<HashSet<_>>();
         if all_variables.contains(&Namespace::Batch) && all_variables.contains(&Namespace::This) {
@@ -322,13 +388,9 @@ impl<'schema> Connect<'schema> {
         }
 
         messages.extend(validate_entity_arg(self.coordinate, self.schema).err());
-        messages.extend(
-            self.http
-                .type_check(self.schema)
-                .err()
-                .into_iter()
-                .flatten(),
-        );
+        if let Some(http) = self.http {
+            messages.extend(http.type_check(self.schema).err().into_iter().flatten());
+        }
         messages.extend(
             self.errors
                 .type_check(self.schema)

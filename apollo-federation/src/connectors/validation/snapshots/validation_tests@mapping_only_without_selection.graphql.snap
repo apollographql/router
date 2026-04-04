@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: result.errors
+input_file: apollo-federation/src/connectors/validation/test_data/mapping_only_without_selection.graphql
+---
+[
+    Message {
+        code: GraphQLError,
+        message: "`@connect(selection:)` on `Mutation.user` is required.",
+        locations: [
+            10:5..10:32,
+        ],
+    },
+]

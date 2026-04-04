@@ -1,19 +1,19 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: connectors.by_service_name
-input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelthread.graphql
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/namespace.graphql
 ---
 {
-    "connectors_Query_users_0": Connector {
+    "connectors_Query_me_0": Connector {
         id: ConnectId {
             subgraph_name: "connectors",
             source_name: Some(
-                "json",
+                "v1",
             ),
             named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
-                    field: Object(Query.users),
+                    field: Object(Query.me),
                     directive_name: "connect",
                     directive_index: 0,
                 },
@@ -26,8 +26,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                         parts: [
                             Constant(
                                 Constant {
-                                    value: "https://jsonplaceholder.typicode.com/",
-                                    location: 0..37,
+                                    value: "http://127.0.0.1",
+                                    location: 0..16,
                                 },
                             ),
                         ],
@@ -37,8 +37,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                     parts: [
                         Constant(
                             Constant {
-                                value: "/users",
-                                location: 0..6,
+                                value: "/me",
+                                location: 0..3,
                             },
                         ),
                     ],
@@ -115,17 +115,13 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                     ),
                 },
             ),
-            spec: V0_1,
+            spec: V0_4,
         },
         config: None,
         max_requests: None,
         entity_resolver: None,
-        spec: V0_1,
-        schema_subtypes_map: {
-            "_Entity": {
-                "User",
-            },
-        },
+        spec: V0_4,
+        schema_subtypes_map: {},
         request_headers: {},
         response_headers: {},
         request_variable_keys: {},
@@ -138,19 +134,82 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             connect_is_success: None,
         },
         label: Label(
-            "connectors.json http: GET /users",
+            "connectors.v1 http: GET /me",
         ),
     },
-    "connectors_Query_user_0": Connector {
+    "connectors_Mutation_user_0": Connector {
+        id: ConnectId {
+            subgraph_name: "connectors",
+            source_name: None,
+            named: None,
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Mutation.user),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
+        },
+        transport: None,
+        mapping_only: true,
+        selection: JSONSelection {
+            inner: Path(
+                PathSelection {
+                    path: WithRange {
+                        node: Expr(
+                            WithRange {
+                                node: Object(
+                                    {},
+                                ),
+                                range: Some(
+                                    2..4,
+                                ),
+                            },
+                            WithRange {
+                                node: Empty,
+                                range: Some(
+                                    5..5,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            0..5,
+                        ),
+                    },
+                },
+            ),
+            spec: V0_4,
+        },
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+        spec: V0_4,
+        schema_subtypes_map: {},
+        request_headers: {},
+        response_headers: {},
+        request_variable_keys: {},
+        response_variable_keys: {},
+        batch_settings: None,
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+            connect_is_success: None,
+        },
+        label: Label(
+            "connectors. mappingOnly",
+        ),
+    },
+    "connectors_UserMutations_update_0": Connector {
         id: ConnectId {
             subgraph_name: "connectors",
             source_name: Some(
-                "json",
+                "v1",
             ),
             named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
-                    field: Object(Query.user),
+                    field: Object(UserMutations.update),
                     directive_name: "connect",
                     directive_index: 0,
                 },
@@ -163,8 +222,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                         parts: [
                             Constant(
                                 Constant {
-                                    value: "https://jsonplaceholder.typicode.com/",
-                                    location: 0..37,
+                                    value: "http://127.0.0.1",
+                                    location: 0..16,
                                 },
                             ),
                         ],
@@ -174,8 +233,8 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                     parts: [
                         Constant(
                             Constant {
-                                value: "/users/",
-                                location: 0..7,
+                                value: "/api/users/",
+                                location: 0..11,
                             },
                         ),
                         Expression(
@@ -219,229 +278,14 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                                             },
                                         },
                                     ),
-                                    spec: V0_1,
+                                    spec: V0_4,
                                 },
-                                location: 8..16,
+                                location: 12..20,
                             },
                         ),
                     ],
                 },
-                method: Get,
-                headers: [],
-                body: None,
-                source_path: None,
-                source_query_params: None,
-                connect_path: None,
-                connect_query_params: None,
-            },
-        ),
-        mapping_only: false,
-        selection: JSONSelection {
-            inner: Named(
-                SubSelection {
-                    selections: [
-                        NamedSelection {
-                            prefix: None,
-                            path: PathSelection {
-                                path: WithRange {
-                                    node: Key(
-                                        WithRange {
-                                            node: Field(
-                                                "id",
-                                            ),
-                                            range: Some(
-                                                0..2,
-                                            ),
-                                        },
-                                        WithRange {
-                                            node: Empty,
-                                            range: Some(
-                                                2..2,
-                                            ),
-                                        },
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
-                                },
-                            },
-                        },
-                        NamedSelection {
-                            prefix: None,
-                            path: PathSelection {
-                                path: WithRange {
-                                    node: Key(
-                                        WithRange {
-                                            node: Field(
-                                                "name",
-                                            ),
-                                            range: Some(
-                                                3..7,
-                                            ),
-                                        },
-                                        WithRange {
-                                            node: Empty,
-                                            range: Some(
-                                                7..7,
-                                            ),
-                                        },
-                                    ),
-                                    range: Some(
-                                        3..7,
-                                    ),
-                                },
-                            },
-                        },
-                        NamedSelection {
-                            prefix: None,
-                            path: PathSelection {
-                                path: WithRange {
-                                    node: Key(
-                                        WithRange {
-                                            node: Field(
-                                                "username",
-                                            ),
-                                            range: Some(
-                                                8..16,
-                                            ),
-                                        },
-                                        WithRange {
-                                            node: Empty,
-                                            range: Some(
-                                                16..16,
-                                            ),
-                                        },
-                                    ),
-                                    range: Some(
-                                        8..16,
-                                    ),
-                                },
-                            },
-                        },
-                    ],
-                    range: Some(
-                        0..16,
-                    ),
-                },
-            ),
-            spec: V0_1,
-        },
-        config: None,
-        max_requests: None,
-        entity_resolver: Some(
-            Explicit,
-        ),
-        spec: V0_1,
-        schema_subtypes_map: {
-            "_Entity": {
-                "User",
-            },
-        },
-        request_headers: {},
-        response_headers: {},
-        request_variable_keys: {
-            $args: {
-                "id",
-            },
-        },
-        response_variable_keys: {},
-        batch_settings: None,
-        error_settings: ConnectorErrorsSettings {
-            message: None,
-            source_extensions: None,
-            connect_extensions: None,
-            connect_is_success: None,
-        },
-        label: Label(
-            "connectors.json http: GET /users/{$args.id}",
-        ),
-    },
-    "connectors_User_d_0": Connector {
-        id: ConnectId {
-            subgraph_name: "connectors",
-            source_name: Some(
-                "json",
-            ),
-            named: None,
-            directive: Field(
-                ObjectOrInterfaceFieldDirectivePosition {
-                    field: Object(User.d),
-                    directive_name: "connect",
-                    directive_index: 0,
-                },
-            ),
-        },
-        transport: Some(
-            HttpJsonTransport {
-                source_template: Some(
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "https://jsonplaceholder.typicode.com/",
-                                    location: 0..37,
-                                },
-                            ),
-                        ],
-                    },
-                ),
-                connect_template: StringTemplate {
-                    parts: [
-                        Constant(
-                            Constant {
-                                value: "/users/",
-                                location: 0..7,
-                            },
-                        ),
-                        Expression(
-                            Expression {
-                                expression: JSONSelection {
-                                    inner: Path(
-                                        PathSelection {
-                                            path: WithRange {
-                                                node: Var(
-                                                    WithRange {
-                                                        node: $this,
-                                                        range: Some(
-                                                            0..5,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Key(
-                                                            WithRange {
-                                                                node: Field(
-                                                                    "c",
-                                                                ),
-                                                                range: Some(
-                                                                    6..7,
-                                                                ),
-                                                            },
-                                                            WithRange {
-                                                                node: Empty,
-                                                                range: Some(
-                                                                    7..7,
-                                                                ),
-                                                            },
-                                                        ),
-                                                        range: Some(
-                                                            5..7,
-                                                        ),
-                                                    },
-                                                ),
-                                                range: Some(
-                                                    0..7,
-                                                ),
-                                            },
-                                        },
-                                    ),
-                                    spec: V0_1,
-                                },
-                                location: 8..15,
-                            },
-                        ),
-                    ],
-                },
-                method: Get,
+                method: Post,
                 headers: [],
                 body: None,
                 source_path: None,
@@ -466,48 +310,44 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                                 node: Key(
                                     WithRange {
                                         node: Field(
-                                            "phone",
+                                            "result",
                                         ),
                                         range: Some(
-                                            2..7,
+                                            2..8,
                                         ),
                                     },
                                     WithRange {
                                         node: Empty,
                                         range: Some(
-                                            7..7,
+                                            8..8,
                                         ),
                                     },
                                 ),
                                 range: Some(
-                                    1..7,
+                                    1..8,
                                 ),
                             },
                         ),
                         range: Some(
-                            0..7,
+                            0..8,
                         ),
                     },
                 },
             ),
-            spec: V0_1,
+            spec: V0_4,
         },
         config: None,
         max_requests: None,
         entity_resolver: Some(
             Implicit,
         ),
-        spec: V0_1,
-        schema_subtypes_map: {
-            "_Entity": {
-                "User",
-            },
-        },
+        spec: V0_4,
+        schema_subtypes_map: {},
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
-            $this: {
-                "c",
+            $args: {
+                "id",
             },
         },
         response_variable_keys: {},
@@ -519,7 +359,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
             connect_is_success: None,
         },
         label: Label(
-            "connectors.json http: GET /users/{$this.c}",
+            "connectors.v1 http: POST /api/users/{$args.id}",
         ),
     },
 }

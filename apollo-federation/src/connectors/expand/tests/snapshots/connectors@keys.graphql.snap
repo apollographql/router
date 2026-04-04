@@ -17,72 +17,75 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "http://localhost/ts/",
-                            location: 0..20,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $args,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id",
-                                                            ),
-                                                            range: Some(
-                                                                6..8,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                8..8,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..8,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..8,
-                                            ),
-                                        },
-                                    },
-                                ),
-                                spec: V0_1,
+        transport: Some(
+            HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://localhost/ts/",
+                                location: 0..20,
                             },
-                            location: 21..29,
-                        },
-                    ),
-                ],
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $args,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    6..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    8..8,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..8,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..8,
+                                                ),
+                                            },
+                                        },
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 21..29,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
+        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -216,124 +219,127 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "http://localhost/ts/",
-                            location: 0..20,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $args,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id",
-                                                            ),
-                                                            range: Some(
-                                                                6..8,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                8..8,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..8,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..8,
-                                            ),
-                                        },
-                                    },
-                                ),
-                                spec: V0_1,
+        transport: Some(
+            HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://localhost/ts/",
+                                location: 0..20,
                             },
-                            location: 21..29,
-                        },
-                    ),
-                    Constant(
-                        Constant {
-                            value: "?id2=",
-                            location: 30..35,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $args,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id2",
-                                                            ),
-                                                            range: Some(
-                                                                6..9,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                9..9,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..9,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..9,
-                                            ),
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $args,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    6..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    8..8,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..8,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..8,
+                                                ),
+                                            },
                                         },
-                                    },
-                                ),
-                                spec: V0_1,
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 21..29,
                             },
-                            location: 36..45,
-                        },
-                    ),
-                ],
+                        ),
+                        Constant(
+                            Constant {
+                                value: "?id2=",
+                                location: 30..35,
+                            },
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $args,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id2",
+                                                                ),
+                                                                range: Some(
+                                                                    6..9,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    9..9,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..9,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..9,
+                                                ),
+                                            },
+                                        },
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 36..45,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
+        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -468,72 +474,75 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "http://localhost/ts/",
-                            location: 0..20,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $args,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "unselected",
-                                                            ),
-                                                            range: Some(
-                                                                6..16,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                16..16,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..16,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..16,
-                                            ),
-                                        },
-                                    },
-                                ),
-                                spec: V0_1,
+        transport: Some(
+            HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://localhost/ts/",
+                                location: 0..20,
                             },
-                            location: 21..37,
-                        },
-                    ),
-                ],
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $args,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "unselected",
+                                                                ),
+                                                                range: Some(
+                                                                    6..16,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    16..16,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..16,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..16,
+                                                ),
+                                            },
+                                        },
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 21..37,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
+        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -667,72 +676,75 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "http://localhost/rs/",
-                            location: 0..20,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $this,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id",
-                                                            ),
-                                                            range: Some(
-                                                                6..8,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                8..8,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..8,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..8,
-                                            ),
-                                        },
-                                    },
-                                ),
-                                spec: V0_1,
+        transport: Some(
+            HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://localhost/rs/",
+                                location: 0..20,
                             },
-                            location: 21..29,
-                        },
-                    ),
-                ],
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $this,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    6..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    8..8,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..8,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..8,
+                                                ),
+                                            },
+                                        },
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 21..29,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
+        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -840,124 +852,127 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "http://localhost/rs/",
-                            location: 0..20,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $this,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id",
-                                                            ),
-                                                            range: Some(
-                                                                6..8,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                8..8,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..8,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..8,
-                                            ),
-                                        },
-                                    },
-                                ),
-                                spec: V0_1,
+        transport: Some(
+            HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://localhost/rs/",
+                                location: 0..20,
                             },
-                            location: 21..29,
-                        },
-                    ),
-                    Constant(
-                        Constant {
-                            value: "?id2=",
-                            location: 30..35,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $this,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id2",
-                                                            ),
-                                                            range: Some(
-                                                                6..9,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                9..9,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..9,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..9,
-                                            ),
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $this,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    6..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    8..8,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..8,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..8,
+                                                ),
+                                            },
                                         },
-                                    },
-                                ),
-                                spec: V0_1,
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 21..29,
                             },
-                            location: 36..45,
-                        },
-                    ),
-                ],
+                        ),
+                        Constant(
+                            Constant {
+                                value: "?id2=",
+                                location: 30..35,
+                            },
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $this,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id2",
+                                                                ),
+                                                                range: Some(
+                                                                    6..9,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    9..9,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..9,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..9,
+                                                ),
+                                            },
+                                        },
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 36..45,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
+        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -1066,72 +1081,75 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "http://localhost/rs/",
-                            location: 0..20,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $this,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id",
-                                                            ),
-                                                            range: Some(
-                                                                6..8,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                8..8,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..8,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..8,
-                                            ),
-                                        },
-                                    },
-                                ),
-                                spec: V0_1,
+        transport: Some(
+            HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://localhost/rs/",
+                                location: 0..20,
                             },
-                            location: 21..29,
-                        },
-                    ),
-                ],
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $this,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    6..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    8..8,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..8,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..8,
+                                                ),
+                                            },
+                                        },
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 21..29,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
+        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -1270,92 +1288,95 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "http://localhost/rs",
-                            location: 0..19,
-                        },
-                    ),
-                ],
-            },
-            method: Post,
-            headers: [],
-            body: Some(
-                JSONSelection {
-                    inner: Named(
-                        SubSelection {
-                            selections: [
-                                NamedSelection {
-                                    prefix: Alias(
-                                        Alias {
-                                            name: WithRange {
-                                                node: Field(
-                                                    "id",
-                                                ),
+        transport: Some(
+            HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://localhost/rs",
+                                location: 0..19,
+                            },
+                        ),
+                    ],
+                },
+                method: Post,
+                headers: [],
+                body: Some(
+                    JSONSelection {
+                        inner: Named(
+                            SubSelection {
+                                selections: [
+                                    NamedSelection {
+                                        prefix: Alias(
+                                            Alias {
+                                                name: WithRange {
+                                                    node: Field(
+                                                        "id",
+                                                    ),
+                                                    range: Some(
+                                                        0..2,
+                                                    ),
+                                                },
                                                 range: Some(
-                                                    0..2,
+                                                    0..3,
                                                 ),
                                             },
-                                            range: Some(
-                                                0..3,
-                                            ),
-                                        },
-                                    ),
-                                    path: PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $this,
-                                                    range: Some(
-                                                        4..9,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id",
-                                                            ),
-                                                            range: Some(
-                                                                10..12,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                12..12,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        9..12,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                4..12,
-                                            ),
+                                        ),
+                                        path: PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $this,
+                                                        range: Some(
+                                                            4..9,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    10..12,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    12..12,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            9..12,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    4..12,
+                                                ),
+                                            },
                                         },
                                     },
-                                },
-                            ],
-                            range: Some(
-                                0..12,
-                            ),
-                        },
-                    ),
-                    spec: V0_1,
-                },
-            ),
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+                                ],
+                                range: Some(
+                                    0..12,
+                                ),
+                            },
+                        ),
+                        spec: V0_1,
+                    },
+                ),
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
+            },
+        ),
+        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -1463,92 +1484,95 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "http://localhost/rs",
-                            location: 0..19,
-                        },
-                    ),
-                ],
-            },
-            method: Post,
-            headers: [],
-            body: Some(
-                JSONSelection {
-                    inner: Named(
-                        SubSelection {
-                            selections: [
-                                NamedSelection {
-                                    prefix: Alias(
-                                        Alias {
-                                            name: WithRange {
-                                                node: Field(
-                                                    "id",
-                                                ),
+        transport: Some(
+            HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://localhost/rs",
+                                location: 0..19,
+                            },
+                        ),
+                    ],
+                },
+                method: Post,
+                headers: [],
+                body: Some(
+                    JSONSelection {
+                        inner: Named(
+                            SubSelection {
+                                selections: [
+                                    NamedSelection {
+                                        prefix: Alias(
+                                            Alias {
+                                                name: WithRange {
+                                                    node: Field(
+                                                        "id",
+                                                    ),
+                                                    range: Some(
+                                                        0..2,
+                                                    ),
+                                                },
                                                 range: Some(
-                                                    0..2,
+                                                    0..3,
                                                 ),
                                             },
-                                            range: Some(
-                                                0..3,
-                                            ),
-                                        },
-                                    ),
-                                    path: PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $this,
-                                                    range: Some(
-                                                        4..9,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id",
-                                                            ),
-                                                            range: Some(
-                                                                10..12,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                12..12,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        9..12,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                4..12,
-                                            ),
+                                        ),
+                                        path: PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $this,
+                                                        range: Some(
+                                                            4..9,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    10..12,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    12..12,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            9..12,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    4..12,
+                                                ),
+                                            },
                                         },
                                     },
-                                },
-                            ],
-                            range: Some(
-                                0..12,
-                            ),
-                        },
-                    ),
-                    spec: V0_1,
-                },
-            ),
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+                                ],
+                                range: Some(
+                                    0..12,
+                                ),
+                            },
+                        ),
+                        spec: V0_1,
+                    },
+                ),
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
+            },
+        ),
+        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {

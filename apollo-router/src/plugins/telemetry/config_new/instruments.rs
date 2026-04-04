@@ -3150,10 +3150,10 @@ mod tests {
                                         .unwrap();
                                     *http_request.headers_mut() = convert_http_headers(headers);
                                     let transport_request =
-                                        TransportRequest::Http(HttpRequest {
+                                        TransportRequest::Http(Box::new(HttpRequest {
                                             inner: http_request,
                                             debug: Default::default(),
-                                        });
+                                        }));
                                     let connector = Connector {
                                         id: ConnectId::new(
                                             subgraph_name,
@@ -3163,7 +3163,7 @@ mod tests {
                                             None,
                                             0,
                                         ),
-                                        transport: HttpJsonTransport {
+                                        transport: Some(HttpJsonTransport {
                                             connect_template: StringTemplate::parse_with_spec(
                                                 url_template.as_str(),
                                                 DEFAULT_CONNECT_SPEC,
@@ -3172,7 +3172,8 @@ mod tests {
                                             method: HTTPMethod::from_str(http_method.as_str())
                                                 .unwrap(),
                                             ..Default::default()
-                                        },
+                                        }),
+                                        mapping_only: false,
                                         selection: JSONSelection::empty(),
                                         config: None,
                                         max_requests: None,

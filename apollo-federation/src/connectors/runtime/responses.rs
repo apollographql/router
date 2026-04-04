@@ -176,6 +176,16 @@ impl<'a> GraphQLDataMapper<'a> {
                                     output_field_name.to_string(),
                                     self.map_data(field_value, &field.selection_set),
                                 );
+                            } else if field.name == TYPENAME {
+                                // __typename is an intrinsic field that always
+                                // resolves to the concrete type name, even when
+                                // the connector response doesn't include it
+                                // (e.g., mappingOnly connectors returning `{}`).
+                                let output_field_name = field.alias.as_ref().unwrap_or(&field.name);
+                                new_map.insert(
+                                    output_field_name.to_string(),
+                                    Value::String(selection_set.ty.to_string().into()),
+                                );
                             }
                         }
 
@@ -242,6 +252,27 @@ fn is_success(
         res.as_ref().and_then(Value::as_bool).unwrap_or_default(),
         warnings,
     )
+}
+
+/// Returns a response for a mapping-only connector by applying the selection against `{}`.
+///
+/// Used when `mappingOnly: true` is set on a `@connect` directive, skipping the HTTP transport.
+pub fn handle_mapping_only_response(
+    key: ResponseKey,
+    connector: &Connector,
+    context: impl ContextReader,
+    client_headers: &HeaderMap<HeaderValue>,
+) -> MappedResponse {
+    let data = Value::Object(Map::new());
+    let inputs = key
+        .inputs()
+        .clone()
+        .merger(&connector.response_variable_keys)
+        .config(connector.config.as_ref())
+        .context(context)
+        .request(&connector.response_headers, client_headers)
+        .merge();
+    map_response(&data, key, inputs, Vec::new())
 }
 
 /// Returns a response with data transformed by the selection mapping.
@@ -556,6 +587,11 @@ impl MappedResponse {
                                 if let Selection::Field(field) = field
                                     && field.name.as_str() == name.as_str()
                                 {
+                                    // Use the field's selection set type so that
+                                    // __typename resolves to the return type (e.g.
+                                    // "UserMutations") rather than the root operation
+                                    // type (e.g. "Mutation").
+                                    new_sub.ty = field.selection_set.ty.clone();
                                     new_sub
                                         .selections
                                         .extend(field.selection_set.selections.iter().cloned());

@@ -284,6 +284,10 @@ pub enum Code {
     InvalidUrlProperty,
     /// Any named type not found in a GraphQL schema where expected
     MissingSchemaType,
+    /// `mappingOnly: true` cannot be combined with `http:` argument
+    MappingOnlyWithHttp,
+    /// `mappingOnly: true` requires connect spec v0.4 or later
+    MappingOnlyRequiresV0_4,
 }
 
 impl Code {

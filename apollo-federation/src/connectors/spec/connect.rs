@@ -35,6 +35,7 @@ pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 pub(crate) const IS_SUCCESS_ARGUMENT_NAME: Name = name!("isSuccess");
+pub(crate) const CONNECT_MAPPING_ONLY_ARGUMENT_NAME: Name = name!("mappingOnly");
 
 pub(super) const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_3;
 
@@ -175,6 +176,11 @@ pub(crate) struct ConnectDirectiveArguments {
     /// Uses the JSONSelection to define a success criteria. This JSON Selection
     /// _must_ resolve to a boolean value.
     pub(crate) is_success: Option<JSONSelection>,
+
+    /// When true, skip the HTTP request entirely and only apply the selection mapping.
+    ///
+    /// Requires spec version >= v0.5. Cannot be used together with `http`.
+    pub(crate) mapping_only: bool,
 }
 
 impl ConnectDirectiveArguments {
@@ -195,6 +201,7 @@ impl ConnectDirectiveArguments {
         let mut batch = None;
         let mut errors = None;
         let mut is_success = None;
+        let mut mapping_only = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -268,6 +275,14 @@ impl ConnectDirectiveArguments {
                     JSONSelection::parse_with_spec(selection_value, connect_spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
+            } else if arg_name == CONNECT_MAPPING_ONLY_ARGUMENT_NAME.as_str() {
+                let mapping_only_value = arg.value.to_bool().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`mappingOnly` field in `@{directive_name}` directive is not a boolean"
+                    ))
+                })?;
+
+                mapping_only = Some(mapping_only_value);
             }
         }
 
@@ -285,6 +300,7 @@ impl ConnectDirectiveArguments {
             batch,
             errors,
             is_success,
+            mapping_only: mapping_only.unwrap_or_default(),
         })
     }
 }
@@ -481,7 +497,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT"
+            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String, mappingOnly: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT"
         );
 
         let fields = schema
@@ -513,7 +529,7 @@ mod tests {
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
-            @r###"
+            @r#"
         [
             ConnectDirectiveArguments {
                 position: Field(
@@ -610,6 +626,7 @@ mod tests {
                 batch: None,
                 errors: None,
                 is_success: None,
+                mapping_only: false,
             },
             ConnectDirectiveArguments {
                 position: Field(
@@ -732,9 +749,10 @@ mod tests {
                 batch: None,
                 errors: None,
                 is_success: None,
+                mapping_only: false,
             },
         ]
-        "###
+        "#
         );
     }
 
