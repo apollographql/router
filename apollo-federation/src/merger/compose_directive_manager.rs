@@ -44,8 +44,8 @@ pub(crate) struct ComposeDirectiveManager {
     merge_directive_map: IndexMap<String, IndexSet<Name>>,
     /// Map of (original) directive name to the latest definition found across subgraphs
     latest_directive_definition_map: IndexMap<Name, DirectiveDefinition>,
-    /// Map of identities to the `Link` with latest version and the subgraph where it is applied
-    latest_feature_map: IndexMap<Identity, (Arc<Link>, String)>,
+    /// Map of identities to the `Link` with latest version and all subgraph names at that version
+    latest_feature_map: IndexMap<Identity, (Arc<Link>, Vec<String>)>,
     /// Map of identities to the list of directives imported from that identity across all
     /// subgraphs. The directive names are recorded in a map of original name to aliased name.
     directives_for_feature_map: IndexMap<Identity, IndexMap<Name, Name>>,
@@ -73,6 +73,12 @@ impl MergeDirectiveItem {
                 .and_then(|s| s.strip_prefix("__"))
             {
                 Name::new(suffix).unwrap_or_else(|_| directive_name.clone())
+            } else if directive_name == spec_name {
+                // The directive name matches the spec's name-in-schema (the "default"
+                // spec directive, which inherits the spec alias when the spec is aliased
+                // via `@link(as: "...")`). Its canonical name within the spec is the
+                // URL's identity name — not the alias.
+                link.link.url.identity.name.clone()
             } else {
                 directive_name.clone()
             }
@@ -380,43 +386,132 @@ impl ComposeDirectiveManager {
             }
         }
 
-        // Find the latest version for each imported feature that is being composed
+        // Find the latest version and all subgraphs at that version for each composed feature.
+        // Directive definitions are sourced exclusively from subgraphs at the latest version:
+        // if a subgraph at an older (but still compatible) minor version composes a directive
+        // whose definition is absent from every latest-version subgraph, composition fails with
+        // an explicit error rather than silently using an outdated definition.
         for (identity, linked_elements) in items_by_identity.iter_all() {
             if wont_merge_features.contains(identity) {
                 continue;
             }
 
-            for linked_element in linked_elements {
-                let latest = self.latest_feature_map.entry(identity.clone()).or_insert((
-                    linked_element.link.link.clone(),
-                    linked_element.subgraph_name.clone(),
-                ));
+            // Step 1: find the highest minor version among all composed items for this identity.
+            // Major version mismatches were already caught above, so all elements share the same
+            // major version here.
+            let Some(latest_minor) = linked_elements
+                .iter()
+                .map(|item| item.link.link.url.version.minor)
+                .max()
+            else {
+                continue;
+            };
 
-                if linked_element
-                    .link
-                    .link
-                    .url
-                    .version
-                    .satisfies(&latest.0.url.version)
-                {
-                    *latest = (
-                        linked_element.link.link.clone(),
-                        linked_element.subgraph_name.clone(),
-                    );
-                    self.latest_directive_definition_map.insert(
-                        linked_element.aliased_directive_name().clone(),
-                        linked_element.definition.clone(),
-                    );
-                    self.directives_for_feature_map
-                        .entry(identity.clone())
-                        .or_default()
-                        .insert(
-                            linked_element.original_directive_name().clone(),
-                            linked_element.aliased_directive_name().clone(),
-                        );
-                } else {
-                    wont_merge_features.insert(identity.clone());
+            // Step 2: collect all subgraph names (and a representative link) at the latest version.
+            let mut latest_link: Option<Arc<Link>> = None;
+            let mut latest_subgraph_names: Vec<String> = Vec::new();
+            for item in linked_elements.iter() {
+                if item.link.link.url.version.minor == latest_minor {
+                    if latest_link.is_none() {
+                        latest_link = Some(item.link.link.clone());
+                    }
+                    if !latest_subgraph_names.contains(&item.subgraph_name) {
+                        latest_subgraph_names.push(item.subgraph_name.clone());
+                    }
                 }
+            }
+            let latest_link = latest_link.unwrap(); // safe: max() succeeded above
+
+            self.latest_feature_map.insert(
+                identity.clone(),
+                (latest_link, latest_subgraph_names.clone()),
+            );
+
+            // Step 3: build the set of (original_name → aliased_name) pairs being composed from
+            // this identity across all versions, then find a definition for each from a
+            // latest-version subgraph.
+            let mut composed_directive_pairs: IndexMap<Name, Name> = IndexMap::new();
+            for item in linked_elements.iter() {
+                composed_directive_pairs
+                    .entry(item.original_directive_name().clone())
+                    .or_insert_with(|| item.aliased_directive_name().clone());
+            }
+
+            // Collect definitions before committing to maps so that a single failure for any
+            // directive in this identity causes the entire identity to be marked wont_merge
+            // (matching the TypeScript behavior) without leaving partial entries behind.
+            let mut pending_definitions: Vec<(Name, DirectiveDefinition)> = Vec::new();
+            let mut pending_identity_directives: IndexMap<Name, Name> = IndexMap::new();
+            let mut identity_has_error = false;
+
+            for (original_name, aliased_name) in &composed_directive_pairs {
+                // First try: a latest-version item already carries the definition (the subgraph
+                // actively composes this directive at the latest version).
+                let definition = linked_elements
+                    .iter()
+                    .filter(|item| {
+                        item.link.link.url.version.minor == latest_minor
+                            && item.original_directive_name() == original_name
+                    })
+                    .map(|item| item.definition.clone())
+                    .next()
+                    // Second try: the subgraph is at the latest version but does not itself
+                    // compose this directive — look directly in its schema. This covers the case
+                    // where a later-version subgraph defines a directive from an older subgraph's
+                    // composed set, allowing the definition to be safely lifted to the supergraph.
+                    .or_else(|| {
+                        latest_subgraph_names.iter().find_map(|sg_name| {
+                            let subgraph = subgraphs.iter().find(|s| s.name == *sg_name)?;
+                            subgraph
+                                .schema()
+                                .schema()
+                                .directive_definitions
+                                .get(aliased_name.as_str())
+                                .map(|d| d.as_ref().clone())
+                        })
+                    });
+
+                match definition {
+                    Some(def) => {
+                        pending_definitions.push((aliased_name.clone(), def));
+                        pending_identity_directives
+                            .insert(original_name.clone(), aliased_name.clone());
+                    }
+                    None => {
+                        identity_has_error = true;
+                        wont_merge_features.insert(identity.clone());
+                        let plural = if latest_subgraph_names.len() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        };
+                        let do_does = if latest_subgraph_names.len() == 1 {
+                            "does"
+                        } else {
+                            "do"
+                        };
+                        let names = latest_subgraph_names
+                            .iter()
+                            .map(|s| format!("\"{s}\""))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        error_reporter.add_error(CompositionError::DirectiveCompositionError {
+                            message: format!(
+                                "Core feature \"{identity}\" in subgraph{plural} \
+                                 ({names}) {do_does} not have a directive definition \
+                                 for \"@{aliased_name}\""
+                            ),
+                        });
+                    }
+                }
+            }
+
+            if !identity_has_error {
+                for (name, def) in pending_definitions {
+                    self.latest_directive_definition_map.insert(name, def);
+                }
+                self.directives_for_feature_map
+                    .insert(identity.clone(), pending_identity_directives);
             }
         }
 
