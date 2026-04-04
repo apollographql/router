@@ -395,8 +395,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         });
 
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
-                                        let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
+
+                                        // Just call the function to mutate the builder in-place. Do not assign the result.
+                                        configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        
+                                        // Call serve on the PARENT builder
+                                        let connection = builder.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     }
                                     #[cfg(unix)]
@@ -408,8 +412,12 @@ pub(super) fn serve_router_on_listen_addr(
                                             app.clone().call(request)
                                         });
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
-                                        let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
+
+                                        // Just call the function to mutate the builder in-place. Do not assign the result.
+                                        configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        
+                                        // Call serve on the PARENT builder
+                                        let connection = builder.serve_connection_with_upgrades(tokio_stream, hyper_service);
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     },
                                     NetworkStream::Tls { stream, acceptor } => {
@@ -442,7 +450,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             .expect(
                                                 "this should not fail unless the socket is invalid",
                                             );
-
+                                        
                                         let hyper_service = hyper::service::service_fn(move |request| {
                                             app.clone().call(request)
                                         });
@@ -450,9 +458,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         let tokio_stream = TokioIo::new(tls_stream);
 
                                         let mut builder = Builder::new(TokioExecutor::new());
-                                        let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
-                                        let connection = config
-                                            .serve_connection_with_upgrades(tokio_stream, hyper_service);
+
+                                        // Just call the function to mutate the builder in-place. Do not assign the result.
+                                        configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
+                                        
+                                        // Call serve on the PARENT builder
+                                        let connection = builder.serve_connection_with_upgrades(tokio_stream, hyper_service);
 
                                         handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     }
@@ -480,12 +491,12 @@ pub(super) fn serve_router_on_listen_addr(
 /// NOTE: centralize all connection configuration changes here so that the behavior of the
 /// connections remains in-step
 fn configure_connection(
-    conn_builder: &mut Builder<TokioExecutor>,
+    conn_builder: &mut Builder<TokioExecutor>, // The Parent
     header_read_timeout: Duration,
     opt_max_http1_headers: Option<usize>,
     opt_max_http1_buf_size: Option<ByteSize>,
     opt_max_http2_headers_list_bytes: Option<ByteSize>,
-) -> Http1Builder<'_, TokioExecutor> {
+) { // No return value needed, we mutate conn_builder in place
     // NOTE: this is a builder that auto-detects http1/http2, so we can configure both and rely on
     // it to figure out whether we have an http1 or http2 connection
     let mut builder = conn_builder.http2();
@@ -514,7 +525,6 @@ fn configure_connection(
         builder.max_buf_size(max_buf_size);
     }
 
-    builder
 }
 
 #[derive(Clone)]
