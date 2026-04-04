@@ -1149,6 +1149,9 @@ impl TypeDefinitionPosition {
         }
 
         match self {
+            TypeDefinitionPosition::Scalar(_) => {
+                schema.referencers.rename_scalar_type(&old_name, &new_name);
+            }
             TypeDefinitionPosition::Object(_) => {
                 schema.referencers.rename_object_type(&old_name, &new_name);
             }

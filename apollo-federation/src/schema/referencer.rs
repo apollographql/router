@@ -317,6 +317,33 @@ impl Referencers {
         arguments.extend(updated_arguments);
     }
 
+    pub(crate) fn rename_scalar_type(&mut self, old_name: &Name, new_name: &Name) {
+        for (_directive_name, directive_refs) in self.directives.iter_mut() {
+            Self::update_scalar_type_positions(
+                &mut directive_refs.scalar_types,
+                old_name,
+                new_name,
+            );
+        }
+    }
+
+    fn update_scalar_type_positions(
+        types: &mut IndexSet<ScalarTypeDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_types: Vec<_> = types
+            .iter()
+            .filter(|t| &t.type_name == old_type_name)
+            .map(|_| ScalarTypeDefinitionPosition {
+                type_name: new_type_name.clone(),
+            })
+            .collect();
+
+        types.retain(|t| &t.type_name != old_type_name);
+        types.extend(updated_types);
+    }
+
     pub(crate) fn rename_interface_type(&mut self, old_name: &Name, new_name: &Name) {
         for (_scalar_name, scalar_refs) in self.scalar_types.iter_mut() {
             Self::update_interface_field_positions(
