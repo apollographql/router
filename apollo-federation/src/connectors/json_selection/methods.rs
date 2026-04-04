@@ -60,6 +60,7 @@ pub(super) enum ArrowMethod {
     Mul,
     Div,
     Mod,
+    PropertiesToCamelCase,
 
     // Future methods:
     TypeOf,
@@ -174,6 +175,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Mul => &public::MulMethod,
             Self::Div => &public::DivMethod,
             Self::Mod => &public::ModMethod,
+            Self::PropertiesToCamelCase => &public::PropertiesToCamelCaseMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -231,6 +233,7 @@ impl ArrowMethod {
             "contains" => Some(Self::Contains),
             "toString" => Some(Self::ToString),
             "parseInt" => Some(Self::ParseInt),
+            "propertiesToCamelCase" => Some(Self::PropertiesToCamelCase),
             _ => None,
         };
 
@@ -278,6 +281,7 @@ impl ArrowMethod {
                 | Self::Mul
                 | Self::Div
                 | Self::Mod
+                | Self::PropertiesToCamelCase
         )
     }
 }
