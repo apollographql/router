@@ -158,6 +158,14 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.operations.coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
   - `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
 
+## Traffic shaping
+
+- `apollo.router.operations.traffic_shaping.timeout` - Requests that were terminated by the traffic shaping timeout layer.
+  - `subgraph.service.name`: string (set to name of the subgraph if terminated at subgraph layer)
+
+- `apollo.router.operations.traffic_shaping.load_shed` - Requests that were shed by the traffic shaping load shed layer due to buffer saturation.
+  - `subgraph.service.name`: string (set to name of the subgraph if terminated at subgraph layer)
+
 ## Performance
 
 - `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
