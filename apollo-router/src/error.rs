@@ -492,7 +492,7 @@ impl From<QueryPlannerError> for Response {
 /// Error in the schema.
 #[derive(Debug, Error, Display, derive_more::From)]
 #[non_exhaustive]
-pub(crate) enum SchemaError {
+pub enum SchemaError {
     /// URL parse error for subgraph {0}: {1}
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
@@ -515,8 +515,8 @@ pub(crate) enum SchemaError {
 
 /// Collection of schema validation errors.
 #[derive(Debug)]
-pub(crate) struct ParseErrors {
-    pub(crate) errors: DiagnosticList,
+pub struct ParseErrors {
+    pub errors: DiagnosticList,
 }
 
 impl std::fmt::Display for ParseErrors {
@@ -565,12 +565,12 @@ impl IntoGraphQLErrors for ParseErrors {
 
 /// Collection of schema validation errors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ValidationErrors {
-    pub(crate) errors: Vec<apollo_compiler::response::GraphQLError>,
+pub struct ValidationErrors {
+    pub errors: Vec<apollo_compiler::response::GraphQLError>,
 }
 
 impl ValidationErrors {
-    pub(crate) fn into_graphql_errors_infallible(self) -> Vec<Error> {
+    pub fn into_graphql_errors_infallible(self) -> Vec<Error> {
         self.errors
             .iter()
             .map(|diagnostic| {

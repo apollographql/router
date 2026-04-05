@@ -43,7 +43,7 @@ pub(crate) mod progressive_override;
 mod record_replay;
 pub(crate) mod response_cache;
 pub(crate) mod rhai;
-pub(crate) mod subscription;
+pub mod subscription;
 pub(crate) mod telemetry;
 #[cfg(test)]
 pub(crate) mod test;

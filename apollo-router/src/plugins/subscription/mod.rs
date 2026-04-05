@@ -30,7 +30,8 @@ use crate::services::SubgraphResponse;
 mod callback;
 mod execution;
 mod fetch;
-pub(crate) mod notification;
+pub mod notification;
+pub mod provider;
 // Only pub(crate) for tests: tests that rely on subscription internals should probably
 // be moved into the plugin.
 pub(crate) mod subgraph;
@@ -110,10 +111,20 @@ pub(crate) struct SubscriptionModeConfig {
     pub(crate) callback: Option<CallbackMode>,
     /// Enable passthrough mode for subgraph(s)
     pub(crate) passthrough: Option<SubgraphPassthroughMode>,
+    /// Enable custom mode for subgraph(s)
+    pub(crate) custom: Option<provider::CustomMode>,
 }
 
 impl SubscriptionModeConfig {
     pub(crate) fn get_subgraph_config(&self, service_name: &str) -> Option<SubscriptionMode> {
+        if let Some(custom_cfg) = &self.custom {
+            if custom_cfg.subgraphs.contains(&service_name.to_string())
+                || custom_cfg.subgraphs.is_empty()
+            {
+                return SubscriptionMode::Custom(custom_cfg.clone()).into();
+            }
+        }
+
         if let Some(passthrough_cfg) = &self.passthrough {
             if let Some(subgraph_cfg) = passthrough_cfg.subgraphs.get(service_name) {
                 return SubscriptionMode::Passthrough(subgraph_cfg.clone()).into();
@@ -155,6 +166,8 @@ pub(crate) enum SubscriptionMode {
     Callback(CallbackMode),
     /// Using websocket to directly connect to subgraph
     Passthrough(WebSocketConfiguration),
+    /// Custom mode
+    Custom(provider::CustomMode),
 }
 
 /// Using a callback url
@@ -286,7 +299,9 @@ impl Plugin for Subscription {
         service: crate::services::subgraph::BoxService,
     ) -> crate::services::subgraph::BoxService {
         let enabled = self.config.enabled
-            && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
+            && (self.config.mode.callback.is_some()
+                || self.config.mode.passthrough.is_some()
+                || self.config.mode.custom.is_some());
         ServiceBuilder::new()
             .checkpoint(move |req: SubgraphRequest| {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
@@ -359,6 +374,42 @@ mod tests {
     use crate::services::router;
     use crate::services::router::body;
     use crate::uplink::license_enforcement::LicenseState;
+
+    #[test]
+    fn test_custom_mode_config() {
+        use std::collections::HashSet;
+
+        use crate::plugins::subscription::provider::CustomMode;
+
+        let config = SubscriptionModeConfig {
+            callback: None,
+            passthrough: None,
+            custom: Some(CustomMode {
+                provider_name: "test_provider".to_string(),
+                subgraphs: vec!["custom_subgraph".to_string()].into_iter().collect(),
+                config: serde_json::Value::Null,
+            }),
+        };
+
+        let mode = config.get_subgraph_config("custom_subgraph");
+        assert!(matches!(mode, Some(SubscriptionMode::Custom(_))));
+
+        let mode2 = config.get_subgraph_config("other_subgraph");
+        assert!(matches!(mode2, None));
+
+        let config_all = SubscriptionModeConfig {
+            callback: None,
+            passthrough: None,
+            custom: Some(CustomMode {
+                provider_name: "test_provider".to_string(),
+                subgraphs: HashSet::new(),
+                config: serde_json::Value::Null,
+            }),
+        };
+
+        let mode3 = config_all.get_subgraph_config("any_subgraph");
+        assert!(matches!(mode3, Some(SubscriptionMode::Custom(_))));
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_callback_endpoint() {

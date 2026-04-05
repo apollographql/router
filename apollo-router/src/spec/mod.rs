@@ -6,7 +6,7 @@ mod field_type;
 mod fragments;
 pub(crate) mod operation_limits;
 pub(crate) mod query;
-mod schema;
+pub mod schema;
 mod selection;
 
 use displaydoc::Display;
@@ -15,7 +15,7 @@ pub(crate) use fragments::*;
 pub(crate) use query::Query;
 pub(crate) use query::TYPENAME;
 pub(crate) use schema::QueryHash;
-pub(crate) use schema::Schema;
+pub use schema::Schema;
 pub(crate) use schema::SchemaHash;
 pub(crate) use selection::*;
 use serde::Deserialize;

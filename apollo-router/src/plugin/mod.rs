@@ -76,7 +76,7 @@ pub struct PluginInit<T> {
     /// Router Supergraph Schema ID (SHA256 of the SDL))
     pub(crate) supergraph_schema_id: Arc<String>,
     /// The supergraph schema (parsed)
-    pub(crate) supergraph_schema: Arc<Valid<Schema>>,
+    pub supergraph_schema: Arc<Valid<Schema>>,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
@@ -84,7 +84,7 @@ pub struct PluginInit<T> {
     /// Launch ID
     pub(crate) launch_id: Option<Arc<String>>,
 
-    pub(crate) notify: Notify<String, graphql::Response>,
+    pub notify: Notify<String, graphql::Response>,
 
     /// User's license's state, including any limits of use
     pub(crate) license: Arc<LicenseState>,
