@@ -761,6 +761,45 @@ expression: "&schema"
         }
       ]
     },
+    "BodyConf": {
+      "anyOf": [
+        {
+          "description": "Send entire body (true) or nothing (false)",
+          "type": "boolean"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/BodyFieldsConf"
+            }
+          ],
+          "description": "Send specific fields"
+        }
+      ],
+      "description": "Configuration for which body fields to send to coprocessor"
+    },
+    "BodyFieldsConf": {
+      "additionalProperties": false,
+      "description": "Configuration for selective body fields",
+      "properties": {
+        "data": {
+          "default": false,
+          "description": "Send the data field",
+          "type": "boolean"
+        },
+        "errors": {
+          "default": false,
+          "description": "Send the errors field",
+          "type": "boolean"
+        },
+        "extensions": {
+          "default": false,
+          "description": "Send the extensions field",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "CSRFConfig": {
       "additionalProperties": false,
       "description": "CSRF protection configuration.\n\nSee <https://owasp.org/www-community/attacks/csrf> for an explanation on CSRF attacks.",
@@ -3803,9 +3842,12 @@ expression: "&schema"
       "description": "What information is passed to a router request/response stage",
       "properties": {
         "body": {
-          "default": false,
-          "description": "Send the body",
-          "type": "boolean"
+          "allOf": [
+            {
+              "$ref": "#/definitions/BodyConf"
+            }
+          ],
+          "description": "Send the body (can be true/false or selective with data/errors/extensions)"
         },
         "context": {
           "allOf": [
@@ -6600,6 +6642,11 @@ expression: "&schema"
             "array",
             "null"
           ]
+        },
+        "allow_missing_exp": {
+          "default": false,
+          "description": "Allow tokens without an `exp` claim for this JWKS.\n\nExpired tokens with `exp` are still rejected.\nEnable only when required by your issuer and with strict issuer/audience constraints.",
+          "type": "boolean"
         },
         "audiences": {
           "description": "Expected audiences for tokens verified by that JWKS\n\nIf not specified, the audience will not be checked.",
@@ -10001,9 +10048,12 @@ expression: "&schema"
       "description": "What information is passed to a subgraph request/response stage",
       "properties": {
         "body": {
-          "default": false,
-          "description": "Send the body",
-          "type": "boolean"
+          "allOf": [
+            {
+              "$ref": "#/definitions/BodyConf"
+            }
+          ],
+          "description": "Send the body (can be true/false or selective with data/errors/extensions)"
         },
         "condition": {
           "allOf": [
@@ -11230,9 +11280,12 @@ expression: "&schema"
       "description": "What information is passed to a router request/response stage",
       "properties": {
         "body": {
-          "default": false,
-          "description": "Send the body",
-          "type": "boolean"
+          "allOf": [
+            {
+              "$ref": "#/definitions/BodyConf"
+            }
+          ],
+          "description": "Send the body (can be true/false or selective with data/errors/extensions)"
         },
         "condition": {
           "allOf": [
