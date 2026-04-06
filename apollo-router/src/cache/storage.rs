@@ -71,36 +71,17 @@ where
         config: Option<RedisCache>,
         caller: &'static str,
     ) -> Result<Self, BoxError> {
-        Ok(Self {
-            cache_size_gauge: Default::default(),
-            cache_estimated_storage_gauge: Default::default(),
-            cache_size: Default::default(),
-            cache_estimated_storage: Default::default(),
-            caller,
-            inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: if let Some(config) = config {
-                let required_to_start = config.required_to_start;
-                // NOTE: this is a bit of a dance, but we have to create a RedisCacheStorage before we can
-                // create its wrapped client because we want that client to be replaceable and need a
-                // standalone data container for certain fields used for its creation (and thus
-                // recreation)
-                match RedisCacheStorage::new(config, caller).await {
-                    // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
-                    // for wrapped client
-                    Ok(storage) => match storage.create_client().await {
-                        Ok(storage_client) => Some(storage_client),
-                        Err(e) => {
-                            tracing::error!(
-                                cache = caller,
-                                e,
-                                "could not open connection to Redis for caching",
-                            );
-                            if required_to_start {
-                                return Err(e);
-                            }
-                            None
-                        }
-                    },
+        let maybe_redis_cache_storage = if let Some(config) = config {
+            let required_to_start = config.required_to_start;
+            // NOTE: this is a bit of a dance, but we have to create a RedisCacheStorage before we can
+            // create its wrapped client because we want that client to be replaceable and need a
+            // standalone data container for certain fields used for its creation (and thus
+            // recreation)
+            match RedisCacheStorage::new(config, caller).await {
+                // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
+                // for wrapped client
+                Ok(storage) => match storage.create_client().await {
+                    Ok(storage_client) => Some(storage_client),
                     Err(e) => {
                         tracing::error!(
                             cache = caller,
@@ -112,10 +93,31 @@ where
                         }
                         None
                     }
+                },
+                Err(e) => {
+                    tracing::error!(
+                        cache = caller,
+                        e,
+                        "could not open connection to Redis for caching",
+                    );
+                    if required_to_start {
+                        return Err(e);
+                    }
+                    None
                 }
-            } else {
-                None
-            },
+            }
+        } else {
+            None
+        };
+
+        Ok(Self {
+            cache_size_gauge: Default::default(),
+            cache_estimated_storage_gauge: Default::default(),
+            cache_size: Default::default(),
+            cache_estimated_storage: Default::default(),
+            caller,
+            inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
+            redis: maybe_redis_cache_storage,
         })
     }
 
