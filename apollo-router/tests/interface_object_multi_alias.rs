@@ -1,8 +1,8 @@
 //! Integration tests for @interfaceObject with multiple root-field aliases.
 //!
 //! Verifies that when the same root field is queried twice under different aliases,
-//! and @interfaceObject subgraphs contribute extra fields via entity fetches,
-//! nullable fields are not nullified in either alias result.
+//! and @interfaceObject subgraphs are present in the supergraph, nullable fields are
+//! not nullified in either alias result.
 //!
 //! Please ensure that any tests added to this file use the tokio multi-threaded
 //! test executor.
@@ -28,7 +28,7 @@ struct RequestAndResponse {
     response: Response,
 }
 
-fn setup(mocks: &[(&'static str, &'static str)]) -> TestHarness<'static> {
+fn setup(schema: &'static str, mocks: &[(&'static str, &'static str)]) -> TestHarness<'static> {
     let mut mocked_subgraphs = MockedSubgraphs::default();
     for (name, m) in mocks {
         let subgraph_mock: SubgraphMock = serde_json::from_str(m).unwrap();
@@ -49,14 +49,16 @@ fn setup(mocks: &[(&'static str, &'static str)]) -> TestHarness<'static> {
             "supergraph": { "generate_query_fragments": false },
         }})
         .unwrap()
-        .schema(include_str!(
-            "fixtures/interface_object_multi_alias/supergraph.graphql"
-        ))
+        .schema(schema)
         .extra_plugin(mocked_subgraphs)
 }
 
-async fn run(query: &str, mocks: &[(&'static str, &'static str)]) -> Response {
-    let supergraph_service = setup(mocks).build_supergraph().await.unwrap();
+async fn run(
+    schema: &'static str,
+    query: &str,
+    mocks: &[(&'static str, &'static str)],
+) -> Response {
+    let supergraph_service = setup(schema, mocks).build_supergraph().await.unwrap();
     let request = supergraph::Request::fake_builder()
         .query(query.to_string())
         .build()
@@ -95,6 +97,7 @@ async fn nullable_fields_not_null_with_two_aliases_and_two_interface_object_subg
     "#;
 
     let response = run(
+        include_str!("fixtures/interface_object_multi_alias/supergraph.graphql"),
         QUERY,
         &[
             ("OWNER", include_str!("fixtures/interface_object_multi_alias/owner.json")),
@@ -131,6 +134,67 @@ async fn nullable_fields_not_null_with_two_aliases_and_two_interface_object_subg
             assert!(
                 !item["rank"].is_null(),
                 "{alias}[].rank must not be null, got: {item}"
+            );
+        }
+    }
+}
+
+// Connection pattern: products returns ProductConnection { edges { node: Product! } }.
+// B and C are @interfaceObject with resolvable: false, so no entity fetches are
+// generated — all fields come from a single OWNER fetch.
+#[tokio::test(flavor = "multi_thread")]
+async fn nullable_fields_not_null_with_connection_pattern_and_two_interface_object_subgraphs() {
+    static QUERY: &str = r#"
+        query TwoAliasesConnection {
+            p1: products {
+                edges {
+                    node {
+                        __typename
+                        id
+                        name
+                    }
+                }
+            }
+            p2: products {
+                edges {
+                    node {
+                        __typename
+                        id
+                        name
+                    }
+                }
+            }
+        }
+    "#;
+
+    // Only OWNER needed — B and C are resolvable: false with no extra fields,
+    // so the router generates no entity fetches for them.
+    let response = run(
+        include_str!("fixtures/interface_object_multi_alias/supergraph_connection.graphql"),
+        QUERY,
+        &[("OWNER", include_str!("fixtures/interface_object_multi_alias/owner_connection.json"))],
+    )
+    .await;
+
+    assert!(
+        response.errors.is_empty(),
+        "expected no errors, got: {:?}",
+        response.errors
+    );
+
+    let data = response.data.as_ref().expect("expected data");
+
+    // Both aliases must have non-null nullable fields.
+    for alias in &["p1", "p2"] {
+        let edges = data[alias]["edges"]
+            .as_array()
+            .expect(&format!("{alias}.edges should be an array"));
+        assert!(!edges.is_empty(), "{alias}.edges should be non-empty");
+        for edge in edges {
+            let node = &edge["node"];
+            assert!(
+                !node["name"].is_null(),
+                "{alias}.edges[].node.name must not be null, got: {node}"
             );
         }
     }
