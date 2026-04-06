@@ -83,6 +83,7 @@ use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
+use crate::schema::same_type;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
 use crate::schema::validators::access_control::validate_transitive_access_control_requirements_in_the_supergraph;
@@ -1918,7 +1919,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 continue;
             };
 
-            if Self::same_type(ty, source_ty) {
+            if same_type(ty, source_ty) {
                 trace!("Types are identical");
                 continue;
             } else if let Ok(true) = self.is_strict_subtype(ty, source_ty) {
@@ -2090,18 +2091,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             // Store updated usage
             self.enum_usages_mut()
                 .insert(base_type_name.to_string(), new_usage);
-        }
-    }
-
-    fn same_type(dest_type: &Type, source_type: &Type) -> bool {
-        match (dest_type, source_type) {
-            (Type::Named(n1), Type::Named(n2)) => n1 == n2,
-            (Type::NonNullNamed(n1), Type::NonNullNamed(n2)) => n1 == n2,
-            (Type::List(inner1), Type::List(inner2)) => Self::same_type(inner1, inner2),
-            (Type::NonNullList(inner1), Type::NonNullList(inner2)) => {
-                Self::same_type(inner1, inner2)
-            }
-            _ => false,
         }
     }
 
