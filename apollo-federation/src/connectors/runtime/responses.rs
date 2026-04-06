@@ -699,3 +699,39 @@ impl MappedResponse {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use http::HeaderMap;
+    use http::HeaderValue;
+    use serde_json_bytes::Value;
+
+    use super::deserialize_response;
+
+    fn headers_with(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (k, v) in pairs {
+            map.insert(
+                http::header::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        map
+    }
+
+    #[test]
+    fn empty_body_no_content_length_returns_null() {
+        // Spec-compliant 204: no Content-Length header, no body.
+        let headers = HeaderMap::new();
+        let result = deserialize_response(b"", &headers).unwrap();
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn empty_body_with_content_length_zero_returns_null() {
+        // Non-compliant server that sends Content-Length: 0 on a 204.
+        let headers = headers_with(&[("content-length", "0")]);
+        let result = deserialize_response(b"", &headers).unwrap();
+        assert_eq!(result, Value::Null);
+    }
+}
