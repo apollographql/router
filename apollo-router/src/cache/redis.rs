@@ -3,6 +3,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -55,6 +56,7 @@ const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "rediss-sentinel",
 ];
 
+static CLIENT_RECREATION_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 /// Timeout applied to internal Redis operations, such as TCP connection initialization, TLS handshakes, AUTH or HELLO, cluster health checks, etc.
 // NOTE: In practice we've found that 5s is too low, so we've set it to 10s. Do some sanity checking before tweaking it to a lower value
 const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -617,24 +619,46 @@ impl RedisCacheStorage {
         match maybe_client {
             Some(client) => Ok(client),
             None => {
-                let new_inner = match self.create_inner_client().await {
-                    Ok(new_inner) => new_inner,
-                    Err(e) => {
-                        let error = RedisError::new(
-                            RedisErrorKind::Unknown,
-                            format!("Error attempting to recreate client: {e:?}"),
-                        );
-                        record_redis_error(&error, self.redis_client_config.caller, "client");
-                        return Err(error);
-                    }
-                };
+                if !(CLIENT_RECREATION_IN_PROGRESS.load(Ordering::Relaxed)) {
+                    let _ = CLIENT_RECREATION_IN_PROGRESS.compare_exchange(
+                        false,
+                        true,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    );
+                    let new_inner = match self.create_inner_client().await {
+                        Ok(new_inner) => new_inner,
+                        Err(e) => {
+                            let error = RedisError::new(
+                                RedisErrorKind::Unknown,
+                                format!("Error attempting to recreate client: {e:?}"),
+                            );
+                            record_redis_error(&error, self.redis_client_config.caller, "client");
 
-                {
-                    let mut guard = self.inner.write();
-                    *guard = new_inner;
-                    if let Some(inner) = guard.as_ref() {
-                        inner.activate();
+                            let _ = CLIENT_RECREATION_IN_PROGRESS.compare_exchange(
+                                true,
+                                false,
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                            );
+                            return Err(error);
+                        }
+                    };
+
+                    {
+                        let mut guard = self.inner.write();
+                        *guard = new_inner;
+                        if let Some(inner) = guard.as_ref() {
+                            inner.activate();
+                        }
                     }
+
+                    let _ = CLIENT_RECREATION_IN_PROGRESS.compare_exchange(
+                        true,
+                        false,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    );
                 }
 
                 // rather than get into either recursion or a loop, we just return an error and let
@@ -651,48 +675,7 @@ impl RedisCacheStorage {
     }
 
     pub(crate) async fn pipeline(&self) -> Result<Pipeline<Client>, RedisError> {
-        // WARN: this looks funky but is important to leave alone: this creates a read guard, gets
-        // the client out of the pool, and then drops the guard; this avoids a deadlock below when
-        // we try to take a write guard out in scenarios where we're recreating the client
-        let maybe_pipeline = {
-            let pool = self.inner.read();
-            pool.as_ref().map(|pool| pool.next().pipeline())
-        };
-
-        match maybe_pipeline {
-            Some(pipeline) => Ok(pipeline),
-            None => {
-                let new_inner = match self.create_inner_client().await {
-                    Ok(new_inner) => new_inner,
-                    Err(e) => {
-                        let error = RedisError::new(
-                            RedisErrorKind::Unknown,
-                            format!("Error attempting to recreate client: {e:?}"),
-                        );
-                        record_redis_error(&error, self.redis_client_config.caller, "client");
-                        return Err(error);
-                    }
-                };
-
-                {
-                    let mut guard = self.inner.write();
-                    *guard = new_inner;
-                    if let Some(inner) = guard.as_ref() {
-                        inner.activate();
-                    }
-                }
-
-                // rather than get into either recursion or a loop, we just return an error and let
-                // the current attempt to reach redis fail. We have a new client waiting for the
-                // next attempt, so this should be a temporary failure
-                let error = RedisError::new(
-                    RedisErrorKind::Unknown,
-                    "client being recreated after connection interrupt",
-                );
-                record_redis_error(&error, self.redis_client_config.caller, "client");
-                Err(error)
-            }
-        }
+        Ok(self.client().await?.pipeline())
     }
 
     fn expiration(&self, ttl: Option<Duration>) -> Option<Expiration> {
@@ -1196,6 +1179,7 @@ mod test {
     ))]
     mod test_against_redis {
         use std::collections::HashMap;
+        use std::sync::OnceLock;
 
         use fred::interfaces::ClientLike;
         use fred::types::cluster::ClusterRouting;
@@ -1204,12 +1188,23 @@ mod test {
         use rand::RngExt as _;
         use rand::distr::Alphanumeric;
         use serde_json::json;
+        use tokio::sync::Mutex;
         use tower::BoxError;
         use uuid::Uuid;
 
         use crate::cache::redis::RedisCacheStorage;
         use crate::cache::redis::RedisKey;
         use crate::cache::redis::RedisValue;
+
+        /// Use to force a test to run serially; there's a static in this file for representing
+        /// client recreation and running all these tests in parallel plays havoc with the behavior
+        /// of that static. So, we force them to run serially by taking out a lock
+        ///
+        /// NOTE: make sure to add this to any test that touches client creation
+        fn lock_for_static() -> &'static Mutex<()> {
+            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+            LOCK.get_or_init(|| Mutex::new(()))
+        }
 
         fn random_namespace() -> String {
             Uuid::new_v4().to_string()
@@ -1244,6 +1239,7 @@ mod test {
         async fn new_starts_empty_and_create_client_populates(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
             assert!(storage.inner.read().is_none());
 
@@ -1258,8 +1254,8 @@ mod test {
             #[values(true, false)] clustered: bool,
             #[values("client", "pipeline")] method: &str,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
-
             storage.inner.write().take();
             assert!(storage.inner.read().is_none());
 
@@ -1268,6 +1264,7 @@ mod test {
                 "pipeline" => storage.pipeline().await.is_err(),
                 _ => unreachable!(),
             };
+
             assert!(first_call_failed, "expected error during recreation");
             assert!(storage.inner.read().is_some());
 
@@ -1285,6 +1282,7 @@ mod test {
         async fn client_works_after_recreation(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
 
             let key = RedisKey("recreation_test_key".to_string());
@@ -1310,6 +1308,7 @@ mod test {
             #[values(true, false)] clustered: bool,
             #[values("client", "pipeline")] method: &str,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
             storage.activate();
 
@@ -1358,6 +1357,7 @@ mod test {
         async fn activate_on_none_inner_is_noop(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
             assert!(storage.inner.read().is_none());
             storage.activate();
@@ -1370,6 +1370,7 @@ mod test {
         async fn activate_after_create_client_starts_metrics(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
 
             // before activate, metrics abort handle should be None
@@ -1405,6 +1406,7 @@ mod test {
         async fn activate_twice_does_not_orphan_old_task(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
             storage.activate();
 
@@ -1445,6 +1447,7 @@ mod test {
         async fn pipeline_operations_work_after_recreation(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
 
             storage.inner.write().take();
@@ -1476,6 +1479,7 @@ mod test {
         async fn clones_share_recreated_client(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
             let clone = storage.clone();
 
@@ -1496,6 +1500,7 @@ mod test {
         async fn concurrent_recreation_does_not_panic_or_deadlock(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
             storage.inner.write().take();
 
@@ -1523,6 +1528,7 @@ mod test {
             use fred::types::scan::Scanner;
             use futures::StreamExt;
 
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
             let key = RedisKey("scan_test_key".to_string());
             storage
@@ -1555,6 +1561,7 @@ mod test {
         /// `RedisCacheStorage` is well-behaved when operating against a cluster.
         #[tokio::test(flavor = "multi_thread")]
         async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let clustered = true;
             let storage = RedisCacheStorage::new(redis_config(clustered), "test_redis_storage")
                 .await?
@@ -1611,6 +1618,7 @@ mod test {
         async fn create_client_replaces_existing_inner(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
 
             let (old_heartbeat, old_watcher) = {
@@ -1642,6 +1650,7 @@ mod test {
         async fn independent_storages_simulate_config_reload(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let old_storage = create_and_connect(clustered).await?;
             let (old_heartbeat, old_watcher) = {
                 let guard = old_storage.inner.read();
@@ -1673,6 +1682,7 @@ mod test {
         async fn pool_shutdown_marks_inner_for_recreation(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
             assert!(storage.inner.read().is_some());
 
@@ -1706,6 +1716,7 @@ mod test {
         async fn test_get_multiple_is_ordered(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             let storage =
                 RedisCacheStorage::new(redis_config(clustered), "test_get_multiple_is_ordered")
                     .await?
