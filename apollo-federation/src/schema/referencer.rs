@@ -346,11 +346,7 @@ impl Referencers {
 
     pub(crate) fn rename_union_type(&mut self, old_name: &Name, new_name: &Name) {
         for (_directive_name, directive_refs) in self.directives.iter_mut() {
-            Self::update_union_type_positions(
-                &mut directive_refs.union_types,
-                old_name,
-                new_name,
-            );
+            Self::update_union_type_positions(&mut directive_refs.union_types, old_name, new_name);
         }
     }
 
@@ -373,16 +369,8 @@ impl Referencers {
 
     pub(crate) fn rename_enum_type(&mut self, old_name: &Name, new_name: &Name) {
         for (_directive_name, directive_refs) in self.directives.iter_mut() {
-            Self::update_enum_type_positions(
-                &mut directive_refs.enum_types,
-                old_name,
-                new_name,
-            );
-            Self::update_enum_value_positions(
-                &mut directive_refs.enum_values,
-                old_name,
-                new_name,
-            );
+            Self::update_enum_type_positions(&mut directive_refs.enum_types, old_name, new_name);
+            Self::update_enum_value_positions(&mut directive_refs.enum_values, old_name, new_name);
         }
     }
 
