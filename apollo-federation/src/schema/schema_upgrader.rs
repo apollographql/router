@@ -883,9 +883,12 @@ impl SchemaUpgrader {
 fn inner_upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Either<Subgraph<Expanded>, Subgraph<Upgraded>>>, Vec<CompositionError>> {
-    let all_fed_2 = subgraphs
+    if subgraphs
         .iter()
-        .all(|subgraph| subgraph.metadata().is_fed_2_schema());
+        .all(|subgraph| subgraph.metadata().is_fed_2_schema())
+    {
+        return Ok(subgraphs.into_iter().map(Either::Left).collect());
+    }
     // Maps type name → set of subgraph names with @interfaceObject on that type (fed2 subgraphs).
     let mut fed2_interface_object_types_to_subgraphs: IndexMap<Name, IndexSet<String>> =
         IndexMap::new();
@@ -907,18 +910,16 @@ fn inner_upgrade_subgraphs_if_necessary(
                 }
                 Ok(Either::Right(result.subgraph))
             } else {
-                if !all_fed_2 {
-                    subgraph
-                        .metadata()
-                        .interface_object_types()
-                        .iter()
-                        .for_each(|intf_object| {
-                            fed2_interface_object_types_to_subgraphs
-                                .entry(intf_object.clone())
-                                .or_default()
-                                .insert(subgraph.name.clone());
-                        });
-                }
+                subgraph
+                    .metadata()
+                    .interface_object_types()
+                    .iter()
+                    .for_each(|intf_object| {
+                        fed2_interface_object_types_to_subgraphs
+                            .entry(intf_object.clone())
+                            .or_default()
+                            .insert(subgraph.name.clone());
+                    });
                 Ok(Either::Left(subgraph))
             }
         })
