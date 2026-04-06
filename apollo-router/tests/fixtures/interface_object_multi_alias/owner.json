@@ -1,0 +1,19 @@
+{
+  "mocks": [
+    {
+      "request": {
+        "query": "{ p1: products { __typename id name } p2: products { __typename id name } }"
+      },
+      "response": {
+        "data": {
+          "p1": [
+            { "__typename": "Service", "id": "1", "name": "ServiceA" }
+          ],
+          "p2": [
+            { "__typename": "Bundle", "id": "2", "name": "BundleB" }
+          ]
+        }
+      }
+    }
+  ]
+}
