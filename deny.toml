@@ -30,10 +30,6 @@ ignore = [
     "RUSTSEC-2024-0388", # TODO replace the `derivative` crate with a maintained equivalent
     "RUSTSEC-2025-0134", # TODO figure out what to do with rustls-pemfile, which is no longer maintained (trans dep of hyper-rustls, tonic)
 
-    # Temporary exemption: the CRL matching bug requires a compromised trusted CA to exploit, and the
-    # router does not enable CRL revocation checking, so this code path is not reachable in practice.
-    "RUSTSEC-2026-0049", # TODO: update rustls-webpki (ROUTER-1675)
-
     # Temporary exemption: the router doesn't unpack or parse existing tarballs.
     "RUSTSEC-2026-0066", # TODO: update tar (ROUTER-1676)
     "RUSTSEC-2026-0067", # TODO: update tar (ROUTER-1676)
