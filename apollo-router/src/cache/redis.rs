@@ -811,19 +811,15 @@ impl RedisCacheStorage {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
 
         // NOTE: we need a writer, so don't use replicas() here
-        match self.client().await {
-            Ok(client) => {
-                let result: Result<(), _> = client
-                    .set(key, value, self.expiration(ttl), None, false)
-                    .await;
+        // NOTE: we've already recorded client failure errors in client(), so using if let Ok()
+        // rather than duplicating reporting/handling
+        if let Ok(client) = self.client().await {
+            let result: Result<(), _> = client
+                .set(key, value, self.expiration(ttl), None, false)
+                .await;
 
-                tracing::trace!("insert result {:?}", result);
-
-                if let Err(err) = result {
-                    self.record_query_error(&err);
-                }
-            }
-            Err(err) => {
+            tracing::trace!("insert result {:?}", result);
+            if let Err(err) = result {
                 self.record_query_error(&err);
             }
         }
