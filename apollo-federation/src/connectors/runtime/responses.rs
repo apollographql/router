@@ -39,12 +39,17 @@ pub enum HandleResponseError {
 
 /// Converts a response body into a json Value based on the Content-Type header.
 pub fn deserialize_response(body: &[u8], headers: &HeaderMap) -> Result<Value, DeserializeError> {
-    // If the body is obviously empty, don't try to parse it
-    if headers
-        .get(CONTENT_LENGTH)
-        .and_then(|len| len.to_str().ok())
-        .and_then(|s| s.parse::<usize>().ok())
-        .is_some_and(|content_length| content_length == 0)
+    // If the body is empty, there's nothing to parse. We check body.is_empty()
+    // directly because spec-compliant HTTP 204 responses must not include a
+    // Content-Length header — so we can't rely on that header alone to detect
+    // empty bodies. The Content-Length: 0 check is kept for non-compliant
+    // servers that do send it, but body.is_empty() covers both cases.
+    if body.is_empty()
+        || headers
+            .get(CONTENT_LENGTH)
+            .and_then(|len| len.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok())
+            .is_some_and(|content_length| content_length == 0)
     {
         return Ok(Value::Null);
     }
