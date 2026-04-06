@@ -1,0 +1,30 @@
+{
+  "mocks": [
+    {
+      "request": {
+        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { score } } }",
+        "variables": {
+          "representations": [{ "__typename": "Product", "id": "1" }]
+        }
+      },
+      "response": {
+        "data": {
+          "_entities": [{ "score": 9.5 }]
+        }
+      }
+    },
+    {
+      "request": {
+        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { score } } }",
+        "variables": {
+          "representations": [{ "__typename": "Product", "id": "2" }]
+        }
+      },
+      "response": {
+        "data": {
+          "_entities": [{ "score": 7.2 }]
+        }
+      }
+    }
+  ]
+}

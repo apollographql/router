@@ -1,0 +1,23 @@
+{
+  "mocks": [
+    {
+      "request": {
+        "query": "{ p1: products { edges { node { __typename id name } } } p2: products { edges { node { __typename id name } } } }"
+      },
+      "response": {
+        "data": {
+          "p1": {
+            "edges": [
+              { "node": { "__typename": "Service", "id": "1", "name": "ServiceA" } }
+            ]
+          },
+          "p2": {
+            "edges": [
+              { "node": { "__typename": "Service", "id": "1", "name": "ServiceA" } }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

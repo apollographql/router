@@ -28,7 +28,11 @@ struct RequestAndResponse {
     response: Response,
 }
 
-fn setup(schema: &'static str, mocks: &[(&'static str, &'static str)]) -> TestHarness<'static> {
+fn setup(
+    schema: &'static str,
+    mocks: &[(&'static str, &'static str)],
+    generate_query_fragments: bool,
+) -> TestHarness<'static> {
     let mut mocked_subgraphs = MockedSubgraphs::default();
     for (name, m) in mocks {
         let subgraph_mock: SubgraphMock = serde_json::from_str(m).unwrap();
@@ -46,7 +50,7 @@ fn setup(schema: &'static str, mocks: &[(&'static str, &'static str)]) -> TestHa
         .try_log_level("info")
         .configuration_json(json! {{
             "include_subgraph_errors": { "all": true },
-            "supergraph": { "generate_query_fragments": false },
+            "supergraph": { "generate_query_fragments": generate_query_fragments },
         }})
         .unwrap()
         .schema(schema)
@@ -58,7 +62,7 @@ async fn run(
     query: &str,
     mocks: &[(&'static str, &'static str)],
 ) -> Response {
-    let supergraph_service = setup(schema, mocks).build_supergraph().await.unwrap();
+    let supergraph_service = setup(schema, mocks, false).build_supergraph().await.unwrap();
     let request = supergraph::Request::fake_builder()
         .query(query.to_string())
         .build()
@@ -142,6 +146,7 @@ async fn nullable_fields_not_null_with_two_aliases_and_two_interface_object_subg
 // Connection pattern: products returns ProductConnection { edges { node: Product! } }.
 // B and C are @interfaceObject with resolvable: false, so no entity fetches are
 // generated — all fields come from a single OWNER fetch.
+// generate_query_fragments is OFF (baseline).
 #[tokio::test(flavor = "multi_thread")]
 async fn nullable_fields_not_null_with_connection_pattern_and_two_interface_object_subgraphs() {
     static QUERY: &str = r#"
@@ -185,6 +190,262 @@ async fn nullable_fields_not_null_with_connection_pattern_and_two_interface_obje
     let data = response.data.as_ref().expect("expected data");
 
     // Both aliases must have non-null nullable fields.
+    for alias in &["p1", "p2"] {
+        let edges = data[alias]["edges"]
+            .as_array()
+            .expect(&format!("{alias}.edges should be an array"));
+        assert!(!edges.is_empty(), "{alias}.edges should be non-empty");
+        for edge in edges {
+            let node = &edge["node"];
+            assert!(
+                !node["name"].is_null(),
+                "{alias}.edges[].node.name must not be null, got: {node}"
+            );
+        }
+    }
+}
+
+// Same as the baseline but both aliases return the same entity (same id/typename),
+// as would happen when querying a shared product catalog under two aliases.
+#[tokio::test(flavor = "multi_thread")]
+async fn nullable_fields_not_null_with_connection_pattern_same_entity_both_aliases() {
+    static QUERY: &str = r#"
+        query TwoAliasesConnection {
+            p1: products {
+                edges {
+                    node {
+                        __typename
+                        id
+                        name
+                    }
+                }
+            }
+            p2: products {
+                edges {
+                    node {
+                        __typename
+                        id
+                        name
+                    }
+                }
+            }
+        }
+    "#;
+
+    let response = run(
+        include_str!("fixtures/interface_object_multi_alias/supergraph_connection.graphql"),
+        QUERY,
+        &[("OWNER", include_str!("fixtures/interface_object_multi_alias/owner_connection_same_entity.json"))],
+    )
+    .await;
+
+    assert!(
+        response.errors.is_empty(),
+        "expected no errors, got: {:?}",
+        response.errors
+    );
+
+    let data = response.data.as_ref().expect("expected data");
+
+    for alias in &["p1", "p2"] {
+        let edges = data[alias]["edges"]
+            .as_array()
+            .expect(&format!("{alias}.edges should be an array"));
+        assert!(!edges.is_empty(), "{alias}.edges should be non-empty");
+        for edge in edges {
+            let node = &edge["node"];
+            assert!(
+                !node["name"].is_null(),
+                "{alias}.edges[].node.name must not be null, got: {node}"
+            );
+        }
+    }
+}
+
+// Same as above but with generate_query_fragments: true, which changes the shape
+// of the query sent to subgraphs and how responses are assembled.
+#[tokio::test(flavor = "multi_thread")]
+async fn nullable_fields_not_null_with_connection_pattern_generate_query_fragments() {
+    static QUERY: &str = r#"
+        query TwoAliasesConnection {
+            p1: products {
+                edges {
+                    node {
+                        __typename
+                        id
+                        name
+                    }
+                }
+            }
+            p2: products {
+                edges {
+                    node {
+                        __typename
+                        id
+                        name
+                    }
+                }
+            }
+        }
+    "#;
+
+    let response = setup(
+        include_str!("fixtures/interface_object_multi_alias/supergraph_connection.graphql"),
+        &[("OWNER", include_str!("fixtures/interface_object_multi_alias/owner_connection_fragments.json"))],
+        true,
+    )
+    .build_supergraph()
+    .await
+    .unwrap()
+    .oneshot(
+        supergraph::Request::fake_builder()
+            .query(QUERY.to_string())
+            .build()
+            .expect("valid request"),
+    )
+    .await
+    .unwrap()
+    .next_response()
+    .await
+    .unwrap();
+
+    assert!(
+        response.errors.is_empty(),
+        "expected no errors, got: {:?}",
+        response.errors
+    );
+
+    let data = response.data.as_ref().expect("expected data");
+
+    for alias in &["p1", "p2"] {
+        let edges = data[alias]["edges"]
+            .as_array()
+            .expect(&format!("{alias}.edges should be an array"));
+        assert!(!edges.is_empty(), "{alias}.edges should be non-empty");
+        for edge in edges {
+            let node = &edge["node"];
+            assert!(
+                !node["name"].is_null(),
+                "{alias}.edges[].node.name must not be null, got: {node}"
+            );
+        }
+    }
+}
+
+// Connection pattern + entity fetches: B contributes score, C contributes rank,
+// both resolvable: true. Tests alias path tracking through connection wrapper nodes.
+#[tokio::test(flavor = "multi_thread")]
+async fn nullable_fields_not_null_with_connection_pattern_and_entity_fetches() {
+    static QUERY: &str = r#"
+        query TwoAliasesConnectionWithFields {
+            p1: products {
+                edges {
+                    node {
+                        __typename
+                        id
+                        name
+                        score
+                        rank
+                    }
+                }
+            }
+            p2: products {
+                edges {
+                    node {
+                        __typename
+                        id
+                        name
+                        score
+                        rank
+                    }
+                }
+            }
+        }
+    "#;
+
+    let response = run(
+        include_str!("fixtures/interface_object_multi_alias/supergraph_connection_with_fields.graphql"),
+        QUERY,
+        &[
+            ("OWNER", include_str!("fixtures/interface_object_multi_alias/owner_connection_with_fields.json")),
+            ("B", include_str!("fixtures/interface_object_multi_alias/subgraph_b_connection.json")),
+            ("C", include_str!("fixtures/interface_object_multi_alias/subgraph_c_connection.json")),
+        ],
+    )
+    .await;
+
+    assert!(
+        response.errors.is_empty(),
+        "expected no errors, got: {:?}",
+        response.errors
+    );
+
+    let data = response.data.as_ref().expect("expected data");
+
+    for alias in &["p1", "p2"] {
+        let edges = data[alias]["edges"]
+            .as_array()
+            .expect(&format!("{alias}.edges should be an array"));
+        assert!(!edges.is_empty(), "{alias}.edges should be non-empty");
+        for edge in edges {
+            let node = &edge["node"];
+            assert!(!node["name"].is_null(), "{alias}.edges[].node.name must not be null, got: {node}");
+            assert!(!node["score"].is_null(), "{alias}.edges[].node.score must not be null, got: {node}");
+            assert!(!node["rank"].is_null(), "{alias}.edges[].node.rank must not be null, got: {node}");
+        }
+    }
+}
+
+// Same scenario but with explicit inline type conditions on the concrete types
+// (... on Service { name }, ... on Bundle { name }), which forces the
+// DoesFragmentTypeApply code path in apply_selection_set. Before the ROUTER-1598
+// fix, this path used field_type (Product interface) instead of the runtime
+// __typename, causing is_subtype("Service", "Product") = false and silently
+// dropping nullable fields.
+#[tokio::test(flavor = "multi_thread")]
+async fn nullable_fields_not_null_with_connection_pattern_inline_type_conditions() {
+    static QUERY: &str = r#"
+        query TwoAliasesInlineFragments {
+            p1: products {
+                edges {
+                    node {
+                        __typename
+                        id
+                        ... on Service { name }
+                        ... on Bundle { name }
+                        ... on Category { name }
+                    }
+                }
+            }
+            p2: products {
+                edges {
+                    node {
+                        __typename
+                        id
+                        ... on Service { name }
+                        ... on Bundle { name }
+                        ... on Category { name }
+                    }
+                }
+            }
+        }
+    "#;
+
+    let response = run(
+        include_str!("fixtures/interface_object_multi_alias/supergraph_connection.graphql"),
+        QUERY,
+        &[("OWNER", include_str!("fixtures/interface_object_multi_alias/owner_connection_inline_frags.json"))],
+    )
+    .await;
+
+    assert!(
+        response.errors.is_empty(),
+        "expected no errors, got: {:?}",
+        response.errors
+    );
+
+    let data = response.data.as_ref().expect("expected data");
+
     for alias in &["p1", "p2"] {
         let edges = data[alias]["edges"]
             .as_array()

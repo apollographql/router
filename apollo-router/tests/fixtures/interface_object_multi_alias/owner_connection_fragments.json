@@ -1,0 +1,23 @@
+{
+  "mocks": [
+    {
+      "request": {
+        "query": "{ p1: products { ...c } p2: products { ...c } } fragment a on Product { __typename id name } fragment b on ProductEdge { node { ...a } } fragment c on ProductConnection { edges { ...b } }"
+      },
+      "response": {
+        "data": {
+          "p1": {
+            "edges": [
+              { "node": { "__typename": "Service", "id": "1", "name": "ServiceA" } }
+            ]
+          },
+          "p2": {
+            "edges": [
+              { "node": { "__typename": "Bundle", "id": "2", "name": "BundleB" } }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
