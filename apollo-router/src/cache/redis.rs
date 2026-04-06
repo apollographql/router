@@ -382,9 +382,6 @@ impl RedisCacheStorage {
 
     /// Creates an inner client alongside some metadata (namespace, ttl, whether it's a clustered
     /// client, ttl reset) to create a fully fledged RedisCacheStorage
-    // NOTE: this splits up the actual inner's creation from the RedisCacheStorage creation because
-    // we need to have a way to recreate the inner client when it errors out but we don't need to
-    // recreate all of RedisCacheStorage
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn create_client(self) -> Result<Self, BoxError> {
         let inner = self.create_inner_client().await?;
@@ -393,6 +390,9 @@ impl RedisCacheStorage {
     }
 
     /// Creates the inner redis client for RedisCacheStorage
+    // NOTE: this splits up the actual inner's creation from the RedisCacheStorage creation because
+    // we need to have a way to recreate the inner client when it errors out but we don't need to
+    // recreate all of RedisCacheStorage
     async fn create_inner_client(&self) -> Result<Option<DropSafeRedisPool>, BoxError> {
         let pooled_client = Builder::from_config(self.redis_client_config.client_config.clone())
             .with_config(|client_config| {
