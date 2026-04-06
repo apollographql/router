@@ -1,0 +1,18 @@
+---
+source: apollo-federation/tests/composition/connectors.rs
+expression: api_schema_string
+---
+type Query {
+  resources: [Resource!]!
+  widgets: [Widget!]!
+}
+
+type Resource {
+  id: ID!
+  name: String!
+}
+
+type Widget {
+  id: ID!
+  name: String!
+}
