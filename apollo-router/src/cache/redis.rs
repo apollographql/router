@@ -3,6 +3,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -35,6 +36,7 @@ use fred::types::scan::ScanResult;
 use futures::Stream;
 use futures::future::join_all;
 use parking_lot::RwLock;
+use tokio::sync::Mutex;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
 use tower::BoxError;
@@ -56,7 +58,12 @@ const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "rediss-sentinel",
 ];
 
-static CLIENT_RECREATION_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+/// Gets a lock for redis client recreation
+fn lock_for_recreation() -> &'static Mutex<()> {
+    static CLIENT_RECREATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    CLIENT_RECREATION_LOCK.get_or_init(|| Mutex::new(()))
+}
+
 /// Timeout applied to internal Redis operations, such as TCP connection initialization, TLS handshakes, AUTH or HELLO, cluster health checks, etc.
 // NOTE: In practice we've found that 5s is too low, so we've set it to 10s. Do some sanity checking before tweaking it to a lower value
 const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -629,45 +636,35 @@ impl RedisCacheStorage {
         match maybe_client {
             Some(client) => Ok(client),
             None => {
-                if CLIENT_RECREATION_IN_PROGRESS.compare_exchange(
-                        false,
-                        true,
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    ).is_ok() {
-                    let new_inner = match self.create_inner_client().await {
-                        Ok(new_inner) => new_inner,
-                        Err(e) => {
-                            let error = RedisError::new(
-                                RedisErrorKind::Unknown,
-                                format!("Error attempting to recreate client: {e:?}"),
-                            );
-                            record_redis_error(&error, self.redis_client_config.caller, "client");
+                let _guard = lock_for_recreation().lock().await;
+                // WARN: don't remove this; this makes sure that once we have a lock, we aren't
+                // recreating the client. Multiple recreations can happen if we queue up tasks
+                // waiting for locks and we need to make sure that after we've acquired a lock, we
+                // aren't just recreating for no reason
+                if let Some(client) = self.inner.read().as_ref() {
+                    let client = client.next().clone();
+                    return Ok(client);
+                }
 
-                            let _ = CLIENT_RECREATION_IN_PROGRESS.compare_exchange(
-                                true,
-                                false,
-                                Ordering::Relaxed,
-                                Ordering::Relaxed,
-                            );
-                            return Err(error);
-                        }
-                    };
+                let new_inner = match self.create_inner_client().await {
+                    Ok(new_inner) => new_inner,
+                    Err(e) => {
+                        let error = RedisError::new(
+                            RedisErrorKind::Unknown,
+                            format!("Error attempting to recreate client: {e:?}"),
+                        );
+                        record_redis_error(&error, self.redis_client_config.caller, "client");
 
-                    {
-                        let mut guard = self.inner.write();
-                        *guard = new_inner;
-                        if let Some(inner) = guard.as_ref() {
-                            inner.activate();
-                        }
+                        return Err(error);
                     }
+                };
 
-                    let _ = CLIENT_RECREATION_IN_PROGRESS.compare_exchange(
-                        true,
-                        false,
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    );
+                {
+                    let mut guard = self.inner.write();
+                    *guard = new_inner;
+                    if let Some(inner) = guard.as_ref() {
+                        inner.activate();
+                    }
                 }
 
                 // rather than get into either recursion or a loop, we just return an error and let
