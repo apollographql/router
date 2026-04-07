@@ -172,7 +172,27 @@ impl Drop for DropSafeRedisPool {
     }
 }
 
-// TODO: comment
+/// Configuration wrapping the redis client configuration; includes useful metadata like whether
+/// we're using clustered redis, but also carries the actual redis connection poll
+#[derive(Clone)]
+pub(crate) struct RedisCacheStorage {
+    // we use a lock for its interior mutability, don't confuse this lock for a lock on the redis
+    // commands (eg, by thinking you need to take a write lock out before doing a redis write command)
+    //
+    // NOTE: we use the parking_lot::RwLock rather than the tokio::sync::RwLock because we don't do
+    // any asynchronous work for the lock: we acquire it, read the pool, and clone the client; only
+    // after that do we the asynchronous work of talking to redis. tokio::sync::RwLock introduces
+    // all the normal asynchronous machinery that we want to avoid here for its overhead
+    inner: Arc<RwLock<Option<DropSafeRedisPool>>>,
+    namespace: Option<Arc<String>>,
+    pub(crate) ttl: Option<Duration>,
+    is_cluster: bool,
+    reset_ttl: bool,
+    // the wrapped client config, comes from the router config
+    redis_client_config: RedisClientConfig,
+}
+
+/// Configuration for the redis client, pulled from fields of the router config
 #[derive(Clone)]
 struct RedisClientConfig {
     client_config: RedisConfig,
@@ -181,19 +201,6 @@ struct RedisClientConfig {
     caller: &'static str,
     metrics_interval: Duration,
     required_to_start: bool,
-}
-
-// TODO: comment
-#[derive(Clone)]
-pub(crate) struct RedisCacheStorage {
-    // TODO: notes on why parking_lot::RwLock, see reverted commit
-    inner: Arc<RwLock<Option<DropSafeRedisPool>>>,
-    namespace: Option<Arc<String>>,
-    pub(crate) ttl: Option<Duration>,
-    is_cluster: bool,
-    reset_ttl: bool,
-    // TODO: comment
-    redis_client_config: RedisClientConfig,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -606,7 +613,10 @@ impl RedisCacheStorage {
         self.ttl = ttl;
     }
 
-    // TODO: note on why RedisError for ease/compatibility/fewest changes for now
+    // NOTE: we return a RedisError here because it's easier to integrate into the rest of the
+    // system (we use it everywhere), but if we refactor this file in order to replace our current
+    // redis client with a different one, we should use our own error rather than use a library's
+    // to avoid this kind of thing in the future
     pub(crate) async fn client(&self) -> Result<Client, RedisError> {
         // WARN: this looks funky but is important to leave alone: this creates a read guard, gets
         // the client out of the pool, and then drops the guard; this avoids a deadlock below when
@@ -920,7 +930,7 @@ impl RedisCacheStorage {
     }
 }
 
-/// TODO: add docs
+/// Sets up the error, reconnection, and unresponsive event listeners
 fn setup_event_listeners(caller: &'static str, client: &Client) {
     let mut error_rx = client.error_rx();
     let mut reconnect_rx = client.reconnect_rx();
