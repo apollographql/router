@@ -111,7 +111,7 @@ impl Supergraph<Merged> {
     }
 
     pub fn assume_satisfiable(self) -> Supergraph<Satisfiable> {
-        todo!("unimplemented")
+        Supergraph::new(self.state.schema, vec![])
     }
 
     /// Supergraph schema

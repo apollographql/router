@@ -1,6 +1,5 @@
 ---
 source: apollo-router/tests/set_context.rs
-assertion_line: 280
 expression: response
 ---
 {
@@ -57,7 +56,7 @@ expression: response
               "operationKind": "query",
               "operationName": "Query_fetch_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "5580d1aad73ae6a685200b5ed6c3bb917f6d6e8da215e0ad9f7f491fc3b776e7",
+              "schemaAwareHash": "cfe676250bb09f4df383ac0f29f617d677c26f5741dd8b103843d2b12b0aa8c4",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -106,7 +105,7 @@ expression: response
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "d33d8040456aa4c2c67fba60c0621d8bc656baf994541c453c479492a0627f3c",
+                    "schemaAwareHash": "7984585ed204a346cdebc41e9095301bbe70515cfc519eaff5039b55a98d1434",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_0"
@@ -149,7 +148,7 @@ expression: response
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "496c2e23024bad910adfe1c7327571e9e87685ea51f61c4f37ea05a489a26a22",
+                    "schemaAwareHash": "369b9c8ec7b1af60c98b6c9b27f986ff9eab01bdc49951de5b648c3f0a99fc38",
                     "serviceName": "Subgraph2",
                     "variableUsages": []
                   },

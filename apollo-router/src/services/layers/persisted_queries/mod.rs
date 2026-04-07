@@ -20,6 +20,7 @@ use tower::BoxError;
 
 use super::query_analysis::ParsedDocument;
 use crate::Configuration;
+use crate::context::PERSISTED_QUERY_ID;
 use crate::graphql::Error as GraphQLError;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::services::SupergraphRequest;
@@ -191,6 +192,10 @@ impl PersistedQueryLayer {
                         pq_id: persisted_query_id.into(),
                     });
                 });
+                // Store PQ ID in public context for access by Rhai/coprocessors/plugins
+                let _ = request
+                    .context
+                    .insert(PERSISTED_QUERY_ID, persisted_query_id.to_string());
                 u64_counter!(
                     "apollo.router.operations.persisted_queries",
                     "Total requests with persisted queries enabled",
@@ -317,10 +322,13 @@ impl PersistedQueryLayer {
 
         // Store PQ ID for reporting if it was used
         if let Some(pq_id) = freeform_graphql_action.pq_id {
-            request
-                .context
-                .extensions()
-                .with_lock(|lock| lock.insert(RequestPersistedQueryId { pq_id }));
+            request.context.extensions().with_lock(|lock| {
+                lock.insert(RequestPersistedQueryId {
+                    pq_id: pq_id.clone(),
+                })
+            });
+            // Store PQ ID in public context for access by Rhai/coprocessors/plugins
+            let _ = request.context.insert(PERSISTED_QUERY_ID, pq_id);
         }
 
         u64_counter!(
@@ -581,6 +589,34 @@ mod tests {
         let request =
             result.expect("pq layer returned response instead of putting the query on the request");
         assert_eq!(request.supergraph_request.body().query, Some(body));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pq_id_stored_in_context_when_resolved_from_manifest() {
+        let (id, _body, manifest) = fake_manifest();
+        let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
+
+        let pq_layer = PersistedQueryLayer::new(
+            &Configuration::fake_builder()
+                .persisted_query(PersistedQueries::builder().enabled(true).build())
+                .uplink(uplink_config)
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let incoming_request = SupergraphRequest::fake_builder()
+            .extension("persistedQuery", json!({"version": 1, "sha256Hash": &id}))
+            .build()
+            .unwrap();
+
+        let result = pq_layer.supergraph_request(incoming_request);
+        let request = result.expect("pq layer returned response instead of request");
+
+        // Verify PQ ID is in public context
+        let pq_id_from_context: Option<String> = request.context.get(PERSISTED_QUERY_ID).unwrap();
+        assert_eq!(pq_id_from_context, Some(id));
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -1,0 +1,12 @@
+# Apollo Router configuration with Unix Domain Socket coprocessor
+#
+# This configuration is a basic example of using unix domain sockets
+supergraph:
+  listen: 0.0.0.0:4000
+
+coprocessor:
+  # Unix Domain Socket URL - note the absolute path (///) rather than relative (//)
+  url: unix:///tmp/apollo-coprocessor.sock
+
+  # Timeouts for coprocessor requests apply to both HTTP and UDS
+  timeout: 2s

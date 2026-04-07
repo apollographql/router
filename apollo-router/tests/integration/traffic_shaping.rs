@@ -261,12 +261,12 @@ async fn test_router_rate_limit() -> Result<(), BoxError> {
     assert_yaml_snapshot!(response);
 
     let (_, response) = router.execute_default_query().await;
-    assert_eq!(response.status(), 429);
+    assert_eq!(response.status(), 503);
     let response = response.text().await?;
     assert!(response.contains("REQUEST_RATE_LIMITED"));
     assert_yaml_snapshot!(response);
 
-    router.assert_metrics_contains(r#"http_server_request_duration_seconds_count{error_type="Too Many Requests",http_request_method="POST",http_response_status_code="429""#, None).await;
+    router.assert_metrics_contains(r#"http_server_request_duration_seconds_count{error_type="Service Unavailable",http_request_method="POST",http_response_status_code="503""#, None).await;
 
     router.graceful_shutdown().await;
     Ok(())

@@ -55,6 +55,8 @@ traffic_shaping:
 
 This rate limiting applies to all requests, there is no filtering per IP or other criteria.
 
+If the router-level rate limit is hit, Apollo Router returns a [HTTP 503 status code](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/503) to indicate that the service is unavailable.
+
 ### Timeouts
 
 The router applies a default timeout of 30 seconds for all requests, including the following:
@@ -234,6 +236,27 @@ traffic_shaping:
 ### HTTP/2
 
 <HttpConnection type="subgraph" />
+
+#### HTTP/2 keep-alive
+
+Router can send periodic HTTP/2 PING frames on idle subgraph connections to detect and close stale connections before they cause request failures. This is particularly useful when connections can become silently broken (for example, due to network timeouts or load balancer idle timeouts).
+
+Use `experimental_http2_keep_alive_interval` to enable keep-alive pings. When you set this, the router sends a PING frame after a connection has been idle for the specified duration. If your subgraph does not respond within `experimental_http2_keep_alive_timeout` (default: 20 seconds), the connection is closed.
+
+Both options apply under `all`, per-subgraph under `subgraphs`, and per-source under `connector.sources`.
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    experimental_http2_keep_alive_interval: 30s # Send a PING every 30s on idle connections
+    experimental_http2_keep_alive_timeout: 10s  # Close the connection if no PONG within 10s
+```
+
+<Note>
+
+Keep-alive pings require HTTP/2 to be active. Setting `experimental_http2: disable` will prevent pings from being sent regardless of these settings.
+
+</Note>
 
 ### Ordering
 

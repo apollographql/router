@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -10,12 +11,12 @@ use itertools::Itertools;
 use super::FederationSchema;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::InputObjectFieldDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceFieldArgumentDefinitionPosition;
@@ -181,29 +182,23 @@ impl Referencers {
         })
     }
 
-    pub(crate) fn get_directive(
-        &self,
-        name: &str,
-    ) -> Result<&DirectiveReferencers, FederationError> {
-        self.directives.get(name).ok_or_else(|| {
-            internal_error!("Directive referencers unexpectedly missing directive `{name}`")
-        })
+    pub(crate) fn get_directive(&self, name: &str) -> &DirectiveReferencers {
+        self.directives
+            .get(name)
+            .unwrap_or_else(|| &EMPTY_REFERENCERS)
     }
 
     pub(crate) fn get_directive_applications<'schema>(
         &self,
         schema: &'schema FederationSchema,
         name: &Name,
-    ) -> Result<
-        impl Iterator<Item = (DirectiveTargetPosition, &'schema Node<ast::Directive>)>,
-        FederationError,
-    > {
-        let directive_referencers = self.get_directive(name)?;
-        Ok(directive_referencers.iter().flat_map(|pos| {
+    ) -> impl Iterator<Item = (DirectiveTargetPosition, &'schema Node<ast::Directive>)> {
+        let directive_referencers = self.get_directive(name);
+        directive_referencers.iter().flat_map(|pos| {
             pos.get_applied_directives(schema, name)
                 .into_iter()
                 .map(move |directive_application| (pos.clone(), directive_application))
-        }))
+        })
     }
 
     pub(crate) fn rename_object_type(&mut self, old_name: &Name, new_name: &Name) {
@@ -524,6 +519,9 @@ impl InputObjectTypeReferencers {
             + self.directive_arguments.len()
     }
 }
+
+static EMPTY_REFERENCERS: LazyLock<DirectiveReferencers> =
+    LazyLock::new(DirectiveReferencers::default);
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DirectiveReferencers {

@@ -2033,7 +2033,7 @@ mod tests {
         })
         .collect();
 
-        assert_debug_snapshot!(requests, @r###"
+        assert_debug_snapshot!(requests, @r#"
         [
             (
                 Request {
@@ -2058,7 +2058,7 @@ mod tests {
                 ),
             ),
         ]
-        "###);
+        "#);
     }
 }
 

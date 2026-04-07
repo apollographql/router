@@ -18,6 +18,7 @@
 //! - Dynamic attribute layer for request-scoped attributes
 //! - OpenTelemetry layer for distributed tracing
 //! - Format layer for structured logging (JSON or text based on TTY)
+//! - Rate limiting layer for OpenTelemetry internal log messages
 //! - Environment filter for log level control
 //!
 //! ## Reloading
@@ -26,10 +27,12 @@
 //! entire subscriber stack, which would require restarting the application.
 
 use std::io::IsTerminal;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use once_cell::sync::OnceCell;
 use opentelemetry::Context;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
@@ -54,6 +57,7 @@ use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
 use crate::plugins::telemetry::otel::PreSampledTracer;
+use crate::plugins::telemetry::reload::rate_limit::RateLimitLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
 
@@ -79,9 +83,8 @@ static FMT_LAYER_HANDLE: OnceCell<
 
 pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     let hot_tracer = ReloadTracer::new(
-        opentelemetry_sdk::trace::TracerProvider::default()
-            .tracer_builder("noop")
-            .build(),
+        opentelemetry_sdk::trace::SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("noop").build()),
     );
     let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
 
@@ -98,7 +101,8 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     OPENTELEMETRY_TRACER_HANDLE
         .get_or_try_init(move || {
             // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
-            let log_level = format!("{log_level},salsa=error");
+            // filter opentelemetry internal logs to warn level (OTel 0.31 emits INFO logs for provider setup)
+            let log_level = format!("{log_level},salsa=error,opentelemetry=warn");
             tracing::debug!("Running the router with log level set to {log_level}");
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
@@ -107,6 +111,11 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
                 .with(WarnLegacyMetricsLayer)
+                // Rate limit OpenTelemetry internal log messages to avoid log spam when things go wrong
+                .with(RateLimitLayer::new(
+                    "opentelemetry",
+                    Duration::from_secs(10),
+                ))
                 .with(EnvFilter::try_new(log_level)?)
                 .try_init()?;
 

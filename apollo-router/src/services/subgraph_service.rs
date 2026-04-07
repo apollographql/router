@@ -33,7 +33,6 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::buffer::Buffer;
 use tracing::Instrument;
 use tracing::instrument;
 
@@ -57,6 +56,8 @@ use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
+use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
@@ -64,9 +65,11 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventResponse;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
+use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphResponseBodySize;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::services::http::service::WireByteCount;
 use crate::services::layers::apq;
 use crate::services::router;
 use crate::services::subgraph;
@@ -980,6 +983,17 @@ pub(crate) async fn call_single_http(
         }
     }
 
+    if body.as_ref().is_some_and(|r| r.is_ok())
+        && let Some(wire_size) = parts
+            .extensions
+            .get::<WireByteCount>()
+            .map(|c| c.0.load(Relaxed))
+    {
+        context.extensions().with_lock(|lock| {
+            lock.insert::<SubgraphResponseBodySize>(SubgraphResponseBodySize(wire_size));
+        });
+    }
+
     let graphql_response =
         http_response_to_graphql_response(service_name, content_type, body, &parts);
 
@@ -1116,7 +1130,10 @@ fn get_apq_error(gql_response: &graphql::Response) -> APQError {
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<
-        HashMap<String, Buffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>>,
+        HashMap<
+            String,
+            UnconstrainedBuffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>,
+        >,
     >,
 }
 
@@ -1139,12 +1156,14 @@ impl SubgraphServiceFactory {
                 ))
                 .service(maker.make())
                 .boxed();
-            let service = ServiceBuilder::new().buffer(DEFAULT_BUFFER_SIZE).service(
-                plugins
-                    .iter()
-                    .rev()
-                    .fold(inner_service, |acc, (_, e)| e.subgraph_service(&name, acc)),
-            );
+            let service = ServiceBuilder::new()
+                .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
+                .service(
+                    plugins
+                        .iter()
+                        .rev()
+                        .fold(inner_service, |acc, (_, e)| e.subgraph_service(&name, acc)),
+                );
             map.insert(name, service);
         }
 

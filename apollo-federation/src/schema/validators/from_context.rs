@@ -21,6 +21,7 @@ use crate::schema::FederationSchema;
 use crate::schema::FromContextDirective;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldArgumentDefinitionPosition;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;

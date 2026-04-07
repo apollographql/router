@@ -145,7 +145,7 @@ fn validate_interface_objects_are_on_entities(
         .name;
     for type_pos in &schema
         .referencers
-        .get_directive(&interface_object_directive_definition.name)?
+        .get_directive(&interface_object_directive_definition.name)
         .object_types
     {
         if !type_pos

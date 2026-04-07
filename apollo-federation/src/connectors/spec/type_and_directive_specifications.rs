@@ -410,8 +410,6 @@ fn connect_directive_spec() -> DirectiveSpecification {
             DirectiveLocation::FieldDefinition,
             DirectiveLocation::Object,
         ],
-        false,
-        None,
         None,
     )
 }
@@ -469,8 +467,6 @@ fn source_directive_spec() -> DirectiveSpecification {
         ],
         true,
         &[DirectiveLocation::Schema],
-        false,
-        None,
         None,
     )
 }

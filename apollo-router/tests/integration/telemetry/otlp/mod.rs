@@ -95,7 +95,7 @@ impl Verifier for OtlpTraceSpec<'_> {
                     }
                 }
             }).filter(|t| {
-            let datadog_trace_id = TraceId::from_u128(trace_id.to_datadog() as u128);
+            let datadog_trace_id = TraceId::from(trace_id.to_datadog() as u128);
             let trace_found1 = !t.select_path(&format!("$..[?(@.traceId == '{trace_id}')]")).unwrap_or_default().is_empty();
             let trace_found2 = !t.select_path(&format!("$..[?(@.traceId == '{datadog_trace_id}')]")).unwrap_or_default().is_empty();
             trace_found1 | trace_found2

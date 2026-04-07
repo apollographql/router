@@ -642,6 +642,7 @@ where
                     }
                 }
             }
+            .with_memory_tracking("planning_task")
             .in_current_span();
 
             fn convert_join_error(e: impl std::fmt::Display) -> CacheResolverError {
@@ -669,7 +670,7 @@ where
                         let task = if let Some(memory_limit) = self.cooperative_cancellation.memory_limit() {
                             if let Some(stats) = crate::allocator::current() {
                                 let memory_limit_bytes = memory_limit.as_u64() as usize;
-                                let task = tokio::task::spawn(cancellable_planning_task.with_memory_tracking("planning_task"));
+                                let task = tokio::task::spawn(cancellable_planning_task);
                                 let abort_handle = task.abort_handle();
                                 stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
                                     exceeded_memory_limit_setter.store(true, Ordering::Relaxed);
@@ -734,7 +735,7 @@ where
                         }
                     }
                     Mode::Measure => {
-                    // In measure mode, spawn a timeout task that only records outcome
+                        // In measure mode, spawn a timeout task that only records outcome
                         let _maybe_timeout_guard =  self.cooperative_cancellation.timeout().map(|timeout| {
                            let timeout_task = tokio::task::spawn(async move {
                                tokio::time::sleep(timeout).await;
@@ -766,13 +767,12 @@ where
                                     abort_handle.abort();
                                 });
 
-                                let task = planning_task.with_memory_tracking("planning_task");
                                 let memory_limit_bytes = memory_limit.as_u64() as usize;
                                 stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
                                     notify_memory_limit_exceeded.notify_waiters();
                                     log::warn!("memory limit exceeded planning query: {}", &query);
                                 }));
-                                tokio::task::spawn(task).await
+                                tokio::task::spawn(planning_task).await
                             } else {
                                 log::error!("memory limit cooperative cancellation is set but no stats are available");
                                 tokio::task::spawn(planning_task).await
@@ -1952,6 +1952,80 @@ mod tests {
         // Verify that the span recorded the cancelled outcome (not success)
         // In measurement mode, we should record cancelled and not overwrite it with success
         assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
+    }
+
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    #[test(tokio::test)]
+    async fn test_allocation_stats_recorded_without_cooperative_cancellation() {
+        use crate::allocator::AllocationStats;
+
+        async {
+            let configuration = Configuration::default();
+            let schema_str = include_str!("testdata/schema.graphql");
+            let schema = Arc::new(Schema::parse(schema_str, &configuration).unwrap());
+
+            let planning_task_stats: Arc<Mutex<Option<Arc<AllocationStats>>>> =
+                Arc::new(Mutex::new(None));
+
+            let planning_task_stats_delegate = planning_task_stats.clone();
+
+            let mut delegate = MockMyQueryPlanner::new();
+            delegate.expect_clone().returning(move || {
+                let mut planner = MockMyQueryPlanner::new();
+                let planning_task_stats_clone = planning_task_stats_delegate.clone();
+
+                planner.expect_sync_call().times(0..2).returning(move |_| {
+                    let plan = Arc::new(QueryPlan::fake_new(None, None));
+                    *planning_task_stats_clone.lock() = crate::allocator::current();
+
+                    Ok(QueryPlannerResponse::builder()
+                        .content(QueryPlannerContent::Plan { plan })
+                        .build())
+                });
+                planner
+            });
+
+            let mut planner = CachingQueryPlanner::new(
+                delegate,
+                schema.clone(),
+                Default::default(),
+                &configuration,
+                IndexMap::default(),
+            )
+            .await
+            .unwrap();
+
+            let doc = Query::parse_document(
+                "query Me { me { name { first } } }",
+                None,
+                &schema,
+                &configuration,
+            )
+            .unwrap();
+
+            let context = Context::new();
+            context
+                .extensions()
+                .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+            // Call the CachingQueryPlanner (no cooperative cancellation configured)
+            let _ = planner
+                .call(query_planner::CachingRequest::new(
+                    "query Me { me { name { first } } }".to_string(),
+                    Some("".into()),
+                    context.clone(),
+                    Default::default(),
+                ))
+                .await;
+
+            let stats = planning_task_stats
+                .lock()
+                .clone()
+                .expect("planning task stats should be set");
+            assert_eq!(stats.name(), "planning_task");
+        }
+        .with_memory_tracking("test_request")
+        .await;
     }
 
     macro_rules! test_query_plan {

@@ -1,3 +1,11 @@
+//! Dynamic attribute management for telemetry spans and events.
+//!
+//! This module provides functionality for adding and managing dynamic attributes on
+//! tracing spans and events. Attributes are stored using `Vec<KeyValue>` rather than
+//! a `HashMap<Key, Value>` despite us not allowing duplicate keys because the vector
+//! performs better at low number of elements, which is realistic for the typical number of
+//! attributes we see in practice.
+
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use tracing_subscriber::Layer;
@@ -14,6 +22,7 @@ use super::formatters::APOLLO_PRIVATE_PREFIX;
 use super::otel::OtelData;
 use super::otel::layer::str_to_span_kind;
 use super::otel::layer::str_to_status;
+use super::utils::upsert_attribute;
 use crate::plugins::telemetry::reload::otel::IsSampled;
 
 #[derive(Debug, Default)]
@@ -27,11 +36,13 @@ impl LogAttributes {
     }
 
     pub(crate) fn insert(&mut self, kv: KeyValue) {
-        self.attributes.push(kv);
+        upsert_attribute(&mut self.attributes, kv);
     }
 
     pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
-        self.attributes.extend(other);
+        for kv in other {
+            upsert_attribute(&mut self.attributes, kv);
+        }
     }
 }
 
@@ -87,7 +98,8 @@ impl SpanDynAttribute for ::tracing::Span {
                                 Some(otel_data) => {
                                     update_otel_data(otel_data, &key, &value);
                                     if let Some(attrs) = otel_data.builder.attributes.as_mut() {
-                                        attrs.push(KeyValue::new(key, value))
+                                        // Replace existing attribute with same key, or add new one
+                                        upsert_attribute(attrs, KeyValue::new(key, value));
                                     } else {
                                         otel_data.builder.attributes =
                                             Some([KeyValue::new(key, value)].into_iter().collect());
@@ -145,7 +157,9 @@ impl SpanDynAttribute for ::tracing::Span {
                                     if let Some(existing_attributes) =
                                         otel_data.builder.attributes.as_mut()
                                     {
-                                        existing_attributes.extend(attributes);
+                                        for attr in attributes {
+                                            upsert_attribute(existing_attributes, attr);
+                                        }
                                     } else {
                                         otel_data.builder.attributes = Some(attributes);
                                     }
@@ -207,7 +221,9 @@ pub(crate) struct EventAttributes {
 
 impl EventAttributes {
     pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
-        self.attributes.extend(other);
+        for kv in other {
+            upsert_attribute(&mut self.attributes, kv);
+        }
     }
 
     pub(crate) fn take(&mut self) -> Vec<KeyValue> {
@@ -239,14 +255,16 @@ impl EventDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => match &mut otel_data.event_attributes {
                                     Some(event_attributes) => {
+                                        // No need to use the upsert function here as they're going into a Map
                                         event_attributes.extend(
-                                            attributes.map(|KeyValue { key, value }| (key, value)),
+                                            attributes
+                                                .map(|KeyValue { key, value, .. }| (key, value)),
                                         );
                                     }
                                     None => {
                                         otel_data.event_attributes = Some(
                                             attributes
-                                                .map(|KeyValue { key, value }| (key, value))
+                                                .map(|KeyValue { key, value, .. }| (key, value))
                                                 .collect(),
                                         );
                                     }
@@ -283,5 +301,148 @@ impl EventDynAttribute for ::tracing::Span {
                 ::tracing::error!("no Registry, this is a bug");
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use opentelemetry::Key;
+    use opentelemetry::KeyValue;
+
+    use super::EventAttributes;
+    use super::LogAttributes;
+
+    #[test]
+    fn test_log_attributes_insert_replaces_existing() {
+        let mut attrs = LogAttributes::default();
+
+        // Insert initial attribute
+        attrs.insert(KeyValue::new(Key::from_static_str("http.method"), "GET"));
+        assert_eq!(attrs.attributes().len(), 1);
+        assert_eq!(attrs.attributes()[0].value.as_str(), Cow::Borrowed("GET"));
+
+        // Insert attribute with same key - should replace
+        attrs.insert(KeyValue::new(Key::from_static_str("http.method"), "POST"));
+        assert_eq!(attrs.attributes().len(), 1);
+        assert_eq!(attrs.attributes()[0].value.as_str(), Cow::Borrowed("POST"));
+    }
+
+    #[test]
+    fn test_log_attributes_insert_adds_new() {
+        let mut attrs = LogAttributes::default();
+
+        attrs.insert(KeyValue::new(Key::from_static_str("http.method"), "GET"));
+        attrs.insert(KeyValue::new(
+            Key::from_static_str("http.route"),
+            "/graphql",
+        ));
+
+        assert_eq!(attrs.attributes().len(), 2);
+    }
+
+    #[test]
+    fn test_log_attributes_extend_replaces_existing() {
+        let mut attrs = LogAttributes::default();
+
+        // Insert initial attributes
+        attrs.insert(KeyValue::new(Key::from_static_str("http.method"), "GET"));
+        attrs.insert(KeyValue::new(Key::from_static_str("http.route"), "/old"));
+
+        // Extend with new values for existing keys
+        attrs.extend([
+            KeyValue::new(Key::from_static_str("http.method"), "POST"),
+            KeyValue::new(Key::from_static_str("http.route"), "/new"),
+            KeyValue::new(Key::from_static_str("http.status"), "200"),
+        ]);
+
+        assert_eq!(attrs.attributes().len(), 3);
+
+        let expected_kvs = [
+            ("http.method", "POST"),
+            ("http.route", "/new"),
+            ("http.status", "200"),
+        ];
+
+        for (key, expected_value) in expected_kvs {
+            let attributes = attrs.attributes();
+            let kv = attributes.iter().find(|kv| kv.key.as_str() == key).unwrap();
+            assert_eq!(kv.value.as_str(), expected_value, "key = {key}");
+        }
+    }
+
+    #[test]
+    fn test_log_attributes_extend_preserves_order_for_new_keys() {
+        let mut attrs = LogAttributes::default();
+
+        attrs.insert(KeyValue::new(Key::from_static_str("first"), "1"));
+        attrs.extend([
+            KeyValue::new(Key::from_static_str("second"), "2"),
+            KeyValue::new(Key::from_static_str("third"), "3"),
+        ]);
+
+        assert_eq!(attrs.attributes().len(), 3);
+        assert_eq!(attrs.attributes()[0].key.as_str(), "first");
+        assert_eq!(attrs.attributes()[1].key.as_str(), "second");
+        assert_eq!(attrs.attributes()[2].key.as_str(), "third");
+    }
+
+    #[test]
+    fn test_event_attributes_extend_replaces_existing() {
+        let mut attrs = EventAttributes::default();
+
+        // Extend with initial attributes
+        attrs.extend([
+            KeyValue::new(Key::from_static_str("http.method"), "GET"),
+            KeyValue::new(Key::from_static_str("http.route"), "/old"),
+        ]);
+
+        // Extend with new values for existing keys
+        attrs.extend([
+            KeyValue::new(Key::from_static_str("http.method"), "POST"),
+            KeyValue::new(Key::from_static_str("http.route"), "/new"),
+            KeyValue::new(Key::from_static_str("http.status"), "200"),
+        ]);
+
+        let taken = attrs.take();
+        assert_eq!(taken.len(), 3);
+
+        let expected_kvs = [
+            ("http.method", "POST"),
+            ("http.route", "/new"),
+            ("http.status", "200"),
+        ];
+
+        for (key, expected_value) in expected_kvs {
+            let kv = taken.iter().find(|kv| kv.key.as_str() == key).unwrap();
+            assert_eq!(kv.value.as_str(), expected_value, "key = {key}");
+        }
+    }
+
+    #[test]
+    fn test_event_attributes_extend_adds_new() {
+        let mut attrs = EventAttributes::default();
+
+        attrs.extend([
+            KeyValue::new(Key::from_static_str("http.method"), "GET"),
+            KeyValue::new(Key::from_static_str("http.route"), "/graphql"),
+        ]);
+
+        let taken = attrs.take();
+        assert_eq!(taken.len(), 2);
+    }
+
+    #[test]
+    fn test_event_attributes_take_clears_attributes() {
+        let mut attrs = EventAttributes::default();
+
+        attrs.extend([KeyValue::new(Key::from_static_str("http.method"), "GET")]);
+        let taken = attrs.take();
+        assert_eq!(taken.len(), 1);
+
+        // After take, attributes should be empty
+        let taken_again = attrs.take();
+        assert_eq!(taken_again.len(), 0);
     }
 }

@@ -62,6 +62,9 @@ pub(crate) enum SpecError {
     SubscriptionNotSupported,
     /// query hashing failed: {0}
     QueryHashing(String),
+    // this is vague on purpose to avoid leaking details about the error
+    /// invalid query
+    Redacted,
 }
 
 const GRAPHQL_PARSE_FAILURE_ERROR_KEY: &str = "GraphQLParseFailure";
@@ -98,6 +101,7 @@ impl ErrorExtension for SpecError {
             SpecError::NoOperation => "GRAPHQL_VALIDATION_FAILED",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
             SpecError::QueryHashing(_) => "QUERY_HASHING",
+            SpecError::Redacted => "UNKNOWN_ERROR",
         }
         .to_string()
     }

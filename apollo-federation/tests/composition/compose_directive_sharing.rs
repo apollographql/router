@@ -113,6 +113,38 @@ fn directive_merging_propagates_built_in_directives_even_if_redefined() {
     "###);
 }
 
+#[test]
+fn directive_merging_handles_arg_values_equal_to_default_values() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          a: String @shareable @deprecated
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          a: String @shareable @deprecated(reason: "No longer supported")
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+    assert_snapshot!(print_sdl(api_schema.schema()), @r###"
+    type Query {
+      a: String @deprecated
+    }
+    "###);
+}
+
 // =============================================================================
 // FIELD SHARING - Tests for @shareable directive validation
 // =============================================================================

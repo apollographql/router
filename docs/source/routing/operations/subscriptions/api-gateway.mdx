@@ -15,6 +15,11 @@ Organizations can require their APIs—including [the router](/graphos/routing/r
 
 The rest of this article describes how to configure API gateways from different vendors to stream and not buffer HTTP responses, therefore supporting subscriptions over HTTP multipart.
 
+
+## AWS API Gateway
+
+Amazon API Gateway supports response streaming for REST APIs, which you can use to enable HTTP multipart subscriptions for the router. To configure response streaming, see the Amazon API Gateway documentation on [Response transfer mode](https://docs.aws.amazon.com/apigateway/latest/developerguide/response-transfer-mode.html).
+
 ## Azure API Management (APIM)
 
 By default, an HTTP API endpoint in APIM buffers each response from a downstream service, where the endpoint must receive all chunks of an HTTP response before it sends the response to the client.
@@ -88,9 +93,3 @@ Streaming of HTTP multipart isn't supported. Use Flex Gateway instead.
 ## Kong
 
 Streaming of HTTP multipart is supported out of the box with no additional configuration required.
-
-
-
-## AWS API Gateway
-
-AWS API Gateway currently doesn't support streaming of HTTP data.

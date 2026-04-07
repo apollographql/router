@@ -10,6 +10,7 @@ pub(crate) mod redis_monitor;
 mod allowed_features;
 mod connectors;
 mod coprocessor;
+mod demand_control;
 mod docs;
 // In the CI environment we only install Redis on x86_64 Linux
 mod directives;

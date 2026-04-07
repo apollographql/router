@@ -255,6 +255,19 @@ impl From<ExecutionResponse> for Response {
 }
 
 #[cfg(test)]
+impl Response {
+    pub(crate) fn errors_with_code<'a>(&'a self, code: &'a str) -> impl Iterator<Item = &'a Error> {
+        self.errors
+            .iter()
+            .filter(move |err| err.extension_code().is_some_and(|c| c == code))
+    }
+
+    pub(crate) fn contains_error_code(&self, code: &str) -> bool {
+        self.errors_with_code(code).next().is_some()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use serde_json::json;
     use serde_json_bytes::json as bjson;

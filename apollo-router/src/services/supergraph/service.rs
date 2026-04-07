@@ -16,7 +16,6 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::buffer::Buffer;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
@@ -25,12 +24,14 @@ use crate::Context;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
+use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
@@ -79,6 +80,7 @@ pub(crate) struct SupergraphService {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
+    strict_variable_validation: Mode,
 }
 
 #[buildstructor::buildstructor]
@@ -88,11 +90,13 @@ impl SupergraphService {
         query_planner_service: CachingQueryPlanner<QueryPlannerService>,
         execution_service: execution::BoxCloneService,
         schema: Arc<Schema>,
+        strict_variable_validation: Mode,
     ) -> Self {
         SupergraphService {
             query_planner_service,
             execution_service,
             schema,
+            strict_variable_validation,
         }
     }
 }
@@ -122,22 +126,27 @@ impl Service<SupergraphRequest> for SupergraphService {
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut = service_call(planning, self.execution_service.clone(), schema, req).or_else(
-            |error: BoxError| async move {
-                let errors = vec![
-                    crate::error::Error::builder()
-                        .message(error.to_string())
-                        .extension_code("INTERNAL_SERVER_ERROR")
-                        .build(),
-                ];
+        let fut = service_call(
+            planning,
+            self.execution_service.clone(),
+            schema,
+            req,
+            self.strict_variable_validation,
+        )
+        .or_else(|error: BoxError| async move {
+            let errors = vec![
+                crate::error::Error::builder()
+                    .message(error.to_string())
+                    .extension_code("INTERNAL_SERVER_ERROR")
+                    .build(),
+            ];
 
-                Ok(SupergraphResponse::infallible_builder()
-                    .errors(errors)
-                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(context_cloned)
-                    .build())
-            },
-        );
+            Ok(SupergraphResponse::infallible_builder()
+                .errors(errors)
+                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                .context(context_cloned)
+                .build())
+        });
 
         Box::pin(fut)
     }
@@ -148,6 +157,7 @@ async fn service_call(
     execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
+    strict_variable_validation: Mode,
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
@@ -306,7 +316,11 @@ async fn service_call(
                 );
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                 Ok(response)
-            } else if let Some(err) = plan.query.validate_variables(body, &schema).err() {
+            } else if let Some(err) = plan
+                .query
+                .validate_variables(body, &schema, strict_variable_validation)
+                .err()
+            {
                 let mut res = SupergraphResponse::new_from_graphql_response(err, context);
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
@@ -558,6 +572,7 @@ impl PluggableSupergraphServiceBuilder {
                     connector_sources,
                 )),
             )),
+            Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
         ));
 
         let execution_service_factory = ExecutionServiceFactory {
@@ -583,12 +598,13 @@ impl PluggableSupergraphServiceBuilder {
             .query_planner_service(query_planner_service.clone())
             .execution_service(execution_service)
             .schema(schema.clone())
+            .strict_variable_validation(configuration.supergraph.strict_variable_validation)
             .build();
 
         let supergraph_service =
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
-        let sb = Buffer::new(
+        let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(content_negotiation::SupergraphLayer::default())
                 .service(
@@ -618,7 +634,7 @@ pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
-    sb: Buffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
+    sb: UnconstrainedBuffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
 }
 
 pub(crate) trait HasPlugins {

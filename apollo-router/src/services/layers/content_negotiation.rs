@@ -87,6 +87,28 @@ where
                     return Ok(ControlFlow::Break(response.into()));
                 }
 
+                if req.router_request.method() == Method::GET
+                    && !content_type_is_strictly_json_or_missing(req.router_request.headers())
+                {
+                    let response = http::Response::builder()
+                        .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "errors": [
+                                    graphql::Error::builder()
+                                        .message(format!("GET request 'content-type' header may only contain: {:?}", APPLICATION_JSON.essence_str()))
+                                        .extension_code("INVALID_CONTENT_TYPE_HEADER")
+                                        .build()
+                                ]
+                            })
+                            .to_string(),
+                        ))
+                        .expect("cannot fail");
+
+                    return Ok(ControlFlow::Break(response.into()));
+                }
+
                 let accepts = parse_accept(req.router_request.headers());
 
                 if accepts.wildcard
@@ -182,6 +204,29 @@ where
     }
 }
 
+/// Returns true if no content type was provided, or if content type's MIME type is `application/json`
+/// (including any optional parameters, ie `; charset=utf-8`).
+/// Returns false if any other types are provided or if any of the types are malformed.
+// NB: content type can come in through (1) multiple header values and (2) multiple elements within the
+//     same header value, so checking this is kind of a pain
+fn content_type_is_strictly_json_or_missing(headers: &HeaderMap) -> bool {
+    for header_value in headers.get_all(CONTENT_TYPE) {
+        let Ok(content_type_str) = header_value.to_str() else {
+            return false;
+        };
+
+        let mime_results = MediaTypeList::new(content_type_str);
+        for mime_result in mime_results {
+            let Ok(mime) = mime_result else { return false };
+            if !(mime.ty == APPLICATION && mime.subty == JSON) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
 /// Returns true if the headers content type is `application/json` or `application/graphql-response+json`
 fn content_type_is_json(headers: &HeaderMap) -> bool {
     headers.get_all(CONTENT_TYPE).iter().any(|value| {
@@ -262,6 +307,28 @@ mod tests {
     use http::HeaderValue;
 
     use super::*;
+
+    #[rstest::rstest]
+    #[case::empty(HeaderMap::new())]
+    #[case::no_content_type(HeaderMap::from_iter([(ACCEPT, HeaderValue::from_static("*/*"))]))]
+    #[case::empty_str(HeaderMap::from_iter([(CONTENT_TYPE, HeaderValue::from_static(""))]))]
+    #[case::application_json(HeaderMap::from_iter([(CONTENT_TYPE, HeaderValue::from_static("application/json"))]))]
+    #[case::application_json_with_charset(HeaderMap::from_iter([(CONTENT_TYPE, HeaderValue::from_static("application/json; charset=utf-8"))]))]
+    fn content_type_is_strictly_json_or_missing_accepts_valid_headers(#[case] headers: HeaderMap) {
+        assert!(content_type_is_strictly_json_or_missing(&headers));
+    }
+
+    #[rstest::rstest]
+    #[case::text_plan(HeaderMap::from_iter([(CONTENT_TYPE, HeaderValue::from_static("invalid"))]))]
+    #[case::text_plan(HeaderMap::from_iter([(CONTENT_TYPE, HeaderValue::from_static("text/plain"))]))]
+    #[case::multipart(HeaderMap::from_iter([(CONTENT_TYPE, HeaderValue::from_static("multipart/form-data"))]))]
+    #[case::multipart(HeaderMap::from_iter([(CONTENT_TYPE, HeaderValue::from_static("application/graphql"))]))]
+    #[case::multiple_values(HeaderMap::from_iter([(CONTENT_TYPE, HeaderValue::from_static("application/json")), (CONTENT_TYPE, HeaderValue::from_static("text/plain"))]))]
+    fn content_type_is_strictly_json_or_missing_rejects_invalid_headers(
+        #[case] headers: HeaderMap,
+    ) {
+        assert!(!content_type_is_strictly_json_or_missing(&headers));
+    }
 
     #[test]
     fn it_checks_accept_header() {

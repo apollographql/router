@@ -6,6 +6,7 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::schema::FederationSchema;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
@@ -18,7 +19,7 @@ pub(crate) fn validate_shareable_directives(
         .federation_spec_definition()
         .shareable_directive_name_in_schema(schema)?
         .unwrap_or(FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC);
-    let shareable_referencers = schema.referencers().get_directive(&directive_name)?;
+    let shareable_referencers = schema.referencers().get_directive(&directive_name);
 
     validate_shareable_not_repeated_on_same_type_declaration(
         schema,

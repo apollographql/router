@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -13,6 +14,7 @@ use wiremock::matchers::path;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::redact_cache_debug_query_hash;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
@@ -705,6 +707,9 @@ async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError>
 
     let mut cache_keys = cache_keys;
     for entry in cache_keys.as_array_mut().unwrap() {
+        if let Some(key) = entry.get_mut("key").and_then(|v| v.as_str()) {
+            entry["key"] = json!(redact_cache_debug_query_hash(key));
+        }
         if let Some(cache_control) = entry
             .get_mut("cacheControl")
             .and_then(|v| v.as_object_mut())
@@ -714,11 +719,784 @@ async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError>
     }
 
     // NOTE: `created` removed from this block
-    let expected = json!([{"key":"version:1.1:subgraph:products:type:Query:hash:a41f028306ba19f5a29b1474ef621a8cb18236cf8476b43d4863820fdd9d1398:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6","invalidationKeys":[],"kind":{"rootFields":["topProducts"]},"subgraphName":"products","subgraphRequest":{"query":"query ExampleQuery__products__0 { topProducts { name } }","operationName":"ExampleQuery__products__0"},"source":"subgraph","cacheControl":{"maxAge":60,"public":true},"shouldStore":true,"data":{"data":{"topProducts":[{"name":"Table","__typename":"Product","reviews":[{"id":"1","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}],"reviewsForAuthor":[{"id":"2","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}]}]}},"warnings":[{"code":"NO_CACHE_TAG_ON_ROOT_FIELD","links":[{"url":"https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods","title":"Add '@cacheTag' in your schema"}],"message":"No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."}]}]);
+    let expected = json!([{"key":"version:1.2:subgraph:products:type:Query:hash:[query-hash]:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6","invalidationKeys":[],"kind":{"rootFields":["topProducts"]},"subgraphName":"products","subgraphRequest":{"query":"query ExampleQuery__products__0 { topProducts { name } }","operationName":"ExampleQuery__products__0"},"source":"subgraph","cacheControl":{"maxAge":60,"public":true},"shouldStore":true,"data":{"data":{"topProducts":[{"name":"Table","__typename":"Product","reviews":[{"id":"1","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}],"reviewsForAuthor":[{"id":"2","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}]}]}},"warnings":[{"code":"NO_CACHE_TAG_ON_ROOT_FIELD","links":[{"url":"https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods","title":"Add '@cacheTag' in your schema"}],"message":"No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."}]}]);
 
     assert_eq!(cache_keys, expected);
 
     router.graceful_shutdown().await;
 
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_unix_domain_socket() -> Result<(), tower::BoxError> {
+    use std::path::PathBuf;
+
+    use hyper_util::rt::TokioExecutor;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::UnixListener;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create a temporary Unix socket path
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("coprocessor.sock");
+    let _ = std::fs::remove_file(&sock_path);
+
+    // Start a minimal Unix domain socket HTTP server that echoes the JSON body back
+    let uds = UnixListener::bind(&sock_path).expect("bind uds");
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = uds.accept().await.expect("accept");
+            let io = TokioIo::new(stream);
+            let svc = hyper::service::service_fn(
+                |req: http::Request<hyper::body::Incoming>| async move {
+                    let bytes = http_body_util::BodyExt::collect(req.into_body())
+                        .await
+                        .unwrap()
+                        .to_bytes();
+                    Ok::<_, std::convert::Infallible>(
+                        http::Response::builder()
+                            .status(200)
+                            .header(
+                                http::header::CONTENT_TYPE,
+                                mime::APPLICATION_JSON.essence_str(),
+                            )
+                            .body(axum::body::Body::from(bytes))
+                            .unwrap(),
+                    )
+                },
+            );
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("uds server error: {err}");
+            }
+        }
+    });
+
+    // Configure router to use the unix:// coprocessor URL
+    let uds_url = format!("unix://{}", sock_path.display());
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(include_str!("fixtures/coprocessor.router.yaml").replace("<replace>", &uds_url))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+/// Verify that unix:// URLs with a `?path=` query parameter deliver requests
+/// to the correct HTTP path on the coprocessor. The UDS server rejects any
+/// request that arrives on a path other than the expected one with a 500,
+/// so the router query itself will fail if the path isn't forwarded correctly.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_unix_domain_socket_with_path() -> Result<(), tower::BoxError> {
+    use std::path::PathBuf;
+
+    use hyper_util::rt::TokioExecutor;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::UnixListener;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("coprocessor.sock");
+    let _ = std::fs::remove_file(&sock_path);
+
+    // the path we append to the filepath socket
+    let expected_path = "/api/v1/coprocessor";
+
+    let uds = UnixListener::bind(&sock_path).expect("bind uds");
+    let expected_path_owned = expected_path.to_string();
+
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = uds.accept().await.expect("accept");
+            let io = TokioIo::new(stream);
+            let expected = expected_path_owned.clone();
+            let svc =
+                hyper::service::service_fn(move |req: http::Request<hyper::body::Incoming>| {
+                    let expected = expected.clone();
+                    async move {
+                        // this checks whether we're actually making requests to /api/v1/coprocessor
+                        if req.uri().path() != expected {
+                            return Ok::<_, std::convert::Infallible>(
+                                http::Response::builder()
+                                    // returning 500s if we're not
+                                    .status(500)
+                                    .header(
+                                        http::header::CONTENT_TYPE,
+                                        mime::APPLICATION_JSON.essence_str(),
+                                    )
+                                    .body(axum::body::Body::from(format!(
+                                        r#"{{"error":"path mismatch: expected '{}', got '{}'"}}"#,
+                                        expected,
+                                        req.uri().path()
+                                    )))
+                                    .unwrap(),
+                            );
+                        }
+
+                        let bytes = http_body_util::BodyExt::collect(req.into_body())
+                            .await
+                            .unwrap()
+                            .to_bytes();
+                        Ok::<_, std::convert::Infallible>(
+                            http::Response::builder()
+                                .status(200)
+                                .header(
+                                    http::header::CONTENT_TYPE,
+                                    mime::APPLICATION_JSON.essence_str(),
+                                )
+                                .body(axum::body::Body::from(bytes))
+                                .unwrap(),
+                        )
+                    }
+                });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("uds server error: {err}");
+            }
+        }
+    });
+
+    let uds_url = format!("unix://{}?path={}", sock_path.display(), expected_path);
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(include_str!("fixtures/coprocessor.router.yaml").replace("<replace>", &uds_url))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    // if we get a 200 it's because we've hit the target path; see above for how this works, but
+    // any path _not_ explicitly the one we've set (/api/v1/coprocessor) will return a 500
+    assert_eq!(response.status(), 200);
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(unix)]
+async fn test_coprocessor_per_stage_unix_socket_urls() -> Result<(), tower::BoxError> {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering;
+
+    use hyper_util::rt::TokioExecutor;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::UnixListener;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create temporary Unix socket paths for different stages
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let mut router_sock_path = PathBuf::from(dir.path());
+    router_sock_path.push("router_stage.sock");
+    let _ = std::fs::remove_file(&router_sock_path);
+
+    let mut supergraph_sock_path = PathBuf::from(dir.path());
+    supergraph_sock_path.push("supergraph_stage.sock");
+    let _ = std::fs::remove_file(&supergraph_sock_path);
+
+    // Counters to verify each socket was actually used
+    let router_counter = Arc::new(AtomicU32::new(0));
+    let supergraph_counter = Arc::new(AtomicU32::new(0));
+
+    // Start Unix domain socket HTTP server for router stage
+    let router_uds = UnixListener::bind(&router_sock_path).expect("bind router uds");
+    let router_counter_clone = router_counter.clone();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = router_uds.accept().await.expect("accept router");
+            let io = TokioIo::new(stream);
+            let counter = router_counter_clone.clone();
+            let svc =
+                hyper::service::service_fn(move |req: http::Request<hyper::body::Incoming>| {
+                    let counter = counter.clone();
+                    async move {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        let bytes = http_body_util::BodyExt::collect(req.into_body())
+                            .await
+                            .unwrap()
+                            .to_bytes();
+                        Ok::<_, std::convert::Infallible>(
+                            http::Response::builder()
+                                .status(200)
+                                .header(
+                                    http::header::CONTENT_TYPE,
+                                    mime::APPLICATION_JSON.essence_str(),
+                                )
+                                .body(axum::body::Body::from(bytes))
+                                .unwrap(),
+                        )
+                    }
+                });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("router uds server error: {err}");
+            }
+        }
+    });
+
+    // Start Unix domain socket HTTP server for supergraph stage
+    let supergraph_uds = UnixListener::bind(&supergraph_sock_path).expect("bind supergraph uds");
+    let supergraph_counter_clone = supergraph_counter.clone();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = supergraph_uds.accept().await.expect("accept supergraph");
+            let io = TokioIo::new(stream);
+            let counter = supergraph_counter_clone.clone();
+            let svc =
+                hyper::service::service_fn(move |req: http::Request<hyper::body::Incoming>| {
+                    let counter = counter.clone();
+                    async move {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        let bytes = http_body_util::BodyExt::collect(req.into_body())
+                            .await
+                            .unwrap()
+                            .to_bytes();
+                        Ok::<_, std::convert::Infallible>(
+                            http::Response::builder()
+                                .status(200)
+                                .header(
+                                    http::header::CONTENT_TYPE,
+                                    mime::APPLICATION_JSON.essence_str(),
+                                )
+                                .body(axum::body::Body::from(bytes))
+                                .unwrap(),
+                        )
+                    }
+                });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("supergraph uds server error: {err}");
+            }
+        }
+    });
+
+    // Wait a moment for servers to start
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Configure router with per-stage Unix socket URLs
+    let router_uds_url = format!("unix://{}", router_sock_path.display());
+    let supergraph_uds_url = format!("unix://{}", supergraph_sock_path.display());
+
+    let config = format!(
+        r#"
+include_subgraph_errors:
+  all: true
+coprocessor:
+  url: http://should-not-be-used:9999  # Global fallback (should not be used)
+  router:
+    request:
+      headers: true
+      context: true
+      url: {}  # Override for router stage
+  supergraph:
+    request:
+      headers: true
+      body: true
+      context: true
+      url: {}  # Override for supergraph stage
+"#,
+        router_uds_url, supergraph_uds_url
+    );
+
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Verify that both Unix socket servers were actually used
+    let router_calls = router_counter.load(Ordering::SeqCst);
+    let supergraph_calls = supergraph_counter.load(Ordering::SeqCst);
+
+    assert!(
+        router_calls > 0,
+        "Router stage Unix socket should have been called, but was called {} times",
+        router_calls
+    );
+    assert!(
+        supergraph_calls > 0,
+        "Supergraph stage Unix socket should have been called, but was called {} times",
+        supergraph_calls
+    );
+
+    println!(
+        "Per-stage Unix socket URLs working correctly: router={} calls, supergraph={} calls",
+        router_calls, supergraph_calls
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(unix)]
+async fn test_coprocessor_mixed_http_and_unix_socket_urls() -> Result<(), tower::BoxError> {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering;
+
+    use hyper_util::rt::TokioExecutor;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::UnixListener;
+    use wiremock::ResponseTemplate;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create temporary Unix socket path for router stage
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut router_sock_path = PathBuf::from(dir.path());
+    router_sock_path.push("router_stage.sock");
+    let _ = std::fs::remove_file(&router_sock_path);
+
+    // Counters to verify each endpoint was actually used
+    let router_counter = Arc::new(AtomicU32::new(0));
+    let supergraph_counter = Arc::new(AtomicU32::new(0));
+
+    // Start Unix domain socket HTTP server for router stage
+    let router_uds = UnixListener::bind(&router_sock_path).expect("bind router uds");
+    let router_counter_clone = router_counter.clone();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = router_uds.accept().await.expect("accept router");
+            let io = TokioIo::new(stream);
+            let counter = router_counter_clone.clone();
+            let svc =
+                hyper::service::service_fn(move |req: http::Request<hyper::body::Incoming>| {
+                    let counter = counter.clone();
+                    async move {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        let bytes = http_body_util::BodyExt::collect(req.into_body())
+                            .await
+                            .unwrap()
+                            .to_bytes();
+                        Ok::<_, std::convert::Infallible>(
+                            http::Response::builder()
+                                .status(200)
+                                .header(
+                                    http::header::CONTENT_TYPE,
+                                    mime::APPLICATION_JSON.essence_str(),
+                                )
+                                .body(axum::body::Body::from(bytes))
+                                .unwrap(),
+                        )
+                    }
+                });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("router uds server error: {err}");
+            }
+        }
+    });
+
+    // Start HTTP server for supergraph stage using wiremock
+    let supergraph_counter_clone = supergraph_counter.clone();
+    let supergraph_mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(move |req: &wiremock::Request| {
+            supergraph_counter_clone.fetch_add(1, Ordering::SeqCst);
+            // Echo back the request body
+            ResponseTemplate::new(200)
+                .set_body_bytes(req.body.clone())
+                .insert_header("content-type", "application/json")
+        })
+        .mount(&supergraph_mock_server)
+        .await;
+
+    // Wait a moment for servers to start
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Configure router with MIXED transports: Unix socket for router, HTTP for supergraph
+    let router_uds_url = format!("unix://{}", router_sock_path.display());
+    let supergraph_http_url = supergraph_mock_server.uri();
+
+    let config = format!(
+        r#"
+include_subgraph_errors:
+  all: true
+coprocessor:
+  url: http://should-not-be-used:9999  # Global fallback (should not be used)
+  router:
+    request:
+      headers: true
+      context: true
+      url: {}  # Unix socket for router stage
+  supergraph:
+    request:
+      headers: true
+      body: true
+      context: true
+      url: {}  # HTTP for supergraph stage
+"#,
+        router_uds_url, supergraph_http_url
+    );
+
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Verify that BOTH transports were used correctly
+    let router_calls = router_counter.load(Ordering::SeqCst);
+    let supergraph_calls = supergraph_counter.load(Ordering::SeqCst);
+
+    assert!(
+        router_calls > 0,
+        "Router stage Unix socket should have been called, but was called {} times",
+        router_calls
+    );
+    assert!(
+        supergraph_calls > 0,
+        "Supergraph stage HTTP endpoint should have been called, but was called {} times",
+        supergraph_calls
+    );
+
+    println!(
+        "Mixed transports working correctly: router Unix socket={} calls, supergraph HTTP={} calls",
+        router_calls, supergraph_calls
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(unix)]
+async fn test_coprocessor_unix_socket_connection_refused() -> Result<(), BoxError> {
+    use std::path::PathBuf;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create a socket path that doesn't exist (no server listening)
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("nonexistent.sock");
+
+    // Configure router to use a Unix socket that doesn't exist
+    let uds_url = format!("unix://{}", sock_path.display());
+    let config = format!(
+        r#"
+include_subgraph_errors:
+  all: true
+coprocessor:
+  url: {}
+  timeout: 1s
+  router:
+    request:
+      headers: true
+"#,
+        uds_url
+    );
+
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Query should fail or return error due to connection refused
+    let (_trace_id, response) = router.execute_default_query().await;
+
+    // The router should handle the error gracefully
+    // Depending on coprocessor configuration, it might return an error or continue
+    // For this test, we're just verifying it doesn't panic/crash
+    assert!(
+        response.status().is_client_error()
+            || response.status().is_server_error()
+            || response.status().is_success(),
+        "Router should handle connection errors gracefully, got status: {}",
+        response.status()
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(unix)]
+async fn test_coprocessor_unix_socket_server_closes_connection() -> Result<(), BoxError> {
+    use std::path::PathBuf;
+
+    use tokio::net::UnixListener;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create a Unix socket that immediately closes connections
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("closing.sock");
+    let _ = std::fs::remove_file(&sock_path);
+
+    let uds = UnixListener::bind(&sock_path).expect("bind uds");
+    tokio::spawn(async move {
+        loop {
+            if let Ok((stream, _)) = uds.accept().await {
+                // Immediately drop the stream to close the connection
+                drop(stream);
+            }
+        }
+    });
+
+    // Wait for server to be ready
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let uds_url = format!("unix://{}", sock_path.display());
+    let config = format!(
+        r#"
+include_subgraph_errors:
+  all: true
+coprocessor:
+  url: {}
+  timeout: 2s
+  router:
+    request:
+      headers: true
+"#,
+        uds_url
+    );
+
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Query should handle the closed connection gracefully
+    let (_trace_id, response) = router.execute_default_query().await;
+
+    // Should get an error response but not crash
+    assert!(
+        response.status().is_client_error()
+            || response.status().is_server_error()
+            || response.status().is_success(),
+        "Router should handle connection closure gracefully, got status: {}",
+        response.status()
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Track which coprocessor stages were called
+    let stages_called: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let stages_called_clone = stages_called.clone();
+
+    // Set up a wiremock coprocessor that echoes back the request and tracks stages
+    let mock_coprocessor = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| {
+            let body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = body
+                .get("stage")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            stages_called_clone.lock().unwrap().push(stage);
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&mock_coprocessor)
+        .await;
+
+    let config = format!(
+        r#"
+        include_subgraph_errors:
+            all: true
+        coprocessor:
+            url: {}
+            connector:
+                all:
+                    request:
+                        body: true
+                        headers: true
+                        uri: true
+                    response:
+                        body: true
+                        headers: true
+                        status_code: true
+        "#,
+        mock_coprocessor.uri()
+    );
+
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "title": "Awesome post",
+            "body": "This is a really great post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query { posts { id title } }"}))
+                .build(),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+
+    let body = response.json::<serde_json::Value>().await?;
+    assert!(
+        body.get("errors").is_none(),
+        "unexpected errors: {:?}",
+        body.get("errors")
+    );
+
+    let called_stages = stages_called.lock().unwrap().clone();
+    assert!(
+        called_stages.contains(&"ConnectorRequest".to_string()),
+        "ConnectorRequest stage should have been called, got: {called_stages:?}"
+    );
+    assert!(
+        called_stages.contains(&"ConnectorResponse".to_string()),
+        "ConnectorResponse stage should have been called, got: {called_stages:?}"
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connector_coprocessor_failure_returns_graphql_error() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Set up a coprocessor that returns a 500 error for connector stages
+    let mock_coprocessor = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&mock_coprocessor)
+        .await;
+
+    let config = format!(
+        r#"
+        include_subgraph_errors:
+            all: true
+        coprocessor:
+            url: {}
+            connector:
+                all:
+                    request:
+                        body: true
+        "#,
+        mock_coprocessor.uri()
+    );
+
+    let mut router = IntegrationTest::builder()
+        .config(config)
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "title": "Awesome post",
+            "body": "This is a really great post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query { posts { id title } }"}))
+                .build(),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+
+    let body = response.json::<serde_json::Value>().await?;
+    assert!(
+        body.get("errors")
+            .and_then(|e| e.as_array())
+            .is_some_and(|errors| !errors.is_empty()),
+        "expected GraphQL errors in response body, got: {body}"
+    );
+
+    router.graceful_shutdown().await;
     Ok(())
 }

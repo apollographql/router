@@ -50,7 +50,7 @@ input join__ContextArgument {
   name: String!
   type: String!
   context: String!
-  selection: join__FieldValue
+  selection: join__FieldValue!
 }
 
 type Query @join__type(graph: WITH_CONNECTORS_V0_2_) @join__type(graph: WITH_CONNECTORS_V0_1_) {

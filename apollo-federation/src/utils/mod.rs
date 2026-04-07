@@ -7,6 +7,8 @@ pub(crate) mod multi_index_map;
 pub mod normalize_schema;
 pub(crate) mod serde_bridge;
 
+use std::cell::OnceCell;
+
 // Re-exports
 pub(crate) use fallible_iterator::*;
 pub(crate) use multi_index_map::MultiIndexMap;
@@ -41,4 +43,31 @@ pub(crate) fn first_max_by_key<T, O: Ord>(
     }
 
     Some(max_item)
+}
+
+/// Wrapper around OnceCell that allows fallible instantiation.
+///
+/// NOTE: This is a temporary workaround until `OnceCell#get_or_try_init` stabilizes
+pub(crate) struct FallibleOnceCell<T>(OnceCell<T>);
+
+impl<T: std::fmt::Debug> FallibleOnceCell<T> {
+    pub(crate) fn new() -> Self {
+        Self(OnceCell::new())
+    }
+
+    pub(crate) fn get_or_try_init<F, E>(&self, f: F) -> Result<&T, E>
+    where
+        F: FnOnce() -> Result<T, E>,
+    {
+        let value = match self.0.get() {
+            Some(value) => value,
+            None => {
+                let value = f()?;
+                self.0.set(value).unwrap();
+                // we just set the value so this should never return None
+                self.0.get().unwrap()
+            }
+        };
+        Ok(value)
+    }
 }

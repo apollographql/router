@@ -41,7 +41,6 @@ pub(crate) struct SubgraphMetadata {
     shareable_fields: IndexSet<FieldDefinitionPosition>,
 }
 
-#[allow(dead_code)]
 impl SubgraphMetadata {
     pub(super) fn new(
         schema: &FederationSchema,
@@ -134,6 +133,17 @@ impl SubgraphMetadata {
         self.external_metadata.external_fields.shift_remove(field);
     }
 
+    pub(crate) fn remove_external_type_fields(
+        &mut self,
+        fields: Vec<ObjectFieldDefinitionPosition>,
+    ) {
+        for field in fields {
+            self.external_metadata
+                .fields_on_external_types
+                .shift_remove(&FieldDefinitionPosition::Object(field));
+        }
+    }
+
     /// Update field coordinates in metadata after a type has been renamed.
     /// This is necessary when root operation types are normalized (e.g., MyMutation -> Mutation).
     pub(crate) fn update_type_references(
@@ -156,6 +166,7 @@ impl SubgraphMetadata {
             .update_type_references(old_type_name, new_type_name);
     }
 
+    #[allow(unused)]
     pub(crate) fn selection_selects_any_external_field(&self, selection: &SelectionSet) -> bool {
         self.external_metadata()
             .selects_any_external_field(selection)
@@ -229,9 +240,8 @@ impl SubgraphMetadata {
         else {
             return Ok(shareable_fields);
         };
-        let shareable_directive_referencers = schema
-            .referencers
-            .get_directive(&shareable_directive_name)?;
+        let shareable_directive_referencers =
+            schema.referencers.get_directive(&shareable_directive_name);
 
         // Fields of shareable object types are shareable
         for object_type_position in &shareable_directive_referencers.object_types {
@@ -347,13 +357,9 @@ impl SubgraphMetadata {
             return Ok(interface_object_types);
         };
 
-        let Ok(interface_object_directive_referencers) = schema
+        let interface_object_directive_referencers = schema
             .referencers
-            .get_directive(&interface_object_directive_name)
-        else {
-            return Ok(interface_object_types);
-        };
-
+            .get_directive(&interface_object_directive_name);
         for object_type_position in &interface_object_directive_referencers.object_types {
             interface_object_types.insert(object_type_position.type_name.clone());
         }
@@ -444,7 +450,7 @@ impl ExternalMetadata {
         };
 
         let external_directive_referencers =
-            schema.referencers.get_directive(&external_directive_name)?;
+            schema.referencers.get_directive(&external_directive_name);
 
         let mut external_fields = IndexSet::default();
 
@@ -515,7 +521,7 @@ impl ExternalMetadata {
         };
 
         let external_directive_referencers =
-            schema.referencers.get_directive(&external_directive_name)?;
+            schema.referencers.get_directive(&external_directive_name);
 
         let mut fields_on_external_types = IndexSet::default();
         for object_type_position in &external_directive_referencers.object_types {

@@ -1,0 +1,36 @@
+schema
+@link(url: "https://specs.apollo.dev/link/v1.0")
+@link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+    query: Query
+}
+
+directive @join__field(graph: join__Graph) repeatable on FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+scalar link__Import
+
+enum join__Graph {
+    SUBGRAPH @join__graph(name: "subgraph", url: "http://localhost:4001")
+}
+
+enum link__Purpose {
+    SECURITY
+    EXECUTION
+}
+
+type Query
+@join__type(graph: SUBGRAPH)
+{
+    user: User @join__field(graph: SUBGRAPH)
+}
+
+type User
+@join__type(graph: SUBGRAPH, key: "id")
+{
+    id: ID!
+    name: String!
+}

@@ -17,6 +17,8 @@ use super::connector_service::ConnectorServiceFactory;
 use super::fetch::AddSubgraphNameExt;
 use super::fetch::BoxService;
 use super::new_service::ServiceFactory;
+use crate::configuration::HoistOrphanErrors;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -40,6 +42,7 @@ pub(crate) struct FetchService {
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>, // TODO: add subscription support to FetchService
     pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
+    pub(crate) hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
 }
 
 impl tower::Service<Request> for FetchService {
@@ -77,6 +80,7 @@ impl FetchService {
         } = request;
         let service_name = service_name.clone();
         let fetch_time_offset = context.created_at.elapsed().as_nanos() as i64;
+        let hoist_orphan_errors = self.hoist_orphan_errors.get(&service_name).enabled;
 
         if let Some(connector) = self
             .connector_service_factory
@@ -88,6 +92,7 @@ impl FetchService {
                 self.connector_service_factory.clone(),
                 connector.id.subgraph_name.clone(),
                 request,
+                hoist_orphan_errors,
             )
             .instrument(tracing::info_span!(
                 FETCH_SPAN_NAME,
@@ -101,6 +106,7 @@ impl FetchService {
                 self.subgraph_service_factory.clone(),
                 self.subgraph_schemas.clone(),
                 request,
+                hoist_orphan_errors,
             )
             .instrument(tracing::info_span!(
                 FETCH_SPAN_NAME,
@@ -116,6 +122,7 @@ impl FetchService {
         connector_service_factory: Arc<ConnectorServiceFactory>,
         subgraph_name: String,
         request: FetchRequest,
+        hoist_orphan_errors: bool,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
         let FetchRequest {
             fetch_node,
@@ -160,8 +167,13 @@ impl FetchService {
                 Ok(res) => res.response.into_parts(),
             };
 
-            let (value, errors) =
-                fetch_node.response_at_path(&schema, &current_dir, paths, response);
+            let (value, errors) = fetch_node.response_at_path(
+                &schema,
+                &current_dir,
+                paths,
+                response,
+                hoist_orphan_errors,
+            );
             Ok((value, errors))
         })
     }
@@ -171,6 +183,7 @@ impl FetchService {
         subgraph_service_factory: Arc<SubgraphServiceFactory>,
         subgraph_schemas: Arc<SubgraphSchemas>,
         request: FetchRequest,
+        hoist_orphan_errors: bool,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
         let FetchRequest {
             fetch_node,
@@ -261,6 +274,7 @@ impl FetchService {
                     variables.inverted_paths,
                     &aqs,
                     variables.variables,
+                    hoist_orphan_errors,
                 )
                 .await)
         })
@@ -274,6 +288,7 @@ pub(crate) struct FetchServiceFactory {
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
+    pub(crate) hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
 }
 
 impl FetchServiceFactory {
@@ -283,6 +298,7 @@ impl FetchServiceFactory {
         subgraph_service_factory: Arc<SubgraphServiceFactory>,
         subscription_config: Option<SubscriptionConfig>,
         connector_service_factory: Arc<ConnectorServiceFactory>,
+        hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
     ) -> Self {
         Self {
             subgraph_service_factory,
@@ -290,6 +306,7 @@ impl FetchServiceFactory {
             schema,
             subscription_config,
             connector_service_factory,
+            hoist_orphan_errors,
         }
     }
 }
@@ -304,6 +321,7 @@ impl ServiceFactory<Request> for FetchServiceFactory {
             subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
             connector_service_factory: self.connector_service_factory.clone(),
+            hoist_orphan_errors: self.hoist_orphan_errors.clone(),
         }
         .boxed()
     }

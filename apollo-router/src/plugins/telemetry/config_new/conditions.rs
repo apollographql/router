@@ -98,7 +98,11 @@ where
             }
             Condition::Exists(sel) => match restricted_stage {
                 Some(stage) => {
-                    if sel.is_active(stage) {
+                    // Allow selectors that are active at the current stage OR at the request stage.
+                    // Request-stage selectors are valid in response-stage events because
+                    // evaluate_request() pre-resolves them before the event is stored for
+                    // response-time evaluation.
+                    if sel.is_active(stage) || sel.is_active(Stage::Request) {
                         Ok(())
                     } else {
                         Err(format!(
@@ -886,6 +890,13 @@ mod test {
         assert!(exists(Req).validate(None).is_ok());
         assert!(exists(Req).validate(Some(Stage::Request)).is_ok());
         assert!(exists(Resp).validate(None).is_ok());
+        // Request-stage selectors are valid in Exists conditions for response-stage events
+        // because evaluate_request() pre-resolves them before response-time evaluation.
+        assert!(exists(Req).validate(Some(Stage::Response)).is_ok());
+        assert!(exists(Req).validate(Some(Stage::ResponseEvent)).is_ok());
+        // Response-stage selectors still work at response stage
+        assert!(exists(Resp).validate(Some(Stage::Response)).is_ok());
+        assert!(exists(Resp).validate(Some(Stage::ResponseEvent)).is_ok());
     }
 
     #[test]

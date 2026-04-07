@@ -20,11 +20,16 @@
 //! - `Public` - For standard metrics exposed via Prometheus or sent to OTLP collectors
 //! - `Apollo`/`ApolloRealtime` - For metrics sent to Apollo Studio with specific filtering
 
+use std::collections::HashSet;
+
 use ahash::HashMap;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::metrics::Stream;
 use prometheus::Registry;
 use tower::BoxError;
 
@@ -33,6 +38,7 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
 
 /// Trait for metric exporters to contribute to meter provider construction
@@ -49,6 +55,10 @@ pub(crate) trait MetricsConfigurator {
 pub(crate) struct MetricsBuilder<'a> {
     pub(super) meter_provider_builders:
         HashMap<MeterProviderType, opentelemetry_sdk::metrics::MeterProviderBuilder>,
+    /// Tracks which provider types have readers configured.
+    /// Only providers with readers are returned from build() to avoid OTel SDK errors
+    /// when observable instruments are registered with providers that have no readers.
+    providers_with_readers: HashSet<MeterProviderType>,
     apollo_metrics_sender: Sender,
     prometheus_registry: Option<Registry>,
     metrics_common: &'a MetricsCommon,
@@ -68,6 +78,11 @@ impl<'a> MetricsBuilder<'a> {
             self.meter_provider_builders
                 .into_iter()
                 .map(|(k, v)| {
+                    // Providers without readers get a noop to avoid OTel SDK errors
+                    // when observable instruments are registered.
+                    if !self.providers_with_readers.contains(&k) {
+                        return (k, FilterMeterProvider::noop());
+                    }
                     (
                         k,
                         match k {
@@ -98,6 +113,7 @@ impl<'a> MetricsBuilder<'a> {
 
         Self {
             meter_provider_builders: HashMap::default(),
+            providers_with_readers: HashSet::new(),
             resource,
             apollo_metrics_sender: Sender::default(),
             prometheus_registry: None,
@@ -125,14 +141,19 @@ impl<'a> MetricsBuilder<'a> {
     ) -> &mut Self {
         let meter_provider = self.meter_provider(meter_provider_type);
         *meter_provider = std::mem::take(meter_provider).with_reader(reader);
+        // Track that this provider has a reader - only providers with readers will be returned
+        self.providers_with_readers.insert(meter_provider_type);
         self
     }
 
-    pub(crate) fn with_view(
+    pub(crate) fn with_view<T>(
         &mut self,
         meter_provider_type: MeterProviderType,
-        view: Box<dyn View>,
-    ) -> &mut Self {
+        view: T,
+    ) -> &mut Self
+    where
+        T: Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static,
+    {
         let meter_provider = self.meter_provider(meter_provider_type);
         *meter_provider = std::mem::take(meter_provider).with_view(view);
         self
@@ -172,13 +193,39 @@ impl<'a> MetricsBuilder<'a> {
             })
     }
 
-    pub(crate) fn configure_views(
-        &mut self,
-        meter_provider_type: MeterProviderType,
-    ) -> Result<(), BoxError> {
-        for metric_view in self.metrics_common().views.clone() {
-            self.with_view(meter_provider_type, metric_view.try_into()?);
-        }
-        Ok(())
+    pub(crate) fn configure_views(&mut self, meter_provider_type: MeterProviderType) {
+        let boundaries = self.metrics_common().buckets.clone();
+
+        // Pre-merge user views with default histogram aggregation
+        let merged_views: HashMap<String, MetricView> = self
+            .metrics_common()
+            .views
+            .clone()
+            .into_iter()
+            .map(|v| {
+                let name = v.name.clone();
+                let default_view = MetricView::default_histogram(name.clone(), boundaries.clone());
+                (name, default_view.merge(v))
+            })
+            .collect();
+
+        // Single view that handles both user-configured and default histogram views
+        self.with_view(meter_provider_type, move |instrument: &Instrument| {
+            merged_views
+                .get(instrument.name())
+                .cloned()
+                .map(|view| view.into_stream())
+                .or_else(|| {
+                    (instrument.kind() == InstrumentKind::Histogram).then(|| {
+                        Stream::builder()
+                            .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                                boundaries: boundaries.clone(),
+                                record_min_max: true,
+                            })
+                            .build()
+                            .expect("Failed to create stream for default histogram bucket view")
+                    })
+                })
+        });
     }
 }

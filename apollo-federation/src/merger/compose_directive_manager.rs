@@ -25,7 +25,6 @@ use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec::Identity;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
-use crate::merger::merge::Sources;
 use crate::subgraph::typestate::HasMetadata;
 use crate::subgraph::typestate::Subgraph;
 use crate::supergraph::CompositionHint;
@@ -53,9 +52,9 @@ pub(crate) struct ComposeDirectiveManager {
 }
 
 #[derive(Clone)]
-struct MergeDirectiveItem {
+pub(crate) struct MergeDirectiveItem {
     subgraph_name: String,
-    definition: DirectiveDefinition,
+    pub(crate) definition: DirectiveDefinition,
     link: LinkedElement,
     original_name: Name,
 }
@@ -612,7 +611,7 @@ impl ErrorReporter {
         items: &[MergeDirectiveItem],
         subgraphs: &[Subgraph<T>],
     ) {
-        let sources: Sources<MergeDirectiveItem> = subgraphs
+        let sources = subgraphs
             .iter()
             .enumerate()
             .map(|(idx, subgraph)| {
@@ -622,12 +621,13 @@ impl ErrorReporter {
                 (idx, item_in_this_subgraph.cloned())
             })
             .collect();
-        self.report_mismatch_error_without_supergraph::<MergeDirectiveItem>(
+        self.report_mismatch_error_without_supergraph(
             CompositionError::DirectiveCompositionError {
                 message: "Composed directive is not named consistently in all subgraphs"
                     .to_string(),
             },
             &sources,
+            subgraphs,
             |elt, _| Some(format!("\"@{}\"", elt.aliased_directive_name())),
         );
     }

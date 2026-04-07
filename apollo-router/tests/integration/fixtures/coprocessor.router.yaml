@@ -22,3 +22,9 @@ coprocessor:
       body: true
     response:
       body: true
+  connector:
+    all:
+      request:
+        body: true
+      response:
+        body: true

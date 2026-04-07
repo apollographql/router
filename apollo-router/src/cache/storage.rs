@@ -128,7 +128,7 @@ where
                     ],
                 )
             })
-            .init()
+            .build()
     }
 
     fn create_cache_estimated_storage_size_gauge(&self) -> ObservableGauge<i64> {
@@ -153,7 +153,7 @@ where
                     )
                 }
             })
-            .init()
+            .build()
     }
 
     /// `init_from_redis` is called with values newly deserialized from Redis cache
@@ -279,11 +279,16 @@ where
     }
 
     pub(crate) fn activate(&self) {
-        // Gauges MUST be created after the meter provider is initialized
-        // This means that on reload we need a non-fallible way to recreate the gauges, hence this function.
+        // Gauges MUST be created after the meter provider is initialized.
+        // This means that on reload we need a non-fallible way to recreate the gauges.
         *self.cache_size_gauge.lock() = Some(self.create_cache_size_gauge());
         *self.cache_estimated_storage_gauge.lock() =
             Some(self.create_cache_estimated_storage_size_gauge());
+
+        // Also activate Redis metrics if present
+        if let Some(redis) = &self.redis {
+            redis.activate();
+        }
     }
 }
 

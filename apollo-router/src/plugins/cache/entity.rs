@@ -52,8 +52,8 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::response_cache::plugin::find_matching_key_field_set;
 use crate::query_planner::OperationKind;
@@ -64,14 +64,14 @@ use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
 
 /// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
-pub(crate) const ENTITY_CACHE_VERSION: &str = "1.1";
+pub(crate) const ENTITY_CACHE_VERSION: &str = "1.2";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 /// Context key to enable support of surrogate cache key
 pub(crate) const CONTEXT_CACHE_KEYS: &str = "apollo::entity_cache::cached_keys_status";
 
-register_plugin!("apollo", "preview_entity_cache", EntityCache);
+register_private_plugin!("apollo", "preview_entity_cache", EntityCache);
 
 #[derive(Clone)]
 pub(crate) struct EntityCache {
@@ -97,6 +97,16 @@ pub(crate) struct Storage {
 impl Storage {
     pub(crate) fn get(&self, subgraph: &str) -> Option<&RedisCacheStorage> {
         self.subgraphs.get(subgraph).or(self.all.as_ref())
+    }
+
+    /// Activate all Redis storages so they can start emitting metrics.
+    pub(crate) fn activate(&self) {
+        if let Some(all) = &self.all {
+            all.activate();
+        }
+        for storage in self.subgraphs.values() {
+            storage.activate();
+        }
     }
 }
 
@@ -190,7 +200,7 @@ pub(crate) struct CacheHitMiss {
 }
 
 #[async_trait::async_trait]
-impl Plugin for EntityCache {
+impl PluginPrivate for EntityCache {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
@@ -462,6 +472,10 @@ impl Plugin for EntityCache {
 
         map
     }
+
+    fn activate(&self) {
+        self.storage.activate();
+    }
 }
 
 #[cfg(test)]
@@ -634,6 +648,16 @@ impl CacheService {
             return self.service.call(request).await;
         }
 
+        let request_cache_control = if request
+            .subgraph_request
+            .headers()
+            .contains_key(&CACHE_CONTROL)
+        {
+            CacheControl::new(request.subgraph_request.headers(), None).ok()
+        } else {
+            None
+        };
+
         if !request
             .subgraph_request
             .body()
@@ -650,6 +674,7 @@ impl CacheService {
                     private_id.as_deref(),
                     self.expose_keys_in_context,
                     request,
+                    request_cache_control.as_ref(),
                 )
                 .instrument(tracing::info_span!("cache.entity.lookup"))
                 .await?
@@ -707,7 +732,9 @@ impl CacheService {
                             .await;
                         }
 
-                        if cache_control.should_store() {
+                        if cache_control.should_store()
+                            && request_cache_control.is_none_or(|c| !c.is_no_store())
+                        {
                             cache_store_root_from_response(
                                 self.storage,
                                 self.subgraph_ttl,
@@ -750,6 +777,7 @@ impl CacheService {
                 private_id.as_deref(),
                 request,
                 self.expose_keys_in_context,
+                request_cache_control.as_ref(),
             )
             .instrument(tracing::info_span!("cache.entity.lookup"))
             .await?
@@ -868,6 +896,7 @@ impl CacheService {
                         cache_result.0,
                         is_known_private,
                         private_id,
+                        request_cache_control,
                     )
                     .await?;
 
@@ -906,6 +935,7 @@ impl CacheService {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn cache_lookup_root(
     name: String,
     entity_type_opt: Option<&str>,
@@ -914,6 +944,7 @@ async fn cache_lookup_root(
     private_id: Option<&str>,
     expose_keys_in_context: bool,
     mut request: subgraph::Request,
+    request_cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String)>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
@@ -927,6 +958,10 @@ async fn cache_lookup_root(
         is_known_private,
         private_id,
     );
+
+    if request_cache_control.is_some_and(|c| c.is_no_cache()) {
+        return Ok(ControlFlow::Continue((request, key)));
+    }
 
     let cache_result: Result<RedisValue<CacheEntry>, _> = cache.get(RedisKey(key.clone())).await;
 
@@ -998,7 +1033,15 @@ async fn cache_lookup_entities(
     private_id: Option<&str>,
     mut request: subgraph::Request,
     expose_keys_in_context: bool,
+    request_cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
+    if request_cache_control.is_some_and(|c| c.is_no_cache()) {
+        return Ok(ControlFlow::Continue((
+            request,
+            EntityCacheResults(vec![], None),
+        )));
+    }
+
     let body = request.subgraph_request.body_mut();
     let keys = extract_cache_keys(
         &name,
@@ -1208,6 +1251,7 @@ async fn cache_store_root_from_response(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn cache_store_entities_from_response(
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
@@ -1216,6 +1260,7 @@ async fn cache_store_entities_from_response(
     mut result_from_cache: Vec<IntermediateResult>,
     is_known_private: bool,
     private_id: Option<String>,
+    request_cache_control: Option<CacheControl>,
 ) -> Result<(), BoxError> {
     let mut data = response.response.body_mut().data.take();
 
@@ -1246,6 +1291,7 @@ async fn cache_store_entities_from_response(
             &mut result_from_cache,
             update_key_private,
             should_cache_private,
+            request_cache_control,
         )
         .await?;
 
@@ -1634,6 +1680,7 @@ async fn insert_entities_in_result(
     result: &mut Vec<IntermediateResult>,
     update_key_private: Option<String>,
     should_cache_private: bool,
+    request_cache_control: Option<CacheControl>,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
@@ -1698,7 +1745,13 @@ async fn insert_entities_in_result(
                     has_errors = true;
                 }
 
-                if !has_errors && cache_control.should_store() && should_cache_private {
+                if !has_errors
+                    && cache_control.should_store()
+                    && should_cache_private
+                    && request_cache_control
+                        .as_ref()
+                        .is_none_or(|c| !c.is_no_store())
+                {
                     to_insert.push((
                         RedisKey(key),
                         RedisValue(CacheEntry {

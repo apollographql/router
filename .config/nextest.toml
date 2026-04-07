@@ -67,6 +67,7 @@ or ( binary_id(=apollo-router::integration_tests) & test(=integration::connector
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::connectors::authentication::test_aws_sig_v4_signing) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::coprocessor::test_coprocessor_response_handling) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::coprocessor::test_error_not_propagated_to_client) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::entity_cache::test_cache_metrics) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_fails_incompatible_query_order) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_fails_invalid_file_order) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_fails_invalid_multipart_order) )

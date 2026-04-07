@@ -104,7 +104,7 @@ LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
 LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
 LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
 LitObject            ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
-LitProperty          ::= Key ":" LitExpr
+LitProperty          ::= Key (":" LitExpr)?
 LitArray             ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
 NO_SPACE             ::= !SpacesOrComments
 SpacesOrComments     ::= (Spaces | Comment)+
@@ -1066,13 +1066,18 @@ A sequence of `LitProperty` items within curly braces, as in JavaScript.
 
 Trailing commas are not currently allowed, but could be supported in the future.
 
-### `LitProperty ::= Key ":" LitExpr`
+### `LitProperty ::= Key (":" LitExpr)?`
 
 ![LitProperty](./grammar/LitProperty.svg)
 
 A key-value pair within a `LitObject`. Note that the `Key` may be either an
 `Identifier` or a `LitString`, as in JavaScript. This is a little different
 from JSON, which allows double-quoted strings only.
+
+Starting in connect/v0.4, shorthand property syntax is supported: `{ a }` is
+equivalent to `{ a: a }`, where the value is a `KeyPath` referencing the same
+name as the key. This mirrors JavaScript's shorthand property syntax and allows
+more concise object literals when passing through input fields unchanged.
 
 ### `LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"`
 

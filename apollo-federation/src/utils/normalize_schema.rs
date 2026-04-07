@@ -70,6 +70,66 @@ pub fn normalize_valid_schema(schema: Valid<Schema>) -> Normalized<Valid<Schema>
     Normalized(Valid::assume_valid(schema.into_inner()))
 }
 
+/// The same as [normalize_schema], but also normalizes all descriptions.
+pub fn normalize_schema_types_and_descriptions(mut schema: Schema) -> Normalized<Schema> {
+    use apollo_compiler::schema::ExtendedType;
+    normalize_description(&mut schema.schema_definition.make_mut().description);
+    for extended_type in schema.types.values_mut() {
+        match extended_type {
+            ExtendedType::Scalar(scalar) => {
+                normalize_description(&mut scalar.make_mut().description);
+            }
+            ExtendedType::Object(object) => {
+                let definition = object.make_mut();
+                normalize_description(&mut definition.description);
+                for field in definition.fields.values_mut() {
+                    let field_definition = field.make_mut();
+                    normalize_description(&mut field_definition.description);
+                    for arg in &mut field_definition.arguments {
+                        normalize_description(&mut arg.make_mut().description);
+                    }
+                }
+            }
+            ExtendedType::Interface(intf) => {
+                let definition = intf.make_mut();
+                normalize_description(&mut definition.description);
+                for field in definition.fields.values_mut() {
+                    let field_definition = field.make_mut();
+                    normalize_description(&mut field_definition.description);
+                    for arg in &mut field_definition.arguments {
+                        normalize_description(&mut arg.make_mut().description);
+                    }
+                }
+            }
+            ExtendedType::Union(union) => {
+                normalize_description(&mut union.make_mut().description);
+            }
+            ExtendedType::Enum(enum_type) => {
+                let definition = enum_type.make_mut();
+                normalize_description(&mut definition.description);
+                for enum_value in definition.values.values_mut() {
+                    normalize_description(&mut enum_value.make_mut().description);
+                }
+            }
+            ExtendedType::InputObject(input_object) => {
+                let definition = input_object.make_mut();
+                normalize_description(&mut definition.description);
+                for input_field in definition.fields.values_mut() {
+                    normalize_description(&mut input_field.make_mut().description);
+                }
+            }
+        }
+    }
+    for directive in schema.directive_definitions.values_mut() {
+        let definition = directive.make_mut();
+        normalize_description(&mut definition.description);
+        for arg in &mut definition.arguments {
+            normalize_description(&mut arg.make_mut().description);
+        }
+    }
+    normalize_schema(schema)
+}
+
 /// A marker wrapper that indicates the contained schema has been normalized via [normalize_schema].
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[repr(transparent)]
@@ -994,6 +1054,20 @@ fn discriminant_type(ty: &apollo_compiler::ast::Type) -> u8 {
     }
 }
 
+fn normalize_description(description: &mut Option<Node<str>>) {
+    *description = match description.take() {
+        Some(val) => {
+            let updated = val.trim();
+            if updated.is_empty() {
+                None
+            } else {
+                Some(Node::new_str(updated))
+            }
+        }
+        None => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use apollo_compiler::schema::ExtendedType;
@@ -1258,5 +1332,56 @@ mod tests {
             .expect("Test schema without extensions unexpectedly invalid.");
         assert_eq!(&normalized_schema, normalized_schema_no_exts.as_ref());
         assert_eq!(normalized_schema.to_string(), normalized_sdl_no_exts);
+    }
+
+    #[test]
+    fn test_description_normalization() {
+        let sdl = r###"
+        """
+
+        My Schema Description
+
+        """
+        schema {
+          query: Query
+        }
+
+        """
+
+        My custom directive
+
+        """
+        directive @custom("  optional argument  " arg: String) on FIELD_DEFINITION
+
+        ""
+        scalar ScalarEmptyDescription
+
+        " Enum Description "
+        enum MyEnum {
+          """
+            Enum Value Description
+          """
+          ONE_WITH_DESCRIPTION,
+          ONE_WITHOUT
+        }
+
+        """   Description on Object"""
+        type Query {
+          "   Description on field "
+          a: String!
+          ""
+          b(
+            """ Argument Description  """
+            name: String
+          ): String
+
+          c(input: ScalarEmptyDescription): Int @custom
+
+          d: MyEnum
+        }
+        "###;
+        let schema = Schema::parse_and_validate(sdl, "schema.graphql").expect("valid schema");
+        let normalized = normalize_schema_types_and_descriptions(schema.into_inner());
+        insta::assert_snapshot!(normalized.to_string());
     }
 }

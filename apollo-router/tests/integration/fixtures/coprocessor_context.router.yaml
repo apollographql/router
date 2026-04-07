@@ -26,8 +26,15 @@ coprocessor:
         context: all
   execution:
     request:
-      body: true  
+      body: true
       context: all
     response:
       body: true
       context: all
+  connector:
+    all:
+      request:
+        body: true
+        context: all
+      response:
+        body: true

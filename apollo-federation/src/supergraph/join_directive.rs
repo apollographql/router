@@ -30,16 +30,13 @@ pub(super) fn extract(
     subgraphs: &mut FederationSubgraphs,
     graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
 ) -> Result<(), FederationError> {
-    let join_directives = match supergraph_schema
+    let join_directives = supergraph_schema
         .referencers()
-        .get_directive(JOIN_DIRECTIVE)
-    {
-        Ok(directives) => directives,
-        Err(_) => {
-            // No join directives found, nothing to do.
-            return Ok(());
-        }
-    };
+        .get_directive(JOIN_DIRECTIVE);
+    if join_directives.is_empty() {
+        // No join directives found, nothing to do.
+        return Ok(());
+    }
 
     if let Some(schema_def_pos) = &join_directives.schema {
         let schema_def = schema_def_pos.get(supergraph_schema.schema());

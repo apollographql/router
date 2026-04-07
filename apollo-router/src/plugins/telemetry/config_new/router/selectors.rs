@@ -161,8 +161,9 @@ pub(crate) enum RouterSelector {
         response_status: ResponseStatus,
     },
     /// The size hint of the body.
-    /// This is used as the Content-Length header has not yet been populated
-    /// when selectors are evaluated
+    /// If compression is enabled, this will be the uncompressed size.
+    /// Its not possible to get the compressed size in selector as the
+    /// body has not yet been compressed at the time on_response is called.
     ResponseSizeHint {
         /// Extract response size hint in bytes
         response_size_hint: bool,
@@ -192,6 +193,11 @@ pub(crate) enum RouterSelector {
     TraceId {
         /// The format of the trace ID.
         trace_id: TraceIdFormat,
+    },
+    /// The context ID of the request (unique per request).
+    ContextId {
+        /// The context ID
+        context_id: bool,
     },
 }
 
@@ -263,6 +269,9 @@ impl Selector for RouterSelector {
             RouterSelector::ResponseErrors { .. } => {
                 insert_display_router_response(request);
                 None
+            }
+            RouterSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(request.context.id.clone()))
             }
             // Related to Response
             _ => None,
@@ -399,6 +408,9 @@ impl Selector for RouterSelector {
                 .ok()
                 .flatten()
                 .map(opentelemetry::Value::from),
+            RouterSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(response.context.id.clone()))
+            }
             _ => None,
         }
     }
@@ -408,6 +420,9 @@ impl Selector for RouterSelector {
             RouterSelector::Error { .. } => Some(error.to_string().into()),
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(ctx.id.clone()))
+            }
             RouterSelector::ResponseContext {
                 response_context,
                 default,
@@ -460,6 +475,7 @@ impl Selector for RouterSelector {
                         | RouterSelector::Static(_)
                         | RouterSelector::Env { .. }
                         | RouterSelector::StaticField { .. }
+                        | RouterSelector::ContextId { .. }
                 )
             }
             Stage::Response | Stage::ResponseEvent => matches!(
@@ -478,6 +494,7 @@ impl Selector for RouterSelector {
                     | RouterSelector::RouterOverhead { .. }
                     | RouterSelector::ActiveSubgraphRequests { .. }
                     | RouterSelector::OnGraphQLError { .. }
+                    | RouterSelector::ContextId { .. }
             ),
             Stage::ResponseField => false,
             Stage::Error => matches!(
@@ -491,6 +508,7 @@ impl Selector for RouterSelector {
                     | RouterSelector::StaticField { .. }
                     | RouterSelector::ResponseContext { .. }
                     | RouterSelector::Error { .. }
+                    | RouterSelector::ContextId { .. }
             ),
             Stage::Drop => matches!(
                 self,
@@ -527,6 +545,8 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::otel;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::RouterRequest;
+    use crate::services::RouterResponse;
 
     #[test]
     fn router_static() {
@@ -747,8 +767,8 @@ mod test {
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
+                TraceId::from(42),
+                SpanId::from(42),
                 // Make sure it's sampled if not, it won't create anything at the otel layer
                 TraceFlags::default().with_sampled(true),
                 false,
@@ -801,8 +821,8 @@ mod test {
             );
 
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
+                TraceId::from(42),
+                SpanId::from(42),
                 TraceFlags::default().with_sampled(true),
                 false,
                 TraceState::default(),
@@ -1047,5 +1067,42 @@ mod test {
             selector.on_response(res).unwrap().as_str(),
             r#"{"message":"Something went wrong","locations":[{"line":1,"column":1}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}"#
         );
+    }
+
+    #[test]
+    fn router_context_id() {
+        let selector = RouterSelector::ContextId { context_id: true };
+        let context = crate::context::Context::new();
+        let expected_id: opentelemetry::Value = context.id.clone().into();
+
+        // Test on_request
+        let request = RouterRequest::fake_builder()
+            .context(context.clone())
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_request(&request).unwrap(), expected_id);
+
+        // Test on_response
+        let response = RouterResponse::fake_builder()
+            .context(context.clone())
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_response(&response).unwrap(), expected_id);
+
+        // Test on_error
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from(String::from("test error")), &context)
+                .unwrap(),
+            expected_id
+        );
+
+        // Test that context_id: false returns None
+        let selector_disabled = RouterSelector::ContextId { context_id: false };
+        let request = RouterRequest::fake_builder()
+            .context(context)
+            .build()
+            .unwrap();
+        assert!(selector_disabled.on_request(&request).is_none());
     }
 }

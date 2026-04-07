@@ -173,7 +173,9 @@ pub(crate) fn trace_id() -> Option<TraceId> {
 pub(crate) fn get_baggage(key: &str) -> Option<opentelemetry::Value> {
     let context = Span::current().context();
     let baggage = context.baggage();
-    baggage.get(key).cloned()
+    baggage
+        .get(key)
+        .map(|v| opentelemetry::Value::String(v.clone()))
 }
 
 pub(crate) trait ToOtelValue {
@@ -248,6 +250,7 @@ impl From<opentelemetry::Value> for AttributeValue {
             opentelemetry::Value::F64(v) => AttributeValue::F64(v),
             opentelemetry::Value::String(v) => AttributeValue::String(v.into()),
             opentelemetry::Value::Array(v) => AttributeValue::Array(v.into()),
+            _ => unreachable!("unexpected opentelemetry::Value variant"),
         }
     }
 }
@@ -311,7 +314,7 @@ mod test {
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
                 TraceId::from(42),
-                SpanId::from_u64(42),
+                SpanId::from(42),
                 TraceFlags::default(),
                 false,
                 TraceState::default(),
@@ -322,7 +325,7 @@ mod test {
             let span = span!(tracing::Level::INFO, "test");
             let _guard = span.enter();
             let trace_id = trace_id();
-            assert_eq!(trace_id, Some(TraceId::from_u128(42)));
+            assert_eq!(trace_id, Some(TraceId::from(42)));
         });
     }
 
@@ -332,8 +335,8 @@ mod test {
         let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
+                TraceId::from(42),
+                SpanId::from(42),
                 TraceFlags::default(),
                 false,
                 TraceState::default(),
@@ -344,7 +347,7 @@ mod test {
             let span = span!(tracing::Level::INFO, "test");
             let _guard = span.enter();
             let trace_id = trace_id();
-            assert_eq!(trace_id, Some(TraceId::from_u128(42)));
+            assert_eq!(trace_id, Some(TraceId::from(42)));
         });
     }
 

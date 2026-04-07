@@ -1,0 +1,48 @@
+---
+source: apollo-router/tests/integration/demand_control.rs
+expression: parse_result_for_snapshot(response).await
+---
+{
+  "apollo::demand_control::actual_cost": 2.0,
+  "apollo::demand_control::actual_cost_by_subgraph": {
+    "users": 2.0
+  },
+  "apollo::demand_control::estimated_cost": 40.0,
+  "apollo::demand_control::estimated_cost_by_subgraph": {
+    "users": 20.0,
+    "vehicles": 20.0
+  },
+  "apollo::demand_control::result": "COST_OK",
+  "apollo::demand_control::result_by_subgraph": {
+    "users": "COST_OK",
+    "vehicles": "SUBGRAPH_COST_ESTIMATED_TOO_EXPENSIVE"
+  },
+  "apollo::demand_control::strategy": "static_estimated",
+  "apollo::experimental_mock_subgraphs::subgraph_call_count": {
+    "users": 1
+  },
+  "body": {
+    "data": null,
+    "errors": [
+      {
+        "extensions": {
+          "code": "SUBGRAPH_COST_ESTIMATED_TOO_EXPENSIVE",
+          "cost.subgraph": "vehicles",
+          "cost.subgraph.estimated": 20.0,
+          "cost.subgraph.max": 1.0,
+          "service": "vehicles"
+        },
+        "message": "query estimated cost 20 exceeded configured maximum 1 for subgraph vehicles",
+        "path": []
+      }
+    ],
+    "extensions": {
+      "valueCompletion": [
+        {
+          "message": "Cannot return null for non-nullable field Query.ships",
+          "path": []
+        }
+      ]
+    }
+  }
+}

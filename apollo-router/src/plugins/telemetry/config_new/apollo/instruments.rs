@@ -313,7 +313,7 @@ fn create_subgraph_and_connector_shared_static_instruments() -> HashMap<String, 
                 .f64_histogram(APOLLO_ROUTER_OPERATIONS_FETCH_DURATION)
                 .with_unit("s")
                 .with_description("Duration of a subgraph fetch.")
-                .init(),
+                .build(),
         ),
     );
     static_instruments

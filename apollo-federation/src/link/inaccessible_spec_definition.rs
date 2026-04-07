@@ -35,6 +35,7 @@ use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::type_and_directive_specification::DirectiveCompositionOptions;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
@@ -124,9 +125,13 @@ impl InaccessibleSpecDefinition {
             &[],
             false, // not repeatable
             locations,
-            true, // composes
-            Some(&|v| INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(v)),
-            None,
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|v| {
+                    INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(v)
+                },
+                static_argument_transform: None,
+                use_join_directive: false,
+            }),
         ))
     }
 }
@@ -1070,7 +1075,7 @@ fn remove_inaccessible_elements(
         })?;
 
     // Find all elements that use @inaccessible. Clone so there's no live borrow.
-    let inaccessible_referencers = schema.referencers().get_directive(&directive_name)?.clone();
+    let inaccessible_referencers = schema.referencers().get_directive(&directive_name).clone();
 
     // Remove fields and arguments from inaccessible types first. If any inaccessible type has a field
     // that references another inaccessible type, it would prevent the other type from being
