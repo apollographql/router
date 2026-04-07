@@ -16,3 +16,5 @@ defaults:
       assignees:
         - "{{ author }}"
       bot_account: "{{ author }}"
+merge_protections_settings:
+  reporting_method: check-runs

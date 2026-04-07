@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.13.0"
+version = "2.13.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -59,7 +59,7 @@ snapshot = []
 addr2line = "0.26.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.13.0" }
+apollo-federation = { path = "../apollo-federation", version = "=2.13.1" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -137,7 +137,7 @@ indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.14.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
-jsonschema = { version = "0.36.0", default-features = false }
+jsonschema = { version = "0.45.0", default-features = false }
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"

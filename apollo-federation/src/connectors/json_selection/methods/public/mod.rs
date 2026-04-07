@@ -12,6 +12,8 @@ mod gte;
 pub(crate) use gte::GteMethod;
 mod lte;
 pub(crate) use lte::LteMethod;
+mod json_parse;
+pub(crate) use json_parse::JsonParseMethod;
 mod json_stringify;
 pub(crate) use json_stringify::JsonStringifyMethod;
 mod last;
