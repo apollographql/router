@@ -132,6 +132,7 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
+use crate::configuration::header_masking_config::HeaderMaskingConfig;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::SubgraphRequest;
@@ -140,6 +141,7 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::connector;
 use crate::services::execution;
+use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::layers::persisted_queries::RequestPersistedQueryId;
 use crate::services::router;
@@ -213,6 +215,7 @@ pub(crate) struct Telemetry {
     builtin_instruments: RwLock<BuiltinInstruments>,
     activation: Mutex<Option<Activation>>,
     enabled_features: EnabledFeatures,
+    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
 }
 
 /// When observed, it reports the most recently stored value (give or take atomicity looseness).
@@ -348,6 +351,20 @@ impl PluginPrivate for Telemetry {
         let enabled_features = Self::extract_enabled_features(full_config);
         ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
 
+        // Initialize header masking rules from global configuration
+        let header_masking_rules = init.full_config
+            .as_ref()
+            .and_then(|config| {
+                config.get("header_masking").and_then(|hm_config| {
+                    serde_json::from_value::<HeaderMaskingConfig>(hm_config.clone())
+                        .ok()
+                        .filter(|config| config.enabled)
+                        .map(|config| {
+                            Arc::new(HeaderMaskingRules::from_config(&config))
+                        })
+                })
+            });
+
         Ok(Telemetry {
             custom_endpoints,
             apollo_metrics_sender,
@@ -358,6 +375,7 @@ impl PluginPrivate for Telemetry {
                 &config.instrumentation.instruments,
             )),
             enabled_features,
+            header_masking_rules,
             config: Arc::new(config),
         })
     }
@@ -374,6 +392,7 @@ impl PluginPrivate for Telemetry {
         let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let metrics_sender = self.apollo_metrics_sender.clone();
+        let header_masking_rules = self.header_masking_rules.clone();
         let static_router_instruments = self
             .builtin_instruments
             .read()
@@ -511,6 +530,13 @@ impl PluginPrivate for Telemetry {
                         let _ = request
                             .context
                             .insert(CLIENT_LIBRARY_VERSION, version.to_owned());
+                    }
+
+                    // Store header masking rules in request context for telemetry events
+                    if let Some(rules) = &header_masking_rules {
+                        request.context.extensions().with_lock(|lock| {
+                            lock.insert(rules.clone());
+                        });
                     }
 
                     let mut custom_attributes = config_request
