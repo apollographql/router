@@ -12,7 +12,6 @@ use tower::ServiceExt;
 
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
 use crate::services::SubgraphRequest;
 #[cfg(unix)]
 use crate::services::parse_unix_socket_url;
