@@ -11,6 +11,7 @@ use tower::BoxError;
 use super::selectors::SupergraphSelector;
 use crate::Context;
 use crate::graphql;
+use crate::services::header_masking::HeaderMaskingRules;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -57,9 +58,16 @@ impl
             headers.sort_keys();
             #[cfg(not(test))]
             let headers = request.supergraph_request.headers();
+            let header_string = request.context.extensions().with_lock(|lock| {
+                if let Some(rules) = lock.get::<Arc<HeaderMaskingRules>>() {
+                    rules.mask_headers_debug(headers)
+                } else {
+                    format!("{headers:?}")
+                }
+            });
             attrs.push(KeyValue::new(
                 HTTP_REQUEST_HEADERS,
-                opentelemetry::Value::String(format!("{headers:?}").into()),
+                opentelemetry::Value::String(header_string.into()),
             ));
             attrs.push(KeyValue::new(
                 HTTP_REQUEST_METHOD,

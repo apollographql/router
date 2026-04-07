@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
@@ -88,8 +89,6 @@ pub(crate) enum ConnectorSelector {
     ConnectorResponseHeader {
         /// The name of a connector HTTP response header.
         connector_http_response_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -273,16 +272,39 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorResponseHeader {
                 connector_http_response_header: connector_response_header,
                 default,
-                ..
+                redact,
             } => {
                 if let Ok(TransportResponse::Http(ref http_response)) = response.transport_result {
-                    http_response
+                    let header_value = http_response
                         .inner
                         .headers
                         .get(connector_response_header)
-                        .and_then(|h| Some(h.to_str().ok()?.to_string()))
-                        .or_else(|| default.clone())
-                        .map(opentelemetry::Value::from)
+                        .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                    // Apply redaction logic
+                    let value = match (redact.as_deref(), &header_value) {
+                        // If redact is "allow", return the actual value
+                        (Some("allow"), _) => header_value,
+                        // If redact has any other value, mask it
+                        (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                        // If redact is None, check global rules
+                        (None, Some(_)) => {
+                            let should_mask = response.context.extensions().with_lock(|lock| {
+                                lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
+                                    .map(|rules| rules.should_mask(connector_response_header))
+                                    .unwrap_or(false)
+                            });
+                            if should_mask {
+                                Some("***MASKED***".to_string())
+                            } else {
+                                header_value
+                            }
+                        }
+                        // No value to mask
+                        _ => header_value,
+                    };
+
+                    value.or_else(|| default.clone()).map(opentelemetry::Value::from)
                 } else {
                     None
                 }

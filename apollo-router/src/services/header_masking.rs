@@ -74,10 +74,7 @@ impl HeaderMaskingRules {
             let value_str = if self.should_mask(k_str) {
                 MASKED_VALUE
             } else {
-                match v.to_str() {
-                    Ok(s) => s,
-                    Err(_) => "<non-utf8>",
-                }
+                v.to_str().unwrap_or("<non-utf8>")
             };
 
             parts.push(format!("\"{}\": \"{}\"", k_str, value_str));

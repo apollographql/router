@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -8,6 +9,7 @@ use tower::BoxError;
 
 use super::selectors::RouterSelector;
 use crate::Context;
+use crate::services::header_masking::HeaderMaskingRules;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
@@ -70,9 +72,16 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
             headers.sort_keys();
             #[cfg(not(test))]
             let headers = response.response.headers();
+            let header_string = response.context.extensions().with_lock(|lock| {
+                if let Some(rules) = lock.get::<Arc<HeaderMaskingRules>>() {
+                    rules.mask_headers_debug(headers)
+                } else {
+                    format!("{headers:?}")
+                }
+            });
             attrs.push(KeyValue::new(
                 HTTP_RESPONSE_HEADERS,
-                opentelemetry::Value::String(format!("{headers:?}").into()),
+                opentelemetry::Value::String(header_string.into()),
             ));
             attrs.push(KeyValue::new(
                 HTTP_RESPONSE_STATUS,
