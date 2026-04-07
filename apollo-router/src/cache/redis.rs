@@ -629,13 +629,12 @@ impl RedisCacheStorage {
         match maybe_client {
             Some(client) => Ok(client),
             None => {
-                if !(CLIENT_RECREATION_IN_PROGRESS.load(Ordering::Relaxed)) {
-                    let _ = CLIENT_RECREATION_IN_PROGRESS.compare_exchange(
+                if CLIENT_RECREATION_IN_PROGRESS.compare_exchange(
                         false,
                         true,
                         Ordering::Relaxed,
                         Ordering::Relaxed,
-                    );
+                    ).is_ok() {
                     let new_inner = match self.create_inner_client().await {
                         Ok(new_inner) => new_inner,
                         Err(e) => {
