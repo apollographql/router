@@ -138,5 +138,15 @@
       groupName: null,
       groupSlug: null,
     },
+    // Add a note to the Rhai update PR to add a changeset
+    {
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^rhai$/'],
+      automerge: false,
+      prBodyNotes: ["> [!IMPORTANT]\n> Rhai updates can cause breaking changes for users. Make sure to add a [`feat_`-prefixed changeset](https://github.com/apollographql/router/blob/dev/.changesets/README.md#conventions-used-in-this-changesets-directory) to alert users of the upgrade!"],
+      // Exclude Rhai from the >= 1.0 group
+      groupName: null,
+      groupSlug: null,
+    },
   ],
 }
