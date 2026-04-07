@@ -1315,4 +1315,287 @@ mod test {
             .unwrap();
         assert!(selector_disabled.on_request(&request).is_none());
     }
+
+    #[test]
+    fn test_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        // Create a selector for authorization header (no explicit redact setting)
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        // Create masking rules
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+        }));
+
+        // Create request with authorization header
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(rules);
+        });
+
+        let request = SupergraphRequest::fake_builder()
+            .header("authorization", "Bearer secret-token")
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should be masked due to global rules
+        let result = selector.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "***MASKED***",
+            "Authorization header should be masked by global rules"
+        );
+    }
+
+    #[test]
+    fn test_request_header_no_masking_when_not_sensitive() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        // Create a selector for a non-sensitive header
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "user-agent".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        // Create masking rules (authorization is sensitive, but user-agent is not)
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+        }));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(rules);
+        });
+
+        let request = SupergraphRequest::fake_builder()
+            .header("user-agent", "test-agent")
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should NOT be masked (not in sensitive list)
+        let result = selector.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "test-agent",
+            "Non-sensitive header should not be masked"
+        );
+    }
+
+    #[test]
+    fn test_request_header_redact_allow_overrides_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        // Create a selector with redact: "allow" - this should override global masking
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: Some("allow".to_string()),
+            default: None,
+        };
+
+        // Create masking rules that would normally mask authorization
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+        }));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(rules);
+        });
+
+        let request = SupergraphRequest::fake_builder()
+            .header("authorization", "Bearer secret-token")
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should NOT be masked because redact: "allow" overrides global rules
+        let result = selector.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "Bearer secret-token",
+            "redact: allow should override global masking rules"
+        );
+    }
+
+    #[test]
+    fn test_request_header_redact_explicit_mask() {
+        // Create a selector with redact set to any value other than "allow"
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "custom-header".to_string(),
+            redact: Some("mask".to_string()),
+            default: None,
+        };
+
+        let context = crate::context::Context::new();
+        // No global rules - but explicit redact should still mask
+
+        let request = SupergraphRequest::fake_builder()
+            .header("custom-header", "sensitive-value")
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should be masked because redact is set (even without global rules)
+        let result = selector.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "***MASKED***",
+            "Explicit redact setting should mask the header"
+        );
+    }
+
+    #[test]
+    fn test_response_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        // Create a selector for set-cookie header
+        let selector = SupergraphSelector::ResponseHeader {
+            response_header: "set-cookie".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        // Create masking rules
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+        }));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(rules);
+        });
+
+        let response = SupergraphResponse::fake_builder()
+            .header("set-cookie", "session=secret-session-id")
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should be masked due to global rules
+        let result = selector.on_response(&response).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "***MASKED***",
+            "Set-Cookie header should be masked by global rules"
+        );
+    }
+
+    #[test]
+    fn test_response_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        // Create a selector with redact: "allow"
+        let selector = SupergraphSelector::ResponseHeader {
+            response_header: "set-cookie".to_string(),
+            redact: Some("allow".to_string()),
+            default: None,
+        };
+
+        // Create masking rules
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+        }));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(rules);
+        });
+
+        let response = SupergraphResponse::fake_builder()
+            .header("set-cookie", "session=secret-session-id")
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should NOT be masked because of redact: "allow"
+        let result = selector.on_response(&response).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "session=secret-session-id",
+            "redact: allow should override masking for response headers"
+        );
+    }
+
+    #[test]
+    fn test_request_header_masking_without_global_rules() {
+        // Create a selector without redact and without global rules
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        let context = crate::context::Context::new();
+        // No masking rules in context
+
+        let request = SupergraphRequest::fake_builder()
+            .header("authorization", "Bearer token")
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should NOT be masked (no rules configured)
+        let result = selector.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "Bearer token",
+            "Headers should not be masked when no rules are configured"
+        );
+    }
+
+    #[test]
+    fn test_request_header_case_insensitive_matching() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        // Create masking rules with lowercase header name
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+        }));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(rules);
+        });
+
+        // Test with lowercase selector
+        let selector_lowercase = SupergraphSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        // Test with uppercase header name in request
+        let request = SupergraphRequest::fake_builder()
+            .header("Authorization", "Bearer token")
+            .context(context.clone())
+            .build()
+            .unwrap();
+
+        let result = selector_lowercase.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "***MASKED***",
+            "Case-insensitive matching should work for headers"
+        );
+    }
 }

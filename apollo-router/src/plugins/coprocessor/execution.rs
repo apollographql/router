@@ -1304,6 +1304,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1323,6 +1324,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1345,6 +1347,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1364,6 +1367,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1388,6 +1392,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1412,6 +1417,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1431,6 +1437,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1452,6 +1459,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1474,6 +1482,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1492,6 +1501,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1509,6 +1519,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1526,6 +1537,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
