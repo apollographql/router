@@ -220,6 +220,7 @@ mod tests {
             "http://127.0.0.1:8081".to_string(), // global URL - should NOT be used
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -296,6 +297,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -360,6 +362,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -423,6 +426,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -479,6 +483,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -622,6 +627,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -775,6 +781,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -942,6 +949,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1026,6 +1034,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1090,6 +1099,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1147,6 +1157,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1265,6 +1276,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1381,6 +1393,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1509,6 +1522,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1658,6 +1672,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1795,6 +1810,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1874,6 +1890,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true,
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1965,6 +1982,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true,
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -2064,6 +2082,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true,
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -2214,6 +2233,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2362,6 +2382,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2496,6 +2517,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2627,6 +2649,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::fake_builder()
@@ -2703,6 +2726,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2789,6 +2813,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2924,6 +2949,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -4793,6 +4819,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
+                        None,
                     )
                     .boxed();
 
@@ -6353,6 +6380,617 @@ mod tests {
                 }
                 _ => panic!("Expected MappedResponse::Error"),
             }
+        }
+    }
+
+    // Header masking integration tests
+    mod header_masking_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn router_request_headers_sent_unmasked_to_coprocessor() {
+            // Test that sensitive headers (like Authorization) are sent unmasked to the coprocessor
+            // for functionality, even when header masking is enabled
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            // Mock coprocessor that captures the headers it receives
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    // Capture the headers from the coprocessor request
+                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Create masking rules for sensitive headers
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
+                    },
+                ),
+            ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service,
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false, None,
+                masking_rules,
+            );
+
+            // Send a request with sensitive headers
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer secret-token-12345")
+                .header("cookie", "session=my-session-id")
+                .header("user-agent", "test-agent")
+                .build()
+                .unwrap();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify the coprocessor received the FULL headers (unmasked)
+            let headers = received_headers.lock().unwrap();
+            assert!(headers.is_some(), "Headers should be sent to coprocessor");
+
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            // Authorization header should be unmasked
+            assert_eq!(
+                headers_obj.get("authorization").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer secret-token-12345",
+                "Authorization header should be sent unmasked to coprocessor"
+            );
+
+            // Cookie header should be unmasked
+            assert_eq!(
+                headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "session=my-session-id",
+                "Cookie header should be sent unmasked to coprocessor"
+            );
+
+            // Non-sensitive header should also be present
+            assert_eq!(
+                headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "test-agent"
+            );
+        }
+
+        #[tokio::test]
+        async fn subgraph_request_headers_sent_unmasked_to_coprocessor() {
+            // Test that subgraph request headers are sent unmasked to coprocessor
+            let subgraph_stage = SubgraphStage {
+                request: SubgraphRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    uri: false,
+                    method: false,
+                    service_name: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_subgraph_service = MockSubgraphService::new();
+
+            // Mock coprocessor that captures headers
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Create masking rules
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["x-api-key".to_string()],
+                    },
+                ),
+            ));
+
+            let service = subgraph_stage.as_service(
+                mock_http_client,
+                mock_subgraph_service.build(),
+                "http://test".to_string(),
+                "test_subgraph".to_string(),
+                false, None,
+                masking_rules,
+            );
+
+            let request = subgraph::Request::fake_builder()
+                .subgraph_request(
+                    http::Request::builder()
+                        .header("x-api-key", "secret-api-key-67890") // gitleaks:allow
+                        .header("content-type", "application/json")
+                        .body(
+                            graphql::Request::fake_builder()
+                                .query("{ test }")
+                                .build(),
+                        )
+                        .unwrap(),
+                )
+                .build();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify the coprocessor received unmasked headers
+            let headers = received_headers.lock().unwrap();
+            assert!(headers.is_some());
+
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            assert_eq!(
+                headers_obj.get("x-api-key").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "secret-api-key-67890", // gitleaks:allow
+                "API key should be sent unmasked to coprocessor"
+            );
+        }
+
+        #[tokio::test]
+        async fn response_headers_sent_unmasked_to_coprocessor() {
+            // Test that response headers are sent unmasked
+            let router_stage = RouterStage {
+                request: Default::default(),
+                response: RouterResponseConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    status_code: false,
+                    url: None,
+                },
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .header("set-cookie", "session=response-session-id")
+                    .header("x-custom-header", "custom-value")
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterResponse",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["set-cookie".to_string()],
+                    },
+                ),
+            ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service,
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false, None,
+                masking_rules,
+            );
+
+            let request = router::Request::fake_builder().build().unwrap();
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify response headers are unmasked
+            let headers = received_headers.lock().unwrap();
+            assert!(headers.is_some());
+
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            assert_eq!(
+                headers_obj.get("set-cookie").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "session=response-session-id",
+                "Set-Cookie header should be sent unmasked to coprocessor"
+            );
+        }
+
+        #[tokio::test]
+        async fn headers_sent_when_masking_disabled() {
+            // Test that when masking is disabled, headers are still sent normally
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // No masking rules (disabled)
+            let masking_rules = None;
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service,
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false, None,
+                masking_rules,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer token")
+                .build()
+                .unwrap();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify headers are still sent
+            let headers = received_headers.lock().unwrap();
+            assert!(headers.is_some());
+
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+            assert_eq!(
+                headers_obj.get("authorization").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer token"
+            );
+        }
+
+        #[tokio::test]
+        async fn multiple_headers_selective_masking() {
+            // Test that with multiple headers, only configured ones would be masked in logs
+            // (but all are sent unmasked to coprocessor)
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Configure to mask only authorization and cookie
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
+                    },
+                ),
+            ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service,
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false, None,
+                masking_rules,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer secret")
+                .header("cookie", "session=secret")
+                .header("user-agent", "test-agent")
+                .header("x-custom-header", "custom-value")
+                .build()
+                .unwrap();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify ALL headers are sent unmasked to coprocessor
+            let headers = received_headers.lock().unwrap();
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            assert_eq!(
+                headers_obj.get("authorization").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer secret"
+            );
+            assert_eq!(
+                headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "session=secret"
+            );
+            assert_eq!(
+                headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "test-agent"
+            );
+            assert_eq!(
+                headers_obj.get("x-custom-header").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "custom-value"
+            );
+        }
+
+        #[tokio::test]
+        async fn custom_sensitive_headers_list() {
+            // Test using a custom list of sensitive headers
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Custom sensitive headers list
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec![
+                            "x-internal-token".to_string(),
+                            "x-secret-key".to_string(),
+                        ],
+                    },
+                ),
+            ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service,
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false, None,
+                masking_rules,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("x-internal-token", "internal-secret")
+                .header("x-secret-key", "secret-key-value")
+                .header("authorization", "Bearer public-token")  // Not in custom list
+                .build()
+                .unwrap();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify all headers sent unmasked (including custom ones and non-configured ones)
+            let headers = received_headers.lock().unwrap();
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            assert_eq!(
+                headers_obj.get("x-internal-token").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "internal-secret"
+            );
+            assert_eq!(
+                headers_obj.get("x-secret-key").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "secret-key-value"
+            );
+            // Authorization is not in the custom list, so it's treated as non-sensitive
+            assert_eq!(
+                headers_obj.get("authorization").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer public-token"
+            );
         }
     }
 }

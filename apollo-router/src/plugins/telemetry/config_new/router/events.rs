@@ -60,25 +60,32 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
         {
             let mut attrs = Vec::with_capacity(4);
 
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = response
-                .response
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = response.response.headers();
-            let header_string = response.context.extensions().with_lock(|lock| {
-                if let Some(rules) = lock.get::<Arc<HeaderMaskingRules>>() {
-                    rules.mask_headers_debug(headers)
-                } else {
+            let header_string = {
+                #[cfg(test)]
+                {
+                    let mut headers: indexmap::IndexMap<String, http::HeaderValue> = response
+                        .response
+                        .headers()
+                        .clone()
+                        .into_iter()
+                        .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                        .collect();
+                    headers.sort_keys();
+                    // In test mode, use Debug format for deterministic output
                     format!("{headers:?}")
                 }
-            });
+                #[cfg(not(test))]
+                {
+                    let headers = response.response.headers();
+                    response.context.extensions().with_lock(|lock| {
+                        if let Some(rules) = lock.get::<Arc<HeaderMaskingRules>>() {
+                            rules.mask_headers_debug(headers)
+                        } else {
+                            format!("{headers:?}")
+                        }
+                    })
+                }
+            };
             attrs.push(KeyValue::new(
                 HTTP_RESPONSE_HEADERS,
                 opentelemetry::Value::String(header_string.into()),
