@@ -23,7 +23,6 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::protocols::websocket::WebSocketProtocol;
 use crate::query_planner::OperationKind;
-use crate::register_plugin;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
@@ -253,7 +252,7 @@ impl Plugin for Subscription {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let mut callback_hmac_key = None;
-        if init.config.mode.callback.is_some() {
+        if let Some(callback) = &init.config.mode.callback {
             callback_hmac_key = Some(
                 SUBSCRIPTION_CALLBACK_HMAC_KEY
                     .get_or_init(|| Uuid::new_v4().to_string())
@@ -261,16 +260,10 @@ impl Plugin for Subscription {
             );
             #[cfg(not(test))]
             init.notify
-                .set_ttl(
-                    init.config
-                        .mode
-                        .callback
-                        .as_ref()
-                        .expect("we checked in the condition the callback conf")
-                        .heartbeat_interval
-                        .into_option(),
-                )
+                .set_ttl(callback.heartbeat_interval.into_option())
                 .await?;
+            #[cfg(test)]
+            let _ = callback;
         }
 
         Ok(Subscription {
