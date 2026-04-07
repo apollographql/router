@@ -42,7 +42,6 @@ use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSch
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
-use crate::register_plugin;
 use crate::services::execution;
 use crate::services::execution::BoxService;
 use crate::services::subgraph;
