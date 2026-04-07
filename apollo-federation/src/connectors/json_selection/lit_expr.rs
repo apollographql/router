@@ -5,6 +5,7 @@
 //! argument values.
 
 use apollo_compiler::collections::IndexMap;
+use nom::Parser;
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
@@ -15,7 +16,6 @@ use nom::multi::many0;
 use nom::multi::many1;
 use nom::sequence::pair;
 use nom::sequence::preceded;
-use nom::sequence::tuple;
 
 use super::ParseResult;
 use super::PathList;
@@ -162,7 +162,9 @@ impl LitExpr {
     }
 
     fn parse_primary(input: Span) -> ParseResult<WithRange<Self>> {
-        match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))(input.clone()) {
+        match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))
+            .parse(input.clone())
+        {
             Ok((suffix, initial_literal)) => {
                 // If we parsed an initial literal expression, it may be the
                 // entire result, but we also want to greedily parse one or more
@@ -211,7 +213,8 @@ impl LitExpr {
             map(ranged_span("?!"), |qq| {
                 WithRange::new(LitOp::NoneCoalescing, qq.range())
             }),
-        ))(input)
+        ))
+        .parse(input)
     }
 
     // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
@@ -228,12 +231,13 @@ impl LitExpr {
             map(ranged_span("null"), |n| {
                 WithRange::new(Self::Null, n.range())
             }),
-        ))(input)
+        ))
+        .parse(input)
     }
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
     fn parse_number(input: Span) -> ParseResult<WithRange<Self>> {
-        let (suffix, (_, neg, _, num)) = tuple((
+        let (suffix, (_, neg, _, num)) = (
             spaces_or_comments,
             opt(ranged_span("-")),
             spaces_or_comments,
@@ -241,12 +245,12 @@ impl LitExpr {
                 map(
                     pair(
                         recognize(many1(one_of("0123456789"))),
-                        opt(tuple((
+                        opt((
                             spaces_or_comments,
                             ranged_span("."),
                             spaces_or_comments,
                             recognize(many0(one_of("0123456789"))),
-                        ))),
+                        )),
                     ),
                     |(int, frac)| {
                         let int_range = Some(
@@ -293,12 +297,12 @@ impl LitExpr {
                     },
                 ),
                 map(
-                    tuple((
+                    (
                         spaces_or_comments,
                         ranged_span("."),
                         spaces_or_comments,
                         recognize(many1(one_of("0123456789"))),
-                    )),
+                    ),
                     |(_, dot, _, frac)| {
                         let frac_range = Some(
                             frac.location_offset()..frac.location_offset() + frac.fragment().len(),
@@ -308,7 +312,8 @@ impl LitExpr {
                     },
                 ),
             )),
-        ))(input.clone())?;
+        )
+            .parse(input.clone())?;
 
         let mut number = String::new();
         if neg.is_some() {
@@ -341,7 +346,7 @@ impl LitExpr {
     // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
     fn parse_object(input: Span) -> ParseResult<WithRange<Self>> {
         let (input, _) = spaces_or_comments(input)?;
-        let (input, open_brace) = ranged_span("{")(input)?;
+        let (input, open_brace) = ranged_span("{").parse(input)?;
         let (mut input, _) = spaces_or_comments(input)?;
 
         let mut output = IndexMap::default();
@@ -350,7 +355,7 @@ impl LitExpr {
             output.insert(key, value);
             input = remainder;
 
-            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input.clone()) {
+            while let Ok((remainder, _)) = (spaces_or_comments, char(',')).parse(input.clone()) {
                 input = remainder;
                 if let Ok((remainder, (key, value))) = Self::parse_property(input.clone()) {
                     output.insert(key, value);
@@ -362,7 +367,7 @@ impl LitExpr {
         }
 
         let (input, _) = spaces_or_comments(input.clone())?;
-        let (input, close_brace) = ranged_span("}")(input)?;
+        let (input, close_brace) = ranged_span("}").parse(input)?;
 
         let range = merge_ranges(open_brace.range(), close_brace.range());
         Ok((input, WithRange::new(Self::Object(output), range)))
@@ -371,7 +376,7 @@ impl LitExpr {
     // LitProperty ::= Key ":" LitExpr | KeyPath (shorthand, V0_4+)
     fn parse_property(input: Span) -> ParseResult<(WithRange<Key>, WithRange<Self>)> {
         let full_result =
-            tuple((Key::parse, spaces_or_comments, char(':'), Self::parse))(input.clone());
+            (Key::parse, spaces_or_comments, char(':'), Self::parse).parse(input.clone());
 
         match full_result {
             Ok((remainder, (key, _, _, value))) => Ok((remainder, (key, value))),
@@ -401,19 +406,16 @@ impl LitExpr {
 
     // LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
     fn parse_array(input: Span) -> ParseResult<WithRange<Self>> {
-        tuple((
+        (
             spaces_or_comments,
             ranged_span("["),
             spaces_or_comments,
             map(
-                opt(tuple((
+                opt((
                     Self::parse,
-                    many0(preceded(
-                        tuple((spaces_or_comments, char(','))),
-                        Self::parse,
-                    )),
-                    opt(tuple((spaces_or_comments, char(',')))),
-                ))),
+                    many0(preceded((spaces_or_comments, char(',')), Self::parse)),
+                    opt((spaces_or_comments, char(','))),
+                )),
                 |elements| {
                     let mut output = vec![];
                     if let Some((first, rest, _trailing_comma)) = elements {
@@ -425,11 +427,12 @@ impl LitExpr {
             ),
             spaces_or_comments,
             ranged_span("]"),
-        ))(input)
-        .map(|(input, (_, open_bracket, _, output, _, close_bracket))| {
-            let range = merge_ranges(open_bracket.range(), close_bracket.range());
-            (input, WithRange::new(output, range))
-        })
+        )
+            .parse(input)
+            .map(|(input, (_, open_bracket, _, output, _, close_bracket))| {
+                let range = merge_ranges(open_bracket.range(), close_bracket.range());
+                (input, WithRange::new(output, range))
+            })
     }
 
     #[cfg(test)]
