@@ -18,28 +18,28 @@ use crate::connectors::json_selection::location::WithRange;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(
-    PropertiesToCamelCaseMethod,
-    properties_to_camel_case_method,
-    properties_to_camel_case_shape
+    KeysToCamelCaseMethod,
+    keys_to_camel_case_method,
+    keys_to_camel_case_shape
 );
 
-/// Converts all property names of an object to camelCase.
+/// Converts all keys of an object to camelCase.
 ///
 /// Handles PascalCase, snake_case, and SCREAMING_SNAKE_CASE inputs.
-/// By default, the transformation is recursive (applies to nested objects
-/// and objects within arrays). Pass `false` to apply only to the
-/// top-level properties.
+/// By default, the transformation applies only to the top-level keys.
+/// Pass `true` to apply recursively to nested objects and objects within
+/// arrays.
 ///
 /// Examples:
 ///
-/// $->propertiesToCamelCase
+/// $->keysToCamelCase
 /// given {"property_one": 1, "PropertyTwo": 2, "PROPERTY_THREE": 3}
 /// results in {"propertyOne": 1, "propertyTwo": 2, "propertyThree": 3}
 ///
-/// $->propertiesToCamelCase(false)
+/// $->keysToCamelCase(true)
 /// given {"outer_key": {"inner_key": 1}}
-/// results in {"outerKey": {"inner_key": 1}}
-fn properties_to_camel_case_method(
+/// results in {"outerKey": {"innerKey": 1}}
+fn keys_to_camel_case_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -88,7 +88,7 @@ fn properties_to_camel_case_method(
             }
         }
     } else {
-        true
+        false
     };
 
     match data {
@@ -201,7 +201,7 @@ fn transform_shape(
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
-fn properties_to_camel_case_shape(
+fn keys_to_camel_case_shape(
     context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -226,10 +226,10 @@ fn properties_to_camel_case_shape(
         use crate::connectors::json_selection::lit_expr::LitExpr;
         match first_arg.as_ref() {
             LitExpr::Bool(b) => *b,
-            _ => true, // Default to true for non-literal args
+            _ => false, // Default to false for non-literal args
         }
     } else {
-        true
+        false
     };
 
     let locations = method_name.shape_location(context.source_id());
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn should_convert_snake_case_properties() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase").apply_to(&json!({
+            selection!("$->keysToCamelCase").apply_to(&json!({
                 "property_one": 1,
                 "property_two": 2,
             })),
@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn should_convert_pascal_case_properties() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase").apply_to(&json!({
+            selection!("$->keysToCamelCase").apply_to(&json!({
                 "PropertyOne": 1,
                 "PropertyTwo": 2,
             })),
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn should_convert_screaming_snake_case_properties() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase").apply_to(&json!({
+            selection!("$->keysToCamelCase").apply_to(&json!({
                 "PROPERTY_ONE": 1,
                 "PROPERTY_TWO": 2,
             })),
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn should_leave_camel_case_unchanged() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase").apply_to(&json!({
+            selection!("$->keysToCamelCase").apply_to(&json!({
                 "alreadyCamel": 1,
                 "anotherOne": 2,
             })),
@@ -323,9 +323,9 @@ mod tests {
     }
 
     #[test]
-    fn should_recursively_transform_nested_objects() {
+    fn should_not_recursively_transform_nested_objects_by_default() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase").apply_to(&json!({
+            selection!("$->keysToCamelCase").apply_to(&json!({
                 "outer_key": {
                     "inner_key": 1,
                 },
@@ -333,7 +333,7 @@ mod tests {
             (
                 Some(json!({
                     "outerKey": {
-                        "innerKey": 1,
+                        "inner_key": 1,
                     },
                 })),
                 vec![],
@@ -342,9 +342,9 @@ mod tests {
     }
 
     #[test]
-    fn should_recursively_transform_objects_in_arrays() {
+    fn should_not_recursively_transform_objects_in_arrays_by_default() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase").apply_to(&json!({
+            selection!("$->keysToCamelCase").apply_to(&json!({
                 "array_key": [
                     { "nested_key": 1 },
                     { "another_key": 2 },
@@ -353,8 +353,8 @@ mod tests {
             (
                 Some(json!({
                     "arrayKey": [
-                        { "nestedKey": 1 },
-                        { "anotherKey": 2 },
+                        { "nested_key": 1 },
+                        { "another_key": 2 },
                     ],
                 })),
                 vec![],
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn should_apply_shallowly_when_false_is_passed() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase(false)").apply_to(&json!({
+            selection!("$->keysToCamelCase(false)").apply_to(&json!({
                 "outer_key": {
                     "inner_key": 1,
                 },
@@ -384,7 +384,7 @@ mod tests {
     #[test]
     fn should_apply_recursively_when_true_is_passed() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase(true)").apply_to(&json!({
+            selection!("$->keysToCamelCase(true)").apply_to(&json!({
                 "outer_key": {
                     "inner_key": 1,
                 },
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn should_handle_empty_object() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase").apply_to(&json!({})),
+            selection!("$->keysToCamelCase").apply_to(&json!({})),
             (Some(json!({})), vec![]),
         );
     }
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn should_handle_mixed_case_styles() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase").apply_to(&json!({
+            selection!("$->keysToCamelCase").apply_to(&json!({
                 "snake_case": 1,
                 "PascalCase": 2,
                 "SCREAMING_CASE": 3,
@@ -432,15 +432,15 @@ mod tests {
     #[test]
     fn should_error_on_non_object_input() {
         assert_eq!(
-            selection!("notAnObject->propertiesToCamelCase").apply_to(&json!({
+            selection!("notAnObject->keysToCamelCase").apply_to(&json!({
                 "notAnObject": true,
             })),
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->propertiesToCamelCase requires an object input, not boolean",
-                    "path": ["notAnObject", "->propertiesToCamelCase"],
-                    "range": [13, 34],
+                    "message": "Method ->keysToCamelCase requires an object input, not boolean",
+                    "path": ["notAnObject", "->keysToCamelCase"],
+                    "range": [13, 28],
                 }))]
             ),
         );
@@ -449,13 +449,13 @@ mod tests {
     #[test]
     fn should_error_on_too_many_arguments() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase(true, false)").apply_to(&json!({})),
+            selection!("$->keysToCamelCase(true, false)").apply_to(&json!({})),
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->propertiesToCamelCase takes at most one argument, but 2 were provided",
-                    "path": ["->propertiesToCamelCase"],
-                    "range": [3, 24],
+                    "message": "Method ->keysToCamelCase takes at most one argument, but 2 were provided",
+                    "path": ["->keysToCamelCase"],
+                    "range": [3, 18],
                 }))]
             ),
         );
@@ -464,13 +464,13 @@ mod tests {
     #[test]
     fn should_error_on_non_boolean_argument() {
         assert_eq!(
-            selection!("$->propertiesToCamelCase(42)").apply_to(&json!({})),
+            selection!("$->keysToCamelCase(42)").apply_to(&json!({})),
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->propertiesToCamelCase requires a boolean argument",
-                    "path": ["->propertiesToCamelCase"],
-                    "range": [3, 24],
+                    "message": "Method ->keysToCamelCase requires a boolean argument",
+                    "path": ["->keysToCamelCase"],
+                    "range": [3, 18],
                 }))]
             ),
         );
@@ -478,7 +478,7 @@ mod tests {
 
     #[test]
     fn should_warn_on_key_collision() {
-        let (result, errors) = selection!("$->propertiesToCamelCase").apply_to(&json!({
+        let (result, errors) = selection!("$->keysToCamelCase").apply_to(&json!({
             "foo_bar": 1,
             "fooBar": 2,
         }));
@@ -509,9 +509,9 @@ mod shape_tests {
 
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
-        properties_to_camel_case_shape(
+        keys_to_camel_case_shape(
             &ShapeContext::new(location.source_id),
-            &WithRange::new("propertiesToCamelCase".to_string(), Some(location.span)),
+            &WithRange::new("keysToCamelCase".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::unknown([]),
@@ -566,9 +566,9 @@ mod shape_tests {
     #[test]
     fn shape_should_handle_no_args_as_none() {
         let location = get_location();
-        let result = properties_to_camel_case_shape(
+        let result = keys_to_camel_case_shape(
             &ShapeContext::new(location.source_id),
-            &WithRange::new("propertiesToCamelCase".to_string(), Some(location.span)),
+            &WithRange::new("keysToCamelCase".to_string(), Some(location.span)),
             None,
             Shape::unknown([]),
             Shape::none(),
@@ -577,7 +577,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn shape_should_recursively_transform_nested_object_fields() {
+    fn shape_should_not_recursively_transform_nested_object_fields_by_default() {
         let mut inner_fields = Shape::empty_map();
         inner_fields.insert("inner_key".to_string(), Shape::int([]));
         let inner = Shape::object(inner_fields, Shape::none(), []);
@@ -595,8 +595,8 @@ mod shape_tests {
                 let inner_shape = fields.get("outerKey").unwrap();
                 match inner_shape.case() {
                     ShapeCase::Object { fields, .. } => {
-                        assert!(fields.contains_key("innerKey"));
-                        assert!(!fields.contains_key("inner_key"));
+                        assert!(fields.contains_key("inner_key"));
+                        assert!(!fields.contains_key("innerKey"));
                     }
                     _ => panic!("Expected nested object shape"),
                 }
@@ -634,7 +634,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn shape_should_recursively_transform_objects_inside_arrays() {
+    fn shape_should_not_recursively_transform_objects_inside_arrays_by_default() {
         let mut item_fields = Shape::empty_map();
         item_fields.insert("array_item_key".to_string(), Shape::string([]));
         let item = Shape::object(item_fields, Shape::none(), []);
@@ -652,8 +652,8 @@ mod shape_tests {
                 let item_shape = list_shape.any_item([]);
                 match item_shape.case() {
                     ShapeCase::Object { fields, .. } => {
-                        assert!(fields.contains_key("arrayItemKey"));
-                        assert!(!fields.contains_key("array_item_key"));
+                        assert!(fields.contains_key("array_item_key"));
+                        assert!(!fields.contains_key("arrayItemKey"));
                     }
                     _ => panic!("Expected object shape inside array"),
                 }
