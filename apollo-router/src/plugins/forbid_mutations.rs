@@ -12,7 +12,6 @@ use crate::error::Error;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::execution;
