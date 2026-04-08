@@ -83,6 +83,7 @@ use crate::ListenAddr;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
+use crate::configuration::header_masking_config::HeaderMaskingConfig;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
@@ -131,7 +132,6 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATI
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
 use crate::router_factory::Endpoint;
-use crate::configuration::header_masking_config::HeaderMaskingConfig;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::SubgraphRequest;
@@ -351,18 +351,14 @@ impl PluginPrivate for Telemetry {
         ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
 
         // Initialize header masking rules from global configuration
-        let header_masking_rules = init.full_config
-            .as_ref()
-            .and_then(|config| {
-                config.get("header_masking").and_then(|hm_config| {
-                    serde_json::from_value::<HeaderMaskingConfig>(hm_config.clone())
-                        .ok()
-                        .filter(|config| config.enabled)
-                        .map(|config| {
-                            Arc::new(HeaderMaskingRules::from_config(&config))
-                        })
-                })
-            });
+        let header_masking_rules = init.full_config.as_ref().and_then(|config| {
+            config.get("header_masking").and_then(|hm_config| {
+                serde_json::from_value::<HeaderMaskingConfig>(hm_config.clone())
+                    .ok()
+                    .filter(|config| config.enabled)
+                    .map(|config| Arc::new(HeaderMaskingRules::from_config(&config)))
+            })
+        });
 
         Ok(Telemetry {
             custom_endpoints,

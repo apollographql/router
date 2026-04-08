@@ -304,7 +304,9 @@ impl Selector for ConnectorSelector {
                         _ => header_value,
                     };
 
-                    value.or_else(|| default.clone()).map(opentelemetry::Value::from)
+                    value
+                        .or_else(|| default.clone())
+                        .map(opentelemetry::Value::from)
                 } else {
                     None
                 }

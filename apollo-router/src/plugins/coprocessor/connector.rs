@@ -38,9 +38,9 @@ use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelect
 use crate::services::connector::request_service;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
-use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::external::PipelineStep;
 use crate::services::external::externalize_header_map;
+use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 
@@ -268,14 +268,14 @@ where
         .then(|| externalize_header_map(&parts.headers));
 
     // Log headers with masking for security
-    if request_config.headers {
-        if let Some(rules) = header_masking_rules.as_deref() {
-            tracing::debug!(
-                headers = %rules.mask_headers_debug(&parts.headers),
-                service = %service_name,
-                "Connector request headers (masked)"
-            );
-        }
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.mask_headers_debug(&parts.headers),
+            service = %service_name,
+            "Connector request headers (masked)"
+        );
     }
 
     let body_to_send = request_config.body.then(|| {
@@ -417,6 +417,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_connector_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -447,14 +448,14 @@ where
                 .then(|| externalize_header_map(&http_response.inner.headers));
 
             // Log headers with masking for security
-            if response_config.headers {
-                if let Some(rules) = header_masking_rules.as_deref() {
-                    tracing::debug!(
-                        headers = %rules.mask_headers_debug(&http_response.inner.headers),
-                        service = %service_name,
-                        "Connector response headers (masked)"
-                    );
-                }
+            if response_config.headers
+                && let Some(rules) = header_masking_rules.as_deref()
+            {
+                tracing::debug!(
+                    headers = %rules.mask_headers_debug(&http_response.inner.headers),
+                    service = %service_name,
+                    "Connector response headers (masked)"
+                );
             }
 
             let status = response_config
