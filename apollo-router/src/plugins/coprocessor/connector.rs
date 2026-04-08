@@ -15,6 +15,7 @@ use serde_json_bytes::ByteString;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use super::COPROCESSOR_ERROR_EXTENSION;
 use super::ContextConf;
@@ -29,7 +30,6 @@ use crate::Context;
 use crate::context::context_key_from_deprecated;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -108,10 +108,10 @@ impl ConnectorStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: request_service::BoxCloneSyncService,
+        service: request_service::BoxCloneService,
         default_url: String,
         service_name: String,
-    ) -> request_service::BoxCloneSyncService
+    ) -> request_service::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -217,7 +217,7 @@ impl ConnectorStage {
             .option_layer(response_layer)
             .buffered()
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

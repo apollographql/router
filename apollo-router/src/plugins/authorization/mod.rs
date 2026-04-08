@@ -14,6 +14,7 @@ use serde::Serialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
 use self::authenticated::AuthenticatedCheckVisitor;
@@ -31,7 +32,6 @@ use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
@@ -588,8 +588,8 @@ impl Plugin for AuthorizationPlugin {
 
     fn supergraph_service(
         &self,
-        service: supergraph::BoxCloneSyncService,
-    ) -> supergraph::BoxCloneSyncService {
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         if self.require_authentication {
             ServiceBuilder::new()
                 .checkpoint(move |request: supergraph::Request| {
@@ -616,16 +616,13 @@ impl Plugin for AuthorizationPlugin {
                     }
                 })
                 .service(service)
-                .boxed_clone_sync()
+                .boxed_clone()
         } else {
             service
         }
     }
 
-    fn execution_service(
-        &self,
-        service: execution::BoxCloneSyncService,
-    ) -> execution::BoxCloneSyncService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
             .map_request(|request: execution::Request| {
                 let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
@@ -646,7 +643,7 @@ impl Plugin for AuthorizationPlugin {
                 request
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

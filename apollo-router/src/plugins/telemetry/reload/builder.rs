@@ -28,10 +28,10 @@ use std::sync::atomic::Ordering;
 use multimap::MultiMap;
 use tokio::task::block_in_place;
 use tower::BoxError;
+use tower::ServiceExt;
 
 use crate::Endpoint;
 use crate::ListenAddr;
-use crate::layers::ServiceExt as _;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::apollo;
 use crate::plugins::telemetry::apollo_exporter::Sender;
@@ -125,7 +125,7 @@ impl<'a> Builder<'a> {
                     PrometheusService {
                         registry: prometheus_registry.clone(),
                     }
-                    .boxed_clone_sync(),
+                    .boxed_clone(),
                 ),
             );
         }

@@ -3,7 +3,6 @@ use tower::ServiceExt;
 
 use super::EnhancedClientAwareness;
 use crate::Context;
-use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugin::test::MockSupergraphService;
@@ -51,7 +50,7 @@ async fn given_client_library_metadata_adds_values_to_context() {
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
             .await
             .unwrap()
-            .supergraph_service(mock_service.boxed_clone_sync());
+            .supergraph_service(mock_service.boxed_clone());
 
     // given
     let mut clients_map = serde_json_bytes::map::Map::new();
@@ -90,7 +89,7 @@ async fn without_client_library_metadata_does_not_add_values_to_context() {
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
             .await
             .unwrap()
-            .supergraph_service(mock_service.boxed_clone_sync());
+            .supergraph_service(mock_service.boxed_clone());
 
     // when
     let request = supergraph::Request::fake_builder()
@@ -110,7 +109,7 @@ async fn invalid_library_name_returns_bad_request() {
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
             .await
             .unwrap()
-            .supergraph_service(mock_service.boxed_clone_sync());
+            .supergraph_service(mock_service.boxed_clone());
 
     let mut clients_map = serde_json_bytes::map::Map::new();
     clients_map.insert(CLIENT_LIBRARY_NAME_KEY, r#"invalid";||"#.into());
@@ -136,7 +135,7 @@ async fn invalid_library_version_returns_bad_request() {
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
             .await
             .unwrap()
-            .supergraph_service(mock_service.boxed_clone_sync());
+            .supergraph_service(mock_service.boxed_clone());
 
     let mut clients_map = serde_json_bytes::map::Map::new();
     clients_map.insert(CLIENT_LIBRARY_VERSION_KEY, r#"invalid";||"#.into());

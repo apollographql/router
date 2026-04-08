@@ -43,7 +43,6 @@ use crate::configuration::Batching;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
@@ -97,14 +96,15 @@ static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no"
 static ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
 
 /// Containing [`Service`] in the request lifecyle.
+#[derive(Clone)]
 pub(crate) struct RouterService {
     // A service stack for the actual implementation of the router service.
-    service: router::BoxService,
+    service: router::BoxCloneService,
 }
 
 impl RouterService {
     fn new(
-        supergraph_service: supergraph::BoxService,
+        supergraph_service: supergraph::BoxCloneService,
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
@@ -125,7 +125,7 @@ impl RouterService {
             .layer(EnforceSafelistLayer::new(persisted_query_layer))
             .buffered() // Makes the supergraph service cloneable
             .service(supergraph_service)
-            .boxed();
+            .boxed_clone();
 
         RouterService { service }
     }
@@ -159,7 +159,6 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
-+ Sync
 + Clone {
     let mut supergraph_service = MockSupergraphService::new();
 
@@ -172,7 +171,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone_sync())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
@@ -201,7 +200,6 @@ pub(crate) async fn from_supergraph_mock_callback(
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
-+ Sync
 + Clone {
     from_supergraph_mock_callback_and_configuration(
         supergraph_callback,
@@ -224,7 +222,7 @@ pub(crate) async fn empty() -> impl Service<
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(Default::default())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone_sync())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
@@ -673,14 +671,14 @@ pub(crate) struct RouterCreator {
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
-    type Service = router::BoxCloneSyncService;
+    type Service = router::BoxCloneService;
     fn create(&self) -> Self::Service {
-        self.make().boxed_clone_sync()
+        self.make().boxed_clone()
     }
 }
 
 impl RouterFactory for RouterCreator {
-    type RouterService = router::BoxCloneSyncService;
+    type RouterService = router::BoxCloneService;
 
     type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
         router::Request,
@@ -753,11 +751,11 @@ impl RouterCreator {
                         .plugins()
                         .iter()
                         .rev()
-                        .fold(router_service.boxed_clone_sync(), |acc, (_, e)| {
+                        .fold(router_service.boxed_clone(), |acc, (_, e)| {
                             e.router_service(acc)
                         }),
                 )
-                .boxed_clone_sync(),
+                .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );
 
@@ -769,8 +767,8 @@ impl RouterCreator {
         })
     }
 
-    pub(crate) fn make(&self) -> router::BoxCloneSyncService {
-        self.sb.clone().boxed_clone_sync()
+    pub(crate) fn make(&self) -> router::BoxCloneService {
+        self.sb.clone().boxed_clone()
     }
 }
 

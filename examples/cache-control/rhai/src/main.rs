@@ -8,7 +8,6 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::graphql;
-    use apollo_router::layers::ServiceExt as _;
     use apollo_router::plugin::test;
     use apollo_router::services::subgraph;
     use apollo_router::services::supergraph;
@@ -74,8 +73,8 @@ mod tests {
             .configuration_json(config)
             .unwrap()
             .subgraph_hook(move |name, _| match name {
-                "accounts" => mock_service1.clone().boxed_clone_sync(),
-                _ => mock_service2.clone().boxed_clone_sync(),
+                "accounts" => mock_service1.clone().boxed_clone(),
+                _ => mock_service2.clone().boxed_clone(),
             })
             // .log_level("DEBUG")
             .build_router()

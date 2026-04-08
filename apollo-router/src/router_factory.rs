@@ -79,7 +79,7 @@ impl std::fmt::Debug for Endpoint {
 
 impl Endpoint {
     /// Creates an Endpoint given a path and a Boxed Service
-    pub fn from_router_service(path: String, handler: router::BoxCloneSyncService) -> Self {
+    pub fn from_router_service(path: String, handler: router::BoxCloneService) -> Self {
         Self {
             path,
             handler: EndpointHandler::Service(Handler::new(handler)),

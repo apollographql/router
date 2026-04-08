@@ -11,7 +11,6 @@ use crate::Context;
 use crate::Notify;
 use crate::TestHarness;
 use crate::graphql;
-use crate::layers::ServiceExt as _;
 use crate::plugin::test::MockSubgraph;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
@@ -3217,7 +3216,7 @@ async fn id_scalar_can_overflow_i32() {
                 let id = &request.subgraph_request.body().variables["id"];
                 Err(format!("$id = {id}").into())
             })
-            .boxed_clone_sync()
+            .boxed_clone()
         })
         .build_supergraph()
         .await

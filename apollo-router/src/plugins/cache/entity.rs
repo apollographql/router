@@ -22,6 +22,7 @@ use sha2::Sha256;
 use tokio::sync::RwLock;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Level;
@@ -51,7 +52,6 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -336,8 +336,8 @@ impl PluginPrivate for EntityCache {
 
     fn supergraph_service(
         &self,
-        service: supergraph::BoxCloneSyncService,
-    ) -> supergraph::BoxCloneSyncService {
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
             .map_response(|mut response: supergraph::Response| {
                 if let Some(cache_control) = response
@@ -351,14 +351,14 @@ impl PluginPrivate for EntityCache {
                 response
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         name: &str,
-        mut service: subgraph::BoxCloneSyncService,
-    ) -> subgraph::BoxCloneSyncService {
+        mut service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let storage = match self.storage.get(name) {
             Some(storage) => storage.clone(),
             None => {
@@ -374,7 +374,7 @@ impl PluginPrivate for EntityCache {
                         response
                     })
                     .service(service)
-                    .boxed_clone_sync();
+                    .boxed_clone();
             }
         };
 
@@ -410,7 +410,7 @@ impl PluginPrivate for EntityCache {
                     service: ServiceBuilder::new()
                         .buffered()
                         .service(service)
-                        .boxed_clone_sync(),
+                        .boxed_clone(),
                     entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage,
@@ -422,7 +422,7 @@ impl PluginPrivate for EntityCache {
                     supergraph_schema: self.supergraph_schema.clone(),
                     subgraph_enums: self.subgraph_enums.clone(),
                 });
-            tower::util::BoxCloneSyncService::new(inner)
+            tower::util::BoxCloneService::new(inner)
         } else {
             ServiceBuilder::new()
                 .map_response(move |response: subgraph::Response| {
@@ -436,7 +436,7 @@ impl PluginPrivate for EntityCache {
                     response
                 })
                 .service(service)
-                .boxed_clone_sync()
+                .boxed_clone()
         }
     }
 
@@ -456,7 +456,7 @@ impl PluginPrivate for EntityCache {
                     let endpoint = Endpoint::from_router_service(
                         endpoint_config.path.clone(),
                         InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
-                            .boxed_clone_sync(),
+                            .boxed_clone(),
                     );
                     tracing::info!(
                         "Entity caching invalidation endpoint listening on: {}{}",
@@ -587,7 +587,7 @@ fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, Stri
 
 #[derive(Clone)]
 struct CacheService {
-    service: subgraph::BoxCloneSyncService,
+    service: subgraph::BoxCloneService,
     name: String,
     entity_type: Option<String>,
     storage: RedisCacheStorage,
@@ -603,7 +603,7 @@ struct CacheService {
 impl Service<subgraph::Request> for CacheService {
     type Response = subgraph::Response;
     type Error = BoxError;
-    type Future = <subgraph::BoxCloneSyncService as Service<subgraph::Request>>::Future;
+    type Future = <subgraph::BoxCloneService as Service<subgraph::Request>>::Future;
 
     fn poll_ready(
         &mut self,

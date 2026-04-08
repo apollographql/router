@@ -20,6 +20,7 @@ use mime::APPLICATION_JSON;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
+use tower::ServiceExt;
 
 use crate::graphql;
 use crate::layers::ServiceExt as _;
@@ -164,11 +165,10 @@ where
     S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
         + Send
         + Clone
-        + Sync
         + 'static,
     <S as Service<supergraph::Request>>::Future: Send + 'static,
 {
-    type Service = supergraph::BoxCloneSyncService;
+    type Service = supergraph::BoxCloneService;
 
     fn layer(&self, service: S) -> Self::Service {
         service
@@ -201,7 +201,7 @@ where
                 }
                 (parts, res)
             })
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

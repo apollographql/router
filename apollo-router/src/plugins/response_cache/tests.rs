@@ -19,7 +19,6 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
-use crate::layers::ServiceExt as _;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
@@ -2628,7 +2627,7 @@ async fn no_data() {
                     .expect_call()
                     .times(1)
                     .returning(move |_req: subgraph::Request| Err("orga not found".into()));
-                subgraph.boxed_clone_sync()
+                subgraph.boxed_clone()
             } else {
                 service
             }
@@ -3919,7 +3918,7 @@ async fn no_store_on_subgraph_timeout() {
                     // Unreachable in practice — the traffic shaping timeout fires first.
                     Err::<subgraph::Response, tower::BoxError>("orga sleep exceeded".into())
                 })
-                .boxed_clone_sync()
+                .boxed_clone()
             } else {
                 service
             }

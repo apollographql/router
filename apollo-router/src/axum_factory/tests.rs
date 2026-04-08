@@ -74,7 +74,6 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
-use crate::layers::ServiceExt as _;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -1498,21 +1497,15 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
                 .into(),
         )
     })
-    .boxed_clone_sync();
+    .boxed_clone();
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service(
-            "/a-custom-path".to_string(),
-            endpoint.clone().boxed_clone_sync(),
-        ),
+        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.clone().boxed_clone()),
     );
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service(
-            "/an-other-custom-path".to_string(),
-            endpoint.boxed_clone_sync(),
-        ),
+        Endpoint::from_router_service("/an-other-custom-path".to_string(), endpoint.boxed_clone()),
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
@@ -1611,19 +1604,16 @@ async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
                 .into(),
         )
     })
-    .boxed_clone_sync();
+    .boxed_clone();
 
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service(
-            "/a-custom-path".to_string(),
-            endpoint.clone().boxed_clone_sync(),
-        ),
+        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.clone().boxed_clone()),
     );
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.boxed_clone_sync()),
+        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.boxed_clone()),
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
@@ -2141,7 +2131,7 @@ async fn http_compressed_service() -> impl Service<
                         graphql_response
                     })
                 })
-                .boxed_clone_sync()
+                .boxed_clone()
         })
         .build_http_service()
         .await
@@ -2191,7 +2181,7 @@ async fn http_deferred_service() -> impl Service<
                         graphql_response
                     })
                 })
-                .boxed_clone_sync()
+                .boxed_clone()
         })
         .build_http_service()
         .await
@@ -2525,11 +2515,11 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
                 .into(),
         )
     })
-    .boxed_clone_sync();
+    .boxed_clone();
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/health".to_string(), endpoint.boxed_clone_sync()),
+        Endpoint::from_router_service("/health".to_string(), endpoint.boxed_clone()),
     );
 
     let error = init_with_config(

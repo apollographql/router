@@ -1,4 +1,3 @@
-use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -9,6 +8,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 #[derive(Debug)]
 struct HelloWorld {
@@ -35,8 +35,8 @@ impl Plugin for HelloWorld {
 
     fn supergraph_service(
         &self,
-        service: supergraph::BoxCloneSyncService,
-    ) -> supergraph::BoxCloneSyncService {
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         // Say hello when our service is added to the router_service
         // stage of the router plugin pipeline.
         #[cfg(test)]
@@ -52,13 +52,10 @@ impl Plugin for HelloWorld {
             // .checkpoint()
             // .timeout()
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
-    fn execution_service(
-        &self,
-        service: execution::BoxCloneSyncService,
-    ) -> execution::BoxCloneSyncService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         //This is the default implementation and does not modify the default service.
         // The trait also has this implementation, and we just provide it here for illustration.
         service
@@ -68,8 +65,8 @@ impl Plugin for HelloWorld {
     fn subgraph_service(
         &self,
         _name: &str,
-        service: subgraph::BoxCloneSyncService,
-    ) -> subgraph::BoxCloneSyncService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         ServiceBuilder::new()
@@ -79,7 +76,7 @@ impl Plugin for HelloWorld {
             // .checkpoint()
             // .timeout()
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

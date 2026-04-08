@@ -12,7 +12,6 @@ use apollo_router::Configuration;
 use apollo_router::Context;
 use apollo_router::graphql;
 use apollo_router::graphql::Error;
-use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::services::router;
@@ -1397,8 +1396,8 @@ impl Plugin for CountingServiceRegistry {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxCloneSyncService,
-    ) -> subgraph::BoxCloneSyncService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let name = subgraph_name.to_owned();
         let counters = self.clone();
         service
@@ -1406,7 +1405,7 @@ impl Plugin for CountingServiceRegistry {
                 counters.increment(&name);
                 request
             })
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

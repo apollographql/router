@@ -24,6 +24,7 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower::timeout::TimeoutLayer;
 use tower::util::MapFutureLayer;
 
@@ -35,7 +36,6 @@ use crate::error::Error;
 use crate::graphql;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -199,37 +199,37 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
         CoprocessorPlugin::new(client, init.config, init.supergraph_sdl)
     }
 
-    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         self.router_service(service)
     }
 
     fn supergraph_service(
         &self,
-        service: services::supergraph::BoxCloneSyncService,
-    ) -> services::supergraph::BoxCloneSyncService {
+        service: services::supergraph::BoxCloneService,
+    ) -> services::supergraph::BoxCloneService {
         self.supergraph_service(service)
     }
 
     fn execution_service(
         &self,
-        service: services::execution::BoxCloneSyncService,
-    ) -> services::execution::BoxCloneSyncService {
+        service: services::execution::BoxCloneService,
+    ) -> services::execution::BoxCloneService {
         self.execution_service(service)
     }
 
     fn subgraph_service(
         &self,
         name: &str,
-        service: subgraph::BoxCloneSyncService,
-    ) -> subgraph::BoxCloneSyncService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.subgraph_service(name, service)
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxCloneSyncService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxCloneSyncService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         self.connector_request_service(&source_name, service)
     }
 }
@@ -283,7 +283,7 @@ where
         })
     }
 
-    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         self.configuration.router.as_service(
             self.http_client.clone(),
             service,
@@ -295,8 +295,8 @@ where
 
     fn supergraph_service(
         &self,
-        service: services::supergraph::BoxCloneSyncService,
-    ) -> services::supergraph::BoxCloneSyncService {
+        service: services::supergraph::BoxCloneService,
+    ) -> services::supergraph::BoxCloneService {
         self.configuration.supergraph.as_service(
             self.http_client.clone(),
             service,
@@ -308,8 +308,8 @@ where
 
     fn execution_service(
         &self,
-        service: services::execution::BoxCloneSyncService,
-    ) -> services::execution::BoxCloneSyncService {
+        service: services::execution::BoxCloneService,
+    ) -> services::execution::BoxCloneService {
         self.configuration.execution.as_service(
             self.http_client.clone(),
             service,
@@ -322,8 +322,8 @@ where
     fn subgraph_service(
         &self,
         name: &str,
-        service: subgraph::BoxCloneSyncService,
-    ) -> subgraph::BoxCloneSyncService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.configuration.subgraph.all.as_service(
             self.http_client.clone(),
             service,
@@ -336,8 +336,8 @@ where
     fn connector_request_service(
         &self,
         source_name: &str,
-        service: crate::services::connector::request_service::BoxCloneSyncService,
-    ) -> crate::services::connector::request_service::BoxCloneSyncService {
+        service: crate::services::connector::request_service::BoxCloneService,
+    ) -> crate::services::connector::request_service::BoxCloneService {
         self.configuration.connector.all.as_service(
             self.http_client.clone(),
             service,
@@ -688,11 +688,11 @@ impl RouterStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: router::BoxCloneSyncService,
+        service: router::BoxCloneService,
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-    ) -> router::BoxCloneSyncService
+    ) -> router::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -791,7 +791,7 @@ impl RouterStage {
             .option_layer(response_layer)
             .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 
@@ -819,11 +819,11 @@ impl SubgraphStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: subgraph::BoxCloneSyncService,
+        service: subgraph::BoxCloneService,
         default_url: String,
         service_name: String,
         response_validation: bool,
-    ) -> subgraph::BoxCloneSyncService
+    ) -> subgraph::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -923,7 +923,7 @@ impl SubgraphStage {
             .option_layer(response_layer)
             .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

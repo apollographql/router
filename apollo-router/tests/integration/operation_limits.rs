@@ -5,7 +5,6 @@ use std::sync::atomic::Ordering;
 use apollo_compiler::parser::Parser;
 use apollo_router::TestHarness;
 use apollo_router::graphql;
-use apollo_router::layers::ServiceExt as _;
 use apollo_router::services::execution;
 use apollo_router::services::supergraph;
 use serde_json::json;
@@ -341,7 +340,7 @@ limits:
 
 async fn build_test_harness(
     limits_config: serde_json::Value,
-) -> (supergraph::BoxCloneSyncService, impl Fn() -> u32) {
+) -> (supergraph::BoxCloneService, impl Fn() -> u32) {
     let execution_count = Arc::new(AtomicU32::new(0));
     let execution_count_2 = execution_count.clone();
     let get_execution_count = move || execution_count_2.load(Ordering::Acquire);
@@ -368,7 +367,7 @@ async fn build_test_harness(
                         .unwrap())
                 }
             })
-            .boxed_clone_sync()
+            .boxed_clone()
         })
         .build_supergraph()
         .await
@@ -376,10 +375,7 @@ async fn build_test_harness(
     (service, get_execution_count)
 }
 
-async fn run_request(
-    service: &mut supergraph::BoxCloneSyncService,
-    query: &str,
-) -> graphql::Response {
+async fn run_request(service: &mut supergraph::BoxCloneService, query: &str) -> graphql::Response {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .build()

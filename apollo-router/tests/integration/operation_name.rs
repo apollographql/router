@@ -1,5 +1,4 @@
 use apollo_router::graphql::Request;
-use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::test::MockSubgraph;
 use serde_json::json;
 use tower::ServiceExt;
@@ -185,7 +184,7 @@ async fn make_request(request: Request) -> apollo_router::graphql::Response {
                     json!({"data": {"me": {"id": 1}}}),
                 )
                 .build()
-                .boxed_clone_sync(),
+                .boxed_clone(),
             _ => default,
         })
         .build_router()

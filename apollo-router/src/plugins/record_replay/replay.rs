@@ -15,11 +15,11 @@ use serde_json_bytes::Value;
 use tokio::fs;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use super::recording::Recording;
 use crate::context::Context;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::TryIntoHeaderName;
@@ -92,7 +92,7 @@ impl Plugin for Replay {
         unreachable!()
     }
 
-    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         let report = self.report.clone();
         let recorded_headers = self.recording.client_response.headers.clone();
 
@@ -127,13 +127,13 @@ impl Plugin for Replay {
                 res
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
     fn supergraph_service(
         &self,
-        service: supergraph::BoxCloneSyncService,
-    ) -> supergraph::BoxCloneSyncService {
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         let report = self.report.clone();
         let recorded_chunks = self.recording.client_response.chunks.clone();
 
@@ -163,13 +163,10 @@ impl Plugin for Replay {
                 })
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
-    fn execution_service(
-        &self,
-        service: execution::BoxCloneSyncService,
-    ) -> execution::BoxCloneSyncService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         let recorded = self.recording.formatted_query_plan.clone();
         let report = self.report.clone();
         ServiceBuilder::new()
@@ -191,14 +188,14 @@ impl Plugin for Replay {
                 req
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxCloneSyncService,
-    ) -> subgraph::BoxCloneSyncService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let subgraph_name = String::from(subgraph_name);
 
         let report = self.report.clone();
@@ -249,7 +246,7 @@ impl Plugin for Replay {
                 }
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

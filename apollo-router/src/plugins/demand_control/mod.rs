@@ -26,6 +26,7 @@ use serde_json_bytes::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use crate::Context;
 use crate::configuration::subgraph::SubgraphConfiguration;
@@ -34,7 +35,6 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::demand_control::cost_calculator::CostBySubgraph;
@@ -551,10 +551,7 @@ impl Plugin for DemandControl {
         })
     }
 
-    fn execution_service(
-        &self,
-        service: execution::BoxCloneSyncService,
-    ) -> execution::BoxCloneSyncService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if !self.config.enabled {
             service
         } else {
@@ -649,15 +646,15 @@ impl Plugin for DemandControl {
                     resp
                 })
                 .service(service)
-                .boxed_clone_sync()
+                .boxed_clone()
         }
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxCloneSyncService,
-    ) -> subgraph::BoxCloneSyncService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         if !self.config.enabled {
             service
         } else {
@@ -713,7 +710,7 @@ impl Plugin for DemandControl {
                     },
                 )
                 .service(service)
-                .boxed_clone_sync()
+                .boxed_clone()
         }
     }
 }

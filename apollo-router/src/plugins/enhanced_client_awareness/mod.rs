@@ -5,9 +5,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::CLIENT_LIBRARY_NAME;
@@ -37,8 +37,8 @@ impl Plugin for EnhancedClientAwareness {
 
     fn supergraph_service(
         &self,
-        service: supergraph::BoxCloneSyncService,
-    ) -> supergraph::BoxCloneSyncService {
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
             .checkpoint(|request: supergraph::Request| {
                 if let Some(client_library_metadata) = request
@@ -91,7 +91,7 @@ impl Plugin for EnhancedClientAwareness {
                 Ok(ControlFlow::Continue(request))
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

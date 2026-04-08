@@ -108,13 +108,12 @@ where
 
 impl<S, Request> Clone for CheckpointService<S, Request>
 where
-    S: Clone,
-    // bounds to match the service struct...
+    S: Service<Request>,
+    S: Send + Clone + 'static,
+    S::Future: Send,
+    S::Response: Send + 'static,
+    S::Error: Into<BoxError> + Send + 'static,
     Request: Send + 'static,
-    S: Service<Request> + Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
-    <S as Service<Request>>::Response: Send + 'static,
-    <S as Service<Request>>::Future: Send + 'static,
 {
     fn clone(&self) -> Self {
         Self {
@@ -179,23 +178,6 @@ where
             Ok(ControlFlow::Break(response)) => Box::pin(async move { Ok(response) }),
             Ok(ControlFlow::Continue(request)) => Box::pin(self.inner.call(request)),
             Err(error) => Box::pin(async move { Err(error) }),
-        }
-    }
-}
-
-impl<S, Request> Clone for CheckpointService<S, Request>
-where
-    S: Service<Request>,
-    S: Send + Clone + 'static,
-    S::Future: Send,
-    S::Response: Send + 'static,
-    S::Error: Into<BoxError> + Send + 'static,
-    Request: Send + 'static,
-{
-    fn clone(&self) -> Self {
-        Self {
-            checkpoint_fn: Arc::clone(&self.checkpoint_fn),
-            inner: self.inner.clone(),
         }
     }
 }

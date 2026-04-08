@@ -385,7 +385,7 @@ async fn test_plugin_ordering() {
 macro_rules! make_plugin {
     ($mod_name: ident, $str_name: expr) => {
         mod $mod_name {
-            use apollo_router::layers::ServiceExt as _;
+            use tower::ServiceExt;
 
             use super::*;
 
@@ -410,8 +410,8 @@ macro_rules! make_plugin {
 
                 fn router_service(
                     &self,
-                    service: router::BoxCloneSyncService,
-                ) -> router::BoxCloneSyncService {
+                    service: router::BoxCloneService,
+                ) -> router::BoxCloneService {
                     ServiceBuilder::new()
                         .map_request(|request: router::Request| {
                             test_plugin_ordering_push_trace(
@@ -428,13 +428,13 @@ macro_rules! make_plugin {
                             response
                         })
                         .service(service)
-                        .boxed_clone_sync()
+                        .boxed_clone()
                 }
 
                 fn supergraph_service(
                     &self,
-                    service: supergraph::BoxCloneSyncService,
-                ) -> supergraph::BoxCloneSyncService {
+                    service: supergraph::BoxCloneService,
+                ) -> supergraph::BoxCloneService {
                     ServiceBuilder::new()
                         .map_request(|request: supergraph::Request| {
                             test_plugin_ordering_push_trace(
@@ -451,7 +451,7 @@ macro_rules! make_plugin {
                             response
                         })
                         .service(service)
-                        .boxed_clone_sync()
+                        .boxed_clone()
                 }
             }
         }

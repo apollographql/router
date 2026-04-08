@@ -108,7 +108,7 @@ mod tests {
                             );
                             (http_parts, graphql_response)
                         })
-                        .boxed_clone_sync()
+                        .boxed_clone()
                 })
                 .build_supergraph()
                 .await

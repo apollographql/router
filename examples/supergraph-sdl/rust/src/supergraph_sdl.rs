@@ -3,13 +3,13 @@ use std::sync::Arc;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
-use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::supergraph;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 // Global state for our plugin would live here.
 // We keep our parsed supergraph schema in a reference-counted pointer
@@ -33,8 +33,8 @@ impl Plugin for SupergraphSDL {
 
     fn supergraph_service(
         &self,
-        service: supergraph::BoxCloneSyncService,
-    ) -> supergraph::BoxCloneSyncService {
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         // Clone our parsed schema for use in map_request
         let schema = self.schema.clone();
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
@@ -60,7 +60,7 @@ impl Plugin for SupergraphSDL {
                 req
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

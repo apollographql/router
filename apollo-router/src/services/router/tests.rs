@@ -16,7 +16,6 @@ use tower_service::Service;
 
 use crate::Context;
 use crate::graphql;
-use crate::layers::ServiceExt as _;
 use crate::metrics::FutureMetricsExt;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::SupergraphRequest;
@@ -574,7 +573,7 @@ async fn escaped_quotes_in_string_literal() {
                     }
                     response
                 })
-                .boxed_clone_sync()
+                .boxed_clone()
         })
         .build_supergraph()
         .await

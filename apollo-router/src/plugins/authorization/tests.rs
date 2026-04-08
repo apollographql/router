@@ -9,7 +9,6 @@ use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::graphql;
-use crate::layers::ServiceExt as _;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
@@ -1129,7 +1128,7 @@ async fn cache_key_metadata() {
                         .build())
                 },
             );
-            mock_subgraph_service.boxed_clone_sync()
+            mock_subgraph_service.boxed_clone()
         })
         .build_router()
         .await

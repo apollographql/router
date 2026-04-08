@@ -22,6 +22,7 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Span;
@@ -36,7 +37,6 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
-use crate::layers::ServiceExt as _;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
@@ -631,7 +631,7 @@ pub(crate) struct ExecutionServiceFactory {
 }
 
 impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
-    type Service = execution::BoxCloneSyncService;
+    type Service = execution::BoxCloneService;
 
     fn create(&self) -> Self::Service {
         let subscription_plugin_conf = self
@@ -658,11 +658,11 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
                         apollo_telemetry_config: apollo_telemetry_conf,
                         configuration: Arc::clone(&self.configuration),
                     }
-                    .boxed_clone_sync(),
+                    .boxed_clone(),
                     |acc, (_, e)| e.execution_service(acc),
                 ),
             )
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 
