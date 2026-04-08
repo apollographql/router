@@ -317,6 +317,148 @@ impl Referencers {
         arguments.extend(updated_arguments);
     }
 
+    pub(crate) fn rename_scalar_type(&mut self, old_name: &Name, new_name: &Name) {
+        for (_directive_name, directive_refs) in self.directives.iter_mut() {
+            Self::update_scalar_type_positions(
+                &mut directive_refs.scalar_types,
+                old_name,
+                new_name,
+            );
+        }
+    }
+
+    fn update_scalar_type_positions(
+        types: &mut IndexSet<ScalarTypeDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_types: Vec<_> = types
+            .iter()
+            .filter(|t| &t.type_name == old_type_name)
+            .map(|_| ScalarTypeDefinitionPosition {
+                type_name: new_type_name.clone(),
+            })
+            .collect();
+
+        types.retain(|t| &t.type_name != old_type_name);
+        types.extend(updated_types);
+    }
+
+    pub(crate) fn rename_union_type(&mut self, old_name: &Name, new_name: &Name) {
+        for (_directive_name, directive_refs) in self.directives.iter_mut() {
+            Self::update_union_type_positions(&mut directive_refs.union_types, old_name, new_name);
+        }
+    }
+
+    fn update_union_type_positions(
+        types: &mut IndexSet<UnionTypeDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_types: Vec<_> = types
+            .iter()
+            .filter(|t| &t.type_name == old_type_name)
+            .map(|_| UnionTypeDefinitionPosition {
+                type_name: new_type_name.clone(),
+            })
+            .collect();
+
+        types.retain(|t| &t.type_name != old_type_name);
+        types.extend(updated_types);
+    }
+
+    pub(crate) fn rename_enum_type(&mut self, old_name: &Name, new_name: &Name) {
+        for (_directive_name, directive_refs) in self.directives.iter_mut() {
+            Self::update_enum_type_positions(&mut directive_refs.enum_types, old_name, new_name);
+            Self::update_enum_value_positions(&mut directive_refs.enum_values, old_name, new_name);
+        }
+    }
+
+    fn update_enum_type_positions(
+        types: &mut IndexSet<EnumTypeDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_types: Vec<_> = types
+            .iter()
+            .filter(|t| &t.type_name == old_type_name)
+            .map(|_| EnumTypeDefinitionPosition {
+                type_name: new_type_name.clone(),
+            })
+            .collect();
+
+        types.retain(|t| &t.type_name != old_type_name);
+        types.extend(updated_types);
+    }
+
+    fn update_enum_value_positions(
+        values: &mut IndexSet<EnumValueDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_values: Vec<_> = values
+            .iter()
+            .filter(|v| &v.type_name == old_type_name)
+            .map(|v| EnumValueDefinitionPosition {
+                type_name: new_type_name.clone(),
+                value_name: v.value_name.clone(),
+            })
+            .collect();
+
+        values.retain(|v| &v.type_name != old_type_name);
+        values.extend(updated_values);
+    }
+
+    pub(crate) fn rename_input_object_type(&mut self, old_name: &Name, new_name: &Name) {
+        for (_directive_name, directive_refs) in self.directives.iter_mut() {
+            Self::update_input_object_type_positions(
+                &mut directive_refs.input_object_types,
+                old_name,
+                new_name,
+            );
+            Self::update_input_object_field_positions(
+                &mut directive_refs.input_object_fields,
+                old_name,
+                new_name,
+            );
+        }
+    }
+
+    fn update_input_object_type_positions(
+        types: &mut IndexSet<InputObjectTypeDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_types: Vec<_> = types
+            .iter()
+            .filter(|t| &t.type_name == old_type_name)
+            .map(|_| InputObjectTypeDefinitionPosition {
+                type_name: new_type_name.clone(),
+            })
+            .collect();
+
+        types.retain(|t| &t.type_name != old_type_name);
+        types.extend(updated_types);
+    }
+
+    fn update_input_object_field_positions(
+        fields: &mut IndexSet<InputObjectFieldDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_fields: Vec<_> = fields
+            .iter()
+            .filter(|f| &f.type_name == old_type_name)
+            .map(|f| InputObjectFieldDefinitionPosition {
+                type_name: new_type_name.clone(),
+                field_name: f.field_name.clone(),
+            })
+            .collect();
+
+        fields.retain(|f| &f.type_name != old_type_name);
+        fields.extend(updated_fields);
+    }
+
     pub(crate) fn rename_interface_type(&mut self, old_name: &Name, new_name: &Name) {
         for (_scalar_name, scalar_refs) in self.scalar_types.iter_mut() {
             Self::update_interface_field_positions(

@@ -44,12 +44,12 @@ use serde_json::Value;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
-use tower::buffer::Buffer;
 use tower::buffer::future::ResponseFuture;
 
 use crate::ListenAddr;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::subscription::notification::Notify;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
@@ -948,7 +948,10 @@ macro_rules! register_private_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
-    service: Buffer<router::Request, <router::BoxService as Service<router::Request>>::Future>,
+    service: UnconstrainedBuffer<
+        router::Request,
+        <router::BoxService as Service<router::Request>>::Future,
+    >,
 }
 
 impl Handler {

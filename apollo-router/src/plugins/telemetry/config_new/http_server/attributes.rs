@@ -211,16 +211,26 @@ impl DefaultForLevel for HttpServerAttributes {
 impl Selectors<router::Request, router::Response, ()> for HttpServerAttributes {
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
-        if let Some(key) = self
-            .http_route
-            .as_ref()
-            .and_then(|a| a.key(HTTP_ROUTE.into()))
-        {
-            attrs.push(KeyValue::new(
-                key,
-                request.router_request.uri().path().to_string(),
-            ));
+        // http.route is always added unless set to false as
+        // it is needed for apollo_telemetry and datadog span mapping
+        match self.http_route {
+            Some(StandardAttribute::Bool(true))
+            | Some(StandardAttribute::Aliased { alias: _ })
+            | None => {
+                if let Some(key) = self
+                    .http_route
+                    .as_ref()
+                    .and_then(|a| a.key(HTTP_ROUTE.into()))
+                {
+                    attrs.push(KeyValue::new(
+                        key,
+                        request.router_request.uri().path().to_string(),
+                    ));
+                }
+            }
+            Some(StandardAttribute::Bool(false)) => {}
         }
+
         if let Some(key) = self
             .client_address
             .as_ref()
@@ -559,6 +569,56 @@ mod test {
                 .find(|key_val| key_val.key.as_str() == HTTP_ROUTE)
                 .map(|key_val| &key_val.value),
             Some(&"/graphql".into())
+        );
+    }
+
+    #[test]
+    fn test_http_server_http_route_disabled() {
+        let server = HttpServerAttributes {
+            http_route: Some(StandardAttribute::Bool(false)),
+            ..Default::default()
+        };
+
+        let req = router::Request::fake_builder()
+            .uri(Uri::from_static("https://localhost/graphql"))
+            .build()
+            .unwrap();
+        let attributes = server.on_request(&req);
+        assert!(
+            !attributes
+                .iter()
+                .any(|key_val| key_val.key.as_str() == HTTP_ROUTE),
+            "http.route should not be present when disabled"
+        );
+    }
+
+    #[test]
+    fn test_http_server_http_route_aliased() {
+        let server = HttpServerAttributes {
+            http_route: Some(StandardAttribute::Aliased {
+                alias: "my_route".to_string(),
+            }),
+            ..Default::default()
+        };
+
+        let req = router::Request::fake_builder()
+            .uri(Uri::from_static("https://localhost/graphql"))
+            .build()
+            .unwrap();
+        let attributes = server.on_request(&req);
+        assert!(
+            !attributes
+                .iter()
+                .any(|key_val| key_val.key.as_str() == HTTP_ROUTE),
+            "original key should not be present when aliased"
+        );
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key.as_str() == "my_route")
+                .map(|key_val| &key_val.value),
+            Some(&"/graphql".into()),
+            "aliased key should have the route value"
         );
     }
 
