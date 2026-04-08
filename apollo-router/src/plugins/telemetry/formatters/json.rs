@@ -61,13 +61,18 @@ impl serde::Serialize for JsonAwareAttributeValue<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use crate::plugins::telemetry::config::AttributeArray;
         match self.value {
-            AttributeValue::String(s) => {
-                JsonAwareStr { s: s.as_str(), expand: self.expand }.serialize(serializer)
+            AttributeValue::String(s) => JsonAwareStr {
+                s: s.as_str(),
+                expand: self.expand,
             }
+            .serialize(serializer),
             AttributeValue::Array(AttributeArray::String(arr)) => {
                 let elems: Vec<JsonAwareStr<'_>> = arr
                     .iter()
-                    .map(|s| JsonAwareStr { s: s.as_str(), expand: self.expand })
+                    .map(|s| JsonAwareStr {
+                        s: s.as_str(),
+                        expand: self.expand,
+                    })
                     .collect();
                 elems.serialize(serializer)
             }
@@ -120,7 +125,11 @@ impl serde::ser::Serialize for SerializableResources<'_> {
     }
 }
 
-struct SerializableContext<'a, 'b, Span>(Option<SpanRef<'a, Span>>, &'b HashSet<&'static str>, bool)
+struct SerializableContext<'a, 'b, Span>(
+    Option<SpanRef<'a, Span>>,
+    &'b HashSet<&'static str>,
+    bool,
+)
 where
     Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
 
@@ -212,7 +221,10 @@ where
                         Value::String(value) => {
                             serializer.serialize_entry(
                                 kv.key.as_str(),
-                                &JsonAwareStr { s: value.as_str(), expand: self.2 },
+                                &JsonAwareStr {
+                                    s: value.as_str(),
+                                    expand: self.2,
+                                },
                             )?;
                         }
                         Value::Array(Array::Bool(array)) => {
@@ -227,7 +239,10 @@ where
                         Value::Array(Array::String(array)) => {
                             let array: Vec<JsonAwareStr<'_>> = array
                                 .iter()
-                                .map(|a| JsonAwareStr { s: a.as_str(), expand: self.2 })
+                                .map(|a| JsonAwareStr {
+                                    s: a.as_str(),
+                                    expand: self.2,
+                                })
                                 .collect();
                             serializer.serialize_entry(kv.key.as_str(), &array)?;
                         }
@@ -631,28 +646,40 @@ mod test {
 
     #[test]
     fn test_json_aware_str_expands_object() {
-        let s = JsonAwareStr { s: r#"{"foo":"bar"}"#, expand: true };
+        let s = JsonAwareStr {
+            s: r#"{"foo":"bar"}"#,
+            expand: true,
+        };
         let out = serde_json::to_string(&s).unwrap();
         assert_eq!(out, r#"{"foo":"bar"}"#);
     }
 
     #[test]
     fn test_json_aware_str_expands_array() {
-        let s = JsonAwareStr { s: r#"[1,2,3]"#, expand: true };
+        let s = JsonAwareStr {
+            s: r#"[1,2,3]"#,
+            expand: true,
+        };
         let out = serde_json::to_string(&s).unwrap();
         assert_eq!(out, r#"[1,2,3]"#);
     }
 
     #[test]
     fn test_json_aware_str_no_expand_when_disabled() {
-        let s = JsonAwareStr { s: r#"{"foo":"bar"}"#, expand: false };
+        let s = JsonAwareStr {
+            s: r#"{"foo":"bar"}"#,
+            expand: false,
+        };
         let out = serde_json::to_string(&s).unwrap();
         assert_eq!(out, r#""{\"foo\":\"bar\"}""#);
     }
 
     #[test]
     fn test_json_aware_str_passthrough_plain_string() {
-        let s = JsonAwareStr { s: "hello", expand: true };
+        let s = JsonAwareStr {
+            s: "hello",
+            expand: true,
+        };
         let out = serde_json::to_string(&s).unwrap();
         assert_eq!(out, r#""hello""#);
     }
@@ -660,7 +687,10 @@ mod test {
     #[test]
     fn test_json_aware_str_invalid_json_stays_string() {
         // Starts with '{' but is not valid JSON — should fall back to a quoted string.
-        let s = JsonAwareStr { s: "{not valid json}", expand: true };
+        let s = JsonAwareStr {
+            s: "{not valid json}",
+            expand: true,
+        };
         let out = serde_json::to_string(&s).unwrap();
         assert_eq!(out, r#""{not valid json}""#);
     }
