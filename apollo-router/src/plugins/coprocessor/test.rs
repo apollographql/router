@@ -7590,7 +7590,18 @@ mod tests {
                 response: Default::default(),
             };
 
-            let mock_subgraph_service = MockSubgraphService::new();
+            let mut mock_subgraph_service = MockSubgraphService::new();
+            mock_subgraph_service
+                .expect_call()
+                .returning(|req: subgraph::Request| {
+                    Ok(subgraph::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .errors(Vec::new())
+                        .extensions(Object::new())
+                        .context(req.context)
+                        .subgraph_name("test_subgraph".to_string())
+                        .build())
+                });
 
             // Mock coprocessor that captures headers
             let received_headers = Arc::new(std::sync::Mutex::new(None));
@@ -7819,7 +7830,7 @@ mod tests {
             );
 
             let request = router::Request::fake_builder()
-                .header("authorization", "Bearer token")
+                .header("authorization", "Bearer token") // gitleaks:allow
                 .build()
                 .unwrap();
 
