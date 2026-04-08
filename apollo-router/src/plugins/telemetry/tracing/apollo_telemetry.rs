@@ -28,7 +28,7 @@ use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
 use parking_lot::Mutex;
 use prost::Message;
-use rand::Rng;
+use rand::RngExt as _;
 use serde::de::DeserializeOwned;
 use serde_json::Value as JSONValue;
 use thiserror::Error;

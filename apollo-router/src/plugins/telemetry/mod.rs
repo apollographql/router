@@ -44,10 +44,9 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
-use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
-use rand::Rng;
+use rand::RngExt as _;
 use regex::Regex;
 use reload::activation::Activation;
 use reload::tracing::TracingConfigurator;
@@ -131,7 +130,6 @@ use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
-use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
@@ -381,6 +379,19 @@ impl PluginPrivate for Telemetry {
             .router_custom_instruments
             .clone();
 
+        let spans = &self.config.instrumentation.spans;
+        let router_attributes = &spans.router.attributes.attributes;
+
+        let client_name_key = router_attributes
+            .client_name
+            .as_ref()
+            .and_then(|a| a.key(CLIENT_NAME_KEY));
+
+        let client_version_key = router_attributes
+            .client_version
+            .as_ref()
+            .and_then(|a| a.key(CLIENT_VERSION_KEY));
+
         ServiceBuilder::new()
             .layer(metrics::allocation::AllocationMetricsLayer::new())
             .map_response(move |response: router::Response| {
@@ -460,14 +471,6 @@ impl PluginPrivate for Telemetry {
                         SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY,
                         supergraph_schema_id.clone(),
                     );
-                    if !use_legacy_request_span {
-                        let span = Span::current();
-
-                        span.set_span_dyn_attribute(
-                            HTTP_REQUEST_METHOD.into(),
-                            request.router_request.method().to_string().into(),
-                        );
-                    }
 
                     let client_name = request
                         .router_request
@@ -557,6 +560,8 @@ impl PluginPrivate for Telemetry {
                     let config = config_later.clone();
                     let sender = metrics_sender.clone();
                     let enabled_features = enabled_features.clone();
+                    let client_name_key = client_name_key.clone();
+                    let client_version_key = client_version_key.clone();
 
                     Self::plugin_metrics(&config);
 
@@ -578,10 +583,16 @@ impl PluginPrivate for Telemetry {
                                 crate::context::deprecated::DEPRECATED_CLIENT_VERSION,
                             )
                         });
-                        custom_attributes.extend([
-                            KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or_default()),
-                            KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or_default()),
-                        ]);
+
+                        if let Some(key) = client_name_key {
+                            custom_attributes
+                                .push(KeyValue::new(key, client_name.unwrap_or_default()));
+                        }
+
+                        if let Some(key) = client_version_key {
+                            custom_attributes
+                                .push(KeyValue::new(key, client_version.unwrap_or_default()));
+                        }
 
                         if let Some(http_server_response_body_size) =
                             &custom_instruments.http_server_response_body_size

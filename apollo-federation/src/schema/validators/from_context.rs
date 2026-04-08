@@ -651,13 +651,13 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
                     type_name: implemented.name.clone(),
                 };
                 let field = itf.fields(schema.schema())?.find(|f| f.field_name == field);
-                if field.is_some() {
+                if let Some(field) = field {
                     errors.push(
                         SingleFederationError::ContextNotSet {
                             message: format!(
                                 "@fromContext argument cannot be used on a field implementing an interface field \"{}.{}\".",
                                 itf.type_name,
-                                field.unwrap().field_name,
+                                field.field_name,
                             ),
                         }
                         .into(),
