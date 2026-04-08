@@ -144,7 +144,7 @@ async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError>
     // still associated with the parsed operation (for tracing). We use a timeout long enough
     // for parsing (100ms) and a slower subgraph (250ms) so we always hit the timeout.
     //
-    // Enable stdout logging and `router.response` events so `otel.name` is emitted reliably.
+    // Enable stdout logging and `router.response` events (includes `otel.name` for the operation).
     let mut router = IntegrationTest::builder()
         .config(
             r#"
@@ -183,9 +183,8 @@ async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError>
     let response = response.text().await?;
     assert!(response.contains("GATEWAY_TIMEOUT"));
 
-    // Operation name is recorded on the span; router.request logs include the GraphQL document.
     router
-        .wait_for_log_message_with_timeout("query UniqueName", std::time::Duration::from_secs(15))
+        .wait_for_log_message(r#""otel.name":"query UniqueName""#)
         .await;
 
     router.graceful_shutdown().await;

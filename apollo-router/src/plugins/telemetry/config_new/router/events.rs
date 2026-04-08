@@ -8,6 +8,8 @@ use tower::BoxError;
 
 use super::selectors::RouterSelector;
 use crate::Context;
+use crate::context::OPERATION_KIND;
+use crate::context::OPERATION_NAME;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
@@ -17,6 +19,7 @@ use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
+use crate::plugins::telemetry::consts::OTEL_NAME;
 use crate::services::router;
 
 #[derive(Clone)]
@@ -54,7 +57,7 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
         if let Some(response_event) = &self.response
             && response_event.condition.evaluate_response(response)
         {
-            let mut attrs = Vec::with_capacity(4);
+            let mut attrs = Vec::with_capacity(6);
 
             #[cfg(test)]
             let mut headers: indexmap::IndexMap<String, http::HeaderValue> = response
@@ -92,6 +95,22 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
                     opentelemetry::Value::String(body.0.into()),
                 ));
             }
+
+            // Match `map_response` OTEL span naming so stdout logs expose the same operation label
+            // as OTLP (e.g. integration tests asserting on `"otel.name":"query ExampleQuery"`).
+            let otel_name = {
+                let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
+                let operation_name = response.context.get::<_, String>(OPERATION_NAME);
+                match (&operation_kind, &operation_name) {
+                    (Ok(Some(kind)), Ok(Some(name))) => format!("{kind} {name}"),
+                    (Ok(Some(kind)), _) => kind.clone(),
+                    _ => "GraphQL Operation".to_string(),
+                }
+            };
+            attrs.push(KeyValue::new(
+                Key::from_static_str(OTEL_NAME),
+                opentelemetry::Value::String(otel_name.into()),
+            ));
 
             log_event(response_event.level, "router.response", attrs, "");
         }
