@@ -41,10 +41,11 @@ struct JsonAwareStr<'a> {
 
 impl serde::Serialize for JsonAwareStr<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        if self.expand && (self.s.starts_with('{') || self.s.starts_with('[')) {
-            if let Ok(raw) = serde_json::from_str::<&serde_json::value::RawValue>(self.s) {
-                return raw.serialize(serializer);
-            }
+        if self.expand
+            && (self.s.starts_with('{') || self.s.starts_with('['))
+            && let Ok(raw) = serde_json::from_str::<&serde_json::value::RawValue>(self.s)
+        {
+            return raw.serialize(serializer);
         }
         serializer.serialize_str(self.s)
     }

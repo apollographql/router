@@ -968,7 +968,7 @@ connector:
                 );
 
                 // Array of JSON object strings (the `response_errors: "$[*]"` case)
-                let whaattributes_array = vec![KeyValue::new(
+                let attributes_array = vec![KeyValue::new(
                     opentelemetry::Key::from_static_str("errors"),
                     opentelemetry::Value::Array(opentelemetry::Array::String(vec![
                         r#"{"message":"Invalid type","extensions":{"code":"INVALID_TYPE"}}"#
