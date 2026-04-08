@@ -2199,12 +2199,11 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     {
         let descriptions: IndexMap<&str, usize> = sources
             .iter()
-            .map(|(idx, source)| {
+            .filter_map(|(idx, source)| {
                 source
                     .as_ref()
                     .and_then(|s| s.description(self.subgraphs[*idx].schema()))
             })
-            .flatten()
             // PORT NOTE: JS was keeping empty descriptions but only using them if no other description was provided
             //  (i.e. we would pick any description over multiple empty descriptions)
             .filter(|d| !d.is_empty())
