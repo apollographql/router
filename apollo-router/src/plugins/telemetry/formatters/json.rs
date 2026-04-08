@@ -32,6 +32,50 @@ use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_list;
 use crate::plugins::telemetry::otel::OtelData;
 
+/// Serializes a `&str` as raw JSON when `expand` is true and the string looks like a JSON
+/// object or array; otherwise serializes it as a normal JSON string.
+struct JsonAwareStr<'a> {
+    s: &'a str,
+    expand: bool,
+}
+
+impl serde::Serialize for JsonAwareStr<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if self.expand && (self.s.starts_with('{') || self.s.starts_with('[')) {
+            if let Ok(raw) = serde_json::from_str::<&serde_json::value::RawValue>(self.s) {
+                return raw.serialize(serializer);
+            }
+        }
+        serializer.serialize_str(self.s)
+    }
+}
+
+/// Wraps an `AttributeValue` so that String / String-array variants go through
+/// `JsonAwareStr` when `expand` is enabled.
+struct JsonAwareAttributeValue<'a> {
+    value: &'a AttributeValue,
+    expand: bool,
+}
+
+impl serde::Serialize for JsonAwareAttributeValue<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use crate::plugins::telemetry::config::AttributeArray;
+        match self.value {
+            AttributeValue::String(s) => {
+                JsonAwareStr { s: s.as_str(), expand: self.expand }.serialize(serializer)
+            }
+            AttributeValue::Array(AttributeArray::String(arr)) => {
+                let elems: Vec<JsonAwareStr<'_>> = arr
+                    .iter()
+                    .map(|s| JsonAwareStr { s: s.as_str(), expand: self.expand })
+                    .collect();
+                elems.serialize(serializer)
+            }
+            other => other.serialize(serializer),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Json {
     config: JsonFormat,
@@ -76,7 +120,7 @@ impl serde::ser::Serialize for SerializableResources<'_> {
     }
 }
 
-struct SerializableContext<'a, 'b, Span>(Option<SpanRef<'a, Span>>, &'b HashSet<&'static str>)
+struct SerializableContext<'a, 'b, Span>(Option<SpanRef<'a, Span>>, &'b HashSet<&'static str>, bool)
 where
     Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
 
@@ -94,7 +138,7 @@ where
         if let Some(leaf_span) = &self.0 {
             for span in leaf_span.scope().from_root() {
                 // TODO: Here in the future we could try to memoize parent spans of the current span to not re serialize eveything if another log happens in the same span
-                serializer.serialize_element(&SerializableSpan(&span, self.1))?;
+                serializer.serialize_element(&SerializableSpan(&span, self.1, self.2))?;
             }
         }
 
@@ -105,6 +149,7 @@ where
 struct SerializableSpan<'a, 'b, Span>(
     &'b tracing_subscriber::registry::SpanRef<'a, Span>,
     &'b HashSet<&'static str>,
+    bool, // expand_json
 )
 where
     Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
@@ -165,7 +210,10 @@ where
                             serializer.serialize_entry(kv.key.as_str(), value)?;
                         }
                         Value::String(value) => {
-                            serializer.serialize_entry(kv.key.as_str(), value.as_str())?;
+                            serializer.serialize_entry(
+                                kv.key.as_str(),
+                                &JsonAwareStr { s: value.as_str(), expand: self.2 },
+                            )?;
                         }
                         Value::Array(Array::Bool(array)) => {
                             serializer.serialize_entry(kv.key.as_str(), array)?;
@@ -177,7 +225,10 @@ where
                             serializer.serialize_entry(kv.key.as_str(), array)?;
                         }
                         Value::Array(Array::String(array)) => {
-                            let array = array.iter().map(|a| a.as_str()).collect::<Vec<_>>();
+                            let array: Vec<JsonAwareStr<'_>> = array
+                                .iter()
+                                .map(|a| JsonAwareStr { s: a.as_str(), expand: self.2 })
+                                .collect();
                             serializer.serialize_entry(kv.key.as_str(), &array)?;
                         }
                         _ => {
@@ -288,7 +339,13 @@ where
                 };
                 if let Some(event_attributes) = event_attributes {
                     for (key, value) in event_attributes {
-                        serializer.serialize_entry(key.as_str(), &AttributeValue::from(value))?;
+                        serializer.serialize_entry(
+                            key.as_str(),
+                            &JsonAwareAttributeValue {
+                                value: &AttributeValue::from(value),
+                                expand: self.config.expand_json_string_values,
+                            },
+                        )?;
                     }
                 }
             }
@@ -297,7 +354,13 @@ where
                 for (key, value) in
                     extract_span_attributes(ctx.lookup_current(), &self.config.span_attributes)
                 {
-                    serializer.serialize_entry(key.as_str(), &AttributeValue::from(value))?;
+                    serializer.serialize_entry(
+                        key.as_str(),
+                        &JsonAwareAttributeValue {
+                            value: &AttributeValue::from(value),
+                            expand: self.config.expand_json_string_values,
+                        },
+                    )?;
                 }
             }
 
@@ -325,7 +388,14 @@ where
                 && let Some(ref span) = current_span
             {
                 serializer
-                    .serialize_entry("span", &SerializableSpan(span, &self.excluded_attributes))
+                    .serialize_entry(
+                        "span",
+                        &SerializableSpan(
+                            span,
+                            &self.excluded_attributes,
+                            self.config.expand_json_string_values,
+                        ),
+                    )
                     .unwrap_or(());
             }
 
@@ -339,7 +409,11 @@ where
             if self.config.display_span_list && current_span.is_some() {
                 serializer.serialize_entry(
                     "spans",
-                    &SerializableContext(ctx.lookup_current(), &self.excluded_attributes),
+                    &SerializableContext(
+                        ctx.lookup_current(),
+                        &self.excluded_attributes,
+                        self.config.expand_json_string_values,
+                    ),
                 )?;
             }
 
@@ -487,6 +561,7 @@ mod test {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::registry::LookupSpan;
 
+    use super::JsonAwareStr;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::formatters::json::extract_dd_trace_id;
@@ -552,5 +627,41 @@ mod test {
                 tracing::info!("test");
             },
         );
+    }
+
+    #[test]
+    fn test_json_aware_str_expands_object() {
+        let s = JsonAwareStr { s: r#"{"foo":"bar"}"#, expand: true };
+        let out = serde_json::to_string(&s).unwrap();
+        assert_eq!(out, r#"{"foo":"bar"}"#);
+    }
+
+    #[test]
+    fn test_json_aware_str_expands_array() {
+        let s = JsonAwareStr { s: r#"[1,2,3]"#, expand: true };
+        let out = serde_json::to_string(&s).unwrap();
+        assert_eq!(out, r#"[1,2,3]"#);
+    }
+
+    #[test]
+    fn test_json_aware_str_no_expand_when_disabled() {
+        let s = JsonAwareStr { s: r#"{"foo":"bar"}"#, expand: false };
+        let out = serde_json::to_string(&s).unwrap();
+        assert_eq!(out, r#""{\"foo\":\"bar\"}""#);
+    }
+
+    #[test]
+    fn test_json_aware_str_passthrough_plain_string() {
+        let s = JsonAwareStr { s: "hello", expand: true };
+        let out = serde_json::to_string(&s).unwrap();
+        assert_eq!(out, r#""hello""#);
+    }
+
+    #[test]
+    fn test_json_aware_str_invalid_json_stays_string() {
+        // Starts with '{' but is not valid JSON — should fall back to a quoted string.
+        let s = JsonAwareStr { s: "{not valid json}", expand: true };
+        let out = serde_json::to_string(&s).unwrap();
+        assert_eq!(out, r#""{not valid json}""#);
     }
 }

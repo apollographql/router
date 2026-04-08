@@ -274,6 +274,11 @@ pub(crate) struct JsonFormat {
     pub(crate) display_span_id: bool,
     /// List of span attributes to attach to the json log object
     pub(crate) span_attributes: HashSet<String>,
+    /// Output string attribute values that contain valid JSON objects or arrays
+    /// as native JSON rather than quoted strings. Useful for log aggregators
+    /// (e.g. Splunk) that can index nested JSON fields. (default: false)
+    #[serde(default)]
+    pub(crate) expand_json_string_values: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -325,6 +330,7 @@ impl Default for JsonFormat {
             display_trace_id: DisplayTraceIdFormat::Bool(true),
             display_span_id: true,
             span_attributes: HashSet::new(),
+            expand_json_string_values: false,
         }
     }
 }

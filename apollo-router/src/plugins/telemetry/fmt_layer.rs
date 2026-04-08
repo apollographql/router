@@ -931,6 +931,81 @@ connector:
     }
 
     #[tokio::test]
+    async fn test_json_logging_expand_json_string_values() {
+        let buff = LogBuffer::default();
+        let text_format = JsonFormat {
+            display_span_list: false,
+            display_current_span: false,
+            display_resource: false,
+            expand_json_string_values: true,
+            ..Default::default()
+        };
+        let format = Json::new(Resource::builder_empty().build(), text_format);
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
+            || {
+                let span = info_span!("test_expand_json");
+                let _enter = span.enter();
+
+                // Single JSON object string value
+                let attributes_single = vec![KeyValue::new(
+                    opentelemetry::Key::from_static_str("errors"),
+                    opentelemetry::Value::String(
+                        r#"{"message":"Invalid type","extensions":{"code":"INVALID_TYPE"}}"#
+                            .to_string()
+                            .into(),
+                    ),
+                )];
+                log_event(
+                    EventLevel::Error,
+                    "response_errors_single",
+                    attributes_single,
+                    "test",
+                );
+
+                // Array of JSON object strings (the `response_errors: "$[*]"` case)
+                let whaattributes_array = vec![KeyValue::new(
+                    opentelemetry::Key::from_static_str("errors"),
+                    opentelemetry::Value::Array(opentelemetry::Array::String(vec![
+                        r#"{"message":"Invalid type","extensions":{"code":"INVALID_TYPE"}}"#
+                            .to_string()
+                            .into(),
+                        r#"{"message":"Validation failed","extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}"#
+                            .to_string()
+                            .into(),
+                    ])),
+                )];
+                log_event(
+                    EventLevel::Error,
+                    "response_errors_array",
+                    attributes_array,
+                    "test",
+                );
+            },
+        );
+
+        let output = buff.to_string();
+        // Single object: the value should be a native JSON object, not a quoted string
+        assert!(
+            output.contains(r#""errors":{"message":"Invalid type""#),
+            "expected native JSON object in output, got: {output}"
+        );
+        // Array case: elements should be native JSON objects, not escaped strings
+        assert!(
+            output.contains(r#""errors":[{"message":"Invalid type""#),
+            "expected array of native JSON objects in output, got: {output}"
+        );
+        assert!(
+            !output.contains(r#""{\"message\""#),
+            "output must not contain escaped JSON strings when expand_json_string_values=true, got: {output}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_json_logging_deduplicates_attributes() {
         let buff = LogBuffer::default();
         let text_format = JsonFormat {
