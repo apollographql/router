@@ -11,7 +11,6 @@ use tower::BoxError;
 use super::selectors::SupergraphSelector;
 use crate::Context;
 use crate::graphql;
-use crate::services::header_masking::HeaderMaskingRules;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -22,6 +21,8 @@ use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
+#[cfg(not(test))]
+use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::supergraph;
 
 pub(crate) type SupergraphEvents = CustomEvents<

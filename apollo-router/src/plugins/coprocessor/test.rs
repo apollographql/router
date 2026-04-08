@@ -4578,11 +4578,11 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    fn mock_with_callback<F>(
-        callback: F,
-    ) -> MockInternalHttpClientService
+    fn mock_with_callback<F>(callback: F) -> MockInternalHttpClientService
     where
-        F: Fn(http::Request<RouterBody>) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
+        F: Fn(
+                http::Request<RouterBody>,
+            ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
             + Send
             + Sync
             + 'static,
@@ -6352,11 +6352,12 @@ mod tests {
         use crate::services::router;
 
         #[allow(clippy::type_complexity)]
-        fn mock_with_callback<F>(
-            callback: F,
-        ) -> MockInternalHttpClientService
+        fn mock_with_callback<F>(callback: F) -> MockInternalHttpClientService
         where
-            F: Fn(http::Request<RouterBody>) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
+            F: Fn(
+                    http::Request<RouterBody>,
+                )
+                    -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
                 + Send
                 + Sync
                 + 'static,
@@ -7542,7 +7543,11 @@ mod tests {
 
             // Authorization header should be unmasked
             assert_eq!(
-                headers_obj.get("authorization").unwrap().as_array().unwrap()[0]
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
                     .as_str()
                     .unwrap(),
                 "Bearer secret-token-12345",
@@ -7638,11 +7643,7 @@ mod tests {
                     http::Request::builder()
                         .header("x-api-key", "secret-api-key-67890") // gitleaks:allow
                         .header("content-type", "application/json")
-                        .body(
-                            graphql::Request::fake_builder()
-                                .query("{ test }")
-                                .build(),
-                        )
+                        .body(graphql::Request::fake_builder().query("{ test }").build())
                         .unwrap(),
                 )
                 .build();
@@ -7830,7 +7831,11 @@ mod tests {
 
             let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
             assert_eq!(
-                headers_obj.get("authorization").unwrap().as_array().unwrap()[0]
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
                     .as_str()
                     .unwrap(),
                 "Bearer token"
@@ -7924,7 +7929,11 @@ mod tests {
             let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
 
             assert_eq!(
-                headers_obj.get("authorization").unwrap().as_array().unwrap()[0]
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
                     .as_str()
                     .unwrap(),
                 "Bearer secret"
@@ -7942,7 +7951,11 @@ mod tests {
                 "test-agent"
             );
             assert_eq!(
-                headers_obj.get("x-custom-header").unwrap().as_array().unwrap()[0]
+                headers_obj
+                    .get("x-custom-header")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
                     .as_str()
                     .unwrap(),
                 "custom-value"
@@ -8026,7 +8039,7 @@ mod tests {
             let request = router::Request::fake_builder()
                 .header("x-internal-token", "internal-secret")
                 .header("x-secret-key", "secret-key-value")
-                .header("authorization", "Bearer public-token")  // Not in custom list
+                .header("authorization", "Bearer public-token") // Not in custom list
                 .build()
                 .unwrap();
 
@@ -8037,7 +8050,11 @@ mod tests {
             let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
 
             assert_eq!(
-                headers_obj.get("x-internal-token").unwrap().as_array().unwrap()[0]
+                headers_obj
+                    .get("x-internal-token")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
                     .as_str()
                     .unwrap(),
                 "internal-secret"
@@ -8050,7 +8067,11 @@ mod tests {
             );
             // Authorization is not in the custom list, so it's treated as non-sensitive
             assert_eq!(
-                headers_obj.get("authorization").unwrap().as_array().unwrap()[0]
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
                     .as_str()
                     .unwrap(),
                 "Bearer public-token"

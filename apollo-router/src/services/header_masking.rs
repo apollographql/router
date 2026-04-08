@@ -33,6 +33,7 @@ impl HeaderMaskingRules {
     }
 
     /// Mask a HeaderMap and convert to HashMap for coprocessor
+    #[allow(dead_code)]
     pub(crate) fn mask_header_map(
         &self,
         input: &HeaderMap<HeaderValue>,
@@ -50,7 +51,10 @@ impl HeaderMaskingRules {
                     } else {
                         v
                     };
-                    output.entry(k_str.to_owned()).or_insert_with(Vec::new).push(value);
+                    output
+                        .entry(k_str.to_owned())
+                        .or_insert_with(Vec::new)
+                        .push(value);
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -144,11 +148,17 @@ mod tests {
         let result = rules.mask_header_map(&headers);
 
         // Sensitive headers should be masked
-        assert_eq!(result.get("authorization"), Some(&vec![MASKED_VALUE.to_string()]));
+        assert_eq!(
+            result.get("authorization"),
+            Some(&vec![MASKED_VALUE.to_string()])
+        );
         assert_eq!(result.get("cookie"), Some(&vec![MASKED_VALUE.to_string()]));
 
         // Non-sensitive headers should not be masked
-        assert_eq!(result.get("content-type"), Some(&vec!["application/json".to_string()]));
+        assert_eq!(
+            result.get("content-type"),
+            Some(&vec!["application/json".to_string()])
+        );
     }
 
     #[test]
@@ -227,6 +237,9 @@ mod tests {
 
         // Even though the header name is lowercase in HeaderMap, our rule should match
         let result = rules.mask_header_map(&headers);
-        assert_eq!(result.get("authorization"), Some(&vec![MASKED_VALUE.to_string()]));
+        assert_eq!(
+            result.get("authorization"),
+            Some(&vec![MASKED_VALUE.to_string()])
+        );
     }
 }

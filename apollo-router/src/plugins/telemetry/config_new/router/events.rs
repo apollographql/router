@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+#[cfg(not(test))]
 use std::sync::Arc;
 
 use opentelemetry::Key;
@@ -9,7 +10,6 @@ use tower::BoxError;
 
 use super::selectors::RouterSelector;
 use crate::Context;
-use crate::services::header_masking::HeaderMaskingRules;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
@@ -19,6 +19,8 @@ use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
+#[cfg(not(test))]
+use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::router;
 
 #[derive(Clone)]

@@ -196,6 +196,7 @@ impl SupergraphStage {
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_supergraph_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -228,13 +229,13 @@ where
         .then(|| externalize_header_map(&parts.headers));
 
     // Log headers with masking for security
-    if request_config.headers {
-        if let Some(rules) = header_masking_rules.as_deref() {
-            tracing::debug!(
-                headers = %rules.mask_headers_debug(&parts.headers),
-                "Supergraph request headers (masked)"
-            );
-        }
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.mask_headers_debug(&parts.headers),
+            "Supergraph request headers (masked)"
+        );
     }
 
     let body_to_send = request_config
@@ -359,6 +360,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_supergraph_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -400,13 +402,13 @@ where
         .then(|| externalize_header_map(&parts.headers));
 
     // Log headers with masking for security
-    if response_config.headers {
-        if let Some(rules) = header_masking_rules.as_deref() {
-            tracing::debug!(
-                headers = %rules.mask_headers_debug(&parts.headers),
-                "Supergraph response headers (masked)"
-            );
-        }
+    if response_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.mask_headers_debug(&parts.headers),
+            "Supergraph response headers (masked)"
+        );
     }
 
     let body_to_send = filter_graphql_response_body(&first, &response_config.body);

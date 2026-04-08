@@ -48,10 +48,10 @@ use crate::services::PATH_QUERY_PARAM;
 use crate::services::external::Control;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
-use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::externalize_header_map;
+use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
@@ -199,20 +199,21 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
         let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
 
         // Initialize header masking rules from global configuration
-        let header_masking_rules = init.full_config
-            .as_ref()
-            .and_then(|config| {
-                config.get("header_masking").and_then(|hm_config| {
-                    serde_json::from_value::<HeaderMaskingConfig>(hm_config.clone())
-                        .ok()
-                        .filter(|config| config.enabled)
-                        .map(|config| {
-                            Arc::new(HeaderMaskingRules::from_config(&config))
-                        })
-                })
-            });
+        let header_masking_rules = init.full_config.as_ref().and_then(|config| {
+            config.get("header_masking").and_then(|hm_config| {
+                serde_json::from_value::<HeaderMaskingConfig>(hm_config.clone())
+                    .ok()
+                    .filter(|config| config.enabled)
+                    .map(|config| Arc::new(HeaderMaskingRules::from_config(&config)))
+            })
+        });
 
-        CoprocessorPlugin::new(client, init.config, init.supergraph_sdl, header_masking_rules)
+        CoprocessorPlugin::new(
+            client,
+            init.config,
+            init.supergraph_sdl,
+            header_masking_rules,
+        )
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -969,6 +970,7 @@ impl SubgraphStage {
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_router_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -1006,13 +1008,13 @@ where
         .then(|| externalize_header_map(&parts.headers));
 
     // Log headers with masking for security
-    if request_config.headers {
-        if let Some(rules) = header_masking_rules.as_deref() {
-            tracing::debug!(
-                headers = %rules.mask_headers_debug(&parts.headers),
-                "Router request headers (masked)"
-            );
-        }
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.mask_headers_debug(&parts.headers),
+            "Router request headers (masked)"
+        );
     }
 
     // HTTP GET requests don't have a body
@@ -1157,6 +1159,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_router_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -1207,13 +1210,13 @@ where
         .then(|| externalize_header_map(&parts.headers));
 
     // Log headers with masking for security
-    if response_config.headers {
-        if let Some(rules) = header_masking_rules.as_deref() {
-            tracing::debug!(
-                headers = %rules.mask_headers_debug(&parts.headers),
-                "Router response headers (masked)"
-            );
-        }
+    if response_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.mask_headers_debug(&parts.headers),
+            "Router response headers (masked)"
+        );
     }
 
     let body_to_send = response_config
@@ -1382,6 +1385,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_subgraph_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -1413,14 +1417,14 @@ where
         .then(|| externalize_header_map(&parts.headers));
 
     // Log headers with masking for security
-    if request_config.headers {
-        if let Some(rules) = header_masking_rules.as_deref() {
-            tracing::debug!(
-                headers = %rules.mask_headers_debug(&parts.headers),
-                subgraph = %service_name,
-                "Subgraph request headers (masked)"
-            );
-        }
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.mask_headers_debug(&parts.headers),
+            subgraph = %service_name,
+            "Subgraph request headers (masked)"
+        );
     }
 
     let body_to_send = request_config
@@ -1563,6 +1567,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_subgraph_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -1595,14 +1600,14 @@ where
         .then(|| externalize_header_map(&parts.headers));
 
     // Log headers with masking for security
-    if response_config.headers {
-        if let Some(rules) = header_masking_rules.as_deref() {
-            tracing::debug!(
-                headers = %rules.mask_headers_debug(&parts.headers),
-                subgraph = %service_name,
-                "Subgraph response headers (masked)"
-            );
-        }
+    if response_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.mask_headers_debug(&parts.headers),
+            subgraph = %service_name,
+            "Subgraph response headers (masked)"
+        );
     }
 
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());

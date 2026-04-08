@@ -450,7 +450,9 @@ impl Selector for SubgraphSelector {
                     _ => header_value,
                 };
 
-                value.or_else(|| default.clone()).map(opentelemetry::Value::from)
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
             }
             SubgraphSelector::SupergraphRequestHeader {
                 supergraph_request_header,
@@ -486,7 +488,9 @@ impl Selector for SubgraphSelector {
                     _ => header_value,
                 };
 
-                value.or_else(|| default.clone()).map(opentelemetry::Value::from)
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
             }
             SubgraphSelector::RequestContext {
                 request_context,
@@ -579,7 +583,9 @@ impl Selector for SubgraphSelector {
                     _ => header_value,
                 };
 
-                value.or_else(|| default.clone()).map(opentelemetry::Value::from)
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
             }
             SubgraphSelector::SubgraphResponseStatus {
                 subgraph_response_status: response_status,

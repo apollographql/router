@@ -293,7 +293,9 @@ impl Selector for SupergraphSelector {
                     _ => header_value,
                 };
 
-                value.or_else(|| default.clone()).map(opentelemetry::Value::from)
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
             }
             SupergraphSelector::QueryVariable {
                 query_variable,
@@ -404,7 +406,9 @@ impl Selector for SupergraphSelector {
                     _ => header_value,
                 };
 
-                value.or_else(|| default.clone()).map(opentelemetry::Value::from)
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
             }
             SupergraphSelector::ResponseStatus { response_status } => match response_status {
                 ResponseStatus::Code => Some(opentelemetry::Value::I64(
@@ -733,7 +737,6 @@ mod test {
     use tracing::subscriber;
     use tracing_subscriber::layer::SubscriberExt;
 
-    use crate::configuration::header_masking_config::HeaderMaskingConfig;
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
     use crate::plugins::telemetry::config::AttributeValue;
@@ -745,7 +748,6 @@ mod test {
     use crate::plugins::telemetry::otel;
     use crate::services::FIRST_EVENT_CONTEXT_KEY;
     use crate::services::SupergraphRequest;
-    use crate::services::header_masking::HeaderMaskingRules;
     use crate::services::SupergraphResponse;
     use crate::spec::operation_limits::OperationLimits;
 

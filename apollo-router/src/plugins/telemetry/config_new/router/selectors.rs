@@ -262,7 +262,9 @@ impl Selector for RouterSelector {
                     _ => header_value,
                 };
 
-                value.map(|v| v.into()).or_else(|| default.maybe_to_otel_value())
+                value
+                    .map(|v| v.into())
+                    .or_else(|| default.maybe_to_otel_value())
             }
             RouterSelector::Env {
                 env,
