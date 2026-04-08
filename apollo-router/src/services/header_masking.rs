@@ -90,9 +90,9 @@ impl HeaderMaskingRules {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use http::header::HeaderName;
-
+    use super::*;
+    
     fn create_test_rules() -> HeaderMaskingRules {
         let config = HeaderMaskingConfig {
             enabled: true,
