@@ -717,6 +717,8 @@ impl Selector for SupergraphSelector {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
     use opentelemetry::baggage::BaggageExt;
@@ -731,6 +733,7 @@ mod test {
     use tracing::subscriber;
     use tracing_subscriber::layer::SubscriberExt;
 
+    use crate::configuration::header_masking_config::HeaderMaskingConfig;
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
     use crate::plugins::telemetry::config::AttributeValue;
@@ -742,6 +745,7 @@ mod test {
     use crate::plugins::telemetry::otel;
     use crate::services::FIRST_EVENT_CONTEXT_KEY;
     use crate::services::SupergraphRequest;
+    use crate::services::header_masking::HeaderMaskingRules;
     use crate::services::SupergraphResponse;
     use crate::spec::operation_limits::OperationLimits;
 

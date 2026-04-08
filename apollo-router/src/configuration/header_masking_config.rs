@@ -6,12 +6,10 @@ use serde::Serialize;
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct HeaderMaskingConfig {
     /// Enable header masking globally (default: true for fail-secure behavior)
-    #[serde(default = "default_enabled")]
     pub(crate) enabled: bool,
 
     /// List of header names to mask (case-insensitive)
     /// Default includes common sensitive headers
-    #[serde(default = "default_sensitive_headers")]
     pub(crate) sensitive_headers: Vec<String>,
 }
 

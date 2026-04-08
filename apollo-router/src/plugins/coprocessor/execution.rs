@@ -773,6 +773,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -844,6 +845,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -975,6 +977,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1090,6 +1093,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = execution::Request::fake_builder()
