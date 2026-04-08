@@ -417,6 +417,7 @@ telemetry:
 | `display_resource`    | `true`\|`false`   | `true`  | `resource`    | The resource as configured in tracing common.                                          |
 | `display_trace_id`    | `true`\|`false`\|`open_telemetry`\|`hexadecimal`\|`decimal`\|`datadog`\|`uuid` | The trace id of the span in which the event was raised.                                |
 | `display_span_id`     | `true`\|`false`   | `true`  | `span_id`     | The span id of the span in which the event was raised.                                 |
-| `span_attributes`     | `[string]`        | `[]`    | `*`           | List of span attributes to attach to the JSON log object.                              |
+| `span_attributes`          | `[string]`      | `[]`    | `*`           | List of span attributes to attach to the JSON log object.                              |
+| `expand_json_string_values`| `true`\|`false` | `false` |               | When `true`, string attribute values that are valid JSON objects or arrays are emitted as native JSON rather than quoted strings. Useful for log aggregators (e.g. Splunk) that index nested fields. |
 
 
