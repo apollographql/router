@@ -12383,6 +12383,11 @@ expression: "&schema"
                   ],
                   "description": "Include the trace id (if any) with the log event. (default: true)"
                 },
+                "expand_json_string_values": {
+                  "default": false,
+                  "description": "Output string attribute values that contain valid JSON objects or arrays\nas native JSON rather than quoted strings. Useful for log aggregators\n(e.g. Splunk) that can index nested JSON fields. (default: false)",
+                  "type": "boolean"
+                },
                 "span_attributes": {
                   "default": [],
                   "description": "List of span attributes to attach to the json log object",
