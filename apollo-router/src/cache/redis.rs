@@ -3,7 +3,6 @@ use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -56,12 +55,6 @@ const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "redis-sentinel",
     "rediss-sentinel",
 ];
-
-/// Gets a lock for redis client recreation
-fn lock_for_recreation() -> &'static Mutex<()> {
-    static CLIENT_RECREATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    CLIENT_RECREATION_LOCK.get_or_init(|| Mutex::new(()))
-}
 
 /// Timeout applied to internal Redis operations, such as TCP connection initialization, TLS handshakes, AUTH or HELLO, cluster health checks, etc.
 // NOTE: In practice we've found that 5s is too low, so we've set it to 10s. Do some sanity checking before tweaking it to a lower value
@@ -196,6 +189,7 @@ pub(crate) struct RedisCacheStorage {
     reset_ttl: bool,
     // the wrapped client config, comes from the router config
     redis_client_config: RedisClientConfig,
+    client_recreation_lock: Arc<Mutex<()>>,
 }
 
 /// Configuration for the redis client, pulled from fields of the router config
@@ -338,6 +332,7 @@ impl RedisCacheStorage {
             ttl: config.ttl,
             reset_ttl: config.reset_ttl,
             is_cluster,
+            client_recreation_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -388,6 +383,7 @@ impl RedisCacheStorage {
             is_cluster,
             reset_ttl: config.reset_ttl,
             redis_client_config,
+            client_recreation_lock: Arc::new(Mutex::new(())),
         };
 
         storage.create_client().await
@@ -635,7 +631,7 @@ impl RedisCacheStorage {
         match maybe_client {
             Some(client) => Ok(client),
             None => {
-                let _guard = lock_for_recreation().lock().await;
+                let _guard = self.client_recreation_lock.lock().await;
                 // WARN: don't remove this; this makes sure that once we have a lock, we aren't
                 // recreating the client. Multiple recreations can happen if we queue up tasks
                 // waiting for locks and we need to make sure that after we've acquired a lock, we
