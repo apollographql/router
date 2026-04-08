@@ -1611,8 +1611,8 @@ fn header_masking_yaml_parsing() {
     // Test that header_masking parses correctly from YAML format
     let yaml = r#"
         header_masking:
-        enabled: true
-        sensitive_headers:
+          enabled: true
+          sensitive_headers:
             - authorization
             - cookie
             - x-api-key

@@ -941,6 +941,7 @@ mod tests {
             let config = ConfigurationSource::Static(Box::new(crate::Configuration {
                 supergraph,
                 health_check: Default::default(),
+                header_masking: Default::default(),
                 sandbox: Default::default(),
                 homepage: Default::default(),
                 server: Default::default(),
@@ -1023,6 +1024,7 @@ mod tests {
             let config = ConfigurationSource::Static(Box::new(crate::Configuration {
                 supergraph,
                 health_check: Default::default(),
+                header_masking: Default::default(),
                 sandbox: Default::default(),
                 homepage: Default::default(),
                 server: Default::default(),

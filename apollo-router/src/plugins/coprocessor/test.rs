@@ -3033,6 +3033,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation - doesn't matter for router stage
+                None,
             )
             .boxed();
 
@@ -3064,6 +3065,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
+                None,
             )
             .boxed();
 
@@ -3088,6 +3090,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
+                None,
             )
             .boxed();
 
@@ -3113,6 +3116,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
+                None,
             )
             .boxed();
 
@@ -3138,6 +3142,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
+                None,
             )
             .boxed();
 
@@ -3162,6 +3167,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
+                None,
             )
             .boxed();
 
@@ -3187,6 +3193,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
+                None,
             )
             .boxed();
 
@@ -3405,6 +3412,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled
+                None,
             )
             .boxed();
 
@@ -3436,6 +3444,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled
+                None,
             )
             .boxed();
 
@@ -3885,6 +3894,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3908,6 +3918,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3929,6 +3940,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3952,6 +3964,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3975,6 +3988,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3996,6 +4010,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4016,6 +4031,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4037,6 +4053,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4057,6 +4074,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4074,6 +4092,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4091,6 +4110,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4111,6 +4131,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4195,6 +4216,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4281,6 +4303,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4353,6 +4376,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4438,6 +4462,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4530,6 +4555,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Disable response validation since coprocessor returns only extensions
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4552,18 +4578,26 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    fn mock_with_callback(
-        callback: fn(
-            http::Request<RouterBody>,
-        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> MockInternalHttpClientService {
+    fn mock_with_callback<F>(
+        callback: F,
+    ) -> MockInternalHttpClientService
+    where
+        F: Fn(http::Request<RouterBody>) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        let callback = Arc::new(callback);
         let mut mock_http_client = MockInternalHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
+            let callback = callback.clone();
             let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
+                let callback = callback.clone();
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_call().returning(
                     move |req: crate::services::http::HttpRequest| {
+                        let callback = callback.clone();
                         let context = req.context.clone();
                         let fut = callback(req.http_request);
                         Box::pin(async move {
@@ -5288,6 +5322,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5317,6 +5352,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5346,6 +5382,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5372,6 +5409,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5398,6 +5436,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5414,6 +5453,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5442,6 +5482,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5471,6 +5512,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5500,6 +5542,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5516,6 +5559,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5548,6 +5592,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5577,6 +5622,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5607,6 +5653,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5637,6 +5684,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5667,6 +5715,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5687,6 +5736,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5749,6 +5799,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5782,6 +5833,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5802,6 +5854,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -6299,20 +6352,27 @@ mod tests {
         use crate::services::router;
 
         #[allow(clippy::type_complexity)]
-        fn mock_with_callback(
-            callback: fn(
-                http::Request<RouterBody>,
-            )
-                -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-        ) -> MockInternalHttpClientService {
+        fn mock_with_callback<F>(
+            callback: F,
+        ) -> MockInternalHttpClientService
+        where
+            F: Fn(http::Request<RouterBody>) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
+                + Send
+                + Sync
+                + 'static,
+        {
+            let callback = Arc::new(callback);
             let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
+                let callback = callback.clone();
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
+                    let callback = callback.clone();
                     let mut mock_http_client = MockInternalHttpClientService::new();
                     mock_http_client
                         .expect_call()
                         .returning(move |req: HttpRequest| {
+                            let callback = callback.clone();
                             let context = req.context.clone();
                             let fut = callback(req.http_request);
                             Box::pin(async move {
@@ -6435,6 +6495,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6486,6 +6547,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6537,6 +6599,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             // Create a request with a non-JSON body
@@ -6601,6 +6664,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6674,6 +6738,7 @@ mod tests {
                 inner_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6730,6 +6795,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6778,6 +6844,7 @@ mod tests {
                         mock_connector_service.boxed(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
+                        None,
                     );
 
                     let request = create_test_connector_request();
@@ -6831,6 +6898,7 @@ mod tests {
                         mock_connector_service.boxed(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
+                        None,
                     );
 
                     let request = create_test_connector_request();
@@ -6878,6 +6946,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6921,6 +6990,7 @@ mod tests {
                         mock_connector_service.boxed(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
+                        None,
                     );
 
                     let request = create_test_connector_request();
@@ -6979,6 +7049,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7027,6 +7098,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7085,6 +7157,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7146,6 +7219,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7192,6 +7266,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7237,6 +7312,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7305,6 +7381,7 @@ mod tests {
                 create_error_connector_service(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7354,6 +7431,7 @@ mod tests {
                 create_error_connector_service(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7407,7 +7485,7 @@ mod tests {
                 let received_headers = received_headers_clone.clone();
                 Box::pin(async move {
                     // Capture the headers from the coprocessor request
-                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
                     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
                     if let Some(headers) = body.get("headers") {
@@ -7439,10 +7517,10 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service,
+                mock_router_service.boxed(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
-                false, None,
+                false,
                 masking_rules,
             );
 
@@ -7501,6 +7579,7 @@ mod tests {
                     uri: false,
                     method: false,
                     service_name: false,
+                    subgraph_request_id: false,
                     url: None,
                 },
                 response: Default::default(),
@@ -7515,7 +7594,7 @@ mod tests {
             let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
                 let received_headers = received_headers_clone.clone();
                 Box::pin(async move {
-                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
                     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
                     if let Some(headers) = body.get("headers") {
@@ -7547,10 +7626,10 @@ mod tests {
 
             let service = subgraph_stage.as_service(
                 mock_http_client,
-                mock_subgraph_service.build(),
+                mock_subgraph_service.boxed(),
                 "http://test".to_string(),
                 "test_subgraph".to_string(),
-                false, None,
+                false,
                 masking_rules,
             );
 
@@ -7618,7 +7697,7 @@ mod tests {
             let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
                 let received_headers = received_headers_clone.clone();
                 Box::pin(async move {
-                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
                     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
                     if let Some(headers) = body.get("headers") {
@@ -7649,10 +7728,10 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service,
+                mock_router_service.boxed(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
-                false, None,
+                false,
                 masking_rules,
             );
 
@@ -7706,7 +7785,7 @@ mod tests {
             let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
                 let received_headers = received_headers_clone.clone();
                 Box::pin(async move {
-                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
                     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
                     if let Some(headers) = body.get("headers") {
@@ -7731,10 +7810,10 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service,
+                mock_router_service.boxed(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
-                false, None,
+                false,
                 masking_rules,
             );
 
@@ -7791,7 +7870,7 @@ mod tests {
             let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
                 let received_headers = received_headers_clone.clone();
                 Box::pin(async move {
-                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
                     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
                     if let Some(headers) = body.get("headers") {
@@ -7823,10 +7902,10 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service,
+                mock_router_service.boxed(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
-                false, None,
+                false,
                 masking_rules,
             );
 
@@ -7902,7 +7981,7 @@ mod tests {
             let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
                 let received_headers = received_headers_clone.clone();
                 Box::pin(async move {
-                    let body_bytes = req.into_body().to_bytes().await.unwrap();
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
                     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
                     if let Some(headers) = body.get("headers") {
@@ -7937,10 +8016,10 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service,
+                mock_router_service.boxed(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
-                false, None,
+                false,
                 masking_rules,
             );
 
