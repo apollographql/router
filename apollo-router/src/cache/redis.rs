@@ -479,8 +479,7 @@ impl RedisCacheStorage {
         let watcher_handle = tokio::spawn(async move {
             // WARN: the client_handles returning is the signal that fred has been aborted; don't
             // remove it!
-            let results = join_all(client_handles).await;
-            ACTIVE_CLIENT_COUNT.fetch_sub(results.len() as u64, Ordering::Relaxed);
+            let _fred_aborted = join_all(client_handles).await;
             if let Some(inner) = client_pool.upgrade() {
                 inner.write().take();
                 tracing::info!("redis client aborted; marking for recreation");
@@ -1177,6 +1176,7 @@ mod test {
     mod test_against_redis {
         use std::collections::HashMap;
         use std::sync::OnceLock;
+        use std::sync::atomic::Ordering;
 
         use fred::interfaces::ClientLike;
         use fred::types::cluster::ClusterRouting;
@@ -1189,15 +1189,18 @@ mod test {
         use tower::BoxError;
         use uuid::Uuid;
 
+        use crate::cache::redis::ACTIVE_CLIENT_COUNT;
         use crate::cache::redis::RedisCacheStorage;
         use crate::cache::redis::RedisKey;
         use crate::cache::redis::RedisValue;
 
-        /// Use to force a test to run serially; there's a static in this file for representing
-        /// client recreation and running all these tests in parallel plays havoc with the behavior
-        /// of that static. So, we force them to run serially by taking out a lock
+        /// Serializes tests that create/drop Redis clients so that concurrent mutations
+        /// to any global statics (like `ACTIVE_CLIENT_COUNT`) don't cause assertion failures
         ///
-        /// NOTE: make sure to add this to any test that touches client creation
+        /// NOTE: add this fn to your tests and take out a lock to force the tests to run serially;
+        /// we must do this while ACTIVE_CLIENT_COUNT is a static because the test that checks
+        /// whether its 'math' is correct becomes inderministic if the tests run in parallel (they
+        /// affect its count)
         fn lock_for_static() -> &'static Mutex<()> {
             static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
             LOCK.get_or_init(|| Mutex::new(()))
@@ -1522,10 +1525,10 @@ mod test {
         async fn scan_works_after_recreation(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
             use fred::types::scan::Scanner;
             use futures::StreamExt;
 
-            let _guard = lock_for_static().lock().await;
             let storage = create_and_connect(clustered).await?;
             let key = RedisKey("scan_test_key".to_string());
             storage
@@ -1752,6 +1755,33 @@ mod test {
                 assert_eq!(parsed_values, expected_values);
             }
 
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn active_client_count_is_balanced_after_drop(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let before = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+
+            let storage = create_and_connect(clustered).await?;
+            let after_create = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+
+            assert!(
+                after_create > before,
+                "count should increase after creating client"
+            );
+
+            drop(storage);
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            let after_drop = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+            assert_eq!(
+                after_drop, before,
+                "count should return to original after drop"
+            );
             Ok(())
         }
     }
