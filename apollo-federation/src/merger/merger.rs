@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::LazyLock;
 
@@ -2204,9 +2203,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 source
                     .as_ref()
                     .and_then(|s| s.description(self.subgraphs[*idx].schema()))
-                    .map(|s| s.deref())
-                    .unwrap_or("")
             })
+            .flatten()
             // PORT NOTE: JS was keeping empty descriptions but only using them if no other description was provided
             //  (i.e. we would pick any description over multiple empty descriptions)
             .filter(|d| !d.is_empty())
