@@ -15,10 +15,10 @@ use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use self::layers::query_analysis::ParsedDocument;
 use self::visitor::OverrideLabelVisitor;
-use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::*;
@@ -141,7 +141,7 @@ impl Plugin for ProgressiveOverridePlugin {
 
     // Add all arbitrary labels (non-percentage-based labels) from the schema to
     // the context so coprocessors can resolve their values
-    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         if !self.enabled {
             service
         } else {
@@ -154,7 +154,7 @@ impl Plugin for ProgressiveOverridePlugin {
                     request
                 })
                 .service(service)
-                .boxed_clone_sync()
+                .boxed_clone()
         }
     }
 
@@ -168,8 +168,8 @@ impl Plugin for ProgressiveOverridePlugin {
     //    query planner
     fn supergraph_service(
         &self,
-        service: supergraph::BoxCloneSyncService,
-    ) -> supergraph::BoxCloneSyncService {
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         if !self.enabled {
             service
         } else {
@@ -258,7 +258,7 @@ impl Plugin for ProgressiveOverridePlugin {
                 request
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
         }
     }
 }

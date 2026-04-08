@@ -218,7 +218,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://127.0.0.1:8081".to_string(), // global URL - should NOT be used
             Arc::new("".to_string()),
             true,
@@ -294,7 +294,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -358,7 +358,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -421,7 +421,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -477,7 +477,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -620,7 +620,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -773,7 +773,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -940,7 +940,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1024,7 +1024,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1088,7 +1088,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1145,7 +1145,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1263,7 +1263,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1379,7 +1379,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1507,7 +1507,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1656,7 +1656,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1793,7 +1793,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -1872,7 +1872,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed_clone_sync(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true,
@@ -1963,7 +1963,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed_clone_sync(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true,
@@ -2062,7 +2062,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed_clone_sync(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true,
@@ -2212,7 +2212,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2360,7 +2360,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2494,7 +2494,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2625,7 +2625,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2701,7 +2701,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2787,7 +2787,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -2922,7 +2922,7 @@ mod tests {
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_router_service.boxed_clone_sync(),
+            mock_router_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -3003,7 +3003,7 @@ mod tests {
         let service_stack = router_stage
             .as_service(
                 mock_http_client,
-                mock_router_service.boxed_clone_sync(),
+                mock_router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation - doesn't matter for router stage
@@ -3221,7 +3221,7 @@ mod tests {
         }
     }
 
-    async fn create_mock_router_service_for_validation_test() -> router::BoxCloneSyncService {
+    async fn create_mock_router_service_for_validation_test() -> router::BoxCloneService {
         router::service::from_supergraph_mock_callback(move |req| {
             Ok(supergraph::Response::builder()
                 .data(json!({"test": 42}))
@@ -3230,7 +3230,7 @@ mod tests {
                 .unwrap())
         })
         .await
-        .boxed_clone_sync()
+        .boxed_clone()
     }
 
     // Helper function to create working router service mock
@@ -3855,7 +3855,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_disabled_invalid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_invalid_subgraph_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -3878,7 +3878,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_enabled_valid() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_valid_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3899,7 +3899,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_enabled_empty() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_empty_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3922,7 +3922,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_enabled_invalid() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_invalid_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3945,7 +3945,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_disabled_valid() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_valid_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -3966,7 +3966,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_disabled_empty() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_empty_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -3986,7 +3986,7 @@ mod tests {
     async fn external_plugin_subgraph_request_validation_disabled_invalid() {
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_invalid_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4007,7 +4007,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_enabled_valid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_valid_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4027,7 +4027,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_enabled_empty() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_empty_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4044,7 +4044,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_enabled_invalid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_invalid_subgraph_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4061,7 +4061,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_disabled_valid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_valid_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4081,7 +4081,7 @@ mod tests {
     async fn external_plugin_subgraph_response_validation_disabled_empty() {
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_empty_response(),
-            create_mock_subgraph_service().boxed_clone_sync(),
+            create_mock_subgraph_service().boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4165,7 +4165,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -4251,7 +4251,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -4323,7 +4323,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -4408,7 +4408,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
@@ -4500,7 +4500,7 @@ mod tests {
 
         let service = subgraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed_clone_sync(),
+            mock_subgraph_service.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Disable response validation since coprocessor returns only extensions
@@ -5258,7 +5258,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed_clone_sync(),
+                    create_mock_subgraph_service().boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -5287,7 +5287,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed_clone_sync(),
+                    create_mock_subgraph_service().boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -5316,7 +5316,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed_clone_sync(),
+                    create_mock_subgraph_service().boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -5342,7 +5342,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed_clone_sync(),
+                    create_mock_subgraph_service().boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -5368,7 +5368,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed_clone_sync(),
+                    create_mock_subgraph_service().boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -5384,7 +5384,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed_clone_sync(),
+                    create_mock_subgraph_service().boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
@@ -5412,7 +5412,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone_sync(),
+                    create_mock_subgraph_service().boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
@@ -5441,7 +5441,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone_sync(),
+                    create_mock_subgraph_service().boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
@@ -5470,7 +5470,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone_sync(),
+                    create_mock_subgraph_service().boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
@@ -5486,7 +5486,7 @@ mod tests {
 
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone_sync(),
+                    create_mock_subgraph_service().boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
@@ -5518,7 +5518,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone_sync(),
+                        mock_router_service.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -5547,7 +5547,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone_sync(),
+                        mock_router_service.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -5577,7 +5577,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone_sync(),
+                        mock_router_service.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -5607,7 +5607,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone_sync(),
+                        mock_router_service.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -5637,7 +5637,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone_sync(),
+                        mock_router_service.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -5657,7 +5657,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone_sync(),
+                        mock_router_service.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -5689,7 +5689,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone_sync(),
+                        mock_router_service.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
@@ -5718,7 +5718,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone_sync(),
+                        mock_router_service.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -5751,7 +5751,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone_sync(),
+                        mock_router_service.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -5771,7 +5771,7 @@ mod tests {
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone_sync(),
+                        mock_router_service.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
@@ -6256,7 +6256,6 @@ mod tests {
         use tower::BoxError;
         use tower::ServiceExt;
 
-        use crate::layers::ServiceExt as _;
         use crate::metrics::FutureMetricsExt;
         use crate::plugin::test::MockInternalHttpClientService;
         use crate::plugins::coprocessor::ContextConf;
@@ -6406,7 +6405,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6457,7 +6456,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6508,7 +6507,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6572,7 +6571,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6645,7 +6644,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                inner_service.boxed_clone_sync(),
+                inner_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6701,7 +6700,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6749,7 +6748,7 @@ mod tests {
 
                     let service = connector_stage.as_service(
                         mock_http_client,
-                        mock_connector_service.boxed_clone_sync(),
+                        mock_connector_service.boxed_clone(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
                     );
@@ -6802,7 +6801,7 @@ mod tests {
 
                     let service = connector_stage.as_service(
                         mock_http_client,
-                        mock_connector_service.boxed_clone_sync(),
+                        mock_connector_service.boxed_clone(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
                     );
@@ -6849,7 +6848,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6892,7 +6891,7 @@ mod tests {
 
                     let service = connector_stage.as_service(
                         mock_http_client,
-                        mock_connector_service.boxed_clone_sync(),
+                        mock_connector_service.boxed_clone(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
                     );
@@ -6950,7 +6949,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -6998,7 +6997,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7056,7 +7055,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7117,7 +7116,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7163,7 +7162,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7208,7 +7207,7 @@ mod tests {
 
             let service = connector_stage.as_service(
                 mock_http_client,
-                mock_connector_service.boxed_clone_sync(),
+                mock_connector_service.boxed_clone(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
             );
@@ -7224,7 +7223,7 @@ mod tests {
             }
         }
 
-        fn create_error_connector_service() -> tower::util::BoxCloneSyncService<
+        fn create_error_connector_service() -> tower::util::BoxCloneService<
             request_service::Request,
             request_service::Response,
             BoxError,
@@ -7247,7 +7246,7 @@ mod tests {
                     },
                 })
             })
-            .boxed_clone_sync()
+            .boxed_clone()
         }
 
         #[tokio::test]

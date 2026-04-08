@@ -48,7 +48,6 @@ use crate::graphql;
 use crate::http_ext;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
@@ -104,21 +103,19 @@ pub(crate) struct RouterService {
     // Cannot be under Arc. Batching state must be preserved for each RouterService
     // instance
     batching: Batching,
-    supergraph_service: supergraph::BoxCloneSyncService,
+    supergraph_service: supergraph::BoxCloneService,
 }
 
 impl RouterService {
     fn new(
-        sgb: supergraph::BoxCloneSyncService,
+        sgb: supergraph::BoxCloneService,
         apq_layer: APQLayer,
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
     ) -> Self {
-        let supergraph_service: supergraph::BoxCloneSyncService = ServiceBuilder::new()
-            .buffered()
-            .service(sgb)
-            .boxed_clone_sync();
+        let supergraph_service: supergraph::BoxCloneService =
+            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
 
         RouterService {
             apq_layer: Arc::new(apq_layer),
@@ -144,7 +141,6 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
-+ Sync
 + Clone {
     let mut supergraph_service = MockSupergraphService::new();
 
@@ -157,7 +153,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone_sync())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
@@ -186,7 +182,6 @@ pub(crate) async fn from_supergraph_mock_callback(
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
-+ Sync
 + Clone {
     from_supergraph_mock_callback_and_configuration(
         supergraph_callback,
@@ -209,7 +204,7 @@ pub(crate) async fn empty() -> impl Service<
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(Default::default())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone_sync())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
@@ -833,14 +828,14 @@ pub(crate) struct RouterCreator {
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
-    type Service = router::BoxCloneSyncService;
+    type Service = router::BoxCloneService;
     fn create(&self) -> Self::Service {
-        self.make().boxed_clone_sync()
+        self.make().boxed_clone()
     }
 }
 
 impl RouterFactory for RouterCreator {
-    type RouterService = router::BoxCloneSyncService;
+    type RouterService = router::BoxCloneService;
 
     type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
         router::Request,
@@ -913,11 +908,11 @@ impl RouterCreator {
                         .plugins()
                         .iter()
                         .rev()
-                        .fold(router_service.boxed_clone_sync(), |acc, (_, e)| {
+                        .fold(router_service.boxed_clone(), |acc, (_, e)| {
                             e.router_service(acc)
                         }),
                 )
-                .boxed_clone_sync(),
+                .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );
 
@@ -929,8 +924,8 @@ impl RouterCreator {
         })
     }
 
-    pub(crate) fn make(&self) -> router::BoxCloneSyncService {
-        self.sb.clone().boxed_clone_sync()
+    pub(crate) fn make(&self) -> router::BoxCloneService {
+        self.sb.clone().boxed_clone()
     }
 }
 

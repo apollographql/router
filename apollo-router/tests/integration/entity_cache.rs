@@ -3,7 +3,6 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use apollo_router::graphql;
-use apollo_router::layers::ServiceExt as _;
 use apollo_router::services;
 use apollo_router::test_harness::HttpService;
 use http::HeaderMap;
@@ -97,7 +96,7 @@ async fn harness(
                         counter.fetch_add(1, Ordering::Relaxed);
                         req
                     })
-                    .boxed_clone_sync()
+                    .boxed_clone()
             } else {
                 service
             }

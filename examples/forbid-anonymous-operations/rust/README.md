@@ -15,11 +15,11 @@ cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
 ```rust
     fn supergraph_service(
         &mut self,
-        service: router::BoxCloneSyncService,
-    ) -> router::BoxCloneSyncService {
+        service: router::BoxCloneService,
+    ) -> router::BoxCloneService {
         ServiceBuilder::new()
             .checkpoint(...) // Validation happens here
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 ```

@@ -6,7 +6,6 @@ use std::ops::ControlFlow;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::layer::util::Stack;
-use tower::util::BoxCloneSyncService;
 use tower_service::Service;
 use tracing::Span;
 
@@ -64,7 +63,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tracing::info_span;
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxCloneSyncService) {
+    /// # fn test(service: supergraph::BoxCloneService) {
     /// let _ = ServiceBuilder::new()
     ///     .checkpoint(|req: supergraph::Request|{
     ///         if req.supergraph_request.method() == Method::GET {
@@ -124,7 +123,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tracing::info_span;
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxCloneSyncService) {
+    /// # fn test(service: supergraph::BoxCloneService) {
     /// let _ = ServiceBuilder::new()
     ///     .checkpoint_async(|req: supergraph::Request|
     ///         async {
@@ -169,7 +168,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tracing::info_span;
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxCloneSyncService) {
+    /// # fn test(service: supergraph::BoxCloneService) {
     /// let _ = ServiceBuilder::new()
     ///             .buffered()
     ///             .service(service);
@@ -198,7 +197,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use tracing::info_span;
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxCloneSyncService) {
+    /// # fn test(service: supergraph::BoxCloneService) {
     /// let instrumented = ServiceBuilder::new()
     ///             .instrument(|_request| info_span!("query_planning"))
     ///             .service(service);
@@ -250,7 +249,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///     #     Ok(Self)
     ///     # }
     ///     // …
-    ///     fn supergraph_service(&self, inner: supergraph::BoxCloneSyncService) -> supergraph::BoxCloneSyncService {
+    ///     fn supergraph_service(&self, inner: supergraph::BoxCloneService) -> supergraph::BoxCloneService {
     ///         tower::ServiceBuilder::new()
     ///             .map_first_graphql_response(|context, mut http_parts, mut graphql_response| {
     ///                 // Something interesting here
@@ -299,8 +298,8 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use apollo_router::Context;
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxCloneSyncService) {
-    /// let _ : supergraph::BoxCloneSyncService = ServiceBuilder::new()
+    /// # fn test(service: supergraph::BoxCloneService) {
+    /// let _ : supergraph::BoxCloneService = ServiceBuilder::new()
     ///     .map_future_with_request_data(
     ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await })
@@ -385,7 +384,7 @@ pub trait ServiceExt<Request>: Service<Request> {
     ///     #     Ok(Self)
     ///     # }
     ///     // …
-    ///     fn supergraph_service(&self, inner: supergraph::BoxCloneSyncService) -> supergraph::BoxCloneSyncService {
+    ///     fn supergraph_service(&self, inner: supergraph::BoxCloneService) -> supergraph::BoxCloneService {
     ///         inner
     ///             .map_first_graphql_response(|context, mut http_parts, mut graphql_response| {
     ///                 // Something interesting here
@@ -438,8 +437,8 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// # use apollo_router::services::supergraph;
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # use apollo_router::layers::ServiceExt as ApolloServiceExt;
-    /// # fn test(service: supergraph::BoxCloneSyncService) {
-    /// let _ : supergraph::BoxCloneSyncService = service
+    /// # fn test(service: supergraph::BoxCloneService) {
+    /// let _ : supergraph::BoxCloneService = service
     ///     .map_future_with_request_data(
     ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await }
@@ -458,18 +457,6 @@ pub trait ServiceExt<Request>: Service<Request> {
         MF: Clone,
     {
         MapFutureWithRequestDataService::new(self, req_fn, map_fn)
-    }
-
-    /// See [`tower::util::ServiceExt::boxed_clone`] for details.
-    /// This variant returns a [`tower::util::BoxCloneSyncService`] instead
-    /// of a [`tower::util::BoxCloneService`].
-    fn boxed_clone_sync(self) -> BoxCloneSyncService<Request, Self::Response, Self::Error>
-    where
-        Self: Sized + Send + 'static,
-        Self::Future: Send + 'static,
-        Self: Clone + Sync,
-    {
-        BoxCloneSyncService::new(self)
     }
 }
 impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}

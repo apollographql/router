@@ -34,7 +34,6 @@ fn main() -> Result<()> {
 mod tests {
 
     use apollo_router::graphql;
-    use apollo_router::layers::ServiceExt as _;
     use apollo_router::plugin::test;
     use apollo_router::services::router;
     use apollo_router::services::supergraph;
@@ -103,7 +102,7 @@ mod tests {
         apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .supergraph_hook(move |_| mock_service.clone().boxed_clone_sync())
+            .supergraph_hook(move |_| mock_service.clone().boxed_clone())
             .build_router()
             .await
             .unwrap()

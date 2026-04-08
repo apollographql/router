@@ -11,11 +11,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use crate::Context;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::limits::layer::BodyLimitError;
@@ -171,7 +171,7 @@ impl Plugin for LimitsPlugin {
         })
     }
 
-    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         ServiceBuilder::new()
             .buffered()
             .map_future_with_request_data(
@@ -187,7 +187,7 @@ impl Plugin for LimitsPlugin {
             .map_request(Into::into)
             .map_response(Into::into)
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

@@ -13,6 +13,7 @@ use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 use self::config::FileUploadsConfig;
 use self::config::MultipartRequestLimits;
@@ -23,7 +24,6 @@ use self::multipart_request::MultipartRequest;
 use self::rearrange_query_plan::rearrange_query_plan;
 use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::execution;
@@ -59,7 +59,7 @@ impl PluginPrivate for FileUploadsPlugin {
         Ok(Self { enabled, limits })
     }
 
-    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -82,13 +82,13 @@ impl PluginPrivate for FileUploadsPlugin {
             })
             .buffered()
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
     fn supergraph_service(
         &self,
-        service: supergraph::BoxCloneSyncService,
-    ) -> supergraph::BoxCloneSyncService {
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -110,13 +110,10 @@ impl PluginPrivate for FileUploadsPlugin {
             })
             .buffered()
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
-    fn execution_service(
-        &self,
-        service: execution::BoxCloneSyncService,
-    ) -> execution::BoxCloneSyncService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -134,14 +131,14 @@ impl PluginPrivate for FileUploadsPlugin {
                 })
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxCloneSyncService,
-    ) -> subgraph::BoxCloneSyncService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -154,7 +151,7 @@ impl PluginPrivate for FileUploadsPlugin {
             })
             .buffered()
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

@@ -41,7 +41,6 @@ use crate::services::TryIntoHeaderValue;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-pub type BoxCloneSyncService = tower::util::BoxCloneSyncService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 
 pub type Body = RouterBody;

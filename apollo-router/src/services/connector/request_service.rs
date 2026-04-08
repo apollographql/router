@@ -31,7 +31,6 @@ use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::layers::ServiceExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::request_limit::RequestLimits;
@@ -48,7 +47,7 @@ use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-pub(crate) type BoxCloneSyncService = tower::util::BoxCloneSyncService<Request, Response, BoxError>;
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub(crate) type ServiceResult = Result<Response, BoxError>;
 
 assert_impl_all!(Request: Send);
@@ -172,10 +171,10 @@ impl ConnectorRequestServiceFactory {
                         ConnectorRequestService {
                             http_client_service_factory: http_client_service_factory.clone(),
                         }
-                        .boxed_clone_sync(),
+                        .boxed_clone(),
                         |acc, (_, e)| e.connector_request_service(acc, source.clone()),
                     )
-                    .boxed_clone_sync(),
+                    .boxed_clone(),
                 DEFAULT_BUFFER_SIZE,
             );
             map.insert(source.clone(), service);

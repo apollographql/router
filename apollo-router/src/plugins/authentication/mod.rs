@@ -22,6 +22,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use url::Url;
 
 use self::jwks::JwksManager;
@@ -30,7 +31,6 @@ use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::serde::deserialize_header_name;
@@ -237,7 +237,7 @@ impl PluginPrivate for AuthenticationPlugin {
         })
     }
 
-    fn router_service(&self, service: router::BoxCloneSyncService) -> router::BoxCloneSyncService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         // Return without layering if no router config was defined
         let Some(router_config) = &self.router else {
             return service;
@@ -262,14 +262,14 @@ impl PluginPrivate for AuthenticationPlugin {
                 Ok(authenticate(&configuration, &jwks_manager, request))
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         name: &str,
-        service: crate::services::subgraph::BoxCloneSyncService,
-    ) -> crate::services::subgraph::BoxCloneSyncService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         // Return without layering if no subgraph config was defined
         let Some(subgraph) = &self.subgraph else {
             return service;
@@ -280,9 +280,9 @@ impl PluginPrivate for AuthenticationPlugin {
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxCloneSyncService,
+        service: crate::services::connector::request_service::BoxCloneService,
         _: String,
-    ) -> crate::services::connector::request_service::BoxCloneSyncService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         // Return without layering if no connector config was defined
         let Some(connector_auth) = &self.connector else {
             return service;

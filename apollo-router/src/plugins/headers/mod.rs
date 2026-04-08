@@ -30,9 +30,9 @@ use serde_json_bytes::path::JsonPathInst;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
 
-use crate::layers::ServiceExt as _;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::serde::deserialize_header_name;
@@ -266,8 +266,8 @@ impl PluginPrivate for Headers {
     fn subgraph_service(
         &self,
         name: &str,
-        service: subgraph::BoxCloneSyncService,
-    ) -> subgraph::BoxCloneSyncService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(
                 self.subgraph_operations
@@ -276,14 +276,14 @@ impl PluginPrivate for Headers {
                     .unwrap_or_else(|| self.all_operations.clone()),
             ))
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxCloneSyncService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxCloneSyncService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(
                 self.connector_source_operations
@@ -292,7 +292,7 @@ impl PluginPrivate for Headers {
                     .unwrap_or_else(|| self.all_connector_operations.clone()),
             ))
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

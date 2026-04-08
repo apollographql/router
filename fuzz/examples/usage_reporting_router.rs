@@ -3,7 +3,6 @@ use std::ops::ControlFlow;
 use anyhow::Result;
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
-use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -11,6 +10,7 @@ use apollo_router::services::execution;
 use apollo_router::services::supergraph;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 #[derive(Debug)]
 struct ExposeReferencedFieldsByType {
@@ -30,8 +30,8 @@ impl Plugin for ExposeReferencedFieldsByType {
 
     fn supergraph_service(
         &self,
-        service: supergraph::BoxCloneSyncService,
-    ) -> supergraph::BoxCloneSyncService {
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
             .map_first_graphql_response(
                 |context, http_parts, mut graphql_response: graphql::Response| {
@@ -43,13 +43,10 @@ impl Plugin for ExposeReferencedFieldsByType {
                 },
             )
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
-    fn execution_service(
-        &self,
-        service: execution::BoxCloneSyncService,
-    ) -> execution::BoxCloneSyncService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
                 let as_json: serde_json_bytes::Value =
@@ -68,7 +65,7 @@ impl Plugin for ExposeReferencedFieldsByType {
                 ))
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

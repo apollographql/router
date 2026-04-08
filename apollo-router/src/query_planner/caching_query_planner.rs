@@ -35,7 +35,6 @@ use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
-use crate::layers::ServiceExt as _;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::limits;
@@ -219,7 +218,7 @@ where
             self.plugins
                 .iter()
                 .rev()
-                .fold(self.delegate.clone().boxed_clone_sync(), |acc, (_, e)| {
+                .fold(self.delegate.clone().boxed_clone(), |acc, (_, e)| {
                     e.query_planner_service(acc)
                 }),
         );

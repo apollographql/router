@@ -561,13 +561,13 @@ mod tests {
     use std::sync::Arc;
 
     use axum::BoxError;
+    use tower::ServiceExt;
     use tower::service_fn;
 
     use super::*;
     use crate::axum_factory::tests::init_with_config;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
-    use crate::layers::ServiceExt;
     use crate::services::router;
     use crate::services::router::body;
 
@@ -609,7 +609,7 @@ mod tests {
                     .unwrap(),
             )
         })
-        .boxed_clone_sync();
+        .boxed_clone();
 
         let mut web_endpoints = MultiMap::new();
         web_endpoints.insert(
@@ -650,7 +650,7 @@ mod tests {
                 .context(req.context)
                 .build()
         })
-        .boxed_clone_sync();
+        .boxed_clone();
 
         let mut mm = MultiMap::new();
         mm.insert(

@@ -2,7 +2,6 @@ use std::ops::ControlFlow;
 
 use anyhow::Result;
 use apollo_router::layers::ServiceBuilderExt;
-use apollo_router::layers::ServiceExt as _;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -10,6 +9,7 @@ use apollo_router::services::execution;
 use apollo_router::services::supergraph;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 
 #[derive(Debug)]
 struct DoNotExecute {
@@ -29,8 +29,8 @@ impl Plugin for DoNotExecute {
 
     fn supergraph_service(
         &self,
-        service: supergraph::BoxCloneSyncService,
-    ) -> supergraph::BoxCloneSyncService {
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
             .map_request(|mut req: supergraph::Request| {
                 let body = req.supergraph_request.body_mut();
@@ -41,13 +41,10 @@ impl Plugin for DoNotExecute {
                 req
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
-    fn execution_service(
-        &self,
-        service: execution::BoxCloneSyncService,
-    ) -> execution::BoxCloneSyncService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
                 Ok(ControlFlow::Break(
@@ -58,7 +55,7 @@ impl Plugin for DoNotExecute {
                 ))
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 }
 

@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use uuid::Uuid;
 
 use self::callback::CallbackService;
@@ -18,7 +19,6 @@ use crate::ListenAddr;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::protocols::websocket::WebSocketProtocol;
@@ -276,8 +276,8 @@ impl Plugin for Subscription {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::subgraph::BoxCloneSyncService,
-    ) -> crate::services::subgraph::BoxCloneSyncService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         let enabled = self.config.enabled
             && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
         ServiceBuilder::new()
@@ -301,7 +301,7 @@ impl Plugin for Subscription {
                 }
             })
             .service(service)
-            .boxed_clone_sync()
+            .boxed_clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -317,7 +317,7 @@ impl Plugin for Subscription {
             let endpoint = Endpoint::from_router_service(
                 format!("{path}/{{callback}}"),
                 CallbackService::new(self.notify.clone(), path.to_string(), callback_hmac_key)
-                    .boxed_clone_sync(),
+                    .boxed_clone(),
             );
             map.insert(listen.clone().unwrap_or_else(default_listen_addr), endpoint);
         }
@@ -337,7 +337,7 @@ mod tests {
     use serde_json::Value;
     use tower::Service;
     use tower::ServiceExt;
-    use tower::util::BoxCloneSyncService;
+    use tower::util::BoxCloneService;
 
     use super::*;
     use crate::Notify;
@@ -782,7 +782,7 @@ mod tests {
 
         let mut subgraph_service = dyn_plugin.subgraph_service(
             "my_subgraph_name",
-            BoxCloneSyncService::new(mock_subgraph_service),
+            BoxCloneService::new(mock_subgraph_service),
         );
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(

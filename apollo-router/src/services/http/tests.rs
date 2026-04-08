@@ -943,8 +943,8 @@ mod plugin_loading {
         fn http_client_service(
             &self,
             _subgraph_name: &str,
-            service: crate::services::http::BoxCloneSyncService,
-        ) -> crate::services::http::BoxCloneSyncService {
+            service: crate::services::http::BoxCloneService,
+        ) -> crate::services::http::BoxCloneService {
             self.started.store(true, Ordering::Release);
             service
         }

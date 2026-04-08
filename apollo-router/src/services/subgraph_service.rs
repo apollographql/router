@@ -32,6 +32,7 @@ use tokio::sync::oneshot;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tracing::Instrument;
 use tracing::instrument;
 
@@ -55,7 +56,6 @@ use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::layers::ServiceExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::file_uploads;
@@ -800,7 +800,7 @@ pub(crate) async fn call_single_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
-    client: crate::services::http::BoxCloneSyncService,
+    client: crate::services::http::BoxCloneService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
     let subgraph_request_event = context
@@ -1053,7 +1053,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: crate::services::http::BoxCloneSyncService,
+    mut client: crate::services::http::BoxCloneService,
     context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
@@ -1155,7 +1155,7 @@ impl SubgraphServiceFactory {
                     Arc::from(name.clone()),
                 ))
                 .service(maker.make())
-                .boxed_clone_sync();
+                .boxed_clone();
             let service = ServiceBuilder::new()
                 .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
                 .service(
@@ -1172,11 +1172,9 @@ impl SubgraphServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxCloneSyncService> {
+    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxCloneService> {
         // Note: We have to box our cloned service to erase the type of the Buffer.
-        self.services
-            .get(name)
-            .map(|svc| svc.clone().boxed_clone_sync())
+        self.services.get(name).map(|svc| svc.clone().boxed_clone())
     }
 }
 
@@ -1184,7 +1182,7 @@ impl SubgraphServiceFactory {
 ///
 /// there can be multiple instances of that service executing at any given time
 pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
-    fn make(&self) -> subgraph::BoxCloneSyncService;
+    fn make(&self) -> subgraph::BoxCloneService;
 }
 
 impl<S> MakeSubgraphService for S
@@ -1196,8 +1194,8 @@ where
         + 'static,
     <S as Service<SubgraphRequest>>::Future: Send,
 {
-    fn make(&self) -> subgraph::BoxCloneSyncService {
-        self.clone().boxed_clone_sync()
+    fn make(&self) -> subgraph::BoxCloneService {
+        self.clone().boxed_clone()
     }
 }
 
