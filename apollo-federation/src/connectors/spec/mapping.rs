@@ -118,6 +118,37 @@ pub(crate) fn extract_mapping_directive_arguments(
         }
     }
 
+    // Validate: reject @mapping on unsupported type kinds (input, enum, union, scalar).
+    // These are silently skipped above, so check explicitly and error.
+    for (type_name, ty) in &schema.types {
+        let has_mapping = |directives: &apollo_compiler::schema::DirectiveList| {
+            directives.iter().any(|d| d.name == *directive_name)
+        };
+
+        let unsupported_kind = match ty {
+            apollo_compiler::schema::ExtendedType::InputObject(t) if has_mapping(&t.directives) => {
+                Some("input type")
+            }
+            apollo_compiler::schema::ExtendedType::Enum(t) if has_mapping(&t.directives) => {
+                Some("enum")
+            }
+            apollo_compiler::schema::ExtendedType::Union(t) if has_mapping(&t.directives) => {
+                Some("union")
+            }
+            apollo_compiler::schema::ExtendedType::Scalar(t) if has_mapping(&t.directives) => {
+                Some("scalar")
+            }
+            _ => None,
+        };
+
+        if let Some(kind) = unsupported_kind {
+            return Err(FederationError::internal(format!(
+                "@mapping directive on {kind} `{type_name}` is not supported. \
+                 @mapping can only be applied to object types and interfaces.",
+            )));
+        }
+    }
+
     Ok(results)
 }
 
@@ -392,5 +423,76 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Duplicate @mapping alias"));
         assert!(err.contains("SharedAlias"));
+    }
+
+    #[test]
+    fn test_mapping_on_input_type_errors() {
+        let schema = Schema::parse(
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@mapping"])
+            directive @link(url: String, import: [link__Import]) repeatable on SCHEMA
+            scalar link__Import
+            directive @mapping(selection: String, as: String) repeatable on OBJECT | INTERFACE | INPUT_OBJECT
+
+            input UserInput @mapping { name: String }
+            type Query { user: String }
+            "#,
+            "test.graphql",
+        )
+        .unwrap();
+
+        let result = extract_mapping_directive_arguments(&schema, &name!(mapping));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("input type"));
+        assert!(err.contains("UserInput"));
+    }
+
+    #[test]
+    fn test_mapping_on_enum_errors() {
+        let schema = Schema::parse(
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@mapping"])
+            directive @link(url: String, import: [link__Import]) repeatable on SCHEMA
+            scalar link__Import
+            directive @mapping(selection: String, as: String) repeatable on OBJECT | INTERFACE | ENUM
+
+            enum Status @mapping { ACTIVE INACTIVE }
+            type Query { status: Status }
+            "#,
+            "test.graphql",
+        )
+        .unwrap();
+
+        let result = extract_mapping_directive_arguments(&schema, &name!(mapping));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("enum"));
+        assert!(err.contains("Status"));
+    }
+
+    #[test]
+    fn test_mapping_on_union_errors() {
+        let schema = Schema::parse(
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@mapping"])
+            directive @link(url: String, import: [link__Import]) repeatable on SCHEMA
+            scalar link__Import
+            directive @mapping(selection: String, as: String) repeatable on OBJECT | INTERFACE | UNION
+
+            type User { id: ID! }
+            type Post { id: ID! }
+            union SearchResult @mapping = User | Post
+            type Query { search: SearchResult }
+            "#,
+            "test.graphql",
+        )
+        .unwrap();
+
+        let result = extract_mapping_directive_arguments(&schema, &name!(mapping));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("union"));
+        assert!(err.contains("SearchResult"));
     }
 }

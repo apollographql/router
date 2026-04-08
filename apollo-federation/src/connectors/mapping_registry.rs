@@ -96,7 +96,7 @@ impl MappingRegistry {
             parsed.inner
         } else {
             // Auto-map mode: generate selection from field names
-            Self::generate_auto_map_selection(&args.field_names, spec)?
+            Self::generate_auto_map_selection(&args.type_name, &args.field_names, spec)?
         };
 
         Ok(MappingDefinition {
@@ -105,12 +105,15 @@ impl MappingRegistry {
         })
     }
 
-    /// Generate an auto-map selection from field names
+    /// Generate an auto-map selection from field names.
+    ///
+    /// Builds a selection string like `"field1 field2 field3"` from the type's
+    /// field names and parses it into a `TopLevelSelection`.
     fn generate_auto_map_selection(
+        type_name: &Name,
         field_names: &[Name],
         spec: ConnectSpec,
     ) -> Result<TopLevelSelection, FederationError> {
-        // Generate a simple selection string like "field1 field2 field3"
         let selection_str = field_names
             .iter()
             .map(|n| n.as_str())
@@ -118,20 +121,22 @@ impl MappingRegistry {
             .join(" ");
 
         if selection_str.is_empty() {
-            return Err(FederationError::internal(
-                "@mapping on type with no fields".to_string(),
-            ));
+            return Err(FederationError::internal(format!(
+                "@mapping on type `{type_name}` has no fields to auto-map",
+            )));
         }
 
         let parsed = JSONSelection::parse_with_spec(&selection_str, spec).map_err(|e| {
-            FederationError::internal(format!("Failed to generate auto-map selection: {}", e))
+            FederationError::internal(format!(
+                "Failed to generate auto-map selection for type `{type_name}`: {e}",
+            ))
         })?;
 
         match parsed.inner {
             TopLevelSelection::Named(sub) => Ok(TopLevelSelection::Named(sub)),
-            TopLevelSelection::Path(_) => Err(FederationError::internal(
-                "Auto-map generated unexpected path selection".to_string(),
-            )),
+            TopLevelSelection::Path(_) => Err(FederationError::internal(format!(
+                "Auto-map for type `{type_name}` generated unexpected path selection",
+            ))),
         }
     }
 
@@ -201,21 +206,13 @@ impl MappingRegistry {
         }
     }
 
-    /// Expand a SubSelection, replacing any SpreadNamed nodes
+    /// Expand a SubSelection, replacing any SpreadNamed nodes.
     fn expand_sub_selection(
         &self,
         sub: &SubSelection,
         expanding: &mut HashSet<String>,
         depth: usize,
     ) -> Result<SubSelection, FederationError> {
-        if depth > MAX_EXPANSION_DEPTH {
-            return Err(FederationError::internal(format!(
-                "Mapping expansion exceeded maximum depth of {}. \
-                 This may indicate an overly complex mapping chain.",
-                MAX_EXPANSION_DEPTH
-            )));
-        }
-
         let mut new_selections = Vec::new();
 
         for named in &sub.selections {
@@ -233,20 +230,33 @@ impl MappingRegistry {
 
                     // Look up the mapping
                     if let Some(mapping) = self.get_mapping(type_name) {
-                        // Mark as expanding to detect cycles
+                        // Depth check before recursing into the referenced mapping.
+                        let next_depth = depth + 1;
+                        if next_depth > MAX_EXPANSION_DEPTH {
+                            return Err(FederationError::internal(format!(
+                                "Mapping expansion exceeded maximum depth of {}. \
+                                 This may indicate an overly complex mapping chain.",
+                                MAX_EXPANSION_DEPTH
+                            )));
+                        }
+
+                        // Mark as expanding to detect cycles.
+                        // Always remove after expansion (even on error) to avoid
+                        // polluting the set for sibling expansions.
                         expanding.insert(type_name.to_string());
 
                         match &mapping.selection {
                             TopLevelSelection::Named(sub) => {
-                                let expanded =
-                                    self.expand_sub_selection(sub, expanding, depth + 1)?;
+                                let result =
+                                    self.expand_sub_selection(sub, expanding, next_depth);
                                 expanding.remove(type_name);
-                                new_selections.extend(expanded.selections);
+                                new_selections.extend(result?.selections);
                             }
                             TopLevelSelection::Path(path) => {
-                                let expanded_path =
-                                    self.expand_path_selection(path, expanding, depth + 1)?;
+                                let result =
+                                    self.expand_path_selection(path, expanding, next_depth);
                                 expanding.remove(type_name);
+                                let expanded_path = result?;
 
                                 // Anonymous paths with subselections behave like inline spreads.
                                 let prefix = if expanded_path.is_anonymous()
@@ -451,7 +461,7 @@ mod tests {
 
         let field_names = vec![name!(id), name!(name), name!(email)];
         let selection =
-            MappingRegistry::generate_auto_map_selection(&field_names, ConnectSpec::V0_5).unwrap();
+            MappingRegistry::generate_auto_map_selection(&name!(TestType), &field_names, ConnectSpec::V0_5).unwrap();
 
         match selection {
             TopLevelSelection::Named(sub) => assert_eq!(sub.selections.len(), 3),
@@ -514,15 +524,14 @@ mod tests {
         let mut registry = MappingRegistry::new();
         let user_selection =
             JSONSelection::parse_with_spec("id name email", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = user_selection.inner {
-            registry.mappings.insert(
-                name!(User),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         // Parse a selection with ...User
         let selection = JSONSelection::parse_with_spec("...User", ConnectSpec::V0_5).unwrap();
@@ -541,15 +550,14 @@ mod tests {
         // Create a registry with a User mapping
         let mut registry = MappingRegistry::new();
         let user_selection = JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = user_selection.inner {
-            registry.mappings.insert(
-                name!(User),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         // Parse a selection with ...User and extra field
         let selection =
@@ -575,28 +583,26 @@ mod tests {
         // UserA references UserB
         let user_a_selection =
             JSONSelection::parse_with_spec("id ...UserB", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = user_a_selection.inner {
-            registry.mappings.insert(
-                name!(UserA),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(UserA),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_a_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(UserA),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(UserA),
+            },
+        );
 
         // UserB references UserA (circular!)
         let user_b_selection =
             JSONSelection::parse_with_spec("name ...UserA", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = user_b_selection.inner {
-            registry.mappings.insert(
-                name!(UserB),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(UserB),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_b_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(UserB),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(UserB),
+            },
+        );
 
         // Try to expand UserA - should fail with circular reference error
         let selection = JSONSelection::parse_with_spec("...UserA", ConnectSpec::V0_5).unwrap();
@@ -668,29 +674,27 @@ mod tests {
         // Address mapping
         let address_selection =
             JSONSelection::parse_with_spec("street city zipCode", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = address_selection.inner {
-            registry.mappings.insert(
-                name!(Address),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(Address),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = address_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(Address),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Address),
+            },
+        );
 
         // User mapping references Address
         let user_selection =
             JSONSelection::parse_with_spec("id name address { ...Address }", ConnectSpec::V0_5)
                 .unwrap();
-        if let TopLevelSelection::Named(sub) = user_selection.inner {
-            registry.mappings.insert(
-                name!(User),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         // Expand User
         let selection = JSONSelection::parse_with_spec("...User", ConnectSpec::V0_5).unwrap();
@@ -714,15 +718,14 @@ mod tests {
 
         // Create User mapping aliased as "BasicUser"
         let user_selection = JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = user_selection.inner {
-            registry.mappings.insert(
-                name!(BasicUser),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(BasicUser),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         // Expand using alias
         let selection = JSONSelection::parse_with_spec("...BasicUser", ConnectSpec::V0_5).unwrap();
@@ -740,15 +743,14 @@ mod tests {
         // Create a registry with a User mapping
         let mut registry = MappingRegistry::new();
         let user_selection = JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = user_selection.inner {
-            registry.mappings.insert(
-                name!(User),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         // Parse a selection with spread + other fields + nested selection
         let selection = JSONSelection::parse_with_spec(
@@ -779,15 +781,14 @@ mod tests {
         // Create a registry with a mapping
         let mut registry = MappingRegistry::new();
         let user_selection = JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = user_selection.inner {
-            registry.mappings.insert(
-                name!(User),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         // Parse a selection with path containing a nested subselection with spread
         let selection =
@@ -811,27 +812,25 @@ mod tests {
         let mut registry = MappingRegistry::new();
 
         let user_selection = JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = user_selection.inner {
-            registry.mappings.insert(
-                name!(UserBasic),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(UserBasic),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         let contact_selection =
             JSONSelection::parse_with_spec("email phone", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = contact_selection.inner {
-            registry.mappings.insert(
-                name!(ContactInfo),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = contact_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(ContactInfo),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         // Parse a selection with multiple spreads
         let selection =
@@ -925,8 +924,9 @@ mod tests {
 
     #[test]
     fn test_auto_map_empty_fields_error() {
+        use apollo_compiler::name;
         // Auto-map with no fields should fail
-        let result = MappingRegistry::generate_auto_map_selection(&[], ConnectSpec::V0_5);
+        let result = MappingRegistry::generate_auto_map_selection(&name!(EmptyType), &[], ConnectSpec::V0_5);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("no fields"));
     }
@@ -1099,27 +1099,25 @@ mod tests {
         let mut registry = MappingRegistry::new();
 
         let selection1 = JSONSelection::parse_with_spec("id", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = selection1.inner {
-            registry.mappings.insert(
-                name!(UserMapping),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = selection1.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(UserMapping),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         let selection2 =
             JSONSelection::parse_with_spec("id name email", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = selection2.inner {
-            registry.mappings.insert(
-                name!(UserMapping),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(Admin),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = selection2.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(UserMapping),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Admin),
+            },
+        );
 
         assert_eq!(registry.len(), 1);
         let mapping = registry.get_mapping("UserMapping").unwrap();
@@ -1167,27 +1165,25 @@ mod tests {
 
         let user_selection =
             JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = user_selection.inner {
-            registry.mappings.insert(
-                name!(User),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         let addr_selection =
             JSONSelection::parse_with_spec("street city", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = addr_selection.inner {
-            registry.mappings.insert(
-                name!(Address),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(Address),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = addr_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(Address),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Address),
+            },
+        );
 
         // Selection with spreads inside a path subselection:
         // users: $.data { ...User address { ...Address } }
@@ -1229,15 +1225,14 @@ mod tests {
 
         let user_selection =
             JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = user_selection.inner {
-            registry.mappings.insert(
-                name!(User),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         let selection =
             JSONSelection::parse_with_spec("payload: $(data { ...User })", ConnectSpec::V0_5)
@@ -1259,15 +1254,14 @@ mod tests {
 
         let addr_selection =
             JSONSelection::parse_with_spec("street city zip", ConnectSpec::V0_5).unwrap();
-        if let TopLevelSelection::Named(sub) = addr_selection.inner {
-            registry.mappings.insert(
-                name!(Address),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(Address),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = addr_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(Address),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Address),
+            },
+        );
 
         // User references Address
         let user_selection = JSONSelection::parse_with_spec(
@@ -1275,15 +1269,14 @@ mod tests {
             ConnectSpec::V0_5,
         )
         .unwrap();
-        if let TopLevelSelection::Named(sub) = user_selection.inner {
-            registry.mappings.insert(
-                name!(User),
-                MappingDefinition {
-                    selection: TopLevelSelection::Named(sub),
-                    source_type: name!(User),
-                },
-            );
-        }
+        let TopLevelSelection::Named(sub) = user_selection.inner else { panic!("expected Named selection") };
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+            },
+        );
 
         // Top-level references User
         let selection = JSONSelection::parse_with_spec(
@@ -1328,15 +1321,14 @@ mod tests {
             };
 
             let sel = JSONSelection::parse_with_spec(&next_ref, ConnectSpec::V0_5).unwrap();
-            if let TopLevelSelection::Named(sub) = sel.inner {
-                registry.mappings.insert(
-                    this_name.clone(),
-                    MappingDefinition {
-                        selection: TopLevelSelection::Named(sub),
-                        source_type: this_name,
-                    },
-                );
-            }
+            let TopLevelSelection::Named(sub) = sel.inner else { panic!("expected Named selection") };
+            registry.mappings.insert(
+                this_name.clone(),
+                MappingDefinition {
+                    selection: TopLevelSelection::Named(sub),
+                    source_type: this_name,
+                },
+            );
         }
 
         // Try to expand T0 -- this creates a 35-level chain which exceeds MAX_EXPANSION_DEPTH (32).
@@ -1350,6 +1342,52 @@ mod tests {
         assert!(
             result.unwrap_err().to_string().contains("maximum depth"),
             "Error should mention maximum depth"
+        );
+    }
+
+    /// Regression test: cycle detection set must be cleaned up even when
+    /// expansion fails. Previously, an error in one branch would leave the
+    /// expanding set polluted, causing false cycle-detection errors in
+    /// sibling expansions.
+    #[test]
+    fn test_cycle_detection_cleanup_on_error() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        // A mapping that references an unknown mapping (will error)
+        let bad_selection =
+            JSONSelection::parse_with_spec("...Unknown", ConnectSpec::V0_5).unwrap();
+        let TopLevelSelection::Named(bad_sub) = bad_selection.inner else { panic!("expected Named selection") };
+
+        registry.mappings.insert(
+            name!(Bad),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(bad_sub),
+                source_type: name!(Bad),
+            },
+        );
+
+        // A good mapping
+        let good_selection =
+            JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
+        registry.mappings.insert(
+            name!(Good),
+            MappingDefinition {
+                selection: good_selection.inner,
+                source_type: name!(Good),
+            },
+        );
+
+        // Expanding ...Bad should fail (references ...Unknown)
+        let sel_bad = JSONSelection::parse_with_spec("...Bad", ConnectSpec::V0_5).unwrap();
+        assert!(registry.expand_selection(&sel_bad).is_err());
+
+        // Expanding ...Good should still succeed (expanding set must be clean)
+        let sel_good = JSONSelection::parse_with_spec("...Good", ConnectSpec::V0_5).unwrap();
+        assert!(
+            registry.expand_selection(&sel_good).is_ok(),
+            "Expanding ...Good should succeed after ...Bad failed"
         );
     }
 }

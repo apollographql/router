@@ -501,8 +501,6 @@ fn mapping_directive_spec() -> DirectiveSpecification {
         ],
         true,
         &[DirectiveLocation::Object, DirectiveLocation::Interface],
-        false,
-        None,
         None,
     )
 }
