@@ -282,10 +282,7 @@ commands:
     steps:
       - run:
           name: Check formatting
-          command: |
-            RUSTFMT_CONFIG="imports_granularity=Item,group_imports=StdExternalCrate"
-            cargo fmt --all -- --config "${RUSTFMT_CONFIG}" --check
-            cd xtask && cargo fmt --all -- --config "${RUSTFMT_CONFIG}" --check
+          command: cargo fmt --all -- --config imports_granularity=Item,group_imports=StdExternalCrate --check
 
   xtask_lint:
     steps:
