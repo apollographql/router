@@ -1347,7 +1347,7 @@ mod test {
         });
 
         let request = SupergraphRequest::fake_builder()
-            .header("authorization", "Bearer secret-token")
+            .header("authorization", "Bearer secret-token") // gitleaks:allow
             .context(context)
             .build()
             .unwrap();
@@ -1423,7 +1423,7 @@ mod test {
         });
 
         let request = SupergraphRequest::fake_builder()
-            .header("authorization", "Bearer secret-token")
+            .header("authorization", "Bearer secret-token") // gitleaks:allow
             .context(context)
             .build()
             .unwrap();
@@ -1432,7 +1432,7 @@ mod test {
         let result = selector.on_request(&request).unwrap();
         assert_eq!(
             result.as_str(),
-            "Bearer secret-token",
+            "Bearer secret-token", // gitleaks:allow
             "redact: allow should override global masking rules"
         );
     }
@@ -1488,7 +1488,7 @@ mod test {
         });
 
         let response = SupergraphResponse::fake_builder()
-            .header("set-cookie", "session=secret-session-id")
+            .header("set-cookie", "session=secret-session-id") // gitleaks:allow
             .context(context)
             .build()
             .unwrap();
@@ -1526,7 +1526,7 @@ mod test {
         });
 
         let response = SupergraphResponse::fake_builder()
-            .header("set-cookie", "session=secret-session-id")
+            .header("set-cookie", "session=secret-session-id") // gitleaks:allow
             .context(context)
             .build()
             .unwrap();
@@ -1535,7 +1535,7 @@ mod test {
         let result = selector.on_response(&response).unwrap();
         assert_eq!(
             result.as_str(),
-            "session=secret-session-id",
+            "session=secret-session-id", // gitleaks:allow
             "redact: allow should override masking for response headers"
         );
     }

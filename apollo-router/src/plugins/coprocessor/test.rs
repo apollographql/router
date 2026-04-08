@@ -7550,7 +7550,7 @@ mod tests {
                     .unwrap()[0]
                     .as_str()
                     .unwrap(),
-                "Bearer secret-token-12345",
+                "Bearer secret-token-12345", // gitleaks:allow
                 "Authorization header should be sent unmasked to coprocessor"
             );
 
@@ -7936,13 +7936,13 @@ mod tests {
                     .unwrap()[0]
                     .as_str()
                     .unwrap(),
-                "Bearer secret"
+                "Bearer secret" // gitleaks:allow
             );
             assert_eq!(
                 headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
                     .as_str()
                     .unwrap(),
-                "session=secret"
+                "session=secret" // gitleaks:allow
             );
             assert_eq!(
                 headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
@@ -8057,13 +8057,13 @@ mod tests {
                     .unwrap()[0]
                     .as_str()
                     .unwrap(),
-                "internal-secret"
+                "internal-secret" // gitleaks:allow
             );
             assert_eq!(
                 headers_obj.get("x-secret-key").unwrap().as_array().unwrap()[0]
                     .as_str()
                     .unwrap(),
-                "secret-key-value"
+                "secret-key-value" // gitleaks:allow
             );
             // Authorization is not in the custom list, so it's treated as non-sensitive
             assert_eq!(
