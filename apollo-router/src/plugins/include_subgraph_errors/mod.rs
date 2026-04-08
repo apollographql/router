@@ -19,7 +19,6 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
 use crate::services::SupergraphResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::fetch::SubgraphNameExt;

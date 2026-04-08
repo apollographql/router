@@ -18,7 +18,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
 use crate::services::execution;
 use crate::services::supergraph;
 

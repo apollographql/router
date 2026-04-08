@@ -37,6 +37,13 @@ pub(crate) struct RouterAttributes {
     /// All key values from trace baggage.
     pub(crate) baggage: Option<bool>,
 
+    /// Optional client name populated from the request headers.
+    #[serde(rename = "client.name")]
+    pub(crate) client_name: Option<StandardAttribute>,
+    /// Optional client version populated from the request headers.
+    #[serde(rename = "client.version")]
+    pub(crate) client_version: Option<StandardAttribute>,
+
     /// Http attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
     pub(crate) common: HttpCommonAttributes,
@@ -51,6 +58,18 @@ impl DefaultForLevel for RouterAttributes {
         requirement_level: DefaultAttributeRequirementLevel,
         kind: TelemetryDataKind,
     ) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required
+            | DefaultAttributeRequirementLevel::Recommended => {
+                if self.client_name.is_none() {
+                    self.client_name = Some(StandardAttribute::Bool(true));
+                }
+                if self.client_version.is_none() {
+                    self.client_version = Some(StandardAttribute::Bool(true));
+                }
+            }
+            DefaultAttributeRequirementLevel::None => {}
+        }
         self.common.defaults_for_level(requirement_level, kind);
         self.server.defaults_for_level(requirement_level, kind);
     }
@@ -119,6 +138,7 @@ mod test {
     use super::*;
     use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::otel;
+    use crate::plugins::telemetry::otlp::TelemetryDataKind;
     use crate::services::router;
 
     #[test]
@@ -146,6 +166,8 @@ mod test {
                 datadog_trace_id: Some(StandardAttribute::Bool(true)),
                 trace_id: Some(StandardAttribute::Bool(true)),
                 baggage: Some(true),
+                client_name: None,
+                client_version: None,
                 common: Default::default(),
                 server: Default::default(),
             };
@@ -194,6 +216,8 @@ mod test {
                     alias: "my_trace_id".to_string(),
                 }),
                 baggage: Some(false),
+                client_name: None,
+                client_version: None,
                 common: Default::default(),
                 server: Default::default(),
             };
@@ -218,5 +242,72 @@ mod test {
                 Some(&"42".into())
             );
         });
+    }
+
+    #[test]
+    fn test_defaults_for_level_sets_client_name_and_version() {
+        let mut attrs = RouterAttributes::default();
+        assert!(attrs.client_name.is_none());
+        assert!(attrs.client_version.is_none());
+
+        attrs.defaults_for_level(
+            DefaultAttributeRequirementLevel::Required,
+            TelemetryDataKind::Traces,
+        );
+        assert_eq!(
+            attrs.client_name,
+            Some(StandardAttribute::Bool(true)),
+            "client_name should default to true at Required level"
+        );
+        assert_eq!(
+            attrs.client_version,
+            Some(StandardAttribute::Bool(true)),
+            "client_version should default to true at Required level"
+        );
+    }
+
+    #[test]
+    fn test_defaults_for_level_preserves_explicit_config() {
+        let mut attrs = RouterAttributes {
+            client_name: Some(StandardAttribute::Bool(false)),
+            client_version: Some(StandardAttribute::Aliased {
+                alias: "my_version".to_string(),
+            }),
+            ..Default::default()
+        };
+
+        attrs.defaults_for_level(
+            DefaultAttributeRequirementLevel::Required,
+            TelemetryDataKind::Traces,
+        );
+        assert_eq!(
+            attrs.client_name,
+            Some(StandardAttribute::Bool(false)),
+            "explicit false should not be overwritten by defaults"
+        );
+        assert_eq!(
+            attrs.client_version,
+            Some(StandardAttribute::Aliased {
+                alias: "my_version".to_string()
+            }),
+            "explicit alias should not be overwritten by defaults"
+        );
+    }
+
+    #[test]
+    fn test_defaults_for_level_none_does_not_set_client_attrs() {
+        let mut attrs = RouterAttributes::default();
+        attrs.defaults_for_level(
+            DefaultAttributeRequirementLevel::None,
+            TelemetryDataKind::Traces,
+        );
+        assert!(
+            attrs.client_name.is_none(),
+            "client_name should remain None at None level"
+        );
+        assert!(
+            attrs.client_version.is_none(),
+            "client_version should remain None at None level"
+        );
     }
 }

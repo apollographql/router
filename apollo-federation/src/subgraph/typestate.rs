@@ -963,6 +963,8 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     //            that is expanded, but federation operations are not added.
     trace!("expand_links: add_federation_operations");
     schema.add_federation_operations()?;
+
+    schema.add_implicit_root_operations()?;
     Ok(schema)
 }
 
@@ -1102,6 +1104,38 @@ impl FederationSchema {
             ty: Type::NonNullNamed(self.service_type()?.type_name),
             arguments: vec![],
         })
+    }
+
+    // PORT_NOTE: JS incorrectly adds mutation and subscription root operation even if schema
+    //   definition does not specify it. We are keeping this behavior to avoid breaking some
+    //   (invalid) customer schemas.
+    fn add_implicit_root_operations(&mut self) -> Result<(), FederationError> {
+        for (root_kind, default_name) in [
+            (
+                SchemaRootDefinitionKind::Mutation,
+                GRAPHQL_MUTATION_TYPE_NAME,
+            ),
+            (
+                SchemaRootDefinitionKind::Subscription,
+                GRAPHQL_SUBSCRIPTION_TYPE_NAME,
+            ),
+        ] {
+            let root_pos = SchemaRootDefinitionPosition { root_kind };
+            let object_pos = ObjectTypeDefinitionPosition {
+                type_name: default_name,
+            };
+            if root_pos.try_get(self.schema()).is_none()
+                && object_pos.try_get(self.schema()).is_some()
+                && self
+                    .referencers()
+                    .object_types
+                    .get(&object_pos.type_name)
+                    .is_some_and(|r| r.len() == 0)
+            {
+                root_pos.insert(self, object_pos.type_name.into())?;
+            };
+        }
+        Ok(())
     }
 }
 
@@ -1819,5 +1853,147 @@ mod tests {
             errors[0].1,
             "[S] Error: an input object field cannot be named `__typename` as names starting with two underscores are reserved\n   ╭─[ S:4:17 ]\n   │\n 4 │                 __typename: String\n   │                 ─────┬────  \n   │                      ╰────── Pick a different name here\n───╯\n"
         );
+    }
+
+    #[test]
+    fn add_unused_implicit_mutation_type() {
+        let sdl = r#"
+            schema {
+              query: Query
+            }
+
+            type Query {
+              fetch(id: ID!): String
+            }
+
+            type Mutation {
+              mutate(id: ID!): ID
+            }
+        "#;
+        let subgraph = Subgraph::parse("s1", "http://s1/graphql", sdl)
+            .expect("parses schema")
+            .expand_links()
+            .expect("valid schema");
+
+        insta::assert_snapshot!(
+            subgraph.schema_string(), @"
+        directive @key(fields: _FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+        directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
+
+        directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
+
+        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+        directive @extends on OBJECT | INTERFACE
+
+        type Query {
+          fetch(id: ID!): String
+          _service: _Service!
+        }
+
+        type Mutation {
+          mutate(id: ID!): ID
+        }
+
+        scalar _FieldSet
+
+        scalar _Any
+
+        type _Service {
+          sdl: String
+        }
+        ");
+    }
+
+    #[test]
+    fn doesnt_add_used_non_root_mutation_type() {
+        let sdl = r#"
+            schema {
+              query: Query
+            }
+
+            type Query {
+              mutation(id: ID!): Mutation
+            }
+
+            type Mutation {
+              id: ID!
+              name: String
+            }
+        "#;
+        let subgraph = Subgraph::parse("s1", "http://s1/graphql", sdl)
+            .expect("parses schema")
+            .expand_links()
+            .expect("valid schema");
+
+        insta::assert_snapshot!(
+            subgraph.schema_string(), @"
+        schema {
+          query: Query
+        }
+
+        directive @key(fields: _FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+        directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
+
+        directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
+
+        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+        directive @extends on OBJECT | INTERFACE
+
+        type Query {
+          mutation(id: ID!): Mutation
+          _service: _Service!
+        }
+
+        type Mutation {
+          id: ID!
+          name: String
+        }
+
+        scalar _FieldSet
+
+        scalar _Any
+
+        type _Service {
+          sdl: String
+        }
+        ");
+    }
+
+    #[test]
+    fn doesnt_add_non_object_mutation_as_root_operation() {
+        let sdl = r#"
+            schema {
+              query: Query
+            }
+
+            type Query {
+              hello(id: ID!): Mutation
+            }
+
+            scalar Mutation
+        "#;
+        let subgraph = Subgraph::parse("s1", "http://s1/graphql", sdl)
+            .expect("parses schema")
+            .expand_links()
+            .expect("valid schema");
+
+        assert!(subgraph.schema().schema().schema_definition.query.is_some());
+        assert!(
+            subgraph
+                .schema()
+                .schema()
+                .schema_definition
+                .mutation
+                .is_none()
+        );
+        assert!(subgraph.schema().schema().get_scalar("Mutation").is_some());
     }
 }

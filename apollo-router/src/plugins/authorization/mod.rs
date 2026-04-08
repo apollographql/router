@@ -37,7 +37,6 @@ use crate::plugin::PluginInit;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
-use crate::register_plugin;
 use crate::services::execution;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::supergraph;

@@ -166,7 +166,7 @@ impl Merger {
                 if name_in_supergraph.is_none() {
                     name_in_supergraph = Some(&directive.name);
                 } else if name_in_supergraph.is_some_and(|n| *n != directive.name) {
-                    let definition_sources: IndexMap<_, _> = self
+                    let definition_sources = self
                         .subgraphs
                         .iter()
                         .enumerate()
@@ -179,12 +179,13 @@ impl Merger {
                             )
                         })
                         .collect();
-                    self.error_reporter.report_mismatch_error::<_, _>(
+                    self.error_reporter.report_mismatch_error(
                         CompositionError::LinkImportNameMismatch {
                             message: format!("The \"@{}\" directive (from {}) is imported with mismatched name between subgraphs: it is imported as ", directive.name, subgraph_core_directive.url),
                         },
                         &directive,
                         &definition_sources,
+                        &self.subgraphs,
                         |def| Some(format!("\"@{}\"", def.name)),
                         |def, _| Some(format!("\"@{}\"", def.name)),
                     );
