@@ -32,20 +32,16 @@ fn default_sensitive_headers() -> Vec<String> {
         "authorization".to_string(),
         "proxy-authorization".to_string(),
         "proxy-authenticate".to_string(),
-
         // Session management
         "cookie".to_string(),
         "set-cookie".to_string(),
-
         // API keys
         "x-api-key".to_string(),
         "api-key".to_string(),
-
         // Auth tokens
         "x-auth-token".to_string(),
         "x-session-id".to_string(),
         "x-session-token".to_string(),
-
         // CSRF protection
         "x-csrf-token".to_string(),
         "x-xsrf-token".to_string(),
@@ -64,7 +60,11 @@ mod tests {
         assert!(!config.sensitive_headers.is_empty());
 
         // Verify common sensitive headers are included
-        assert!(config.sensitive_headers.contains(&"authorization".to_string()));
+        assert!(
+            config
+                .sensitive_headers
+                .contains(&"authorization".to_string())
+        );
         assert!(config.sensitive_headers.contains(&"cookie".to_string()));
         assert!(config.sensitive_headers.contains(&"x-api-key".to_string()));
     }
@@ -82,8 +82,16 @@ sensitive_headers:
 
         assert!(!config.enabled);
         assert_eq!(config.sensitive_headers.len(), 2);
-        assert!(config.sensitive_headers.contains(&"custom-secret".to_string()));
-        assert!(config.sensitive_headers.contains(&"x-internal-token".to_string()));
+        assert!(
+            config
+                .sensitive_headers
+                .contains(&"custom-secret".to_string())
+        );
+        assert!(
+            config
+                .sensitive_headers
+                .contains(&"x-internal-token".to_string())
+        );
     }
 
     #[test]

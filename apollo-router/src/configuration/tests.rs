@@ -1492,14 +1492,18 @@ fn header_masking_parses_correctly() {
 
     assert!(config.header_masking.enabled);
     assert_eq!(config.header_masking.sensitive_headers.len(), 2);
-    assert!(config
-        .header_masking
-        .sensitive_headers
-        .contains(&"authorization".to_string()));
-    assert!(config
-        .header_masking
-        .sensitive_headers
-        .contains(&"x-custom-secret".to_string()));
+    assert!(
+        config
+            .header_masking
+            .sensitive_headers
+            .contains(&"authorization".to_string())
+    );
+    assert!(
+        config
+            .header_masking
+            .sensitive_headers
+            .contains(&"x-custom-secret".to_string())
+    );
 }
 
 #[test]
@@ -1537,18 +1541,24 @@ fn header_masking_custom_headers_list() {
 
     assert!(config.header_masking.enabled);
     assert_eq!(config.header_masking.sensitive_headers.len(), 3);
-    assert!(config
-        .header_masking
-        .sensitive_headers
-        .contains(&"x-internal-token".to_string()));
-    assert!(config
-        .header_masking
-        .sensitive_headers
-        .contains(&"x-secret-key".to_string()));
-    assert!(config
-        .header_masking
-        .sensitive_headers
-        .contains(&"custom-auth-header".to_string()));
+    assert!(
+        config
+            .header_masking
+            .sensitive_headers
+            .contains(&"x-internal-token".to_string())
+    );
+    assert!(
+        config
+            .header_masking
+            .sensitive_headers
+            .contains(&"x-secret-key".to_string())
+    );
+    assert!(
+        config
+            .header_masking
+            .sensitive_headers
+            .contains(&"custom-auth-header".to_string())
+    );
 }
 
 #[test]
