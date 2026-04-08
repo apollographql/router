@@ -7527,7 +7527,7 @@ mod tests {
 
             // Send a request with sensitive headers
             let request = router::Request::fake_builder()
-                .header("authorization", "Bearer secret-token-12345")
+                .header("authorization", "Bearer secret-token-12345") // gitleaks:allow
                 .header("cookie", "session=my-session-id")
                 .header("user-agent", "test-agent")
                 .build()
@@ -7915,8 +7915,8 @@ mod tests {
             );
 
             let request = router::Request::fake_builder()
-                .header("authorization", "Bearer secret")
-                .header("cookie", "session=secret")
+                .header("authorization", "Bearer secret") // gitleaks:allow
+                .header("cookie", "session=secret") // gitleaks:allow
                 .header("user-agent", "test-agent")
                 .header("x-custom-header", "custom-value")
                 .build()
@@ -8037,8 +8037,8 @@ mod tests {
             );
 
             let request = router::Request::fake_builder()
-                .header("x-internal-token", "internal-secret")
-                .header("x-secret-key", "secret-key-value")
+                .header("x-internal-token", "internal-secret") // gitleaks:allow
+                .header("x-secret-key", "secret-key-value") // gitleaks:allow
                 .header("authorization", "Bearer public-token") // Not in custom list
                 .build()
                 .unwrap();
