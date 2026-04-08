@@ -660,7 +660,7 @@ fn increment_subgraph_rejected_counter(service_name: &str) {
 
 fn increment_subgraph_ended_counter(service_name: &str) {
     u64_counter!(
-        "apollo.router.operations.subscriptions.ended.subgraph",
+        "apollo.router.operations.subscriptions.terminated.subgraph",
         "Number of subscriptions ended by the subgraph closing the WebSocket connection",
         1,
         subgraph.name = service_name.to_string()

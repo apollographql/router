@@ -2422,7 +2422,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.ended.subgraph",
+                "apollo.router.operations.subscriptions.terminated.subgraph",
                 1,
                 "subgraph.name" = "test"
             );

@@ -60,7 +60,7 @@ pub(crate) struct RouterInstrumentsConfig {
         DefaultedStandardInstrument<Extendable<RouterOverheadAttributes, RouterSelector>>,
 
     /// Counter of subscriptions terminated
-    #[serde(rename = "apollo.router.operations.subscriptions.terminated")]
+    #[serde(rename = "apollo.router.operations.subscriptions.terminated.client")]
     pub(crate) subscriptions_terminated:
         DefaultedStandardInstrument<Extendable<SubscriptionsTerminatedAttributes, RouterSelector>>,
 }

@@ -504,7 +504,7 @@ mod tests {
         use opentelemetry::metrics::MeterProvider;
         let counter = crate::metrics::meter_provider()
             .meter("test")
-            .f64_counter("apollo.router.operations.subscriptions.terminated")
+            .f64_counter("apollo.router.operations.subscriptions.terminated.client")
             .with_description("Subscription terminated")
             .build();
         SubscriptionsTerminatedCounter {
@@ -553,7 +553,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "server_close",
                 "subgraph.name" = "test_subgraph",
@@ -603,7 +603,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "server_close",
                 "subgraph.name" = "test_subgraph",
@@ -645,7 +645,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "server_close",
                 "subgraph.name" = "test_subgraph",
@@ -706,7 +706,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "heartbeat_delivery_failed",
                 "subgraph.name" = "",
@@ -758,7 +758,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "client_disconnect",
                 "subgraph.name" = "",
@@ -810,7 +810,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "schema_reload",
                 "subgraph.name" = "",
@@ -863,7 +863,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "config_reload",
                 "subgraph.name" = "",
@@ -1390,7 +1390,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "subgraph_error",
                 "subgraph.name" = "flaky_subgraph",
@@ -1442,7 +1442,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "subgraph_error",
                 "subgraph.name" = "error_subgraph",
@@ -1472,7 +1472,7 @@ mod tests {
             drop(span);
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "server_close",
                 "subgraph.name" = "",
@@ -1508,7 +1508,7 @@ mod tests {
             drop(span);
 
             assert_counter!(
-                "apollo.router.operations.subscriptions.terminated",
+                "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "client_disconnect",
                 "subgraph.name" = "",

@@ -126,7 +126,7 @@ pub(super) const APOLLO_ROUTER_OPERATIONS_FETCH_DURATION: &str =
     "apollo.router.operations.fetch.duration";
 
 pub(super) const APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED: &str =
-    "apollo.router.operations.subscriptions.terminated";
+    "apollo.router.operations.subscriptions.terminated.client";
 
 impl InstrumentsConfig {
     pub(crate) fn validate(&self) -> Result<(), String> {
@@ -1218,7 +1218,7 @@ impl DefaultForLevel for SubscriptionsTerminatedAttributes {
 
 /// Handle stashed in the request context so that
 /// [`Multipart`](crate::protocols::multipart::Multipart) can record the
-/// `apollo.router.operations.subscriptions.terminated` counter at drop time
+/// `apollo.router.operations.subscriptions.terminated.client` counter at drop time
 /// with only the attributes that are enabled in config.
 #[derive(Clone, Debug)]
 pub(crate) struct SubscriptionsTerminatedCounter {

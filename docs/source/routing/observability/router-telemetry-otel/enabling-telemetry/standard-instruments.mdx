@@ -245,7 +245,7 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
 - `apollo.router.operations.subscriptions.rejected` - Number of subscription requests rejected. Attributes:
   - `reason`: The reason the subscription was rejected (`max_opened_subscriptions_limit_reached` or `subgraph`).
   - `subgraph.name`: The name of the subgraph that rejected the connection (empty string if not applicable).
-- `apollo.router.operations.subscriptions.terminated` - Number of subscription client streams that have ended. Incremented once per client connection. When deduplication is enabled, a single subgraph WebSocket closure produces one event per deduplicated client (each with `reason=server_close`). Default attributes:
+- `apollo.router.operations.subscriptions.terminated.client` - Number of subscription client streams that have ended. Incremented once per client connection. When deduplication is enabled, a single subgraph WebSocket closure produces one event per deduplicated client (each with `reason=server_close`). Default attributes:
   - `reason`: The reason the subscription ended (`server_close`, `subgraph_error`, `client_disconnect`, `heartbeat_delivery_failed`, `schema_reload`, or `config_reload`).
   - `subgraph.name`: The name of the subgraph (empty string if not applicable).
 
@@ -259,13 +259,13 @@ telemetry:
   instrumentation:
     instruments:
       router:
-        apollo.router.operations.subscriptions.terminated:
+        apollo.router.operations.subscriptions.terminated.client:
           attributes:
             reason: true
             subgraph.name: true
             client.name: true
 ```
-- `apollo.router.operations.subscriptions.ended.subgraph` - Number of subgraph WebSocket connections closed by the subgraph. Incremented once per subgraph connection closure. Each deduplicated client sharing that connection will also emit a corresponding `terminated` event with `reason=server_close`. Attributes:
+- `apollo.router.operations.subscriptions.terminated.subgraph` - Number of subgraph WebSocket connections closed by the subgraph. Incremented once per subgraph connection closure. Each deduplicated client sharing that connection will also emit a corresponding `terminated` event with `reason=server_close`. Attributes:
   - `subgraph.name`: The name of the subgraph that closed the connection.
 
 ## Batching

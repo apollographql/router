@@ -4746,7 +4746,7 @@ expression: "&schema"
         "$ref": "#/definitions/Instrument"
       },
       "properties": {
-        "apollo.router.operations.subscriptions.terminated": {
+        "apollo.router.operations.subscriptions.terminated.client": {
           "allOf": [
             {
               "$ref": "#/definitions/StandardInstrumentExtendedSubscriptionsTerminatedAttributesWithRouterSelector"
