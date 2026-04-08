@@ -135,7 +135,7 @@ mod tests {
 
         headers.insert(
             HeaderName::from_static("authorization"),
-            HeaderValue::from_static("Bearer secret-token"),
+            HeaderValue::from_static("Bearer secret-token"), // gitleaks:allow
         );
         headers.insert(
             HeaderName::from_static("content-type"),
@@ -193,7 +193,7 @@ mod tests {
 
         headers.insert(
             HeaderName::from_static("authorization"),
-            HeaderValue::from_static("Bearer secret-token"),
+            HeaderValue::from_static("Bearer secret-token"), // gitleaks:allow
         );
         headers.insert(
             HeaderName::from_static("content-type"),
@@ -233,7 +233,7 @@ mod tests {
         // HeaderMap normalizes to lowercase, but test with mixed case in value
         headers.insert(
             HeaderName::from_static("authorization"),
-            HeaderValue::from_static("Bearer SECRET"),
+            HeaderValue::from_static("Bearer SECRET"), // gitleaks:allow
         );
 
         // Even though the header name is lowercase in HeaderMap, our rule should match
