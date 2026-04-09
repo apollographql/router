@@ -1100,6 +1100,12 @@ async fn do_fetch(
                     .map_err(|err| {
                         tracing::error!(fetch_error = ?err);
                         let reason = if err.downcast_ref::<LengthLimitError>().is_some() {
+                            u64_counter!(
+                                "apollo.router.limits.subgraph_response_size.exceeded",
+                                "Number of subgraph responses aborted because they exceeded the configured response size limit",
+                                1,
+                                subgraph.name = service_name.to_string()
+                            );
                             format!("subgraph response body exceeded limit of {limit} bytes")
                         } else {
                             err.to_string()
