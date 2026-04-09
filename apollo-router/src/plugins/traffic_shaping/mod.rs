@@ -803,9 +803,9 @@ mod test {
         builder = builder.with_plugins(plugins);
 
         let builder = builder
-            .with_subgraph_service("accounts", account_service.clone())
-            .with_subgraph_service("reviews", review_service.clone())
-            .with_subgraph_service("products", product_service.clone());
+            .with_subgraph_service("accounts", account_service.boxed_clone())
+            .with_subgraph_service("reviews", review_service.boxed_clone())
+            .with_subgraph_service("products", product_service.boxed_clone());
 
         let supergraph_creator = builder.build().await.expect("should build");
 
