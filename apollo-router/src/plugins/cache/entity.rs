@@ -226,11 +226,13 @@ impl PluginPrivate for EntityCache {
             // create its wrapped client because we want that client to be replaceable and need a
             // standalone data container for certain fields used for its creation (and thus
             // recreation)
+            // WARN: on new(), RedisCacheStorage doesn't have an inner client pool; it must be
+            // created with create_client()
             all = match RedisCacheStorage::new(redis_config, "entity").await {
-                Ok(storage) => {
+                Ok(storage_without_client) => {
                     // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
                     // for wrapped client
-                    match storage.create_client().await {
+                    match storage_without_client.clone().create_client().await {
                         Ok(storage_client) => Some(storage_client),
                         Err(e) => {
                             tracing::error!(
@@ -241,7 +243,13 @@ impl PluginPrivate for EntityCache {
                             if required_to_start {
                                 return Err(e);
                             }
-                            None
+                            // NOTE: returning the RedisCacheStorage with an inner client pool set
+                            // to None will try to recreate that pool on the first attempted
+                            // command to redis; this is good, we want that, even if we weren't
+                            // able to initially set up the pool. The risk, though, is that we spin
+                            // off a bunch of background tasks to try and recreate the client when
+                            // there's some fundamental issue with redis
+                            Some(storage_without_client)
                         }
                     }
                 }
