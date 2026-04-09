@@ -6703,102 +6703,39 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
-        "http1_max_request_buf_size": {
-          "default": null,
-          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kib.",
-          "type": [
-            "string",
-            "null"
-          ]
+        "router": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouterLimitsConfig"
+            }
+          ],
+          "default": {
+            "http1_max_request_buf_size": null,
+            "http1_max_request_headers": null,
+            "http2_max_headers_list_bytes": null,
+            "http_max_request_bytes": 2000000,
+            "introspection_max_depth": true,
+            "max_aliases": null,
+            "max_depth": null,
+            "max_height": null,
+            "max_root_fields": null,
+            "parser_max_recursion": 500,
+            "parser_max_tokens": 15000,
+            "warn_only": false
+          },
+          "description": "Limits that apply to inbound requests to the router."
         },
-        "http1_max_request_headers": {
-          "default": null,
-          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with\n\"431 Request Header Fields Too Large\".",
-          "format": "uint",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "http2_max_headers_list_bytes": {
-          "default": null,
-          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "http_max_request_bytes": {
-          "default": 2000000,
-          "description": "Limit the size of incoming HTTP requests read from the network,\nto protect against running out of memory. Default: 2000000 (2 MB)",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "introspection_max_depth": {
-          "default": true,
-          "description": "Limit the depth of nested list fields in introspection queries\nto protect avoid generating huge responses. Returns a GraphQL\nerror with `{ message: \"Maximum introspection depth exceeded\" }`\nwhen nested fields exceed the limit.\nDefault: true",
-          "type": "boolean"
-        },
-        "max_aliases": {
-          "default": null,
-          "description": "If set, requests with operations with more aliases than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "max_depth": {
-          "default": null,
-          "description": "If set, requests with operations deeper than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛\nincluding fields in fragments and inline fragments. The following\nexample has a depth of 3.\n\n```graphql\nquery getProduct {\n  book { # 1\n    ...bookDetails\n  }\n}\n\nfragment bookDetails on Book {\n  details { # 2\n    ... on ProductDetailsBook {\n      country # 3\n    }\n  }\n}\n```",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "max_height": {
-          "default": null,
-          "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```\n\nThis may change in a future version of Apollo Router to do\n[full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "max_root_fields": {
-          "default": null,
-          "description": "If set, requests with operations with more root fields than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set,\nincluding fragments and inline fragments.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "parser_max_recursion": {
-          "default": 500,
-          "description": "Limit recursion in the GraphQL parser to protect against stack overflow.\ndefault: 500",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "parser_max_tokens": {
-          "default": 15000,
-          "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "warn_only": {
-          "default": false,
-          "description": "If set to true (which is the default is dev mode),\nrequests that exceed a `max_*` limit are *not* rejected.\nInstead they are executed normally, and a warning is logged.",
-          "type": "boolean"
+        "subgraph": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphLimitsConfig"
+            }
+          ],
+          "default": {
+            "all": null,
+            "subgraphs": {}
+          },
+          "description": "Limits that apply to outbound subgraph responses."
         }
       },
       "type": "object"
@@ -8324,6 +8261,110 @@ expression: "&schema"
             },
             "redis": null
           }
+        }
+      },
+      "type": "object"
+    },
+    "RouterLimitsConfig": {
+      "additionalProperties": false,
+      "description": "Limits that apply to inbound requests to the router.",
+      "properties": {
+        "http1_max_request_buf_size": {
+          "default": null,
+          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kib.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http1_max_request_headers": {
+          "default": null,
+          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with\n\"431 Request Header Fields Too Large\".",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "http2_max_headers_list_bytes": {
+          "default": null,
+          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http_max_request_bytes": {
+          "default": 2000000,
+          "description": "Limit the size of incoming HTTP requests read from the network,\nto protect against running out of memory. Default: 2000000 (2 MB)",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "introspection_max_depth": {
+          "default": true,
+          "description": "Limit the depth of nested list fields in introspection queries\nto protect avoid generating huge responses. Returns a GraphQL\nerror with `{ message: \"Maximum introspection depth exceeded\" }`\nwhen nested fields exceed the limit.\nDefault: true",
+          "type": "boolean"
+        },
+        "max_aliases": {
+          "default": null,
+          "description": "If set, requests with operations with more aliases than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_depth": {
+          "default": null,
+          "description": "If set, requests with operations deeper than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛\nincluding fields in fragments and inline fragments. The following\nexample has a depth of 3.\n\n```graphql\nquery getProduct {\n  book { # 1\n    ...bookDetails\n  }\n}\n\nfragment bookDetails on Book {\n  details { # 2\n    ... on ProductDetailsBook {\n      country # 3\n    }\n  }\n}\n```",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_height": {
+          "default": null,
+          "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```\n\nThis may change in a future version of Apollo Router to do\n[full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_root_fields": {
+          "default": null,
+          "description": "If set, requests with operations with more root fields than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set,\nincluding fragments and inline fragments.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "parser_max_recursion": {
+          "default": 500,
+          "description": "Limit recursion in the GraphQL parser to protect against stack overflow.\ndefault: 500",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parser_max_tokens": {
+          "default": 15000,
+          "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "warn_only": {
+          "default": false,
+          "description": "If set to true (which is the default is dev mode),\nrequests that exceed a `max_*` limit are *not* rejected.\nInstead they are executed normally, and a warning is logged.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -9943,6 +9984,50 @@ expression: "&schema"
           "default": "",
           "description": "Shared key needed to request the invalidation endpoint",
           "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphLimits": {
+      "additionalProperties": false,
+      "description": "Per-subgraph response size limits.",
+      "properties": {
+        "http_max_response_bytes": {
+          "default": null,
+          "description": "Limit the size of incoming subgraph response bodies read from the network,\nto protect against running out of memory. Default: no limit.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphLimitsConfig": {
+      "additionalProperties": false,
+      "description": "Limits that apply to outbound subgraph responses.",
+      "properties": {
+        "all": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubgraphLimits"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Limits applied to all subgraph responses, unless overridden per subgraph."
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphLimits"
+          },
+          "default": {},
+          "description": "Per-subgraph limit overrides.",
+          "type": "object"
         }
       },
       "type": "object"

@@ -1,6 +1,7 @@
 mod layer;
 mod limited;
 
+use std::collections::HashMap;
 use std::error::Error;
 
 use async_trait::async_trait;
@@ -20,14 +21,28 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::limits::layer::BodyLimitError;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
+use crate::services::SubgraphRequest;
 use crate::services::router;
 use crate::services::router::BoxService;
+use crate::services::subgraph;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 #[schemars(rename = "LimitsConfig")]
 pub(crate) struct Config {
+    /// Limits that apply to inbound requests to the router.
+    pub(crate) router: RouterLimitsConfig,
+
+    /// Limits that apply to outbound subgraph responses.
+    pub(crate) subgraph: SubgraphLimitsConfig,
+}
+
+/// Limits that apply to inbound requests to the router.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+#[schemars(rename = "RouterLimitsConfig")]
+pub(crate) struct RouterLimitsConfig {
     /// If set, requests with operations deeper than this maximum
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
     /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
@@ -130,7 +145,7 @@ pub(crate) struct Config {
     pub(crate) introspection_max_depth: bool,
 }
 
-impl Default for Config {
+impl Default for RouterLimitsConfig {
     fn default() -> Self {
         Self {
             // These limits are opt-in
@@ -145,7 +160,7 @@ impl Default for Config {
             http2_max_headers_list_bytes: None,
             parser_max_tokens: 15_000,
 
-            // This is `apollo-parser`’s default, which protects against stack overflow
+            // This is `apollo-parser`'s default, which protects against stack overflow
             // but is still very high for "reasonable" queries.
             // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
             parser_max_recursion: 500,
@@ -154,6 +169,49 @@ impl Default for Config {
         }
     }
 }
+
+/// Limits that apply to outbound subgraph responses.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+#[schemars(rename = "SubgraphLimitsConfig")]
+pub(crate) struct SubgraphLimitsConfig {
+    /// Limits applied to all subgraph responses, unless overridden per subgraph.
+    pub(crate) all: Option<SubgraphLimits>,
+
+    /// Per-subgraph limit overrides.
+    pub(crate) subgraphs: HashMap<String, SubgraphLimits>,
+}
+
+impl SubgraphLimitsConfig {
+    pub(crate) fn get_response_limit(&self, subgraph_name: &str) -> Option<usize> {
+        self.subgraphs
+            .get(subgraph_name)
+            .and_then(|s| s.http_max_response_bytes)
+            .or_else(|| self.all.as_ref()?.http_max_response_bytes)
+    }
+}
+
+/// Per-subgraph response size limits.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+#[schemars(rename = "SubgraphLimits")]
+pub(crate) struct SubgraphLimits {
+    /// Limit the size of incoming subgraph response bodies read from the network,
+    /// to protect against running out of memory. Default: no limit.
+    pub(crate) http_max_response_bytes: Option<usize>,
+}
+
+impl Default for SubgraphLimits {
+    fn default() -> Self {
+        Self {
+            http_max_response_bytes: None,
+        }
+    }
+}
+
+/// Extension type placed on the request context to signal the subgraph response size limit.
+#[derive(Clone, Copy)]
+pub(crate) struct SubgraphResponseSizeLimit(pub usize);
 
 struct LimitsPlugin {
     config: Config,
@@ -182,12 +240,28 @@ impl Plugin for LimitsPlugin {
             .map_request(Into::into)
             .map_response(Into::into)
             .layer(RequestBodyLimitLayer::new(
-                self.config.http_max_request_bytes,
+                self.config.router.http_max_request_bytes,
             ))
             .map_request(Into::into)
             .map_response(Into::into)
             .service(service)
             .boxed()
+    }
+
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+        let limit = self.config.subgraph.get_response_limit(name);
+        match limit {
+            None => service,
+            Some(limit) => ServiceBuilder::new()
+                .map_request(move |req: SubgraphRequest| {
+                    req.context
+                        .extensions()
+                        .with_lock(|e| e.insert(SubgraphResponseSizeLimit(limit)));
+                    req
+                })
+                .service(service)
+                .boxed(),
+        }
     }
 }
 

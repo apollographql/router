@@ -59,6 +59,7 @@ use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::file_uploads;
+use crate::plugins::limits::SubgraphResponseSizeLimit;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::config_new::events::log_event;
@@ -1084,19 +1085,40 @@ async fn do_fetch(
 
     let content_type = get_graphql_content_type(service_name, &parts);
 
+    let response_size_limit = context
+        .extensions()
+        .with_lock(|e| e.get::<SubgraphResponseSizeLimit>().copied());
+
     let body = if content_type.is_ok() {
-        let body = router::body::into_bytes(body)
-            .instrument(tracing::debug_span!("aggregate_response_data"))
-            .await
-            .map_err(|err| {
-                tracing::error!(fetch_error = ?err);
-                FetchError::SubrequestHttpError {
-                    status_code: Some(parts.status.as_u16()),
-                    service: service_name.to_string(),
-                    reason: err.to_string(),
-                }
-            });
-        Some(body)
+        let body_result = match response_size_limit {
+            Some(SubgraphResponseSizeLimit(limit)) => {
+                router::body::into_bytes_limited(body, limit)
+                    .instrument(tracing::debug_span!("aggregate_response_data"))
+                    .await
+                    .map_err(|err| {
+                        tracing::error!(fetch_error = ?err);
+                        FetchError::SubrequestHttpError {
+                            status_code: Some(parts.status.as_u16()),
+                            service: service_name.to_string(),
+                            reason: err.to_string(),
+                        }
+                    })
+            }
+            None => {
+                router::body::into_bytes(body)
+                    .instrument(tracing::debug_span!("aggregate_response_data"))
+                    .await
+                    .map_err(|err| {
+                        tracing::error!(fetch_error = ?err);
+                        FetchError::SubrequestHttpError {
+                            status_code: Some(parts.status.as_u16()),
+                            service: service_name.to_string(),
+                            reason: err.to_string(),
+                        }
+                    })
+            }
+        };
+        Some(body_result)
     } else {
         None
     };

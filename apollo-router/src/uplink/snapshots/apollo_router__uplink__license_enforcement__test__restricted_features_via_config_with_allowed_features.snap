@@ -19,13 +19,13 @@ Configuration yaml:
   .plugins.['experimental.restricted'].enabled
 
 * Operation depth limiting
-  .limits.max_depth
+  .limits.router.max_depth
 
 * Operation height limiting
-  .limits.max_height
+  .limits.router.max_height
 
 * Operation root fields limiting
-  .limits.max_root_fields
+  .limits.router.max_root_fields
 
 * Operation aliases limiting
-  .limits.max_aliases
+  .limits.router.max_aliases

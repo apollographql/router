@@ -4,5 +4,6 @@ expression: new_config
 ---
 ---
 limits:
-  parser_max_recursion: 100
+  router:
+    parser_max_recursion: 100
 

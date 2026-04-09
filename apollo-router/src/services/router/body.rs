@@ -6,9 +6,12 @@ use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::Empty;
 use http_body_util::Full;
+use http_body_util::LengthLimitError;
+use http_body_util::Limited;
 use http_body_util::StreamBody;
 use http_body_util::combinators::UnsyncBoxBody;
 use hyper::body::Body as HttpBody;
+use tower::BoxError;
 
 pub type RouterBody = UnsyncBoxBody<Bytes, AxumError>;
 
@@ -43,6 +46,26 @@ where
     RouterBody::new(StreamBody::new(
         data_stream.map(|s| s.map(Frame::data).map_err(AxumError::new)),
     ))
+}
+
+/// Like `into_bytes`, but rejects the body if it exceeds `limit` bytes.
+/// Checks size per-frame as data arrives — does not buffer the full body before checking.
+pub(crate) async fn into_bytes_limited<B>(body: B, limit: usize) -> Result<Bytes, BoxError>
+where
+    B: HttpBody,
+    B::Error: Into<BoxError>,
+{
+    Limited::new(body, limit)
+        .collect()
+        .await
+        .map(|collected| collected.to_bytes())
+        .map_err(|e| {
+            if e.downcast_ref::<LengthLimitError>().is_some() {
+                format!("subgraph response body exceeded limit of {limit} bytes").into()
+            } else {
+                e
+            }
+        })
 }
 
 /// Get a body's contents as a utf-8 string for use in test assertions, or return an error.

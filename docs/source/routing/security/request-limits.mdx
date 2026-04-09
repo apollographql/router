@@ -13,20 +13,21 @@ For enhanced security, the GraphOS Router can reject requests that violate any o
 
 ```yaml title="router.yaml"
 limits:
-  # Network-based limits
-  http_max_request_bytes: 2000000 # Default value: 2 MB
-  http1_max_request_headers: 200 # Default value: 100
-  http1_max_request_buf_size: 800kb # Default value: 400kib
+  router:
+    # Network-based limits
+    http_max_request_bytes: 2000000 # Default value: 2 MB
+    http1_max_request_headers: 200 # Default value: 100
+    http1_max_request_buf_size: 800kb # Default value: 400kib
 
-  # Parser-based limits
-  parser_max_tokens: 15000 # Default value
-  parser_max_recursion: 500 # Default value
+    # Parser-based limits
+    parser_max_tokens: 15000 # Default value
+    parser_max_recursion: 500 # Default value
 
-  # Operation-based limits (License only)
-  max_depth: 100
-  max_height: 200
-  max_aliases: 30
-  max_root_fields: 20
+    # Operation-based limits (License only)
+    max_depth: 100
+    max_height: 200
+    max_aliases: 30
+    max_root_fields: 20
 ```
 
 ## Operation-based limits
@@ -48,13 +49,14 @@ You define operation limits in your router's [YAML config file](/graphos/referen
 
 ```yaml title="router.yaml"
 limits:
-  max_depth: 100
-  max_height: 200
-  max_aliases: 30
-  max_root_fields: 20
+  router:
+    max_depth: 100
+    max_height: 200
+    max_aliases: 30
+    max_root_fields: 20
 
-  # Uncomment to enable warn_only mode
-  # warn_only: true
+    # Uncomment to enable warn_only mode
+    # warn_only: true
 ```
 
 Each limit takes an integer value. You can define any combination of [supported limits](#supported-limits).
@@ -153,7 +155,8 @@ You can enable or disable `warn_only` mode in your router's [YAML config file](/
 
 ```yaml title="router.yaml"
 limits:
-  warn_only: true # warn_only mode always enabled
+  router:
+    warn_only: true # warn_only mode always enabled
 ```
 
 ### Response format for exceeded limits

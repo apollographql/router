@@ -3,6 +3,7 @@ health_check:
 homepage:
   enabled: false
 limits:
-  parser_max_recursion: 1000
+  router:
+    parser_max_recursion: 1000
 connectors:
   preview_connect_v0_4: true
