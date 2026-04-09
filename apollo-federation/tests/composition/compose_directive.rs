@@ -426,6 +426,7 @@ mod inconsistent_feature_versions {
         );
 
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
+        println!("{:?}", result.hints());
         assert_eq!(result.hints().len(), 0);
 
         assert!(result.schema().schema().to_string().contains(expected_link));
@@ -730,7 +731,7 @@ mod inconsistent_imports {
         );
         let subgraph_b = generate_subgraph(
             "subgraphB",
-            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo"])"#,
+            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo", "@bar"])"#,
             r#"@composeDirective(name: "@foo")"#,
             r#"
             directive @foo(name: String!) on FIELD_DEFINITION
