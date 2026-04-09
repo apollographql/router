@@ -431,12 +431,18 @@ impl PluginPrivate for TrafficShaping {
             ServiceBuilder::new()
                 .map_future_with_request_data(
                     |req: &subgraph::Request| (req.context.clone(), req.subgraph_name.clone()),
-                    move |(ctx, subgraph_name), future| {
+                    move |(ctx, subgraph_name): (crate::Context, String), future| {
                         async {
                             let response: Result<SubgraphResponse, BoxError> = future.await;
                             match response {
                                 Err(err) if err.is::<Elapsed>() => {
-                                    // TODO add metrics
+                                    u64_counter_with_unit!(
+                                        "apollo.router.operations.traffic_shaping.timeout",
+                                        "Requests timed out by traffic_shaping timeout layer",
+                                        "{request}",
+                                        1,
+                                        subgraph.service.name = subgraph_name.to_string()
+                                    );
                                     Ok(SubgraphResponse::error_builder()
                                         .status_code(StatusCode::GATEWAY_TIMEOUT)
                                         .subgraph_name(subgraph_name)
@@ -445,7 +451,13 @@ impl PluginPrivate for TrafficShaping {
                                         .build())
                                 }
                                 Err(err) if err.is::<Overloaded>() => {
-                                    // TODO add metrics
+                                    u64_counter_with_unit!(
+                                        "apollo.router.operations.traffic_shaping.load_shed",
+                                        "Requests shed by traffic_shaping load_shed due to buffer saturation",
+                                        "{request}",
+                                        1,
+                                        subgraph.service.name = subgraph_name.to_string()
+                                    );
                                     Ok(SubgraphResponse::error_builder()
                                         .status_code(StatusCode::SERVICE_UNAVAILABLE)
                                         .subgraph_name(subgraph_name)
@@ -661,6 +673,7 @@ mod test {
     use crate::Configuration;
     use crate::Context;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockRouterService;
@@ -1155,6 +1168,91 @@ mod test {
                 .errors
                 .is_empty()
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_emits_load_shed_metric_for_subgraph_requests() {
+        async {
+            let config = serde_yaml::from_str::<serde_json::Value>(
+                r#"
+            subgraphs:
+                test:
+                    global_rate_limit:
+                        capacity: 1
+                        interval: 100ms
+                    timeout: 500ms
+            "#,
+            )
+            .unwrap();
+
+            let plugin = get_traffic_shaping_plugin(&config).await;
+            let test_service = MockSubgraph::new(hashmap! {
+                graphql::Request::default() => graphql::Response::default()
+            });
+            let mut svc = plugin.subgraph_service("test", test_service.boxed());
+
+            // First request: succeeds, fills the rate limit bucket
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(SubgraphRequest::fake_builder().subgraph_name("test".to_string()).build())
+                .await
+                .unwrap();
+
+            // Second request: shed by the rate limiter → emits the counter
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(SubgraphRequest::fake_builder().subgraph_name("test".to_string()).build())
+                .await
+                .unwrap();
+
+            assert_counter!(
+                "apollo.router.operations.traffic_shaping.load_shed",
+                1,
+                "subgraph.service.name" = "test"
+            );
+        }
+        .with_metrics()
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_emits_timeout_metric_for_subgraph_requests() {
+        async {
+            let config = serde_yaml::from_str::<serde_json::Value>(
+                r#"
+            subgraphs:
+                test:
+                    timeout: 1ns
+            "#,
+            )
+            .unwrap();
+
+            let plugin = get_traffic_shaping_plugin(&config).await;
+            let slow_service = ServiceBuilder::new()
+                .service_fn(|_req: SubgraphRequest| async {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    Ok::<SubgraphResponse, BoxError>(SubgraphResponse::fake_builder().build())
+                })
+                .boxed();
+            let mut svc = plugin.subgraph_service("test", slow_service);
+
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(SubgraphRequest::fake_builder().subgraph_name("test".to_string()).build())
+                .await
+                .unwrap();
+
+            assert_counter!(
+                "apollo.router.operations.traffic_shaping.timeout",
+                1,
+                "subgraph.service.name" = "test"
+            );
+        }
+        .with_metrics()
+        .await
     }
 
     #[tokio::test(flavor = "multi_thread")]
