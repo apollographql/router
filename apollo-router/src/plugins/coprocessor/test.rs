@@ -4577,11 +4577,11 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    fn mock_with_callback<F>(
-        callback: F,
-    ) -> MockInternalHttpClientService
+    fn mock_with_callback<F>(callback: F) -> MockInternalHttpClientService
     where
-        F: Fn(http::Request<RouterBody>) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
+        F: Fn(
+                http::Request<RouterBody>,
+            ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
             + Send
             + Sync
             + 'static,
