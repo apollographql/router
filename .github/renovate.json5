@@ -49,10 +49,7 @@
     // a suite of related packages all released at once.
     {
       matchCurrentVersion: '>= 1.0.0',
-      matchManagers: [
-        'cargo',
-        'npm',
-      ],
+      matchManagers: ['cargo', 'npm'],
       matchUpdateTypes: [
         'minor',
         'patch',
@@ -61,6 +58,15 @@
       ],
       groupName: 'all non-major packages >= 1.0',
       groupSlug: 'all-non-major-gte-1.0',
+      automerge: true,
+      minimumReleaseAge: '5 days',
+    },
+
+    // Auto-merge patch updates pre-1.0. Not grouped because they are more likely to require manual intervention.
+    {
+      matchCurrentVersion: '< 1.0.0',
+      matchManagers: ['cargo', 'npm'],
+      matchUpdateTypes: ['patch'],
       automerge: true,
       minimumReleaseAge: '5 days',
     },
