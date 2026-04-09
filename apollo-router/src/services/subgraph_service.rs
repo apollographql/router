@@ -422,7 +422,8 @@ pub(crate) async fn process_batch(
         "http.url" = %schema_uri,
         "net.transport" = "ip_tcp",
         "apollo.subgraph.name" = %&service,
-        "graphql.operation.name" = "batch"
+        "graphql.operation.name" = "batch",
+        "apollo.subgraph.response.aborted" = tracing::field::Empty,
     );
 
     // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
@@ -853,6 +854,7 @@ pub(crate) async fn call_single_http(
         "net.transport" = "ip_tcp",
         "apollo.subgraph.name" = %service_name,
         "graphql.operation.name" = %operation_name,
+        "apollo.subgraph.response.aborted" = tracing::field::Empty,
     );
 
     // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
@@ -1106,6 +1108,8 @@ async fn do_fetch(
                                 1,
                                 subgraph.name = service_name.to_string()
                             );
+                            tracing::Span::current()
+                                .record("apollo.subgraph.response.aborted", "response_size_limit");
                             format!("subgraph response body exceeded limit of {limit} bytes")
                         } else {
                             err.to_string()
