@@ -15,7 +15,6 @@ use super::FetchRequest;
 use super::SubgraphRequest;
 use super::connector_service::ConnectorServiceFactory;
 use super::fetch::AddSubgraphNameExt;
-use super::fetch::BoxCloneService;
 use super::new_service::ServiceFactory;
 use crate::configuration::HoistOrphanErrors;
 use crate::configuration::subgraph::SubgraphConfiguration;
@@ -43,6 +42,26 @@ pub(crate) struct FetchService {
     pub(crate) _subscription_config: Option<SubscriptionConfig>, // TODO: add subscription support to FetchService
     pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
     pub(crate) hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
+}
+
+impl FetchService {
+    pub(crate) fn new(
+        schema: Arc<Schema>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
+        subgraph_service_factory: Arc<SubgraphServiceFactory>,
+        subscription_config: Option<SubscriptionConfig>,
+        connector_service_factory: Arc<ConnectorServiceFactory>,
+        hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
+    ) -> Self {
+        Self {
+            subgraph_service_factory,
+            schema,
+            subgraph_schemas,
+            _subscription_config: subscription_config,
+            connector_service_factory,
+            hoist_orphan_errors,
+        }
+    }
 }
 
 impl tower::Service<Request> for FetchService {
@@ -278,51 +297,5 @@ impl FetchService {
                 )
                 .await)
         })
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct FetchServiceFactory {
-    pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
-    pub(crate) subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
-    pub(crate) hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
-}
-
-impl FetchServiceFactory {
-    pub(crate) fn new(
-        schema: Arc<Schema>,
-        subgraph_schemas: Arc<SubgraphSchemas>,
-        subgraph_service_factory: Arc<SubgraphServiceFactory>,
-        subscription_config: Option<SubscriptionConfig>,
-        connector_service_factory: Arc<ConnectorServiceFactory>,
-        hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
-    ) -> Self {
-        Self {
-            subgraph_service_factory,
-            subgraph_schemas,
-            schema,
-            subscription_config,
-            connector_service_factory,
-            hoist_orphan_errors,
-        }
-    }
-}
-
-impl ServiceFactory<Request> for FetchServiceFactory {
-    type Service = BoxCloneService;
-
-    fn create(&self) -> Self::Service {
-        FetchService {
-            subgraph_service_factory: self.subgraph_service_factory.clone(),
-            schema: self.schema.clone(),
-            subgraph_schemas: self.subgraph_schemas.clone(),
-            _subscription_config: self.subscription_config.clone(),
-            connector_service_factory: self.connector_service_factory.clone(),
-            hoist_orphan_errors: self.hoist_orphan_errors.clone(),
-        }
-        .boxed_clone()
     }
 }

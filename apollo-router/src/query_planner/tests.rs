@@ -36,7 +36,7 @@ use crate::query_planner::fetch::FetchNode;
 use crate::services::SubgraphResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
-use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::fetch_service::FetchService;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Query;
@@ -119,14 +119,14 @@ async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed(
         "product".into(),
         mock_products_service.boxed_clone(),
     )]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let result = query_plan
         .execute(
@@ -188,14 +188,14 @@ async fn fetch_includes_operation_name() {
         "product".into(),
         mock_products_service.boxed_clone(),
     )]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let _response = query_plan
         .execute(
@@ -254,14 +254,14 @@ async fn fetch_makes_post_requests() {
         "product".into(),
         mock_products_service.boxed_clone(),
     )]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let _response = query_plan
         .execute(
@@ -411,14 +411,14 @@ async fn defer() {
         ("X".into(), mock_x_service.boxed_clone()),
         ("Y".into(), mock_y_service.boxed_clone()),
     ]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let response = query_plan
         .execute(
@@ -512,14 +512,14 @@ async fn defer_if_condition() {
     let mut receiver_stream = ReceiverStream::new(receiver);
 
     let ssf = subgraph_service_factory(vec![("accounts".into(), mocked_accounts.boxed_clone())]);
-    let service_factory = Arc::new(FetchServiceFactory::new(
+    let service_factory = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let defer_primary_response = query_plan
         .execute(
@@ -673,14 +673,14 @@ async fn dependent_mutations() {
         ("A".into(), mock_a_service.boxed_clone()),
         ("B".into(), mock_b_service.boxed_clone()),
     ]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
     let _response = query_plan
