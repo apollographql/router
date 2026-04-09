@@ -226,32 +226,21 @@ impl PluginPrivate for EntityCache {
             // create its wrapped client because we want that client to be replaceable and need a
             // standalone data container for certain fields used for its creation (and thus
             // recreation)
-            // WARN: on new(), RedisCacheStorage doesn't have an inner client pool; it must be
-            // created with create_client()
             all = match RedisCacheStorage::new(redis_config, "entity").await {
-                Ok(storage_without_client) => {
-                    // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
-                    // for wrapped client
-                    match storage_without_client.clone().create_client().await {
-                        Ok(storage_client) => Some(storage_client),
-                        Err(e) => {
-                            tracing::error!(
-                                cache = "entity",
-                                e,
-                                "could not open connection to Redis for caching",
-                            );
-                            if required_to_start {
-                                return Err(e);
-                            }
-                            // NOTE: returning the RedisCacheStorage with an inner client pool set
-                            // to None will try to recreate that pool on the first attempted
-                            // command to redis; this is good, we want that, even if we weren't
-                            // able to initially set up the pool. The risk, though, is that we spin
-                            // off a bunch of background tasks to try and recreate the client when
-                            // there's some fundamental issue with redis
-                            Some(storage_without_client)
+                Ok(storage) => {
+                    // WARN: on new(), RedisCacheStorage doesn't have an inner client pool; it must be
+                    // created with initialize_client()
+                    if let Err(e) = storage.clone().initialize_client().await {
+                        tracing::error!(
+                            cache = "entity",
+                            e,
+                            "could not open connection to Redis for caching",
+                        );
+                        if required_to_start {
+                            return Err(e);
                         }
                     }
+                    Some(storage)
                 }
                 Err(e) => {
                     tracing::error!(
@@ -262,6 +251,8 @@ impl PluginPrivate for EntityCache {
                     if required_to_start {
                         return Err(e);
                     }
+                    // WARN: this is a terminal error; without a RedisCacheStorage, we won't be
+                    // able to connect or reconnect to redis
                     None
                 }
             };
@@ -282,20 +273,7 @@ impl PluginPrivate for EntityCache {
                 let storage = match RedisCacheStorage::new(redis_config, "entity").await {
                     // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
                     // for wrapped client
-                    Ok(storage) => match storage.create_client().await {
-                        Ok(storage_client) => Some(storage_client),
-                        Err(e) => {
-                            tracing::error!(
-                                cache = "entity",
-                                e,
-                                "could not open connection to Redis for caching",
-                            );
-                            if required_to_start {
-                                return Err(e);
-                            }
-                            None
-                        }
-                    },
+                    Ok(storage) => Some(storage),
                     Err(e) => {
                         tracing::error!(
                             cache = "entity",
@@ -308,7 +286,20 @@ impl PluginPrivate for EntityCache {
                         None
                     }
                 };
+
                 if let Some(storage) = storage {
+                    // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
+                    // for wrapped client
+                    if let Err(e) = storage.clone().initialize_client().await {
+                        tracing::error!(
+                            cache = "entity",
+                            e,
+                            "could not open connection to Redis for caching",
+                        );
+                        if required_to_start {
+                            return Err(e);
+                        }
+                    }
                     subgraph_storages.insert(subgraph.clone(), storage);
                 }
             }

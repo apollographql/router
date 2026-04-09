@@ -285,7 +285,7 @@ where
 }
 
 impl RedisCacheStorage {
-    /// Create a new RedisCacheStorage without an inner client. To create an inner client, you must call `create_client`
+    /// Create a new RedisCacheStorage without an inner client. To create an inner client, you must call `initialize_client`
     pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)
             .inspect_err(|err| record_redis_error(err, caller, "startup"))?;
@@ -386,16 +386,16 @@ impl RedisCacheStorage {
             pool_recreation_lock: Arc::new(Mutex::new(())),
         };
 
-        storage.create_client().await
+        let _ = storage.initialize_client().await?;
+        Ok(storage)
     }
 
-    /// Creates an inner client alongside some metadata (namespace, ttl, whether it's a clustered
-    /// client, ttl reset) to create a fully fledged RedisCacheStorage
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn create_client(self) -> Result<Self, BoxError> {
+    /// Initializes an inner client pool
+    pub(crate) async fn initialize_client(&self) -> Result<(), BoxError> {
         let inner = self.create_client_pool().await?;
+        // NOTE: this is the real behavior of the fn, hiding that we're setting the new pool to inner
         *self.inner.write() = inner;
-        Ok(self)
+        Ok(())
     }
 
     /// Creates the inner redis client for RedisCacheStorage
@@ -1247,10 +1247,9 @@ mod test {
         }
 
         async fn create_and_connect(clustered: bool) -> Result<RedisCacheStorage, BoxError> {
-            RedisCacheStorage::new(redis_config(clustered), "test")
-                .await?
-                .create_client()
-                .await
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.initialize_client().await?;
+            Ok(storage)
         }
 
         async fn wait_for_recreation(storage: &RedisCacheStorage) {
@@ -1265,14 +1264,14 @@ mod test {
 
         #[tokio::test]
         #[rstest::rstest]
-        async fn new_starts_empty_and_create_client_populates(
+        async fn new_starts_empty_and_initialize_client_populates(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
             let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
             assert!(storage.inner.read().is_none());
 
-            let storage = storage.create_client().await?;
+            storage.initialize_client().await?;
             assert!(storage.inner.read().is_some());
             Ok(())
         }
@@ -1396,10 +1395,10 @@ mod test {
             Ok(())
         }
 
-        /// activate() after initial create_client() populates the metrics abort handle
+        /// activate() after initial initialize_client() populates the metrics abort handle
         #[tokio::test]
         #[rstest::rstest]
-        async fn activate_after_create_client_starts_metrics(
+        async fn activate_after_initialize_client_starts_metrics(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
@@ -1598,10 +1597,9 @@ mod test {
         async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
             let clustered = true;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test_redis_storage")
-                .await?
-                .create_client()
-                .await?;
+            let storage =
+                RedisCacheStorage::new(redis_config(clustered), "test_redis_storage").await?;
+            storage.initialize_client().await?;
 
             // insert values which reflect different cluster slots
             let mut data = HashMap::default();
@@ -1646,11 +1644,11 @@ mod test {
             Ok(())
         }
 
-        /// Calling create_client() on an already-connected storage replaces the pool. The old
+        /// Calling initialize_client() on an already-connected storage replaces the pool. The old
         /// pool's watcher must not clear the new pool from `inner`.
         #[tokio::test]
         #[rstest::rstest]
-        async fn create_client_replaces_existing_inner(
+        async fn initialize_client_replaces_existing_inner(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
@@ -1667,7 +1665,7 @@ mod test {
             assert!(!old_heartbeat.is_finished());
             assert!(!old_watcher.is_finished());
 
-            let storage = storage.create_client().await?;
+            storage.initialize_client().await?;
             tokio::task::yield_now().await;
 
             assert!(old_heartbeat.is_finished());
@@ -1751,9 +1749,8 @@ mod test {
             let _guard = lock_for_static().lock().await;
             let storage =
                 RedisCacheStorage::new(redis_config(clustered), "test_get_multiple_is_ordered")
-                    .await?
-                    .create_client()
                     .await?;
+            storage.initialize_client().await?;
 
             let data = [("a", "1"), ("b", "2"), ("c", "3")]
                 .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));

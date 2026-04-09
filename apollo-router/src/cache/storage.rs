@@ -73,27 +73,8 @@ where
     ) -> Result<Self, BoxError> {
         let maybe_redis_cache_storage = if let Some(config) = config {
             let required_to_start = config.required_to_start;
-            // NOTE: this is a bit of a dance, but we have to create a RedisCacheStorage before we can
-            // create its wrapped client because we want that client to be replaceable and need a
-            // standalone data container for certain fields used for its creation (and thus
-            // recreation)
-            match RedisCacheStorage::new(config, caller).await {
-                // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
-                // for wrapped client
-                Ok(storage) => match storage.create_client().await {
-                    Ok(storage_client) => Some(storage_client),
-                    Err(e) => {
-                        tracing::error!(
-                            cache = caller,
-                            e,
-                            "could not open connection to Redis for caching",
-                        );
-                        if required_to_start {
-                            return Err(e);
-                        }
-                        None
-                    }
-                },
+            let storage = match RedisCacheStorage::new(config, caller).await {
+                Ok(storage) => Some(storage),
                 Err(e) => {
                     tracing::error!(
                         cache = caller,
@@ -103,9 +84,30 @@ where
                     if required_to_start {
                         return Err(e);
                     }
+                    // WARN: this is a terminal failure; we couldn't, for whatever reason noted in
+                    // the error log, connect to redis--maybe it doesn't exist, maybe it's
+                    // unreachable, who knows; but, this will prevent future commands from reaching
+                    // redis
                     None
                 }
+            };
+
+            // NOTE: this populates the inner client pool, but failure doesn't represent a terminal
+            // state unless the router is configred to require connections to start
+            if let Some(storage) = storage.clone() {
+                if let Err(e) = storage.initialize_client().await {
+                    tracing::error!(
+                        cache = caller,
+                        e,
+                        "could not open connection to Redis for caching",
+                    );
+                    if required_to_start {
+                        return Err(e);
+                    }
+                }
             }
+
+            storage
         } else {
             None
         };
