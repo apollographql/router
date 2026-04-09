@@ -4216,6 +4216,462 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Errors should be modified by coprocessor
+        assert_eq!(response.response.body().errors[0].message, "modified error");
+        // Original data should be preserved since it wasn't sent to coprocessor
+        assert_eq!(
+            json!({ "test": 1234_u32 }),
+            *response.response.body().data.as_ref().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_data_and_extensions() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: true,
+                    errors: false,
+                    extensions: true,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                use crate::graphql::Error;
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .error(
+                        Error::builder()
+                            .message("test error")
+                            .extension_code("TEST_ERROR")
+                            .build(),
+                    )
+                    .extensions(Object::from_iter(vec![(
+                        "ext_key".into(),
+                        json!("ext_value"),
+                    )]))
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify data and extensions are sent, but not errors
+                assert!(body.get("body").is_some());
+                let response_body = body.get("body").unwrap();
+                assert!(response_body.get("data").is_some());
+                assert!(response_body.get("extensions").is_some());
+                assert!(response_body.get("errors").is_none());
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "body": {
+                                "data": { "test": 5678 },
+                                "extensions": { "ext_key": "modified_value" }
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Data and extensions should be modified by coprocessor
+        assert_eq!(
+            json!({ "test": 5678_u32 }),
+            *response.response.body().data.as_ref().unwrap()
+        );
+        assert_eq!(
+            json!("modified_value"),
+            *response.response.body().extensions.get("ext_key").unwrap()
+        );
+        // Original errors should be preserved since they weren't sent to coprocessor
+        assert_eq!(response.response.body().errors[0].message, "test error");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_nothing() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: false,
+                    errors: false,
+                    extensions: false,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify no body is sent
+                assert!(body.get("body").is_none());
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse"
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Original data should be preserved
+        assert_eq!(
+            json!({ "test": 1234_u32 }),
+            *response.response.body().data.as_ref().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_errors_with_empty_errors() {
+        // Test that when errors are configured, empty errors array is sent to coprocessor
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: false,
+                    errors: true,
+                    extensions: false,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                // Response with data but NO errors
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify errors field is sent even though it's empty
+                assert!(body.get("body").is_some());
+                let response_body = body.get("body").unwrap();
+                assert!(
+                    response_body.get("errors").is_some(),
+                    "errors field should be present"
+                );
+                let errors = response_body.get("errors").unwrap();
+                assert!(errors.is_array(), "errors should be an array");
+                assert_eq!(
+                    errors.as_array().unwrap().len(),
+                    0,
+                    "errors array should be empty"
+                );
+                // data and extensions should not be sent since not configured
+                assert!(response_body.get("data").is_none());
+                assert!(response_body.get("extensions").is_none());
+
+                // Don't modify the response - just return it as-is
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse"
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Original data should be preserved
+        assert_eq!(
+            json!({ "test": 1234_u32 }),
+            *response.response.body().data.as_ref().unwrap()
+        );
+        // Errors should remain empty
+        assert!(response.response.body().errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_extensions_only() {
+        // Test that when only extensions are configured, only extensions are sent to coprocessor
+        // and data/errors are preserved from original response
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: false,
+                    errors: false,
+                    extensions: true,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                // Response with data and extensions
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 5678_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::from_iter(vec![(
+                        "trace_id".into(),
+                        json!("abc123"),
+                    )]))
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify only extensions are sent, not data or errors
+                assert!(body.get("body").is_some());
+                let response_body = body.get("body").unwrap();
+                assert!(
+                    response_body.get("extensions").is_some(),
+                    "extensions should be present"
+                );
+                assert!(
+                    response_body.get("data").is_none(),
+                    "data should not be sent"
+                );
+                assert!(
+                    response_body.get("errors").is_none(),
+                    "errors should not be sent"
+                );
+
+                // Coprocessor modifies extensions only
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "body": {
+                                "extensions": { "trace_id": "abc123", "processor": "modified" }
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            false, // Disable response validation since coprocessor returns only extensions
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Original data should be preserved since it wasn't sent to coprocessor
+        assert_eq!(
+            json!({ "test": 5678_u32 }),
+            *response.response.body().data.as_ref().unwrap()
+        );
+        // Extensions should be modified by coprocessor
+        assert_eq!(
+            response.response.body().extensions.get("trace_id"),
+            Some(&json!("abc123"))
+        );
+        assert_eq!(
+            response.response.body().extensions.get("processor"),
+            Some(&json!("modified"))
+        );
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn mock_with_callback(
+        callback: fn(
+            http::Request<RouterBody>,
+        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
+    ) -> MockInternalHttpClientService {
+        let mut mock_http_client = MockInternalHttpClientService::new();
+        mock_http_client.expect_clone().returning(move || {
+            let mut mock_http_client = MockInternalHttpClientService::new();
+            mock_http_client.expect_clone().returning(move || {
+                let mut mock_http_client = MockInternalHttpClientService::new();
+                mock_http_client.expect_call().returning(
+                    move |req: crate::services::http::HttpRequest| {
+                        let context = req.context.clone();
+                        let fut = callback(req.http_request);
+                        Box::pin(async move {
+                            let response = fut.await?;
+                            Ok(crate::services::http::HttpResponse {
+                                http_response: response,
+                                context,
+                            })
+                        })
+                    },
+                );
+                mock_http_client
+            });
+            mock_http_client
+        });
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_errors_only() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: false,
+                    errors: true,
+                    extensions: false,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                use crate::graphql::Error;
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .error(
+                        Error::builder()
+                            .message("test error")
+                            .extension_code("TEST_ERROR")
+                            .build(),
+                    )
+                    .extensions(Object::from_iter(vec![(
+                        "ext_key".into(),
+                        json!("ext_value"),
+                    )]))
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify only errors are sent, not data or extensions
+                assert!(body.get("body").is_some());
+                let response_body = body.get("body").unwrap();
+                assert!(response_body.get("errors").is_some());
+                assert!(response_body.get("data").is_none());
+                assert!(response_body.get("extensions").is_none());
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "body": {
+                                "errors": [{ "message": "modified error" }]
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
             None,
         );
 
@@ -4313,6 +4769,482 @@ mod tests {
         assert_eq!(
             json!({ "test": 5678_u32 }),
             *response.response.body().data.as_ref().unwrap()
+        );
+        assert_eq!(
+            json!("modified_value"),
+            *response.response.body().extensions.get("ext_key").unwrap()
+        );
+        // Original errors should be preserved since they weren't sent to coprocessor
+        assert_eq!(response.response.body().errors[0].message, "test error");
+    }
+
+    #[test]
+    fn test_was_incoming_payload_valid() {
+        // When body is not sent, always return true
+        assert!(was_incoming_payload_valid(
+            &valid_response(),
+            &BodyConf::All(false)
+        ));
+        assert!(was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::All(false)
+        ));
+
+        // When body is sent, check validity
+        assert!(was_incoming_payload_valid(
+            &valid_response(),
+            &BodyConf::All(true)
+        ));
+        assert!(!was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::All(true)
+        ));
+
+        // With selective body config, should check validity when any field is sent
+        assert!(was_incoming_payload_valid(
+            &valid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            })
+        ));
+        assert!(!was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            })
+        ));
+
+        // When no fields are sent in selective mode, assume valid
+        assert!(was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: false,
+                extensions: false,
+            })
+        ));
+
+        // When only extensions are sent, skip GraphQL spec validation
+        // This is valid even if the response has no data and no errors
+        assert!(was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: false,
+                extensions: true,
+            })
+        ));
+    }
+
+    #[test]
+    fn test_filter_graphql_response_body() {
+        use crate::plugins::coprocessor::BodyFieldsConf;
+        use crate::plugins::coprocessor::filter_graphql_response_body;
+
+        // Test BodyConf::All(false) returns None
+        let response = valid_response();
+        assert!(filter_graphql_response_body(&response, &BodyConf::All(false)).is_none());
+
+        // Test BodyConf::All(true) returns full body
+        let result = filter_graphql_response_body(&response, &BodyConf::All(true));
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_some());
+
+        // Test selective: only errors
+        let response_with_errors = graphql::Response::builder()
+            .data(serde_json_bytes::json!({"test": "data"}))
+            .errors(vec![
+                graphql::Error::builder().message("test error").build(),
+            ])
+            .extensions(serde_json_bytes::Map::from_iter([(
+                "ext_key".into(),
+                serde_json_bytes::json!("ext_value"),
+            )]))
+            .build();
+
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_none(), "data should not be included");
+        assert!(body.get("errors").is_some(), "errors should be included");
+        assert!(
+            body.get("extensions").is_none(),
+            "extensions should not be included"
+        );
+
+        // Test selective: only data
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: true,
+                errors: false,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_some(), "data should be included");
+        assert!(
+            body.get("errors").is_none(),
+            "errors should not be included"
+        );
+
+        // Test selective: all fields
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: true,
+                errors: true,
+                extensions: true,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_some());
+        assert!(body.get("errors").is_some());
+        assert!(body.get("extensions").is_some());
+
+        // Test selective: no fields returns None
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: false,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_filter_graphql_response_body_includes_empty_fields() {
+        use crate::plugins::coprocessor::BodyFieldsConf;
+        use crate::plugins::coprocessor::filter_graphql_response_body;
+
+        // Test that configured fields are always included, even when empty
+        // This ensures coprocessors receive a consistent structure
+
+        // Response with data but no errors or extensions
+        let response_data_only = graphql::Response::builder()
+            .data(serde_json_bytes::json!({"test": "data"}))
+            .build();
+
+        // When errors are configured but not present, should send errors: []
+        let result = filter_graphql_response_body(
+            &response_data_only,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(
+            body.get("errors").is_some(),
+            "errors field should be included even when empty"
+        );
+        assert_eq!(
+            body.get("errors").unwrap().as_array().unwrap().len(),
+            0,
+            "errors should be empty array"
+        );
+        assert!(body.get("data").is_none(), "data should not be included");
+
+        // When extensions are configured but not present, should send extensions: {}
+        let result = filter_graphql_response_body(
+            &response_data_only,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: false,
+                extensions: true,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(
+            body.get("extensions").is_some(),
+            "extensions field should be included even when empty"
+        );
+        assert_eq!(
+            body.get("extensions").unwrap().as_object().unwrap().len(),
+            0,
+            "extensions should be empty object"
+        );
+
+        // When data is configured but is None, should send data: null
+        let response_no_data = graphql::Response::builder()
+            .errors(vec![
+                graphql::Error::builder().message("test error").build(),
+            ])
+            .build();
+
+        let result = filter_graphql_response_body(
+            &response_no_data,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: true,
+                errors: false,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(
+            body.get("data").is_some(),
+            "data field should be included even when null"
+        );
+        assert!(body.get("data").unwrap().is_null(), "data should be null");
+        assert!(
+            body.get("errors").is_none(),
+            "errors should not be included"
+        );
+    }
+
+    #[test]
+    fn test_body_conf_should_send_data_or_errors() {
+        use crate::plugins::coprocessor::BodyFieldsConf;
+
+        // Test BodyConf::All
+        assert!(BodyConf::All(true).should_send_data_or_errors());
+        assert!(!BodyConf::All(false).should_send_data_or_errors());
+
+        // Test BodyConf::Selective - only extensions should return false
+        let extensions_only = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: false,
+            extensions: true,
+        });
+        assert!(!extensions_only.should_send_data_or_errors());
+
+        // Test BodyConf::Selective - errors only should return true
+        let errors_only = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: true,
+            extensions: false,
+        });
+        assert!(errors_only.should_send_data_or_errors());
+
+        // Test BodyConf::Selective - data only should return true
+        let data_only = BodyConf::Selective(BodyFieldsConf {
+            data: true,
+            errors: false,
+            extensions: false,
+        });
+        assert!(data_only.should_send_data_or_errors());
+
+        // Test BodyConf::Selective - data with extensions should return true
+        let data_and_extensions = BodyConf::Selective(BodyFieldsConf {
+            data: true,
+            errors: false,
+            extensions: true,
+        });
+        assert!(data_and_extensions.should_send_data_or_errors());
+    }
+
+    #[test]
+    fn test_conditional_validation_logic() {
+        // Invalid incoming + validation enabled = validation bypassed (succeeds with invalid copro response)
+        assert!(
+            handle_graphql_response(
+                invalid_response(),
+                Some(invalid_copro_body()),
+                true,
+                false,
+                &BodyConf::All(true)
+            )
+            .is_ok()
+        );
+
+        // Valid incoming + validation enabled + invalid copro response = validation applied (fails)
+        assert!(
+            handle_graphql_response(
+                valid_response(),
+                Some(invalid_copro_body()),
+                true,
+                true,
+                &BodyConf::All(true)
+            )
+            .is_err()
+        );
+
+        // Valid incoming + validation enabled + valid copro response = validation applied (succeeds)
+        assert!(
+            handle_graphql_response(
+                valid_response(),
+                Some(valid_copro_body()),
+                true,
+                true,
+                &BodyConf::All(true)
+            )
+            .is_ok()
+        );
+
+        // Validation disabled = always bypassed (succeeds regardless)
+        assert!(
+            handle_graphql_response(
+                valid_response(),
+                Some(invalid_copro_body()),
+                false,
+                true,
+                &BodyConf::All(true)
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_selective_body_field_merging() {
+        use crate::plugins::coprocessor::BodyFieldsConf;
+
+        // Original response with data, errors, and extensions
+        let original = graphql::Response::builder()
+            .data(json!({"original": "data"}))
+            .error(Error::builder().message("original error").build())
+            .extension("original_ext", json!("original_value"))
+            .build();
+
+        // Test 1: Send only data, coprocessor modifies data
+        // Errors and extensions should be preserved from original
+        let selective_data = BodyConf::Selective(BodyFieldsConf {
+            data: true,
+            errors: false,
+            extensions: false,
+        });
+
+        let copro_response = json!({
+            "data": {"modified": "data"},
+            "errors": [], // Coprocessor might return empty errors
+            "extensions": {} // Coprocessor might return empty extensions
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_data,
+        )
+        .unwrap();
+
+        // Data should be modified from coprocessor
+        assert_eq!(result.data, Some(json!({"modified": "data"})));
+        // Errors should be preserved from original (not empty from copro)
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "original error");
+        // Extensions should be preserved from original (not empty from copro)
+        assert_eq!(
+            result.extensions.get("original_ext"),
+            Some(&json!("original_value"))
+        );
+
+        // Test 2: Send only errors, coprocessor modifies errors
+        // Data and extensions should be preserved from original
+        let selective_errors = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: true,
+            extensions: false,
+        });
+
+        let copro_response = json!({
+            "data": null, // Coprocessor might return null data
+            "errors": [{"message": "modified error"}]
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_errors,
+        )
+        .unwrap();
+
+        // Data should be preserved from original
+        assert_eq!(result.data, Some(json!({"original": "data"})));
+        // Errors should be modified from coprocessor
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "modified error");
+        // Extensions should be preserved from original
+        assert_eq!(
+            result.extensions.get("original_ext"),
+            Some(&json!("original_value"))
+        );
+
+        // Test 3: Send only extensions, coprocessor modifies extensions
+        // Data and errors should be preserved from original
+        let selective_extensions = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: false,
+            extensions: true,
+        });
+
+        let copro_response = json!({
+            "extensions": {"modified_ext": "modified_value"}
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_extensions,
+        )
+        .unwrap();
+
+        // Data should be preserved from original
+        assert_eq!(result.data, Some(json!({"original": "data"})));
+        // Errors should be preserved from original
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "original error");
+        // Extensions should be modified from coprocessor
+        assert_eq!(
+            result.extensions.get("modified_ext"),
+            Some(&json!("modified_value"))
+        );
+        assert_eq!(result.extensions.get("original_ext"), None);
+
+        // Test 4: Send data and extensions, but not errors
+        let selective_data_ext = BodyConf::Selective(BodyFieldsConf {
+            data: true,
+            errors: false,
+            extensions: true,
+        });
+
+        let copro_response = json!({
+            "data": {"modified": "data"},
+            "extensions": {"modified_ext": "modified_value"}
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_data_ext,
+        )
+        .unwrap();
+
+        // Data should be modified from coprocessor
+        assert_eq!(result.data, Some(json!({"modified": "data"})));
+        // Errors should be preserved from original
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "original error");
+        // Extensions should be modified from coprocessor
+        assert_eq!(
+            result.extensions.get("modified_ext"),
+            Some(&json!("modified_value"))
         );
         assert_eq!(
             json!("modified_value"),
@@ -6055,6 +6987,91 @@ mod tests {
             assert!(
                 test_harness.is_ok(),
                 "Legacy HTTP configuration should load successfully"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_selective_body_field_configuration() {
+        // Test that new selective body field configurations work
+        let selective_configs = vec![
+            // Boolean body (backwards compatible)
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": true
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": false
+                        }
+                    }
+                }
+            }),
+            // Selective body fields - errors only
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": {
+                                "data": false,
+                                "errors": true,
+                                "extensions": false
+                            }
+                        }
+                    }
+                }
+            }),
+            // Selective body fields - all fields
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": {
+                                "data": true,
+                                "errors": true,
+                                "extensions": true
+                            }
+                        }
+                    }
+                }
+            }),
+            // Selective body fields - execution stage
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "execution": {
+                        "response": {
+                            "body": {
+                                "errors": true
+                            }
+                        }
+                    }
+                }
+            }),
+        ];
+
+        for config in selective_configs {
+            let test_harness = crate::TestHarness::builder()
+                .configuration_json(config.clone())
+                .unwrap()
+                .build_router()
+                .await;
+
+            assert!(
+                test_harness.is_ok(),
+                "Selective body configuration should load successfully: {:?}",
+                config
             );
         }
     }

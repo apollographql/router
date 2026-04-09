@@ -395,7 +395,7 @@ where
     let headers_to_send = response_config
         .headers
         .then(|| externalize_header_map(&parts.headers));
-
+  
     // Log headers with masking for security
     if response_config.headers
         && let Some(rules) = header_masking_rules.as_deref()
