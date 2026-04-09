@@ -804,19 +804,21 @@ impl JoinSpecDefinition {
             });
         }
 
-        args.push(DirectiveArgumentSpecification {
-            base_spec: ArgumentSpecification {
-                name: JOIN_CONNECTED_SELECTION_ARGUMENT_NAME,
-                get_type: |_schema, link| {
-                    let field_set_name = link.map_or(JOIN_FIELD_SET_NAME_IN_SPEC, |link| {
-                        link.type_name_in_schema(&JOIN_FIELD_SET_NAME_IN_SPEC)
-                    });
-                    Ok(Type::Named(field_set_name))
+        if *self.version() >= (Version { major: 0, minor: 6 }) {
+            args.push(DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: JOIN_CONNECTED_SELECTION_ARGUMENT_NAME,
+                    get_type: |_schema, link| {
+                        let field_set_name = link.map_or(JOIN_FIELD_SET_NAME_IN_SPEC, |link| {
+                            link.type_name_in_schema(&JOIN_FIELD_SET_NAME_IN_SPEC)
+                        });
+                        Ok(Type::Named(field_set_name))
+                    },
+                    default_value: None,
                 },
-                default_value: None,
-            },
-            composition_strategy: None,
-        });
+                composition_strategy: None,
+            });
+        }
 
         DirectiveSpecification::new(
             JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC,
@@ -1274,6 +1276,7 @@ impl SpecDefinition for JoinSpecDefinition {
 ///  - 0.3: adds the `isInterfaceObject` argument to `@join__type`, and make the `graph` in `@join__field` skippable.
 ///  - 0.4: adds the optional `overrideLabel` argument to `@join_field` for progressive override.
 ///  - 0.5: adds the `contextArguments` argument to `@join_field` for setting context.
+///  - 0.6: adds the `connectedSelection` argument to `@join__field` for connector recursive types.
 pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
     LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::join_identity());
@@ -1295,6 +1298,10 @@ pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
         ));
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 5 },
+            Version { major: 2, minor: 8 },
+        ));
+        definitions.add(JoinSpecDefinition::new(
+            Version { major: 0, minor: 6 },
             Version { major: 2, minor: 8 },
         ));
         definitions
@@ -1484,7 +1491,7 @@ scalar join__FieldSet
 "#);
         insta::assert_snapshot!(join_spec_directives_snapshot(&schema), @r#"directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @join__type(graph: join__Graph!, key: join__FieldSet) on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, connectedSelection: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__owner(graph: join__Graph!) on OBJECT
 "#);
     }
@@ -1499,7 +1506,7 @@ scalar join__FieldSet
 
         insta::assert_snapshot!(join_spec_directives_snapshot(&schema), @r#"directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, connectedSelection: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 "#);
     }
@@ -1514,7 +1521,7 @@ scalar join__FieldSet
 
         insta::assert_snapshot!(join_spec_directives_snapshot(&schema), @r#"directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, connectedSelection: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
@@ -1532,7 +1539,7 @@ scalar join__DirectiveArguments
 
         insta::assert_snapshot!(join_spec_directives_snapshot(&schema), @r#"directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, connectedSelection: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
@@ -1543,6 +1550,32 @@ directive @join__directive(graphs: [join__Graph!], name: String!, args: join__Di
     #[test]
     fn join_spec_v0_5_definitions() {
         let schema = get_schema_with_join(Version { major: 0, minor: 5 });
+
+        insta::assert_snapshot!(join_spec_types_snapshot(&schema), @r#"enum join__Graph
+scalar join__FieldSet
+scalar join__DirectiveArguments
+scalar join__FieldValue
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+"#);
+
+        insta::assert_snapshot!(join_spec_directives_snapshot(&schema), @r#"directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+"#);
+    }
+
+    #[test]
+    fn join_spec_v0_6_definitions() {
+        let schema = get_schema_with_join(Version { major: 0, minor: 6 });
 
         insta::assert_snapshot!(join_spec_types_snapshot(&schema), @r#"enum join__Graph
 scalar join__FieldSet
