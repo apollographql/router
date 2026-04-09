@@ -68,6 +68,41 @@ where
         })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn into_bytes_limited_under_limit() {
+        let body = from_bytes("hello");
+        let result = into_bytes_limited(body, 10).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn into_bytes_limited_at_limit() {
+        let body = from_bytes("hello");
+        let result = into_bytes_limited(body, 5).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn into_bytes_limited_over_limit() {
+        let body = from_bytes("hello world");
+        let result = into_bytes_limited(body, 5).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("exceeded limit of 5 bytes"),
+            "error message should mention the limit"
+        );
+    }
+}
+
 /// Get a body's contents as a utf-8 string for use in test assertions, or return an error.
 pub async fn into_string<B>(input: B) -> Result<String, AxumError>
 where
