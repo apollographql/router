@@ -386,4 +386,9 @@ This histogram is disabled by default. Once enabled, use it to observe the 95th 
 
 ### Monitoring exceeded limits
 
-When a subgraph response is aborted because it exceeds the configured limit, the router increments the `apollo.router.limits.subgraph_response_size.exceeded` counter with a `subgraph.name` attribute identifying the affected subgraph. Monitor this counter to detect misconfigured limits or misbehaving subgraphs.
+When a subgraph response is aborted because it exceeds the configured limit:
+
+- The router increments the `apollo.router.limits.subgraph_response_size.exceeded` counter with a `subgraph.name` attribute identifying the affected subgraph.
+- The subgraph request span gets an `apollo.subgraph.response.aborted` attribute set to `"response_size_limit"`.
+
+Monitor the counter to detect misconfigured limits or misbehaving subgraphs. The span attribute makes limit-triggered aborts filterable in your tracing backend.
