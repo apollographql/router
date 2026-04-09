@@ -2024,14 +2024,14 @@ mod tests {
         MyRouterFactory {}
 
         impl RouterFactory for MyRouterFactory {
-            type RouterService = router::BoxService;
+            type RouterService = router::BoxCloneService;
             type Future = <Self::RouterService as Service<RouterRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
             fn pipeline_ref(&self) -> Arc<PipelineRef>;
         }
         impl ServiceFactory<RouterRequest> for MyRouterFactory {
-            type Service = router::BoxService;
-            fn create(&self) -> router::BoxService;
+            type Service = router::BoxCloneService;
+            fn create(&self) -> router::BoxCloneService;
         }
 
         impl Clone for MyRouterFactory {

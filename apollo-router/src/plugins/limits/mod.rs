@@ -21,7 +21,6 @@ use crate::plugin::PluginInit;
 use crate::plugins::limits::layer::BodyLimitError;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::services::router;
-use crate::services::router::BoxService;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -172,8 +171,9 @@ impl Plugin for LimitsPlugin {
         })
     }
 
-    fn router_service(&self, service: BoxService) -> BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         ServiceBuilder::new()
+            .buffered()
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },
@@ -187,7 +187,7 @@ impl Plugin for LimitsPlugin {
             .map_request(Into::into)
             .map_response(Into::into)
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

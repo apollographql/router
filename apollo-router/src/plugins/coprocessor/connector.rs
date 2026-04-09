@@ -108,10 +108,10 @@ impl ConnectorStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: request_service::BoxService,
+        service: request_service::BoxCloneService,
         default_url: String,
         service_name: String,
-    ) -> request_service::BoxService
+    ) -> request_service::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -217,7 +217,7 @@ impl ConnectorStage {
             .option_layer(response_layer)
             .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

@@ -115,7 +115,11 @@ impl PluginPrivate for MockSubgraphsPlugin {
         })
     }
 
-    fn subgraph_service(&self, name: &str, _: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        _: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let config = self.per_subgraph_config.get(name).cloned();
         let subgraph_schema = self.subgraph_schemas[name].clone();
         tower::service_fn(move |request: subgraph::Request| {
@@ -159,7 +163,7 @@ impl PluginPrivate for MockSubgraphsPlugin {
                 ))
             }
         })
-        .boxed()
+        .boxed_clone()
     }
 }
 

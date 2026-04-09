@@ -237,7 +237,7 @@ impl PluginPrivate for AuthenticationPlugin {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         // Return without layering if no router config was defined
         let Some(router_config) = &self.router else {
             return service;
@@ -262,14 +262,14 @@ impl PluginPrivate for AuthenticationPlugin {
                 Ok(authenticate(&configuration, &jwks_manager, request))
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         // Return without layering if no subgraph config was defined
         let Some(subgraph) = &self.subgraph else {
             return service;
@@ -280,9 +280,9 @@ impl PluginPrivate for AuthenticationPlugin {
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         _: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         // Return without layering if no connector config was defined
         let Some(connector_auth) = &self.connector else {
             return service;

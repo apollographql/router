@@ -586,7 +586,10 @@ impl Plugin for AuthorizationPlugin {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         if self.require_authentication {
             ServiceBuilder::new()
                 .checkpoint(move |request: supergraph::Request| {
@@ -613,13 +616,13 @@ impl Plugin for AuthorizationPlugin {
                     }
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
             .map_request(|request: execution::Request| {
                 let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
@@ -640,7 +643,7 @@ impl Plugin for AuthorizationPlugin {
                 request
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

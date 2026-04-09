@@ -28,7 +28,10 @@ impl Plugin for ExposeReferencedFieldsByType {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
             .map_first_graphql_response(
                 |context, http_parts, mut graphql_response: graphql::Response| {
@@ -40,10 +43,10 @@ impl Plugin for ExposeReferencedFieldsByType {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
                 let as_json: serde_json_bytes::Value =
@@ -62,7 +65,7 @@ impl Plugin for ExposeReferencedFieldsByType {
                 ))
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

@@ -611,11 +611,11 @@ impl PluggableSupergraphServiceBuilder {
                     self.plugins
                         .iter()
                         .rev()
-                        .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                        .fold(supergraph_service.boxed_clone(), |acc, (_, e)| {
                             e.supergraph_service(acc)
                         }),
                 )
-                .boxed(),
+                .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );
 
@@ -658,24 +658,15 @@ impl HasSchema for SupergraphCreator {
 }
 
 impl ServiceFactory<supergraph::Request> for SupergraphCreator {
-    type Service = supergraph::BoxService;
+    type Service = supergraph::BoxCloneService;
     fn create(&self) -> Self::Service {
-        self.make().boxed()
+        self.make()
     }
 }
 
 impl SupergraphCreator {
-    pub(crate) fn make(
-        &self,
-    ) -> impl Service<
-        supergraph::Request,
-        Response = supergraph::Response,
-        Error = BoxError,
-        Future = BoxFuture<'static, supergraph::ServiceResult>,
-    > + Send
-    + use<> {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
-        self.sb.clone().boxed()
+    pub(crate) fn make(&self) -> supergraph::BoxCloneService {
+        self.sb.clone().boxed_clone()
     }
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {

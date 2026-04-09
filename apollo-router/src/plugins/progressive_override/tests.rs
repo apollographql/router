@@ -150,7 +150,7 @@ async fn plugin_router_service_adds_all_arbitrary_labels_to_context() {
     ))
     .await
     .unwrap()
-    .router_service(mock_service.boxed());
+    .router_service(mock_service.boxed_clone());
 
     let _ = service_stack
         .oneshot(router::Request::fake_builder().build().unwrap())
@@ -205,7 +205,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     ))
     .await
     .unwrap()
-    .supergraph_service(mock_service.boxed());
+    .supergraph_service(mock_service.boxed_clone());
 
     let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),
@@ -354,7 +354,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     ))
     .await
     .unwrap()
-    .supergraph_service(mock_service.boxed());
+    .supergraph_service(mock_service.boxed_clone());
 
     let schema = crate::spec::Schema::parse(
         include_str!("./testdata/supergraph.graphql"),

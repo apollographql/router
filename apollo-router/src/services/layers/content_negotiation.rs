@@ -164,10 +164,11 @@ impl<S> Layer<S> for SupergraphLayer
 where
     S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
         + Send
+        + Clone
         + 'static,
     <S as Service<supergraph::Request>>::Future: Send + 'static,
 {
-    type Service = supergraph::BoxService;
+    type Service = supergraph::BoxCloneService;
 
     fn layer(&self, service: S) -> Self::Service {
         service
@@ -200,7 +201,7 @@ where
                 }
                 (parts, res)
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 

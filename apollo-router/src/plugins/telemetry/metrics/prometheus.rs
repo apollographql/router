@@ -91,6 +91,7 @@ impl MetricsConfigurator for Config {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct PrometheusService {
     pub(crate) registry: Registry,
 }

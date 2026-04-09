@@ -143,7 +143,7 @@ fn init_query_plan_from_redis(
     Ok(())
 }
 
-impl<T: Clone + 'static> CachingQueryPlanner<T>
+impl<T: Clone + Sync + 'static> CachingQueryPlanner<T>
 where
     T: tower::Service<
             QueryPlannerRequest,
@@ -218,7 +218,7 @@ where
             self.plugins
                 .iter()
                 .rev()
-                .fold(self.delegate.clone().boxed(), |acc, (_, e)| {
+                .fold(self.delegate.clone().boxed_clone(), |acc, (_, e)| {
                     e.query_planner_service(acc)
                 }),
         );

@@ -969,7 +969,7 @@ async fn no_data() {
                     .expect_call()
                     .times(1)
                     .returning(move |_req: subgraph::Request| Err("orga not found".into()));
-                subgraph.boxed()
+                subgraph.boxed_clone()
             } else {
                 service
             }

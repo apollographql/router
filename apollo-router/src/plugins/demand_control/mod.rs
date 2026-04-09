@@ -43,7 +43,6 @@ use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::execution;
-use crate::services::execution::BoxService;
 use crate::services::subgraph;
 
 pub(crate) mod cost_calculator;
@@ -552,7 +551,7 @@ impl Plugin for DemandControl {
         })
     }
 
-    fn execution_service(&self, service: BoxService) -> BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if !self.config.enabled {
             service
         } else {
@@ -647,15 +646,15 @@ impl Plugin for DemandControl {
                     resp
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         }
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         if !self.config.enabled {
             service
         } else {
@@ -711,7 +710,7 @@ impl Plugin for DemandControl {
                     },
                 )
                 .service(service)
-                .boxed()
+                .boxed_clone()
         }
     }
 }

@@ -286,7 +286,7 @@ async fn harness(
                         counter.fetch_add(1, Ordering::Relaxed);
                         req
                     })
-                    .boxed()
+                    .boxed_clone()
             } else {
                 service
             }

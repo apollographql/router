@@ -35,7 +35,7 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
 use crate::services::fetch::ErrorMapping;
-use crate::services::subgraph::BoxService;
+use crate::services::subgraph::BoxCloneService;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SchemaHash;
@@ -267,7 +267,7 @@ impl FetchNode {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn subgraph_fetch(
         &self,
-        service: BoxService,
+        service: BoxCloneService,
         subgraph_request: SubgraphRequest,
         current_dir: &Path,
         schema: &Schema,

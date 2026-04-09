@@ -846,7 +846,7 @@ mod tests {
                             r
                         },
                     )
-                    .boxed()
+                    .boxed_clone()
             })
             .with_subgraph_network_requests()
             .build_router()

@@ -64,19 +64,19 @@ impl HttpClientServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> BoxService {
+    pub(crate) fn create(&self, name: &str) -> BoxCloneService {
         let service = self.service.clone();
         self.plugins
             .iter()
             .rev()
-            .fold(service.boxed(), |acc, (_, e)| {
+            .fold(service.boxed_clone(), |acc, (_, e)| {
                 e.http_client_service(name, acc)
             })
     }
 }
 
 pub(crate) trait MakeHttpService: Send + Sync + 'static {
-    fn make(&self) -> BoxService;
+    fn make(&self) -> BoxCloneService;
 }
 
 impl<S> MakeHttpService for S
@@ -88,7 +88,7 @@ where
         + 'static,
     <S as Service<HttpRequest>>::Future: Send,
 {
-    fn make(&self) -> BoxService {
-        self.clone().boxed()
+    fn make(&self) -> BoxCloneService {
+        self.clone().boxed_clone()
     }
 }

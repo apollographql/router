@@ -573,7 +573,7 @@ async fn escaped_quotes_in_string_literal() {
                     }
                     response
                 })
-                .boxed()
+                .boxed_clone()
         })
         .build_supergraph()
         .await

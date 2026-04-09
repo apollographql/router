@@ -367,7 +367,7 @@ async fn build_test_harness(
                         .unwrap())
                 }
             })
-            .boxed()
+            .boxed_clone()
         })
         .build_supergraph()
         .await

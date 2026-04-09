@@ -1200,7 +1200,7 @@ mod tests {
                             .build())
                     }
                 })
-                .boxed()
+                .boxed_clone()
             })
             .build_supergraph()
             .await
