@@ -26,25 +26,10 @@
     },
   ],
   packageRules: [
-    // Don't do `rust` image updates separately since they'll we want them
-    // managed/grouped into the rule directly above this one.  This prevents
-    // multiple PRs for the same bump, and puts all our Rust version bumps
-    // together.
+    // Put all the rustc dependencies in a single PR
     {
-      matchPackageNames: [
-        'rust',
-      ],
-      matchManagers: [
-        'dockerfile',
-        'mise',
-      ],
-      enabled: false,
-    },
-    {
-      matchPackageNames: [
-        'rust',
-      ],
-      matchManagers: 'regex',
+      matchPackageNames: ['rust'],
+      matchManagers: ['custom.regex', 'dockerfile', 'mise', 'rust-release-channel'],
       groupName: 'rustc',
     },
 
