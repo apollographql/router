@@ -321,10 +321,17 @@ register_plugin!("apollo", "limits", LimitsPlugin);
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use http::StatusCode;
     use tower::BoxError;
+    use tower::ServiceExt;
 
+    use crate::Context;
     use crate::plugins::limits::LimitsPlugin;
+    use crate::plugins::limits::SubgraphLimits;
+    use crate::plugins::limits::SubgraphLimitsConfig;
+    use crate::plugins::limits::SubgraphResponseSizeLimit;
     use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
@@ -518,5 +525,121 @@ mod test {
             .await
             .expect("test harness");
         plugin
+    }
+
+    // --- SubgraphLimitsConfig::get_response_limit ---
+
+    #[test]
+    fn get_response_limit_no_config() {
+        let config = SubgraphLimitsConfig::default();
+        assert_eq!(config.get_response_limit("products"), None);
+    }
+
+    #[test]
+    fn get_response_limit_all() {
+        let config = SubgraphLimitsConfig {
+            all: Some(SubgraphLimits {
+                http_max_response_bytes: Some(1024),
+            }),
+            subgraphs: HashMap::new(),
+        };
+        assert_eq!(config.get_response_limit("products"), Some(1024));
+        assert_eq!(config.get_response_limit("reviews"), Some(1024));
+    }
+
+    #[test]
+    fn get_response_limit_subgraph_specific() {
+        let mut subgraphs = HashMap::new();
+        subgraphs.insert(
+            "products".to_string(),
+            SubgraphLimits {
+                http_max_response_bytes: Some(512),
+            },
+        );
+        let config = SubgraphLimitsConfig {
+            all: None,
+            subgraphs,
+        };
+        assert_eq!(config.get_response_limit("products"), Some(512));
+        assert_eq!(config.get_response_limit("reviews"), None);
+    }
+
+    #[test]
+    fn get_response_limit_subgraph_overrides_all() {
+        let mut subgraphs = HashMap::new();
+        subgraphs.insert(
+            "products".to_string(),
+            SubgraphLimits {
+                http_max_response_bytes: Some(512),
+            },
+        );
+        let config = SubgraphLimitsConfig {
+            all: Some(SubgraphLimits {
+                http_max_response_bytes: Some(1024),
+            }),
+            subgraphs,
+        };
+        // per-subgraph override wins
+        assert_eq!(config.get_response_limit("products"), Some(512));
+        // fallback to all
+        assert_eq!(config.get_response_limit("reviews"), Some(1024));
+    }
+
+    // --- LimitsPlugin::subgraph_service ---
+
+    #[tokio::test]
+    async fn subgraph_service_sets_limit_on_context() {
+        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
+            .config(
+                "limits:\n  subgraph:\n    all:\n      http_max_response_bytes: 1024",
+            )
+            .build()
+            .await
+            .expect("test harness");
+
+        let result = plugin
+            .subgraph_service("products", |req: crate::services::SubgraphRequest| async move {
+                let limit = req
+                    .context
+                    .extensions()
+                    .with_lock(|e| e.get::<SubgraphResponseSizeLimit>().copied());
+                assert_eq!(
+                    limit.map(|l| l.0),
+                    Some(1024),
+                    "limit should be set on context"
+                );
+                Ok(crate::services::SubgraphResponse::fake_builder()
+                    .context(req.context)
+                    .build())
+            })
+            .call_default()
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn subgraph_service_no_limit_does_not_set_extension() {
+        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
+            .config(include_str!("fixtures/content_length_limit.router.yaml"))
+            .build()
+            .await
+            .expect("test harness");
+
+        let result = plugin
+            .subgraph_service("products", |req: crate::services::SubgraphRequest| async move {
+                let limit = req
+                    .context
+                    .extensions()
+                    .with_lock(|e| e.get::<SubgraphResponseSizeLimit>().copied());
+                assert!(limit.is_none(), "no limit should be set on context");
+                Ok(crate::services::SubgraphResponse::fake_builder()
+                    .context(req.context)
+                    .build())
+            })
+            .call_default()
+            .await;
+
+        assert!(result.is_ok());
     }
 }
