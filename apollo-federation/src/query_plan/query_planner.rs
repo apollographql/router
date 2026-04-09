@@ -1521,8 +1521,11 @@ type User @join__type(graph: CONNECTOR, key: "id") {
             planner.api_schema().schema(),
             r#"{ user(id: "1") { friends { name } } }"#,
             "op.graphql",
-        ).unwrap();
-        let plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
+        )
+        .unwrap();
+        let plan = planner
+            .build_query_plan(&doc, None, Default::default())
+            .unwrap();
         // name IS on the restricted copy, so single fetch
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
@@ -1544,8 +1547,11 @@ type User @join__type(graph: CONNECTOR, key: "id") {
             planner.api_schema().schema(),
             r#"{ user(id: "1") { friends { name friends { name } } } }"#,
             "op.graphql",
-        ).unwrap();
-        let plan2 = planner.build_query_plan(&doc2, None, Default::default()).unwrap();
+        )
+        .unwrap();
+        let plan2 = planner
+            .build_query_plan(&doc2, None, Default::default())
+            .unwrap();
         // friends is NOT on the restricted copy, so needs entity resolution
         insta::assert_snapshot!(plan2, @r###"
         QueryPlan {
@@ -1653,8 +1659,11 @@ type User @join__type(graph: CONNECTOR, key: "id") {
             planner.api_schema().schema(),
             r#"{ user(id: "1") { friends { friends { friends { name } } } } }"#,
             "op.graphql",
-        ).unwrap();
-        let plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
+        )
+        .unwrap();
+        let plan = planner
+            .build_query_plan(&doc, None, Default::default())
+            .unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Sequence {
@@ -1807,7 +1816,9 @@ type User @join__type(graph: CONNECTORS, key: "id") {
             "op.graphql",
         )
         .unwrap();
-        let plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
+        let plan = planner
+            .build_query_plan(&doc, None, Default::default())
+            .unwrap();
         let plan_str = plan.to_string();
 
         assert!(

@@ -176,11 +176,7 @@ impl<'schema> Selection<'schema> {
                     return Ok(Vec::new());
                 }
 
-                let mut validator = SelectionValidator::new(
-                    schema,
-                    &self.node,
-                    self.coordinate,
-                );
+                let mut validator = SelectionValidator::new(schema, &self.node, self.coordinate);
 
                 // Clear seen_fields for this connector
                 validator.seen_fields.clear();
@@ -216,11 +212,7 @@ impl<'schema> Selection<'schema> {
                     });
                 }
 
-                let mut validator = SelectionValidator::new(
-                    schema,
-                    &self.node,
-                    self.coordinate,
-                );
+                let mut validator = SelectionValidator::new(schema, &self.node, self.coordinate);
 
                 // Clear seen_fields for this connector
                 validator.seen_fields.clear();

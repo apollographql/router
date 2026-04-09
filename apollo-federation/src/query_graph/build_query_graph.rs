@@ -18,9 +18,9 @@ use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
-use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::operation::merge_selection_sets;
@@ -2210,10 +2210,8 @@ impl FederatedQueryGraphBuilder {
     /// nodes that only have the specified field edges plus key resolution edges.
     fn handle_connected_selection(&mut self) -> Result<(), FederationError> {
         // Get join spec from supergraph
-        let (_, join_spec, _) =
-            validate_supergraph_for_query_planning(&self.supergraph_schema)?;
-        let join_field_def =
-            join_spec.field_directive_definition(&self.supergraph_schema)?;
+        let (_, join_spec, _) = validate_supergraph_for_query_planning(&self.supergraph_schema)?;
+        let join_field_def = join_spec.field_directive_definition(&self.supergraph_schema)?;
         let join_field_name = join_field_def.name.clone();
 
         // Build graph enum value -> source name mapping
@@ -2244,13 +2242,12 @@ impl FederatedQueryGraphBuilder {
                     let args = join_spec.field_directive_arguments(directive)?;
                     if let (Some(graph_enum_value), Some(connected_sel)) =
                         (args.graph, args.connected_selection)
+                        && let Some(source_name) = graph_enum_to_source.get(&graph_enum_value)
                     {
-                        if let Some(source_name) = graph_enum_to_source.get(&graph_enum_value) {
-                            restrictions.insert(
-                                (source_name.clone(), type_name.clone(), field_name.clone()),
-                                connected_sel.to_string(),
-                            );
-                        }
+                        restrictions.insert(
+                            (source_name.clone(), type_name.clone(), field_name.clone()),
+                            connected_sel.to_string(),
+                        );
                     }
                 }
             }
@@ -2300,8 +2297,7 @@ impl FederatedQueryGraphBuilder {
             let conditions = parse_field_set(schema, tail_type_name, connected_sel, true)?;
 
             provide_id += 1;
-            let new_tail =
-                self.create_restricted_copy(tail, &source, &conditions, provide_id)?;
+            let new_tail = self.create_restricted_copy(tail, &source, &conditions, provide_id)?;
             Self::update_edge_tail(&mut self.base, edge, new_tail)?;
             // Mark ancestors of the head as having reachable "cross-subgraph"
             // edges. Even though the restricted copy is in the same subgraph,
@@ -2318,8 +2314,7 @@ impl FederatedQueryGraphBuilder {
         &self,
         join_spec: &'static JoinSpecDefinition,
     ) -> Result<IndexMap<Name, Arc<str>>, FederationError> {
-        let graph_directive_def =
-            join_spec.graph_directive_definition(&self.supergraph_schema)?;
+        let graph_directive_def = join_spec.graph_directive_definition(&self.supergraph_schema)?;
         let graph_enum_name = self
             .supergraph_schema
             .schema()
@@ -2410,10 +2405,10 @@ impl FederatedQueryGraphBuilder {
         // Register in types_to_nodes for the federated graph
         let current_source = self.base.query_graph.current_source.clone();
         self.base.query_graph.current_source = FEDERATED_GRAPH_ROOT_SOURCE.into();
-        if let Ok(nodes) = self.base.query_graph.types_to_nodes_mut() {
-            if let Some(node_set) = nodes.get_mut(type_pos.type_name()) {
-                node_set.insert(new_node);
-            }
+        if let Ok(nodes) = self.base.query_graph.types_to_nodes_mut()
+            && let Some(node_set) = nodes.get_mut(type_pos.type_name())
+        {
+            node_set.insert(new_node);
         }
         self.base.query_graph.current_source = current_source;
 
@@ -2459,12 +2454,8 @@ impl FederatedQueryGraphBuilder {
             if let Some((transition, tail)) = existing {
                 if let Some(nested_selections) = &field_selection.selection_set {
                     // Nested selection - create another restricted copy for the next level
-                    let new_tail = self.create_restricted_copy(
-                        tail,
-                        source,
-                        nested_selections,
-                        provide_id,
-                    )?;
+                    let new_tail =
+                        self.create_restricted_copy(tail, source, nested_selections, provide_id)?;
                     self.base
                         .add_edge(restricted_node, new_tail, transition, None, None)?;
                 } else {

@@ -247,13 +247,15 @@ fn add_connected_selections(
             use apollo_compiler::ast::InputValueDefinition;
             use apollo_compiler::ast::Type;
             let join_field_def = join_field_def.make_mut();
-            join_field_def.arguments.push(Node::new(InputValueDefinition {
-                description: None,
-                name: JOIN_CONNECTED_SELECTION_ARGUMENT_NAME,
-                ty: Node::new(Type::Named(name!("join__FieldSet"))),
-                default_value: None,
-                directives: Default::default(),
-            }));
+            join_field_def
+                .arguments
+                .push(Node::new(InputValueDefinition {
+                    description: None,
+                    name: JOIN_CONNECTED_SELECTION_ARGUMENT_NAME,
+                    ty: Node::new(Type::Named(name!("join__FieldSet"))),
+                    default_value: None,
+                    directives: Default::default(),
+                }));
         }
     }
 
@@ -306,10 +308,10 @@ fn build_service_name_to_enum_value(
         // Look for @join__graph(name: "service_name") on this enum value
         for directive in enum_value_def.directives.get_all(&name!("join__graph")) {
             for arg in &directive.arguments {
-                if arg.name == name!("name") {
-                    if let Value::String(service_name) = arg.value.as_ref() {
-                        map.insert(service_name.clone(), enum_value_name.clone());
-                    }
+                if arg.name == name!("name")
+                    && let Value::String(service_name) = arg.value.as_ref()
+                {
+                    map.insert(service_name.clone(), enum_value_name.clone());
                 }
             }
         }

@@ -1725,8 +1725,9 @@ where
                 // node. Copy nodes have fewer fields than the original, so the
                 // "detour" (re-entering the subgraph) is actually necessary to
                 // access fields not on the copy.
-                if !tail_is_copy && let Some(last_subgraph_entering_edge_info) =
-                    &to_advance.last_subgraph_entering_edge_info
+                if !tail_is_copy
+                    && let Some(last_subgraph_entering_edge_info) =
+                        &to_advance.last_subgraph_entering_edge_info
                 {
                     let Some(last_subgraph_entering_edge) =
                         to_advance.edges[last_subgraph_entering_edge_info.index].into()
