@@ -1381,6 +1381,52 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_subgraph_pool_idle_timeout_null() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          pool_idle_timeout: null
+        subgraphs:
+          explicit_value:
+            pool_idle_timeout: 10s
+          explicit_null:
+            pool_idle_timeout: null
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_value")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(10)),
+            "subgraph-specific override should win"
+        );
+
+        assert!(
+            shaping_config
+                .subgraph_client_config("unknown")
+                .pool_idle_timeout
+                .is_none(),
+            "explicit null falls back to all"
+        );
+
+        assert!(
+            shaping_config
+                .subgraph_client_config("unknown")
+                .pool_idle_timeout
+                .is_none(),
+            "unknown subgraph falls back to all"
+        );
+    }
+
+    #[tokio::test]
     async fn test_connector_pool_idle_timeout_override_and_fallback() {
         let config = serde_yaml::from_str::<Config>(
             r#"
