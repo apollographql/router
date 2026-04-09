@@ -2239,6 +2239,50 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorLimits": {
+      "additionalProperties": false,
+      "description": "Per-connector-source response size limits.",
+      "properties": {
+        "http_max_response_bytes": {
+          "default": null,
+          "description": "Limit the size of incoming connector response bodies read from the network,\nto protect against running out of memory. Default: no limit.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorLimitsConfig": {
+      "additionalProperties": false,
+      "description": "Limits that apply to outbound connector responses.",
+      "properties": {
+        "all": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConnectorLimits"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Limits applied to all connector responses, unless overridden per source."
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ConnectorLimits"
+          },
+          "default": {},
+          "description": "Per-source limit overrides, keyed by `subgraph_name.source_name`.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "ConnectorRequestConf": {
       "additionalProperties": false,
       "description": "What information is passed to a connector request stage",
@@ -6703,6 +6747,18 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorLimitsConfig"
+            }
+          ],
+          "default": {
+            "all": null,
+            "sources": {}
+          },
+          "description": "Limits that apply to outbound connector responses."
+        },
         "router": {
           "allOf": [
             {
