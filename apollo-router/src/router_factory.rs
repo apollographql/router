@@ -387,7 +387,7 @@ impl YamlRouterFactory {
                 create_subgraph_services(&http_service_factory, &configuration).await?;
             builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
-                builder = builder.with_subgraph_service(&name, subgraph_service);
+                builder = builder.with_subgraph_service(&name, subgraph_service.boxed_clone());
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.

@@ -46,7 +46,6 @@ use crate::services::Plugins;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
 
-pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub(crate) type ServiceResult = Result<Response, BoxError>;
 
@@ -185,11 +184,11 @@ impl ConnectorRequestServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, source_name: String) -> BoxService {
+    pub(crate) fn create(&self, source_name: String) -> BoxCloneService {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services
             .get(&source_name)
-            .map(|svc| svc.clone().boxed())
+            .map(|svc| svc.clone().boxed_clone())
             .expect("We should always get a service, even if it is a blank/default one")
     }
 }

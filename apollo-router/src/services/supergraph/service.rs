@@ -64,7 +64,7 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
 use crate::services::router::ClientRequestAccepts;
-use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::spec::operation_limits::OperationLimits;
@@ -452,7 +452,7 @@ async fn plan_query(
 /// through the entire stack to return a response.
 pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Arc<Plugins>,
-    subgraph_services: Vec<(String, Box<dyn MakeSubgraphService>)>,
+    subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
     http_service_factory: IndexMap<String, HttpClientServiceFactory>,
     configuration: Option<Arc<Configuration>>,
     planner: QueryPlannerService,
@@ -477,16 +477,12 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
-    pub(crate) fn with_subgraph_service<S>(
+    pub(crate) fn with_subgraph_service(
         mut self,
         name: &str,
-        service_maker: S,
-    ) -> PluggableSupergraphServiceBuilder
-    where
-        S: MakeSubgraphService,
-    {
-        self.subgraph_services
-            .push((name.to_string(), Box::new(service_maker)));
+        service: subgraph::BoxCloneService,
+    ) -> PluggableSupergraphServiceBuilder {
+        self.subgraph_services.push((name.to_string(), service));
         self
     }
 
@@ -548,10 +544,7 @@ impl PluggableSupergraphServiceBuilder {
             schema.clone(),
             subgraph_schemas.clone(),
             Arc::new(SubgraphServiceFactory::new(
-                self.subgraph_services
-                    .into_iter()
-                    .map(|(name, service)| (name, service.into()))
-                    .collect(),
+                self.subgraph_services,
                 self.plugins.clone(),
                 configuration.notify.clone(),
                 subscription_plugin_conf.clone().map(Arc::new),
