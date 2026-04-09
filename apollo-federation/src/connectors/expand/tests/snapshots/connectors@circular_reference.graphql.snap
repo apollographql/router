@@ -1,0 +1,469 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: connectors.by_service_name
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/circular_reference.graphql
+---
+{
+    "connectors_Query_user_0": Connector {
+        id: ConnectId {
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            named: None,
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.user),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
+        },
+        transport: HttpJsonTransport {
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://example",
+                                location: 0..14,
+                            },
+                        ),
+                    ],
+                },
+            ),
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users/",
+                            location: 0..7,
+                        },
+                    ),
+                    Expression(
+                        Expression {
+                            expression: JSONSelection {
+                                inner: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $args,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                6..8,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                8..8,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..8,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..8,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                spec: V0_1,
+                            },
+                            location: 8..16,
+                        },
+                    ),
+                ],
+            },
+            method: Get,
+            headers: [],
+            body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
+        },
+        selection: JSONSelection {
+            inner: Named(
+                SubSelection {
+                    selections: [
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
+                            },
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "name",
+                                            ),
+                                            range: Some(
+                                                3..7,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                7..7,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        3..7,
+                                    ),
+                                },
+                            },
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "friends",
+                                            ),
+                                            range: Some(
+                                                8..15,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Selection(
+                                                SubSelection {
+                                                    selections: [
+                                                        NamedSelection {
+                                                            prefix: None,
+                                                            path: PathSelection {
+                                                                path: WithRange {
+                                                                    node: Key(
+                                                                        WithRange {
+                                                                            node: Field(
+                                                                                "id",
+                                                                            ),
+                                                                            range: Some(
+                                                                                18..20,
+                                                                            ),
+                                                                        },
+                                                                        WithRange {
+                                                                            node: Empty,
+                                                                            range: Some(
+                                                                                20..20,
+                                                                            ),
+                                                                        },
+                                                                    ),
+                                                                    range: Some(
+                                                                        18..20,
+                                                                    ),
+                                                                },
+                                                            },
+                                                        },
+                                                        NamedSelection {
+                                                            prefix: None,
+                                                            path: PathSelection {
+                                                                path: WithRange {
+                                                                    node: Key(
+                                                                        WithRange {
+                                                                            node: Field(
+                                                                                "name",
+                                                                            ),
+                                                                            range: Some(
+                                                                                21..25,
+                                                                            ),
+                                                                        },
+                                                                        WithRange {
+                                                                            node: Empty,
+                                                                            range: Some(
+                                                                                25..25,
+                                                                            ),
+                                                                        },
+                                                                    ),
+                                                                    range: Some(
+                                                                        21..25,
+                                                                    ),
+                                                                },
+                                                            },
+                                                        },
+                                                    ],
+                                                    range: Some(
+                                                        16..27,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                16..27,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        8..27,
+                                    ),
+                                },
+                            },
+                        },
+                    ],
+                    range: Some(
+                        0..27,
+                    ),
+                },
+            ),
+            spec: V0_1,
+        },
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+        spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "User",
+            },
+        },
+        request_headers: {},
+        response_headers: {},
+        request_variable_keys: {
+            $args: {
+                "id",
+            },
+        },
+        response_variable_keys: {},
+        batch_settings: None,
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+            connect_is_success: None,
+        },
+        label: Label(
+            "connectors.example http: GET /users/{$args.id}",
+        ),
+    },
+    "connectors_User_friends_0": Connector {
+        id: ConnectId {
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            named: None,
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(User.friends),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
+        },
+        transport: HttpJsonTransport {
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "http://example",
+                                location: 0..14,
+                            },
+                        ),
+                    ],
+                },
+            ),
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users/",
+                            location: 0..7,
+                        },
+                    ),
+                    Expression(
+                        Expression {
+                            expression: JSONSelection {
+                                inner: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $this,
+                                                    range: Some(
+                                                        0..5,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                6..8,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                8..8,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        5..8,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..8,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                spec: V0_1,
+                            },
+                            location: 8..16,
+                        },
+                    ),
+                    Constant(
+                        Constant {
+                            value: "/friends",
+                            location: 17..25,
+                        },
+                    ),
+                ],
+            },
+            method: Get,
+            headers: [],
+            body: None,
+            source_path: None,
+            source_query_params: None,
+            connect_path: None,
+            connect_query_params: None,
+        },
+        selection: JSONSelection {
+            inner: Named(
+                SubSelection {
+                    selections: [
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
+                            },
+                        },
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "name",
+                                            ),
+                                            range: Some(
+                                                3..7,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                7..7,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        3..7,
+                                    ),
+                                },
+                            },
+                        },
+                    ],
+                    range: Some(
+                        0..7,
+                    ),
+                },
+            ),
+            spec: V0_1,
+        },
+        config: None,
+        max_requests: None,
+        entity_resolver: Some(
+            Explicit,
+        ),
+        spec: V0_1,
+        schema_subtypes_map: {
+            "_Entity": {
+                "User",
+            },
+        },
+        request_headers: {},
+        response_headers: {},
+        request_variable_keys: {
+            $this: {
+                "id",
+            },
+        },
+        response_variable_keys: {},
+        batch_settings: None,
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+            connect_is_success: None,
+        },
+        label: Label(
+            "connectors.example http: GET /users/{$this.id}/friends",
+        ),
+    },
+}
