@@ -1,5 +1,5 @@
 use apollo_compiler::collections::IndexSet;
-use nom::Slice;
+use nom::Input;
 use nom::character::complete::multispace0;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
@@ -47,9 +47,9 @@ pub(crate) fn spaces_or_comments(input: Span<'_>) -> ParseResult<'_, WithRange<&
         let suffix_len = suffix.fragment().len();
         if suffix.fragment().starts_with('#') {
             if let Some(newline) = suffix.fragment().find('\n') {
-                suffix = suffix.slice(newline + 1..);
+                suffix = suffix.take_from(newline + 1);
             } else {
-                suffix = suffix.slice(suffix_len..);
+                suffix = suffix.take_from(suffix_len);
             }
             made_progress = true;
         }
@@ -60,7 +60,7 @@ pub(crate) fn spaces_or_comments(input: Span<'_>) -> ParseResult<'_, WithRange<&
             return Ok((
                 suffix,
                 WithRange::new(
-                    input.slice(0..end_of_slice).fragment(),
+                    input.take(end_of_slice).fragment(),
                     // The location of the parsed spaces and comments
                     Some(start..end),
                 ),
