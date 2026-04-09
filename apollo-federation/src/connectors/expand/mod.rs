@@ -2,13 +2,19 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::name;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use carryover::carryover_directives;
 use indexmap::IndexMap;
 use itertools::Itertools;
 use multimap::MultiMap;
+use shape::ShapeCase;
 
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
@@ -16,6 +22,7 @@ use crate::ValidFederationSubgraph;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::error::FederationError;
+use crate::link::join_spec_definition::JOIN_CONNECTED_SELECTION_ARGUMENT_NAME;
 use crate::merge::merge_subgraphs;
 use crate::schema::FederationSchema;
 use crate::subgraph::Subgraph;
@@ -128,6 +135,13 @@ pub fn expand_connectors(
         .map(|(connector, sub)| (sub.name.into(), connector))
         .collect();
 
+    // Add connectedSelection to @join__field for recursive connector types
+    add_connected_selections(
+        supergraph.schema.schema(),
+        &mut new_supergraph,
+        &connectors_by_service_name,
+    )?;
+
     let labels_by_service_name = connectors_by_service_name
         .iter()
         .map(|(service_name, connector)| (service_name.clone(), connector.label.0.clone()))
@@ -157,6 +171,158 @@ fn contains_connectors(link: &ConnectLink, subgraph: &ValidFederationSubgraph) -
             directive.directive_name == link.connect_directive_name
                 || directive.directive_name == link.source_directive_name
         })
+}
+
+/// Add `connectedSelection` to `@join__field` directives for recursive connector types.
+///
+/// When a connector is on a field whose return type matches its parent type (recursion),
+/// this function annotates the corresponding `@join__field` directive with the connector's
+/// selection field names so the query graph builder can create restricted copy nodes.
+fn add_connected_selections(
+    original_schema: &Valid<Schema>,
+    supergraph: &mut FederationSchema,
+    connectors: &IndexMap<Arc<str>, Connector>,
+) -> Result<(), FederationError> {
+    // Build service_name -> join__Graph enum value name mapping
+    let service_name_to_enum_value = build_service_name_to_enum_value(supergraph.schema())?;
+
+    // Collect (type_name, field_name, enum_value, connected_selection_str) tuples
+    let mut annotations: Vec<(Name, Name, Name, String)> = Vec::new();
+
+    for (service_name, connector) in connectors {
+        // Only field-level connectors can be recursive
+        let Some(parent_type_name) = connector.id.directive.parent_type_name() else {
+            continue;
+        };
+
+        let Some(base_type_name) = connector.id.directive.base_type_name(original_schema) else {
+            continue;
+        };
+
+        // Check if this field's return type matches its parent type (self-reference)
+        if base_type_name != parent_type_name {
+            continue;
+        }
+
+        let Some(graph_enum_value) = service_name_to_enum_value.get(service_name.as_ref()) else {
+            continue;
+        };
+
+        // The connector's selection field names are the connected selection
+        let shape = connector.selection.shape();
+        if let Some(selection_str) = extract_shape_field_names(&shape) {
+            annotations.push((
+                parent_type_name.clone(),
+                connector
+                    .id
+                    .directive
+                    .field_definition(original_schema)
+                    .map(|f| f.name.clone())
+                    .ok_or_else(|| {
+                        FederationError::internal("field definition not found for connector")
+                    })?,
+                graph_enum_value.clone(),
+                selection_str,
+            ));
+        }
+    }
+
+    if annotations.is_empty() {
+        return Ok(());
+    }
+
+    // Apply annotations to the supergraph schema
+    let schema = supergraph.schema_mut();
+    for (type_name, field_name, enum_value, selection_str) in annotations {
+        let Some(ExtendedType::Object(obj)) = schema.types.get_mut(&type_name) else {
+            continue;
+        };
+        let obj = obj.make_mut();
+        let Some(field) = obj.fields.get_mut(&field_name) else {
+            continue;
+        };
+        let field = field.make_mut();
+
+        // Find the @join__field directive matching this graph enum value
+        for directive in field.directives.0.iter_mut() {
+            if directive.name != name!("join__field") {
+                continue;
+            }
+            let has_matching_graph = directive.arguments.iter().any(|arg| {
+                arg.name == name!("graph")
+                    && matches!(arg.value.as_ref(), Value::Enum(v) if *v == enum_value)
+            });
+            if has_matching_graph {
+                // Add connectedSelection argument
+                let directive = directive.make_mut();
+                directive.arguments.push(Node::new(Argument {
+                    name: JOIN_CONNECTED_SELECTION_ARGUMENT_NAME,
+                    value: Node::new(Value::String(selection_str.clone())),
+                }));
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Build a mapping from service name (e.g. "connectors_Query_user_0") to the
+/// join__Graph enum value name (e.g. "CONNECTORS_QUERY_USER_0").
+fn build_service_name_to_enum_value(
+    schema: &Schema,
+) -> Result<HashMap<String, Name>, FederationError> {
+    let mut map = HashMap::default();
+
+    let Some(ExtendedType::Enum(join_graph_enum)) = schema.types.get("join__Graph") else {
+        return Ok(map);
+    };
+
+    for (enum_value_name, enum_value_def) in &join_graph_enum.values {
+        // Look for @join__graph(name: "service_name") on this enum value
+        for directive in enum_value_def.directives.get_all(&name!("join__graph")) {
+            for arg in &directive.arguments {
+                if arg.name == name!("name") {
+                    if let Value::String(service_name) = arg.value.as_ref() {
+                        map.insert(service_name.clone(), enum_value_name.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(map)
+}
+
+/// Extract field names from a Shape, returning them as a space-separated string.
+/// Returns None if the shape is not an Object.
+fn extract_shape_field_names(shape: &shape::Shape) -> Option<String> {
+    match shape.case() {
+        ShapeCase::Object { fields, .. } => {
+            let names: Vec<&str> = fields
+                .keys()
+                .filter(|k| *k != "__typename")
+                .map(|k| k.as_str())
+                .collect();
+            if names.is_empty() {
+                None
+            } else {
+                Some(names.join(" "))
+            }
+        }
+        // Handle arrays: extract from the tail (element type)
+        ShapeCase::Array { tail, .. } => extract_shape_field_names(tail),
+        // Handle One (union): try each member
+        ShapeCase::One(shapes) => {
+            for member in shapes.iter() {
+                if let Some(names) = extract_shape_field_names(member) {
+                    return Some(names);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 /// Split up a subgraph so that each connector directive becomes its own subgraph.

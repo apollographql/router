@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
+assertion_line: 27
 expression: raw_sdl
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/circular_reference.graphql
 ---
@@ -57,7 +58,7 @@ enum join__Graph {
 type User @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_USER_FRIENDS_0) {
   id: ID! @join__field(graph: CONNECTORS_QUERY_USER_0, type: "ID!") @join__field(graph: CONNECTORS_USER_FRIENDS_0, type: "ID!")
   name: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_USER_FRIENDS_0, type: "String")
-  friends: [User] @join__field(graph: CONNECTORS_USER_FRIENDS_0, type: "[User]")
+  friends: [User] @join__field(graph: CONNECTORS_USER_FRIENDS_0, type: "[User]", connectedSelection: "id name")
 }
 
 type Query @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_USER_FRIENDS_0) {
