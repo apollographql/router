@@ -71,6 +71,8 @@ pub(crate) fn directive_required_string_argument<'doc>(
 ) -> Result<&'doc str, FederationError> {
     directive_optional_string_argument(application, name)?.ok_or_else(|| {
         SingleFederationError::Internal {
+            // Note that part of compose_directive_manager.rs unfortunately string-matches this
+            // error message.
             message: format!(
                 "Required argument \"{}\" of directive \"@{}\" was not present.",
                 name, application.name

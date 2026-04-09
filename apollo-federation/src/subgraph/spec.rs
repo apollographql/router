@@ -273,6 +273,7 @@ impl FederationSpecDefinitions {
                 .collect::<Vec<Arc<Import>>>(),
             purpose: None,
             spec_alias: None,
+            line_column_range: None,
         })
     }
 
@@ -796,6 +797,7 @@ impl Default for LinkSpecDefinitions {
             })],
             purpose: None,
             spec_alias: None,
+            line_column_range: None,
         };
         Self::new(link)
     }
@@ -829,6 +831,7 @@ mod tests {
             spec_alias: None,
             imports: vec![],
             purpose: None,
+            line_column_range: None,
         })
         .expect_err("federation version 99 is not yet supported");
     }
