@@ -26,23 +26,6 @@
     },
   ],
   packageRules: [
-    // Put all the rustc dependencies in a single PR
-    {
-      matchPackageNames: ['rust'],
-      matchManagers: ['custom.regex', 'dockerfile', 'mise', 'rust-release-channel'],
-      groupName: 'rustc',
-    },
-
-    // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
-    // underlying package is deprecated. The package works as-is and we can
-    // consider replacing it in the future. We'll allow 0.8.x just in case
-    // there HAPPEN to be any security updates that we need to be aware of.
-    // See: https://github.com/dtolnay/serde-yaml/releases/tag/0.9.34
-    {
-      matchManagers: ['cargo'],
-      matchPackageNames: ['serde_yaml'],
-      allowedVersions: '0.8.x',
-    },
     // Bunch up all non-major dependencies into a single PR.  In the common case
     // where the upgrades apply cleanly, this causes less noise and is resolved faster
     // than starting a bunch of upgrades in parallel for what may turn out to be
@@ -84,6 +67,34 @@
       automerge: true,
     },
 
+    // Require explicit approval for updates of pinned dependencies, which are usually pinned for a reason!
+    {
+      matchManagers: ['cargo'],
+      matchCurrentValue: '/^=/',
+      dependencyDashboardApproval: true,
+      automerge: false,
+      groupName: null,
+      groupSlug: null,
+    },
+
+    // Put all the rustc dependencies in a single PR
+    {
+      matchPackageNames: ['rust'],
+      matchManagers: ['custom.regex', 'dockerfile', 'mise', 'rust-release-channel'],
+      groupName: 'rustc',
+    },
+
+    // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
+    // underlying package is deprecated. The package works as-is and we can
+    // consider replacing it in the future. We'll allow 0.8.x just in case
+    // there HAPPEN to be any security updates that we need to be aware of.
+    // See: https://github.com/dtolnay/serde-yaml/releases/tag/0.9.34
+    {
+      matchManagers: ['cargo'],
+      matchPackageNames: ['serde_yaml'],
+      allowedVersions: '0.8.x',
+    },
+
     // We're currently constrained in our ability to update the `tracing`
     // packages to the latest versions because of our usage.  As an extension
     // of the same concern, we cannot update our `opentelemetry` packages since
@@ -103,6 +114,7 @@
         '/^opentelemetry/',
       ],
     },
+
     // Various monorepos / crates that are often released together
     {
       groupName: 'apollo-rs crates',
@@ -144,17 +156,7 @@
       automerge: true,
       minimumReleaseAge: '5 days',
     },
-    // Handle exact version pins (versions starting with =) in Cargo.toml files
-    // separately. Put them in individual PRs and require dashboard approval
-    // since they were explicitly pinned for a reason.
-    {
-      matchManagers: ['cargo'],
-      matchCurrentValue: '/^=/',
-      dependencyDashboardApproval: true,
-      automerge: false,
-      groupName: null,
-      groupSlug: null,
-    },
+
     // Add a note to the Rhai update PR to add a changeset
     {
       matchManagers: ['cargo'],
