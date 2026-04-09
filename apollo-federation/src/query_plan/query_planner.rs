@@ -1707,4 +1707,116 @@ type User @join__type(graph: CONNECTOR, key: "id") {
         }
         "###);
     }
+
+    #[test]
+    fn end_to_end_circular_connector_expansion_to_query_plan() {
+        use crate::connectors::expand::ExpansionResult;
+        use crate::connectors::expand::expand_connectors;
+
+        // Original supergraph (before expansion) with connector directives.
+        // friends uses $this.id (implicit entity resolver), so expansion should
+        // emit connectedSelection on the friends field and an entity key on User.
+        let original_supergraph = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION)
+  @join__directive(graphs: [CONNECTORS], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
+  @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "api", http: {baseURL: "http://localhost"}})
+{
+  query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+scalar join__FieldSet
+scalar join__FieldValue
+scalar link__Import
+
+enum join__Graph {
+  CONNECTORS @join__graph(name: "connectors", url: "none")
+}
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query @join__type(graph: CONNECTORS) {
+  user(id: ID!): User
+    @join__field(graph: CONNECTORS)
+    @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "api", http: {GET: "/users/{$args.id}"}, selection: "id name friends { id name }"})
+}
+
+type User @join__type(graph: CONNECTORS, key: "id") {
+  id: ID!
+  name: String @join__field(graph: CONNECTORS)
+  friends: [User]
+    @join__field(graph: CONNECTORS)
+    @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "api", http: {GET: "/users/{$this.id}/friends"}, selection: "id name"})
+}
+        "#;
+
+        // Expand connectors
+        let result = expand_connectors(original_supergraph, &Default::default())
+            .expect("expansion should succeed");
+        let ExpansionResult::Expanded { raw_sdl, .. } = result else {
+            panic!("expected expansion, got Unchanged");
+        };
+
+        // Expanded supergraph must carry connectedSelection so the query graph
+        // builder knows the friends edge yields a restricted copy of User.
+        assert!(
+            raw_sdl.contains("connectedSelection"),
+            "expanded supergraph should contain connectedSelection, got:\n{raw_sdl}"
+        );
+
+        // Build query planner from expanded supergraph.
+        // Use new_with_router_specs because the expanded SDL may reference
+        // connect/v0.1 which is an execution spec only supported by Router.
+        let supergraph = Supergraph::new_with_router_specs(&raw_sdl).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
+        // Query that needs friends.friends — not available on the restricted copy,
+        // so entity resolution (Sequence + Flatten) must be used.
+        let doc = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"{ user(id: "1") { friends { name friends { name } } } }"#,
+            "op.graphql",
+        )
+        .unwrap();
+        let plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
+        let plan_str = plan.to_string();
+
+        assert!(
+            plan_str.contains("Sequence"),
+            "plan should use Sequence for recursive fields, got:\n{plan_str}"
+        );
+        assert!(
+            plan_str.contains("Flatten"),
+            "plan should use Flatten for entity resolution, got:\n{plan_str}"
+        );
+    }
 }

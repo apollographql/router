@@ -234,6 +234,29 @@ fn add_connected_selections(
 
     // Apply annotations to the supergraph schema
     let schema = supergraph.schema_mut();
+
+    // Ensure the @join__field directive definition declares `connectedSelection`.
+    // The expansion may produce join/v0.5 SDL which lacks this argument, but we
+    // need it so the expanded supergraph passes GraphQL validation.
+    if let Some(join_field_def) = schema.directive_definitions.get_mut(&name!("join__field")) {
+        let already_has_arg = join_field_def
+            .arguments
+            .iter()
+            .any(|a| a.name == JOIN_CONNECTED_SELECTION_ARGUMENT_NAME);
+        if !already_has_arg {
+            use apollo_compiler::ast::InputValueDefinition;
+            use apollo_compiler::ast::Type;
+            let join_field_def = join_field_def.make_mut();
+            join_field_def.arguments.push(Node::new(InputValueDefinition {
+                description: None,
+                name: JOIN_CONNECTED_SELECTION_ARGUMENT_NAME,
+                ty: Node::new(Type::Named(name!("join__FieldSet"))),
+                default_value: None,
+                directives: Default::default(),
+            }));
+        }
+    }
+
     for (type_name, field_name, enum_value, selection_str) in annotations {
         let Some(ExtendedType::Object(obj)) = schema.types.get_mut(&type_name) else {
             continue;
