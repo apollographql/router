@@ -916,3 +916,92 @@ type A @key(fields: "id") {
     "###
     );
 }
+
+#[test]
+fn recursive_type_across_subgraphs() {
+    // PoC: proves the query planner already handles recursive entity resolution
+    // when a recursive type is split across subgraphs.
+    // Subgraph A has {id, name}, Subgraph B has {id, friends}.
+    // To resolve friends.name, the planner must alternate A→B→A.
+    let planner = planner!(
+        A: r#"
+        type Query {
+          user(id: ID!): User
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+          name: String
+        }
+        "#,
+        B: r#"
+        type User @key(fields: "id") {
+          id: ID!
+          friends: [User]
+        }
+        "#,
+    );
+
+    // Depth 1: need friends from B, then name from A
+    assert_plan!(
+        &planner,
+        r#"
+        {
+          user(id: "1") {
+            name
+            friends {
+              name
+            }
+          }
+        }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "A") {
+              {
+                user(id: "1") {
+                  __typename
+                  id
+                  name
+                }
+              }
+            },
+            Flatten(path: "user") {
+              Fetch(service: "B") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    friends {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "user.friends.@") {
+              Fetch(service: "A") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    name
+                  }
+                }
+              },
+            },
+          },
+        }
+        "###
+    );
+}
