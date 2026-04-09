@@ -86,7 +86,7 @@ type T @join__type(graph: ONE_QUERY_T_0, key: "id") @join__type(graph: ONE_QUERY
   policy: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @policy(policies: [["admin"]])
   requiresScopes: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @requiresScopes(scopes: ["scope"])
   tagged: TEnum @join__field(graph: ONE_QUERY_T_0, type: "TEnum") @join__field(graph: ONE_QUERY_TS_0, type: "TEnum") @tag(name: "tag")
-  r: R @join__field(graph: ONE_T_R_0, type: "R")
+  r: R @join__field(graph: ONE_T_R_0, type: "R", connectedSelection: "id")
 }
 
 type Query @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_T_R_0) @join__type(graph: TWO) {

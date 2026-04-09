@@ -65,11 +65,11 @@ type T @join__type(graph: ONE_QUERY_T2_0, key: "id id2") @join__type(graph: ONE_
   id2: ID! @join__field(graph: ONE_QUERY_T2_0, type: "ID!") @join__field(graph: ONE_QUERY_T_0, type: "ID!") @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "ID!") @join__field(graph: ONE_T_R2_0, type: "ID!") @join__field(graph: ONE_T_R3_0, type: "ID!") @join__field(graph: ONE_T_R5_0, type: "ID!")
   unselected: ID! @join__field(graph: ONE_QUERY_T2_0, type: "ID!") @join__field(graph: ONE_QUERY_T_0, type: "ID!") @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "ID!")
   accessibleByUnselected: ID! @join__field(graph: ONE_QUERY_UNSELECTED_0, type: "ID!")
-  r1: R @join__field(graph: ONE_T_R1_0, type: "R")
-  r2: R @join__field(graph: ONE_T_R2_0, type: "R")
-  r3: R @join__field(graph: ONE_T_R3_0, type: "R")
-  r4: R @join__field(graph: ONE_T_R4_0, type: "R")
-  r5: R @join__field(graph: ONE_T_R5_0, type: "R")
+  r1: R @join__field(graph: ONE_T_R1_0, type: "R", connectedSelection: "id id2")
+  r2: R @join__field(graph: ONE_T_R2_0, type: "R", connectedSelection: "id id2")
+  r3: R @join__field(graph: ONE_T_R3_0, type: "R", connectedSelection: "id id2")
+  r4: R @join__field(graph: ONE_T_R4_0, type: "R", connectedSelection: "id id2")
+  r5: R @join__field(graph: ONE_T_R5_0, type: "R", connectedSelection: "id id2")
 }
 
 type Query @join__type(graph: ONE_QUERY_T2_0) @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_QUERY_UNSELECTED_0) @join__type(graph: ONE_T_R1_0) @join__type(graph: ONE_T_R2_0) @join__type(graph: ONE_T_R3_0) @join__type(graph: ONE_T_R4_0) @join__type(graph: ONE_T_R5_0) {

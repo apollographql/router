@@ -173,11 +173,13 @@ fn contains_connectors(link: &ConnectLink, subgraph: &ValidFederationSubgraph) -
         })
 }
 
-/// Add `connectedSelection` to `@join__field` directives for recursive connector types.
+/// Add `connectedSelection` to `@join__field` directives for entity resolver connectors.
 ///
-/// When a connector is on a field whose return type matches its parent type (recursion),
+/// For any field-level entity resolver connector (not on Query/Mutation root types),
 /// this function annotates the corresponding `@join__field` directive with the connector's
 /// selection field names so the query graph builder can create restricted copy nodes.
+/// This handles both direct cycles (User.friends: [User]) and indirect cycles
+/// (Track.modules: [Module], Module.track: Track).
 fn add_connected_selections(
     original_schema: &Valid<Schema>,
     supergraph: &mut FederationSchema,
@@ -195,12 +197,11 @@ fn add_connected_selections(
             continue;
         };
 
-        let Some(base_type_name) = connector.id.directive.base_type_name(original_schema) else {
-            continue;
-        };
-
-        // Check if this field's return type matches its parent type (self-reference)
-        if base_type_name != parent_type_name {
+        // Only non-root entity resolvers need connectedSelection.
+        // Root connectors (Query/Mutation) and non-entity-resolver connectors are skipped.
+        if connector.entity_resolver.is_none()
+            || connector.id.directive.on_root_type(original_schema)
+        {
             continue;
         }
 

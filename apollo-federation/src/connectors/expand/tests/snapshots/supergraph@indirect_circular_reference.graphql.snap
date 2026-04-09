@@ -1,9 +1,9 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
-input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling_fields.graphql
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/indirect_circular_reference.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [CONNECTORS_QUERY_F_0, CONNECTORS_T_B_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [CONNECTORS_QUERY_TRACK_0, CONNECTORS_MODULE_TRACK_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) {
   query: Query
 }
 
@@ -50,20 +50,22 @@ input join__ContextArgument {
 scalar join__DirectiveArguments
 
 enum join__Graph {
-  CONNECTORS_QUERY_F_0 @join__graph(name: "connectors_Query_f_0", url: "none")
-  CONNECTORS_T_B_0 @join__graph(name: "connectors_T_b_0", url: "none")
+  CONNECTORS_MODULE_TRACK_0 @join__graph(name: "connectors_Module_track_0", url: "none")
+  CONNECTORS_QUERY_TRACK_0 @join__graph(name: "connectors_Query_track_0", url: "none")
 }
 
-type K @join__type(graph: CONNECTORS_QUERY_F_0) @join__type(graph: CONNECTORS_T_B_0) {
-  id: ID! @join__field(graph: CONNECTORS_QUERY_F_0, type: "ID!") @join__field(graph: CONNECTORS_T_B_0, type: "ID!")
+type Track @join__type(graph: CONNECTORS_MODULE_TRACK_0) @join__type(graph: CONNECTORS_QUERY_TRACK_0) {
+  id: ID! @join__field(graph: CONNECTORS_MODULE_TRACK_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_TRACK_0, type: "ID!")
+  title: String @join__field(graph: CONNECTORS_MODULE_TRACK_0, type: "String")
 }
 
-type T @join__type(graph: CONNECTORS_QUERY_F_0) @join__type(graph: CONNECTORS_T_B_0, key: "k { id }") {
-  k: K @join__field(graph: CONNECTORS_QUERY_F_0, type: "K") @join__field(graph: CONNECTORS_T_B_0, type: "K")
-  b: String @join__field(graph: CONNECTORS_T_B_0, type: "String", connectedSelection: "b")
+type Module @join__type(graph: CONNECTORS_MODULE_TRACK_0) @join__type(graph: CONNECTORS_QUERY_TRACK_0) {
+  track: Track @join__field(graph: CONNECTORS_MODULE_TRACK_0, type: "Track", connectedSelection: "id title") @join__field(graph: CONNECTORS_QUERY_TRACK_0, type: "Track")
+  id: ID! @join__field(graph: CONNECTORS_QUERY_TRACK_0, type: "ID!")
+  title: String @join__field(graph: CONNECTORS_QUERY_TRACK_0, type: "String")
 }
 
-type Query @join__type(graph: CONNECTORS_QUERY_F_0) @join__type(graph: CONNECTORS_T_B_0) {
-  f: T @join__field(graph: CONNECTORS_QUERY_F_0, type: "T")
-  _: ID @inaccessible @join__field(graph: CONNECTORS_T_B_0, type: "ID")
+type Query @join__type(graph: CONNECTORS_MODULE_TRACK_0) @join__type(graph: CONNECTORS_QUERY_TRACK_0) {
+  _: ID @inaccessible @join__field(graph: CONNECTORS_MODULE_TRACK_0, type: "ID")
+  track(id: ID!): Track @join__field(graph: CONNECTORS_QUERY_TRACK_0, type: "Track")
 }
