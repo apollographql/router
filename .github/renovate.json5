@@ -47,6 +47,7 @@
       matchManagers: 'regex',
       groupName: 'rustc',
     },
+
     // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
     // underlying package is deprecated. The package works as-is and we can
     // consider replacing it in the future. We'll allow 0.8.x just in case
@@ -78,6 +79,20 @@
       automerge: true,
       minimumReleaseAge: '5 days',
     },
+
+    // Auto-merge non-major updates from other package managers (these usually don't come in batches)
+    {
+      matchManagers: ['docker', 'mise', 'github-actions', 'circleci'],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'pin',
+        'digest',
+      ],
+      minimumReleaseAge: '5 days',
+      automerge: true,
+    },
+
     // We're currently constrained in our ability to update the `tracing`
     // packages to the latest versions because of our usage.  As an extension
     // of the same concern, we cannot update our `opentelemetry` packages since
