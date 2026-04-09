@@ -254,11 +254,6 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
 - `apollo.router.operations.batching` - A counter of the number of query batches received by the router.
 - `apollo.router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
 
-## Limits
-
-- `apollo.router.limits.subgraph_response_size.exceeded` - A counter of subgraph responses aborted because their body exceeded the configured [`http_max_response_bytes`](/router/security/request-limits#http_max_response_bytes) limit.
-  - `subgraph.name`: The name of the subgraph whose response was aborted.
-
 ## GraphOS Studio
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the router.
