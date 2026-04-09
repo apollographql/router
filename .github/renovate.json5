@@ -92,7 +92,6 @@
       ],
       groupName: 'cargo tracing packages',
       groupSlug: 'cargo-tracing-packages',
-      dependencyDashboardApproval: true,
       matchPackageNames: [
         '/^tracing/',
         '/^opentelemetry/',
