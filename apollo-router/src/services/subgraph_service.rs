@@ -59,6 +59,8 @@ use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::file_uploads;
+use http_body_util::LengthLimitError;
+
 use crate::plugins::limits::SubgraphResponseSizeLimit;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
@@ -1097,10 +1099,15 @@ async fn do_fetch(
                     .await
                     .map_err(|err| {
                         tracing::error!(fetch_error = ?err);
+                        let reason = if err.downcast_ref::<LengthLimitError>().is_some() {
+                            format!("subgraph response body exceeded limit of {limit} bytes")
+                        } else {
+                            err.to_string()
+                        };
                         FetchError::SubrequestHttpError {
                             status_code: Some(parts.status.as_u16()),
                             service: service_name.to_string(),
-                            reason: err.to_string(),
+                            reason,
                         }
                     })
             }
@@ -2199,10 +2206,7 @@ mod tests {
             errors[0].message
         );
         assert_eq!(
-            errors[0]
-                .extensions
-                .get("code")
-                .and_then(|v| v.as_str()),
+            errors[0].extensions.get("code").and_then(|v| v.as_str()),
             Some("SUBREQUEST_HTTP_ERROR")
         );
     }

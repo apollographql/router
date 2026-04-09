@@ -6,7 +6,6 @@ use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::Empty;
 use http_body_util::Full;
-use http_body_util::LengthLimitError;
 use http_body_util::Limited;
 use http_body_util::StreamBody;
 use http_body_util::combinators::UnsyncBoxBody;
@@ -55,17 +54,7 @@ where
     B: HttpBody,
     B::Error: Into<BoxError>,
 {
-    Limited::new(body, limit)
-        .collect()
-        .await
-        .map(|collected| collected.to_bytes())
-        .map_err(|e| {
-            if e.downcast_ref::<LengthLimitError>().is_some() {
-                format!("subgraph response body exceeded limit of {limit} bytes").into()
-            } else {
-                e
-            }
-        })
+    Ok(Limited::new(body, limit).collect().await?.to_bytes())
 }
 
 #[cfg(test)]
@@ -90,15 +79,17 @@ mod tests {
 
     #[tokio::test]
     async fn into_bytes_limited_over_limit() {
+        use http_body_util::LengthLimitError;
+
         let body = from_bytes("hello world");
         let result = into_bytes_limited(body, 5).await;
         assert!(result.is_err());
         assert!(
             result
                 .unwrap_err()
-                .to_string()
-                .contains("exceeded limit of 5 bytes"),
-            "error message should mention the limit"
+                .downcast_ref::<LengthLimitError>()
+                .is_some(),
+            "error should be a LengthLimitError"
         );
     }
 }
