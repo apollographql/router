@@ -622,7 +622,7 @@ impl Merger {
         {
             let imports = directives
                 .iter()
-                .map(|(original, alias)| {
+                .map(|(alias, original)| {
                     if *alias == *original {
                         Import {
                             alias: None,
@@ -825,9 +825,6 @@ impl Merger {
             for (name, definition) in subgraph.schema().schema().directive_definitions.iter() {
                 if self.merged.get_directive_definition(name).is_none()
                     && self.is_merged_directive_definition(&subgraph.name, definition)
-                    && !self
-                        .compose_directive_manager
-                        .has_latest_directive_definition(name)
                 {
                     let pos = DirectiveDefinitionPosition {
                         directive_name: name.clone(),
@@ -1687,17 +1684,13 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // We should skip the supergraph specific directives, that is the @core and @join directives.
 
         // Collect all directive names from both the merged schema and the compose directive manager
-        let mut directive_names: IndexSet<Name> = self
+        let directive_names: IndexSet<Name> = self
             .merged
             .schema()
             .directive_definitions
             .keys()
             .cloned()
             .collect();
-
-        for name in self.compose_directive_manager.composed_directive_names() {
-            directive_names.insert(name.clone());
-        }
 
         for directive_name in directive_names {
             if self
@@ -2326,7 +2319,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 let mut should_include_as_join_directive = false;
 
                 if directive.name == link_directive_name {
-                    if let Ok(link) = Link::from_directive_application(directive) {
+                    if let Ok(link) = Link::from_directive_application(directive, schema.schema()) {
                         should_include_as_join_directive =
                             self.should_use_join_directive_for_url(&link.url);
 
