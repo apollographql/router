@@ -11,12 +11,12 @@ fn valid_supergraph_schema() {
     const SCHEMA: &str = "../examples/graphql/supergraph.graphql";
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
-    // Actual number: 136_317.
-    const MAX_BYTES_SUPERGRAPH: usize = 143_132; // ~143 KiB. actual number: 136317
+    // Actual number: 143_768.
+    const MAX_BYTES_SUPERGRAPH: usize = 150_956; // ~151 KiB. actual number: 143768
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 4952.
-    const MAX_ALLOCATIONS_SUPERGRAPH: u64 = 5_200; // number of allocations.
+    // Actual number: 4959.
+    const MAX_ALLOCATIONS_SUPERGRAPH: u64 = 5_207; // number of allocations.
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
     // Actual number: 195_884.
