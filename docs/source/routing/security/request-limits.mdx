@@ -380,7 +380,7 @@ The per-subgraph entry under `subgraphs` takes precedence over `all`. If only `a
 
 ### Choosing a limit value
 
-Before setting a limit, measure the actual response sizes your subgraphs return. Enable the built-in `http.client.response.body.size` histogram to collect a distribution of subgraph response sizes:
+To determine the appropriate limit, measure the actual response sizes your subgraphs return. Use the built-in `http.client.response.body.size` histogram to collect a distribution of subgraph response sizes:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -394,12 +394,12 @@ This histogram is disabled by default. Once enabled, use it to observe the 95th 
 
 ### Monitoring exceeded limits
 
-When a subgraph response is aborted because it exceeds the configured limit:
+After a subgraph response is aborted because it exceeds the configured limit:
 
 - The router increments the `apollo.router.limits.subgraph_response_size.exceeded` counter with a `subgraph.name` attribute identifying the affected subgraph.
-- The subgraph request span gets an `apollo.subgraph.response.aborted` attribute set to `"response_size_limit"`.
+- The subgraph request span gets an `apollo.subgraph.response.aborted` attribute set to `response_size_limit`.
 
-Monitor the counter to detect misconfigured limits or misbehaving subgraphs. The span attribute makes limit-triggered aborts filterable in your tracing backend.
+Monitor the counter to detect misconfigured limits or misbehaving subgraphs. Use the span attribute to filter limit-triggered aborts in your tracing backend.
 
 ## Connector response size limits
 
@@ -411,7 +411,7 @@ This limit is enforced as the response body streams in — the router stops read
 
 There is no default limit; connector responses are unrestricted unless you configure this option.
 
-Sources are identified by `subgraph_name.source_name` (matching the key format used in connector configuration). You can set a global default that applies to all sources, and optionally override it per source:
+Identify sources by `subgraph_name.source_name` (matching the key format used in connector configuration). You can set a global default that applies to all sources, and optionally override it per source:
 
 ```yaml title="router.yaml"
 limits:
@@ -427,7 +427,7 @@ The per-source entry under `sources` takes precedence over `all`.
 
 ### Choosing a limit value
 
-Enable the built-in `http.client.response.body.size` histogram to measure actual connector response sizes before setting a limit:
+The built-in `http.client.response.body.size` histogram measures actual connector response sizes:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -442,4 +442,4 @@ telemetry:
 When a connector response is aborted because it exceeds the configured limit:
 
 - The router increments the `apollo.router.limits.connector_response_size.exceeded` counter with a `connector.source` attribute identifying the affected source.
-- The connector request span gets an `apollo.connector.response.aborted` attribute set to `"response_size_limit"`.
+- The connector request span gets an `apollo.connector.response.aborted` attribute set to `response_size_limit`.
