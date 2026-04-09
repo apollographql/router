@@ -406,46 +406,13 @@ impl<'schema> SelectionValidator<'schema> {
 impl<'schema> SelectionValidator<'schema> {
     fn check_for_circular_reference(
         &self,
-        field_def: &Node<FieldDefinition>,
-        current_ty: SchemaTypeRef<'schema>,
+        _field_def: &Node<FieldDefinition>,
+        _current_ty: SchemaTypeRef<'schema>,
     ) -> Result<(), Message> {
-        for (depth, seen_part) in self.path_with_root().enumerate() {
-            let (seen_type, ancestor_field) = match seen_part {
-                PathPart::Root(root) => (root, None),
-                PathPart::Field { ty, definition } => (ty, Some(definition)),
-            };
-
-            if seen_type == current_ty {
-                return Err(Message {
-                    code: Code::CircularReference,
-                    message: format!(
-                        "Circular reference detected in {coordinate}: type `{type_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        coordinate = &self.coordinate,
-                        selection_path = self
-                            .path_with_root()
-                            .map(|part| match part {
-                                PathPart::Root(ty) => ty.name().as_str(),
-                                PathPart::Field { definition, .. } => definition.name.as_str(),
-                            })
-                            .join("."),
-                        type_name = current_ty.name(),
-                    ),
-                    // TODO: make a helper function for easier range collection
-                    locations: if depth > 1 {
-                        ancestor_field
-                            .and_then(|def| def.line_column_range(&self.schema.sources))
-                            .into_iter()
-                            .chain(field_def.line_column_range(&self.schema.sources))
-                            .collect()
-                    } else {
-                        field_def
-                            .line_column_range(&self.schema.sources)
-                            .into_iter()
-                            .collect()
-                    },
-                });
-            }
-        }
+        // Circular references in selections are now allowed.
+        // The selection string is inherently finite, so walk_type_with_shape
+        // naturally terminates. Recursive types are handled by restricted
+        // copy nodes in the query graph.
         Ok(())
     }
 
