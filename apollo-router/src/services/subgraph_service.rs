@@ -17,6 +17,7 @@ use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::response::Parts;
 use http_body::Body;
+use http_body_util::LengthLimitError;
 use hyper_rustls::ConfigBuilderExt;
 use itertools::Itertools;
 use mediatype::MediaType;
@@ -59,8 +60,6 @@ use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::file_uploads;
-use http_body_util::LengthLimitError;
-
 use crate::plugins::limits::SubgraphResponseSizeLimit;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
@@ -2192,7 +2191,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|mut e| e.insert(SubgraphResponseSizeLimit(10)));
+            .with_lock(|e| e.insert(SubgraphResponseSizeLimit(10)));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2241,7 +2240,7 @@ mod tests {
         // Limit of 1000 bytes — well above {"data": null} (14 bytes)
         context
             .extensions()
-            .with_lock(|mut e| e.insert(SubgraphResponseSizeLimit(1000)));
+            .with_lock(|e| e.insert(SubgraphResponseSizeLimit(1000)));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service

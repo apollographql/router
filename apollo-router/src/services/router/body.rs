@@ -57,6 +57,22 @@ where
     Ok(Limited::new(body, limit).collect().await?.to_bytes())
 }
 
+/// Get a body's contents as a utf-8 string for use in test assertions, or return an error.
+pub async fn into_string<B>(input: B) -> Result<String, AxumError>
+where
+    B: HttpBody,
+    B::Error: Into<axum::BoxError>,
+{
+    let bytes = input
+        .collect()
+        .await
+        .map_err(AxumError::new)?
+        .to_bytes()
+        .to_vec();
+    let string = String::from_utf8(bytes).map_err(AxumError::new)?;
+    Ok(string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,20 +108,4 @@ mod tests {
             "error should be a LengthLimitError"
         );
     }
-}
-
-/// Get a body's contents as a utf-8 string for use in test assertions, or return an error.
-pub async fn into_string<B>(input: B) -> Result<String, AxumError>
-where
-    B: HttpBody,
-    B::Error: Into<axum::BoxError>,
-{
-    let bytes = input
-        .collect()
-        .await
-        .map_err(AxumError::new)?
-        .to_bytes()
-        .to_vec();
-    let string = String::from_utf8(bytes).map_err(AxumError::new)?;
-    Ok(string)
 }

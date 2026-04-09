@@ -17,7 +17,6 @@ use apollo_federation::connectors::runtime::responses::MappedResponse;
 use apollo_federation::connectors::runtime::responses::deserialize_response;
 use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
-use bytes::Bytes;
 use http::response::Parts;
 use http_body_util::BodyExt;
 use http_body_util::LengthLimitError;
