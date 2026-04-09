@@ -18,6 +18,7 @@ use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
+use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::operation::Selection;
@@ -1173,6 +1174,7 @@ impl FederatedQueryGraphBuilder {
         // Note that @provides must be handled last when building since it requires copying nodes
         // and their edges, and it's easier to reason about this if we know previous
         self.handle_provides()?;
+        self.handle_connected_selection()?;
         // The exception to the above rule is @interaceObject handling, where we explicitly don't
         // want to add self-edges for copied @provides nodes. (See the comments in this method for
         // more details).
@@ -2202,6 +2204,277 @@ impl FederatedQueryGraphBuilder {
             new_edge.add_to(base)?;
         }
         Ok((new_node, type_pos))
+    }
+
+    /// Handle fields with `connectedSelection` on `@join__field` by creating restricted copy
+    /// nodes that only have the specified field edges plus key resolution edges.
+    fn handle_connected_selection(&mut self) -> Result<(), FederationError> {
+        // Get join spec from supergraph
+        let (_, join_spec, _) =
+            validate_supergraph_for_query_planning(&self.supergraph_schema)?;
+        let join_field_def =
+            join_spec.field_directive_definition(&self.supergraph_schema)?;
+        let join_field_name = join_field_def.name.clone();
+
+        // Build graph enum value -> source name mapping
+        let graph_enum_to_source = self.build_graph_enum_to_source_map(join_spec)?;
+
+        // Find max existing provide_id
+        let mut provide_id: u32 = self
+            .base
+            .query_graph
+            .graph
+            .node_weights()
+            .filter_map(|n| n.provide_id)
+            .max()
+            .unwrap_or(0);
+
+        // Collect restrictions from supergraph @join__field directives
+        // Key: (source_name, type_name, field_name) -> connected_selection string
+        let mut restrictions: IndexMap<(Arc<str>, Name, Name), String> = IndexMap::default();
+
+        for (type_name, type_def) in &self.supergraph_schema.schema().types {
+            let fields = match type_def {
+                ExtendedType::Object(obj) => &obj.fields,
+                ExtendedType::Interface(iface) => &iface.fields,
+                _ => continue,
+            };
+            for (field_name, field_def) in fields {
+                for directive in field_def.directives.get_all(&join_field_name) {
+                    let args = join_spec.field_directive_arguments(directive)?;
+                    if let (Some(graph_enum_value), Some(connected_sel)) =
+                        (args.graph, args.connected_selection)
+                    {
+                        if let Some(source_name) = graph_enum_to_source.get(&graph_enum_value) {
+                            restrictions.insert(
+                                (source_name.clone(), type_name.clone(), field_name.clone()),
+                                connected_sel.to_string(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if restrictions.is_empty() {
+            return Ok(());
+        }
+
+        // Now find matching edges and create restricted copies
+        let edges: Vec<_> = self.base.query_graph.graph.edge_indices().collect();
+        for edge in edges {
+            let edge_weight = self.base.query_graph.edge_weight(edge)?;
+            let QueryGraphEdgeTransition::FieldCollection {
+                source,
+                field_definition_position,
+                is_part_of_provides,
+            } = &edge_weight.transition
+            else {
+                continue;
+            };
+            if *is_part_of_provides {
+                continue;
+            }
+            if *source == self.base.query_graph.current_source {
+                continue;
+            }
+
+            let type_name = field_definition_position.type_name().clone();
+            let field_name = field_definition_position.field_name().clone();
+            let source = source.clone();
+
+            let key = (source.clone(), type_name, field_name);
+            let Some(connected_sel) = restrictions.get(&key) else {
+                continue;
+            };
+
+            // Parse the connected selection as a field set
+            let (head, tail) = self.base.query_graph.edge_endpoints(edge)?;
+            let tail_weight = self.base.query_graph.node_weight(tail)?;
+            let QueryGraphNodeType::SchemaType(tail_type_pos) = &tail_weight.type_ else {
+                continue;
+            };
+
+            let schema = self.base.query_graph.schema_by_source(&source)?;
+            let tail_type_name = tail_type_pos.type_name().clone();
+            let conditions = parse_field_set(schema, tail_type_name, connected_sel, true)?;
+
+            provide_id += 1;
+            let new_tail =
+                self.create_restricted_copy(tail, &source, &conditions, provide_id)?;
+            Self::update_edge_tail(&mut self.base, edge, new_tail)?;
+            // Mark ancestors of the head as having reachable "cross-subgraph"
+            // edges. Even though the restricted copy is in the same subgraph,
+            // it has fewer fields, so the planner must not short-circuit.
+            self.base
+                .mark_has_reachable_cross_subgraph_edges_for_ancestors(head)?;
+        }
+
+        Ok(())
+    }
+
+    /// Build a mapping from join__Graph enum value names to source names.
+    fn build_graph_enum_to_source_map(
+        &self,
+        join_spec: &'static JoinSpecDefinition,
+    ) -> Result<IndexMap<Name, Arc<str>>, FederationError> {
+        let graph_directive_def =
+            join_spec.graph_directive_definition(&self.supergraph_schema)?;
+        let graph_enum_name = self
+            .supergraph_schema
+            .schema()
+            .types
+            .iter()
+            .find_map(|(name, ty)| {
+                if matches!(ty, ExtendedType::Enum(_)) && name.as_str().ends_with("Graph") {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| FederationError::internal("Missing join__Graph enum"))?;
+
+        let graph_enum = match self.supergraph_schema.schema().types.get(&graph_enum_name) {
+            Some(ExtendedType::Enum(e)) => e,
+            _ => return Err(FederationError::internal("join__Graph is not an enum")),
+        };
+
+        let mut result = IndexMap::default();
+        for (enum_value_name, enum_value_def) in &graph_enum.values {
+            if let Some(directive) = enum_value_def.directives.get(&graph_directive_def.name) {
+                let args = join_spec.graph_directive_arguments(directive)?;
+                let source_name: Arc<str> = args.name.into();
+                if self.base.query_graph.sources.contains_key(&source_name) {
+                    result.insert(enum_value_name.clone(), source_name);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Create a restricted copy of a node with ONLY the specified fields + key edges.
+    fn create_restricted_copy(
+        &mut self,
+        node: NodeIndex,
+        source: &Arc<str>,
+        restricted_fields: &SelectionSet,
+        provide_id: u32,
+    ) -> Result<NodeIndex, FederationError> {
+        let node_weight = self.base.query_graph.node_weight(node)?;
+        let QueryGraphNodeType::SchemaType(type_pos) = node_weight.type_.clone() else {
+            return Err(FederationError::internal(
+                "connectedSelection on non-schema-type node",
+            ));
+        };
+        // Create new node with correct source
+        let current_source = self.base.query_graph.current_source.clone();
+        self.base.query_graph.current_source = source.clone();
+        let new_node = self.base.create_new_node(type_pos.clone().into())?;
+        self.base.query_graph.current_source = current_source;
+
+        let new_node_weight = self.base.query_graph.node_weight_mut(new_node)?;
+        new_node_weight.provide_id = Some(provide_id);
+        // Restricted copies have fewer fields than the schema type, so we must
+        // prevent the "fully local" optimization from short-circuiting. Setting
+        // this to true forces the planner to process fields individually, which
+        // lets it discover that some fields require entity resolution.
+        new_node_weight.has_reachable_cross_subgraph_edges = true;
+
+        // Copy ONLY KeyResolution and RootTypeResolution edges
+        let mut edges_to_add = Vec::new();
+        for edge_ref in self
+            .base
+            .query_graph
+            .out_edges_with_federation_self_edges(node)
+        {
+            match &edge_ref.weight().transition {
+                QueryGraphEdgeTransition::KeyResolution
+                | QueryGraphEdgeTransition::RootTypeResolution { .. } => {
+                    edges_to_add.push(QueryGraphEdgeData {
+                        head: new_node,
+                        tail: edge_ref.target(),
+                        transition: edge_ref.weight().transition.clone(),
+                        conditions: edge_ref.weight().conditions.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+        for edge_data in edges_to_add {
+            edge_data.add_to(&mut self.base)?;
+        }
+
+        // Add FieldCollection edges for restricted fields only
+        self.add_restricted_field_edges(node, new_node, source, restricted_fields, provide_id)?;
+
+        // Register in types_to_nodes for the federated graph
+        let current_source = self.base.query_graph.current_source.clone();
+        self.base.query_graph.current_source = FEDERATED_GRAPH_ROOT_SOURCE.into();
+        if let Ok(nodes) = self.base.query_graph.types_to_nodes_mut() {
+            if let Some(node_set) = nodes.get_mut(type_pos.type_name()) {
+                node_set.insert(new_node);
+            }
+        }
+        self.base.query_graph.current_source = current_source;
+
+        Ok(new_node)
+    }
+
+    /// Add FieldCollection edges to a restricted copy for only the specified fields.
+    fn add_restricted_field_edges(
+        &mut self,
+        original_node: NodeIndex,
+        restricted_node: NodeIndex,
+        source: &Arc<str>,
+        fields: &SelectionSet,
+        provide_id: u32,
+    ) -> Result<(), FederationError> {
+        for selection in fields.selections.values() {
+            let Selection::Field(field_selection) = selection else {
+                continue;
+            };
+
+            // Find the matching FieldCollection edge on the original node
+            let existing = self
+                .base
+                .query_graph
+                .out_edges_with_federation_self_edges(original_node)
+                .into_iter()
+                .find_map(|edge_ref| {
+                    if let QueryGraphEdgeTransition::FieldCollection {
+                        field_definition_position,
+                        ..
+                    } = &edge_ref.weight().transition
+                    {
+                        if field_definition_position.field_name() == field_selection.field.name() {
+                            Some((edge_ref.weight().transition.clone(), edge_ref.target()))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                });
+
+            if let Some((transition, tail)) = existing {
+                if let Some(nested_selections) = &field_selection.selection_set {
+                    // Nested selection - create another restricted copy for the next level
+                    let new_tail = self.create_restricted_copy(
+                        tail,
+                        source,
+                        nested_selections,
+                        provide_id,
+                    )?;
+                    self.base
+                        .add_edge(restricted_node, new_tail, transition, None, None)?;
+                } else {
+                    // Leaf field - point to same tail as original
+                    self.base
+                        .add_edge(restricted_node, tail, transition, None, None)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Handle @interfaceObject by adding the appropriate fake-downcast self-edges.

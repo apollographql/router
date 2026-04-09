@@ -1449,4 +1449,137 @@ type User
             serde_json::from_str(&serialized).expect("Deserializing");
         assert!(deserialized.best_plan_cost.is_nan());
     }
+
+    #[test]
+    fn connected_selection_creates_restricted_copy() {
+        // Hand-crafted supergraph with connectedSelection on friends field.
+        // This tells the query graph builder that traversing friends yields
+        // a User restricted to {id, name} — no friends edge on the copy.
+        let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!], connectedSelection: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__DirectiveArguments
+scalar join__FieldSet
+scalar link__Import
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__FieldValue
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+enum join__Graph {
+  CONNECTOR @join__graph(name: "connector", url: "")
+}
+
+type Query @join__type(graph: CONNECTOR) {
+  user(id: ID!): User @join__field(graph: CONNECTOR)
+}
+
+type User @join__type(graph: CONNECTOR, key: "id") {
+  id: ID! @join__field(graph: CONNECTOR)
+  name: String @join__field(graph: CONNECTOR)
+  friends: [User] @join__field(graph: CONNECTOR, connectedSelection: "id name")
+}
+        "#;
+
+        let supergraph = Supergraph::new(supergraph_sdl).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
+        // Query that only needs fields available on the restricted copy.
+        // Should NOT require entity resolution.
+        let doc = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"{ user(id: "1") { friends { name } } }"#,
+            "op.graphql",
+        ).unwrap();
+        let plan = planner.build_query_plan(&doc, None, Default::default()).unwrap();
+        // name IS on the restricted copy, so single fetch
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "connector") {
+            {
+              user(id: "1") {
+                friends {
+                  name
+                }
+              }
+            }
+          },
+        }
+        "###);
+
+        // Query that needs friends.friends — NOT on restricted copy.
+        // Requires entity resolution (re-enter connector via key).
+        let doc2 = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"{ user(id: "1") { friends { name friends { name } } } }"#,
+            "op.graphql",
+        ).unwrap();
+        let plan2 = planner.build_query_plan(&doc2, None, Default::default()).unwrap();
+        // friends is NOT on the restricted copy, so needs entity resolution
+        insta::assert_snapshot!(plan2, @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "connector") {
+              {
+                user(id: "1") {
+                  friends {
+                    __typename
+                    id
+                    name
+                  }
+                }
+              }
+            },
+            Flatten(path: "user.friends.@") {
+              Fetch(service: "connector") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    friends {
+                      name
+                    }
+                  }
+                }
+              },
+            },
+          },
+        }
+        "###);
+    }
 }
