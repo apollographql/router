@@ -22,8 +22,6 @@ use crate::query_planner::subscription::SubscriptionNode;
 /// its existence.
 const SUBGRAPH_NAME_EXTENSION_KEY: &str = "apollo.private.subgraph.name";
 
-pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-
 // XXX(@goto-bus-stop): The `SubscriptionRequest` should not be an enum branch here in the future.
 // The information it represents must be isolated to the subscription plugin.
 #[allow(clippy::large_enum_variant)]

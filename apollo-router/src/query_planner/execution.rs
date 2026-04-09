@@ -44,8 +44,7 @@ use crate::services::FetchRequest;
 use crate::services::fetch;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::SubscriptionRequest;
-use crate::services::fetch_service::FetchServiceFactory;
-use crate::services::new_service::ServiceFactory;
+use crate::services::fetch_service::FetchService;
 use crate::spec::Query;
 use crate::spec::Schema;
 
@@ -55,7 +54,7 @@ impl QueryPlan {
     pub(crate) async fn execute<'a>(
         &self,
         context: &'a Context,
-        service_factory: &'a Arc<FetchServiceFactory>,
+        service_factory: &'a FetchService,
         // The original supergraph request is used to populate variable values and for plugin
         // features like propagating headers or subgraph telemetry based on supergraph request
         // values.
@@ -117,7 +116,7 @@ impl QueryPlan {
 // holds the query plan executon arguments that do not change between calls
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
-    pub(crate) service_factory: &'a Arc<FetchServiceFactory>,
+    pub(crate) service_factory: &'a FetchService,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) subgraph_schemas: &'a Arc<SubgraphSchemas>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
@@ -239,7 +238,7 @@ impl PlanNode {
                             &None,
                         ) {
                             Some(variables) => {
-                                let service = parameters.service_factory.create();
+                                let service = parameters.service_factory.clone();
                                 let request = fetch::Request::Subscription(
                                     SubscriptionRequest::builder()
                                         .context(parameters.context.clone())
@@ -295,7 +294,7 @@ impl PlanNode {
                         ) {
                             Some(variables) => {
                                 let paths = variables.inverted_paths.clone();
-                                let service = parameters.service_factory.create();
+                                let service = parameters.service_factory.clone();
                                 let request = fetch::Request::Fetch(
                                     FetchRequest::builder()
                                         .context(parameters.context.clone())

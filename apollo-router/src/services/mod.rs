@@ -8,7 +8,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum::Display;
 
-pub(crate) use self::execution::service::*;
 pub(crate) use self::query_planner::*;
 pub(crate) use self::subgraph_service::*;
 pub(crate) use self::supergraph::service::*;
