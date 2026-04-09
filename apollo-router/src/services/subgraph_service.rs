@@ -1410,6 +1410,21 @@ mod tests {
         serve(listener, handle).await.unwrap();
     }
 
+    // starts a local server emulating a subgraph returning a large JSON response
+    async fn emulate_subgraph_large_response(listener: TcpListener) {
+        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            // 100 bytes of JSON — enough to exceed a small limit in tests
+            let body = format!(r#"{{"data":{{"field":"{}"}}}}"#, "x".repeat(80));
+            Ok(http::Response::builder()
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .status(StatusCode::OK)
+                .body(body.into())
+                .unwrap())
+        }
+
+        serve(listener, handle).await.unwrap();
+    }
+
     // starts a local server emulating a subgraph returning bad response format
     async fn emulate_subgraph_application_graphql_response(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
@@ -2138,6 +2153,99 @@ mod tests {
         assert_eq!(
             response.response.body().errors[0].message,
             "service 'test' response was malformed: expected value at line 1 column 1"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_response_size_limit_exceeded() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_subgraph_large_response(listener));
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                crate::configuration::shared::Client::default(),
+            ),
+        )
+        .expect("can create a SubgraphService");
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|mut e| e.insert(SubgraphResponseSizeLimit(10)));
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
+                    .context(context)
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        let errors = &response.response.body().errors;
+        assert!(!errors.is_empty(), "expected an error for exceeded limit");
+        assert!(
+            errors[0].message.contains("exceeded limit of 10 bytes"),
+            "unexpected error message: {}",
+            errors[0].message
+        );
+        assert_eq!(
+            errors[0]
+                .extensions
+                .get("code")
+                .and_then(|v| v.as_str()),
+            Some("SUBREQUEST_HTTP_ERROR")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_response_size_limit_under() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_subgraph_application_json_response(listener));
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                crate::configuration::shared::Client::default(),
+            ),
+        )
+        .expect("can create a SubgraphService");
+
+        let context = Context::new();
+        // Limit of 1000 bytes — well above {"data": null} (14 bytes)
+        context
+            .extensions()
+            .with_lock(|mut e| e.insert(SubgraphResponseSizeLimit(1000)));
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
+                    .context(context)
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            response.response.body().errors.is_empty(),
+            "expected no errors when response is under the limit"
         );
     }
 
