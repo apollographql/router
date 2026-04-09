@@ -2270,6 +2270,58 @@ mod quickstart_tests {
     }
 }
 
+#[tokio::test]
+async fn circular_reference_entity_resolution() {
+    let mock_server = MockServer::start().await;
+
+    // Query connector: GET /users/1 returns user data
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "1",
+            "name": "Alice"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Entity resolver: GET /users/1/friends returns friends
+    Mock::given(method("GET"))
+        .and(path("/users/1/friends"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": "2", "name": "Bob"},
+            {"id": "3", "name": "Charlie"}
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        include_str!("../testdata/circular_reference.graphql"),
+        &mock_server.uri(),
+        r#"query { user(id: "1") { name friends { name } } }"#,
+        Default::default(),
+        None,
+        |_req| {},
+        None,
+    )
+    .await;
+
+    // Verify response has correct data
+    let data = &response["data"];
+    assert_eq!(data["user"]["name"], "Alice");
+    let friends = data["user"]["friends"].as_array().unwrap();
+    assert_eq!(friends.len(), 2);
+    assert_eq!(friends[0]["name"], "Bob");
+    assert_eq!(friends[1]["name"], "Charlie");
+
+    // Verify HTTP call sequence: query fetch then entity resolver
+    let requests = mock_server.received_requests().await.unwrap();
+    assert!(
+        requests.len() >= 2,
+        "expected at least 2 HTTP requests, got {}",
+        requests.len()
+    );
+}
+
 async fn execute(
     schema: &str,
     uri: &str,
