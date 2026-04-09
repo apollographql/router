@@ -76,7 +76,7 @@ struct Shaping {
         deserialize_with = "humantime_serde::deserialize",
         default = "default_pool_idle_timeout"
     )]
-    #[schemars(with = "String", default = "default_pool_idle_timeout")]
+    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
     pool_idle_timeout: Option<Duration>,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
@@ -193,7 +193,7 @@ struct ConnectorShaping {
         deserialize_with = "humantime_serde::deserialize",
         default = "default_pool_idle_timeout"
     )]
-    #[schemars(with = "String", default = "default_pool_idle_timeout")]
+    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
     pool_idle_timeout: Option<Duration>,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.

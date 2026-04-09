@@ -31,7 +31,7 @@ pub(crate) struct Client {
         deserialize_with = "humantime_serde::deserialize",
         default = "default_pool_idle_timeout"
     )]
-    #[schemars(with = "String", default = "default_pool_idle_timeout")]
+    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
     /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
     pub(crate) pool_idle_timeout: Option<Duration>,
 
