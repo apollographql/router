@@ -189,7 +189,7 @@ pub(crate) struct RedisCacheStorage {
     reset_ttl: bool,
     // the wrapped client config, comes from the router config
     redis_client_config: RedisClientConfig,
-    client_recreation_lock: Arc<Mutex<()>>,
+    pool_recreation_lock: Arc<Mutex<()>>,
 }
 
 /// Configuration for the redis client, pulled from fields of the router config
@@ -332,7 +332,7 @@ impl RedisCacheStorage {
             ttl: config.ttl,
             reset_ttl: config.reset_ttl,
             is_cluster,
-            client_recreation_lock: Arc::new(Mutex::new(())),
+            pool_recreation_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -383,7 +383,7 @@ impl RedisCacheStorage {
             is_cluster,
             reset_ttl: config.reset_ttl,
             redis_client_config,
-            client_recreation_lock: Arc::new(Mutex::new(())),
+            pool_recreation_lock: Arc::new(Mutex::new(())),
         };
 
         storage.create_client().await
@@ -393,7 +393,7 @@ impl RedisCacheStorage {
     /// client, ttl reset) to create a fully fledged RedisCacheStorage
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn create_client(self) -> Result<Self, BoxError> {
-        let inner = self.create_inner_client().await?;
+        let inner = self.create_client_pool().await?;
         *self.inner.write() = inner;
         Ok(self)
     }
@@ -402,7 +402,7 @@ impl RedisCacheStorage {
     // NOTE: this splits up the actual inner's creation from the RedisCacheStorage creation because
     // we need to have a way to recreate the inner client when it errors out but we don't need to
     // recreate all of RedisCacheStorage
-    async fn create_inner_client(&self) -> Result<Option<DropSafeRedisPool>, BoxError> {
+    async fn create_client_pool(&self) -> Result<Option<DropSafeRedisPool>, BoxError> {
         let pooled_client = Builder::from_config(self.redis_client_config.client_config.clone())
             .with_config(|client_config| {
                 if self.is_cluster {
@@ -630,7 +630,18 @@ impl RedisCacheStorage {
         match maybe_client {
             Some(client) => Ok(client),
             None => {
-                let _guard = self.client_recreation_lock.lock().await;
+                let _guard = if let Ok(lock) = self.pool_recreation_lock.try_lock() {
+                    lock
+                } else {
+                    let error = RedisError::new(
+                        RedisErrorKind::Unknown,
+                        format!(
+                            "Error: attempting to send a command to Redis while its client pool is recreating"
+                        ),
+                    );
+                    record_redis_error(&error, self.redis_client_config.caller, "client");
+                    return Err(error);
+                };
                 // WARN: don't remove this; this makes sure that once we have a lock, we aren't
                 // recreating the client. Multiple recreations can happen if we queue up tasks
                 // waiting for locks and we need to make sure that after we've acquired a lock, we
@@ -640,33 +651,41 @@ impl RedisCacheStorage {
                     return Ok(client);
                 }
 
-                let new_inner = match self.create_inner_client().await {
-                    Ok(new_inner) => new_inner,
-                    Err(e) => {
-                        let error = RedisError::new(
-                            RedisErrorKind::Unknown,
-                            format!("Error attempting to recreate client: {e:?}"),
-                        );
-                        record_redis_error(&error, self.redis_client_config.caller, "client");
+                let cloned_self = self.clone();
+                tokio::task::spawn(async move {
+                    let new_inner = match cloned_self.create_client_pool().await {
+                        Ok(new_inner) => new_inner,
+                        Err(e) => {
+                            let error = RedisError::new(
+                                RedisErrorKind::Unknown,
+                                format!("Error attempting to recreate client: {e:?}"),
+                            );
+                            record_redis_error(
+                                &error,
+                                cloned_self.redis_client_config.caller,
+                                "client",
+                            );
 
-                        return Err(error);
-                    }
-                };
+                            return Err(error);
+                        }
+                    };
 
-                {
-                    let mut guard = self.inner.write();
-                    *guard = new_inner;
-                    if let Some(inner) = guard.as_ref() {
-                        inner.activate();
+                    {
+                        let mut guard = cloned_self.inner.write();
+                        *guard = new_inner;
+                        if let Some(inner) = guard.as_ref() {
+                            inner.activate();
+                        }
                     }
-                }
+                    Ok(())
+                });
 
                 // rather than get into either recursion or a loop, we just return an error and let
                 // the current attempt to reach redis fail. We have a new client waiting for the
                 // next attempt, so this should be a temporary failure
                 let error = RedisError::new(
                     RedisErrorKind::Unknown,
-                    "client being recreated after connection interrupt",
+                    "client pool being recreated after connection interrupt",
                 );
                 record_redis_error(&error, self.redis_client_config.caller, "client");
                 Err(error)
@@ -1234,6 +1253,16 @@ mod test {
                 .await
         }
 
+        async fn wait_for_recreation(storage: &RedisCacheStorage) {
+            for _ in 0..100 {
+                if storage.inner.read().is_some() {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            panic!("timed out waiting for background recreation to complete");
+        }
+
         #[tokio::test]
         #[rstest::rstest]
         async fn new_starts_empty_and_create_client_populates(
@@ -1266,7 +1295,7 @@ mod test {
             };
 
             assert!(first_call_failed, "expected error during recreation");
-            assert!(storage.inner.read().is_some());
+            wait_for_recreation(&storage).await;
 
             let second_call_ok = match method {
                 "client" => storage.client().await.is_ok(),
@@ -1292,6 +1321,7 @@ mod test {
 
             storage.inner.write().take();
             let _ = storage.client().await;
+            wait_for_recreation(&storage).await;
 
             storage
                 .insert(key.clone(), RedisValue("after".to_string()), None)
@@ -1327,6 +1357,10 @@ mod test {
             assert!(!old_metrics.is_finished());
 
             storage.inner.write().take();
+            tokio::task::yield_now().await;
+            assert!(old_heartbeat.is_finished());
+            assert!(old_metrics.is_finished());
+
             match method {
                 "client" => {
                     let _ = storage.client().await;
@@ -1336,9 +1370,7 @@ mod test {
                 }
                 _ => unreachable!(),
             }
-
-            assert!(old_heartbeat.is_finished());
-            assert!(old_metrics.is_finished());
+            wait_for_recreation(&storage).await;
 
             let guard = storage.inner.read();
             let new_inner = guard.as_ref().unwrap();
@@ -1452,6 +1484,7 @@ mod test {
 
             storage.inner.write().take();
             let _ = storage.client().await;
+            wait_for_recreation(&storage).await;
 
             let data = vec![
                 (
@@ -1487,6 +1520,7 @@ mod test {
             assert!(clone.inner.read().is_none(), "clone should also see None");
 
             let _ = storage.client().await;
+            wait_for_recreation(&storage).await;
             assert!(
                 clone.inner.read().is_some(),
                 "clone should see the recreated client"
@@ -1514,7 +1548,7 @@ mod test {
             for result in futures::future::join_all(handles).await {
                 assert!(result.is_ok(), "task panicked");
             }
-            assert!(storage.inner.read().is_some());
+            wait_for_recreation(&storage).await;
             assert!(storage.client().await.is_ok());
             Ok(())
         }
@@ -1537,6 +1571,7 @@ mod test {
 
             storage.inner.write().take();
             let _ = storage.client().await;
+            wait_for_recreation(&storage).await;
 
             let mut stream = storage
                 .scan_with_namespaced_results("*".to_string(), Some(100))
@@ -1702,10 +1737,7 @@ mod test {
             let result = storage.client().await;
 
             assert!(result.is_err(), "first call after abort should error");
-            assert!(
-                storage.inner.read().is_some(),
-                "inner should be repopulated after recreation"
-            );
+            wait_for_recreation(&storage).await;
             assert!(storage.client().await.is_ok());
             Ok(())
         }
