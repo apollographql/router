@@ -122,7 +122,6 @@
       matchManagers: ['cargo'],
       matchPackageNames: ['/^apollo-(parser|compiler|smith)$/'],
       automerge: true,
-      minimumReleaseAge: '5 days',
     },
     {
       groupName: 'rand crates',
