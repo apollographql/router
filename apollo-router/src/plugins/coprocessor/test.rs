@@ -4676,14 +4676,6 @@ mod tests {
         crate::graphql::Response::builder().build() // No data, no errors
     }
 
-    fn valid_copro_body() -> Value {
-        json!({"data": {"field": "new_value"}})
-    }
-
-    fn invalid_copro_body() -> Value {
-        json!({}) // No data, no errors
-    }
-
     #[test]
     fn test_minimal_graphql_validation() {
         assert!(is_graphql_response_minimally_valid(&valid_response()));
