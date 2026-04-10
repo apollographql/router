@@ -28,6 +28,8 @@ telemetry:
             # You can add more custom attributes using subgraph selectors
 ```
 
+The `apollo.router.response.cache` instrument tracks cache hits and misses for both subgraph and connector requests. For connector sources, the source name appears in the `subgraph_name.source_name` format.
+
 You can use custom instruments to create metrics for the subgraph service. The following example creates a custom instrument to generate a histogram that measures the subgraph request duration when there's at least one cache hit for the "inventory" subgraph:
 
 ```yaml title="router.yaml"
@@ -111,6 +113,8 @@ The `response_cache.store` span shows how much time was spent inserting data int
 
 For invalidation, look for the `invalidation_endpoint` span.
 
+The `response_cache.lookup` and `response_cache.store` spans also appear for connector requests. For connectors, `subgraph.name` contains the connector source identifier in `subgraph_name.source_name` format.
+
 Available attributes on `response_cache.lookup`:
 - `kind`: `root` or `entity`. Indicates whether the cache lookup is for a root field or an entity.
 - `subgraph.name`: The subgraph name
@@ -130,7 +134,7 @@ Available attributes on `response_cache.store`:
 
 ## Logs
 
-The router supports a [`response_cache` selector](/router/configuration/telemetry/instrumentation/selectors#subgraph) in telemetry for the subgraph service. The selector returns either the number of cache hits or misses by an entity for a subgraph request or the cache status (`hit`|`partial_hit`|`miss`) for a subgraph request.
+The router supports a [`response_cache` selector](/router/configuration/telemetry/instrumentation/selectors#subgraph) in telemetry for the subgraph and connector services. The selector returns either the number of cache hits or misses by an entity for a request or the cache status (`hit`|`partial_hit`|`miss`) for a request.
 
 For example, display a log containing all subgraph response data that's not cached:
 
@@ -261,7 +265,7 @@ response_cache:
   src="../../../../images/response-cache/sandbox-dropdown.png"
 />
 
-- A list of cached or potentially cached entries appears. This list helps you understand the cache status of your data:
+- A list of cached or potentially cached entries appears, including both subgraph and connector cache entries. For connector sources, the `source` column displays names in the `subgraph_name.source_name` format. This list helps you understand the cache status of your data:
   - If the `Created at` column contains data, the value has been stored in the cache
   - If the `source` column is `products`, the data for this call was fetched from the `products` subgraph, even if it is now cached
   - If the `Created at` column is empty, the entry hasn't been cached. This might happen for multiple reasons (see [Troubleshoot](#troubleshoot)). In this example, the `accounts` subgraph entry isn't cached because it contains private, uncacheable data.

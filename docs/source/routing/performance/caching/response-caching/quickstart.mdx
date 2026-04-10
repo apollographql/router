@@ -64,6 +64,36 @@ response_cache:
 ```
 
 
+### Configure caching for Apollo Connectors
+
+To cache responses from [Apollo Connectors](/graphos/connectors), add a `connector` block alongside the `subgraph` block. Connector sources are identified using the `subgraph_name.source_name` format.
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  connector:
+    all:
+      enabled: true
+      ttl: 10m # Required: fallback TTL when responses don't include Cache-Control headers
+      redis:
+        urls: ["redis://localhost:6379"]
+      invalidation:
+        enabled: true
+        shared_key: ${env.INVALIDATION_SHARED_KEY}
+    # Configure overrides for specific connector sources
+    sources:
+      "products.my_rest_api":
+        ttl: 5m # Override TTL for this source
+      "inventory.stock_api":
+        enabled: false # Disable caching for this source
+```
+
+<Note>
+
+The `connector` configuration block mirrors the `subgraph` block, but uses `sources` (keyed by `subgraph_name.source_name`) instead of `subgraphs` (keyed by subgraph name).
+
+</Note>
+
 ### Identify what data to cache
 
 To identify which subgraphs would benefit most from caching, you can enable metrics and increase their granularity. Keep in mind that more granularity leads to higher metric cardinality, which might increase costs in your APM.
@@ -85,7 +115,9 @@ telemetry:
             # You can add more custom attributes using subgraph selectors
 ```
 
-You can use the `apollo.router.response.cache` metric to create a dashboard similar to the following example:
+The `apollo.router.response.cache` metric tracks cache hits and misses for both subgraph and connector requests.
+
+You can use this metric to create a dashboard similar to the following example:
 
 <img
   className="screenshot"
@@ -193,6 +225,13 @@ type Post @key(fields: "id") @cacheControl(maxAge: 60) {
 ```
 
 The cache control is set with a TTL of 60 seconds, so both the `Post` and `User` types are cached for 60 seconds.
+
+<Note>
+
+For Apollo Connectors, TTLs are determined by the `Cache-Control` HTTP headers returned by the REST API endpoints your connectors call. You don't need `@cacheControl` directives since connectors work with HTTP APIs that return standard HTTP headers directly. The `ttl` configured in `connector.all` or `connector.sources` serves as a fallback when the API doesn't return a `Cache-Control` header.
+
+</Note>
+
 With caching enabled, you can see the difference in the dashboard: more cache hits and fewer cache misses.
 
 <img
@@ -274,6 +313,16 @@ curl --request POST \
 ```
 
 `INVALIDATION_SHARED_KEY` is an environment variable containing a token for authenticating requests to this endpoint. This was configured in the router setup at the beginning of this page.
+
+For connector sources, use `"sources"` instead of `"subgraphs"` and the `subgraph_name.source_name` format:
+
+```
+curl --request POST \
+	--header "authorization: $INVALIDATION_SHARED_KEY" \
+	--header 'content-type: application/json' \
+	--url http://localhost:4000/invalidation \
+	--data '[{"kind":"cache_tag","sources":["products.my_rest_api"],"cache_tag":"user-42"}]'
+```
 
 The call returns the number of invalidated entries. For example, if only one entry was invalidated:
 
