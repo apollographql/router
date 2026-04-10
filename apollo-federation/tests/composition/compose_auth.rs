@@ -1,6 +1,7 @@
 use apollo_compiler::coord;
 use insta::assert_snapshot;
-
+use apollo_federation::composition::compose;
+use apollo_federation::subgraph::typestate::Subgraph;
 use super::ServiceDefinition;
 use super::assert_composition_errors;
 use super::compose_as_fed2_subgraphs;
@@ -480,6 +481,47 @@ fn policy_comprehensive_locations() {
         let has_policy = target.directives.iter().any(|d| d.name == "policy");
         assert!(has_policy, "No policy directive found in {}", target.node);
     }
+}
+
+
+#[test]
+fn specs_compose_in_consistent_order() {
+    let users_sdl = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@authenticated", "@key", "@policy", "@requiresScopes"])
+
+        type Query {
+          users: [User!]! @requiresScopes(scopes: [["admin"]])
+          user(id: ID!): User @authenticated
+        }
+
+        type User @key(fields: "id") @requiresScopes(scopes: [["user_1"]]) {
+          id: ID!
+          name: String!
+          dob: String! @policy(policies: [["user"]])
+        }
+    "#;
+    let users = Subgraph::parse("users", "http://users/graphql", users_sdl)
+        .expect("valid users subgraph");
+
+    let address_sdl = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key", "@requiresScopes"])
+
+        type User @key(fields: "id") @requiresScopes(scopes: [["user_2"]]) {
+          id: ID!
+          address: String
+        }
+    "#;
+    let address = Subgraph::parse("address", "http://address/graphql", address_sdl)
+        .expect("valid address subgraph");
+
+    let result = compose(vec![users.clone(), address.clone()])
+        .expect("composes successfully");
+    let supergraph_schema = result.schema().schema();
+    assert_snapshot!(supergraph_schema);
+
+    let result = compose(vec![address, users])
+        .expect("composes successfully");
+    assert_eq!(result.schema().schema(), supergraph_schema);
 }
 
 mod transitive_auth {
