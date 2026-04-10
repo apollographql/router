@@ -121,6 +121,11 @@ impl FederationSchema {
         self.links_metadata.as_deref()
     }
 
+    /// Subgraph metadata after [`FederationBlueprint::on_constructed`] populates it (see [`compute_subgraph_metadata`]).
+    pub(crate) fn subgraph_metadata(&self) -> Option<&SubgraphMetadata> {
+        self.subgraph_metadata.as_deref()
+    }
+
     pub(crate) fn referencers(&self) -> &Referencers {
         &self.referencers
     }
@@ -324,6 +329,16 @@ impl FederationSchema {
     pub(crate) fn is_fed_2(&self) -> bool {
         self.federation_link()
             .is_some_and(|link| link.url.version.satisfies(&Version { major: 2, minor: 0 }))
+    }
+
+    /// `true` when this subgraph is **not** federation 2.x per resolved [`SubgraphMetadata`].
+    ///
+    /// Requires [`Self::subgraph_metadata`] to be populated (e.g. after
+    /// [`FederationBlueprint::on_constructed`]). Matches the Fed 1 branch in
+    /// [`FederationBlueprint::ignore_parsed_field`]. Returns `false` if metadata is missing.
+    pub(crate) fn is_fed_1_subgraph(&self) -> bool {
+        self.subgraph_metadata()
+            .is_some_and(|meta| !meta.is_fed_2_schema())
     }
 
     // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS

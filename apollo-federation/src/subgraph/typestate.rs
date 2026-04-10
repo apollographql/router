@@ -46,6 +46,7 @@ use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
+use crate::schema::position::HasType;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -961,7 +962,11 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     //            It seems to make sense for it to be a part of expansion stage. We can create
     //            a separate stage for it between `Expanded` and `Validated` if we need a stage
     //            that is expanded, but federation operations are not added.
-    trace!("expand_links: add_federation_operations");
+    trace!(
+        is_fed_1_subgraph = schema.is_fed_1_subgraph(),
+        is_fed_2_link = schema.is_fed_2(),
+        "expand_links: add_federation_operations"
+    );
     schema.add_federation_operations()?;
 
     schema.add_implicit_root_operations()?;
@@ -1026,6 +1031,15 @@ impl FederationSchema {
             query_root_pos.get(self.schema())?.name.clone()
         };
 
+        let is_fed_1_subgraph = self.is_fed_1_subgraph();
+
+        // PORT_NOTE: Fed 1 — JS first **ignores** user `Query._service` / `Query._entities` while
+        //            building types (`buildNamedTypeInner` in buildSchema.ts; Rust:
+        //            `FederationBlueprint::ignore_parsed_field`). Later, JS `addFederationOperations`
+        //            **checks and adds** the canonical `_service` field for **both** Fed 1 and Fed 2.
+        //            This function is that second step: when we return, the root query type must
+        //            expose `_service: _Service!` (plus `_entities` when `_Entity` exists).
+
         // Add or remove `Query._entities` (if applicable)
         let entity_field_pos = ObjectFieldDefinitionPosition {
             type_name: query_root_type_name.clone(),
@@ -1046,11 +1060,38 @@ impl FederationSchema {
 
         // Add `Query._service` (if not already present)
         let service_field_pos = ObjectFieldDefinitionPosition {
-            type_name: query_root_type_name,
+            type_name: query_root_type_name.clone(),
             field_name: FEDERATION_SERVICE_FIELD_NAME,
         };
-        if service_field_pos.try_get(self.schema()).is_none() {
+        // JS does not keep a user-provided nullable `_service` field type; normalize to `_Service!`.
+        if service_field_pos.try_get(self.schema()).is_some() {
+            if !service_field_pos.get_type(self)?.is_non_null() {
+                service_field_pos
+                    .set_type(self, Type::NonNullNamed(self.service_type()?.type_name))?;
+            }
+        } else {
             service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
+        }
+
+        // Fed 1 parse often strips federation fields from `Query` before injection; any empty root
+        // query object is invalid GraphQL — recover with `_service` if still missing.
+        let query_object_pos = ObjectTypeDefinitionPosition {
+            type_name: query_root_type_name,
+        };
+        if let Some(query_obj) = query_object_pos.try_get(self.schema())
+            && query_obj.fields.is_empty()
+        {
+            trace!(
+                is_fed_1_subgraph = is_fed_1_subgraph,
+                "add_federation_operations: recovering empty root query type"
+            );
+            let recovery_pos = ObjectFieldDefinitionPosition {
+                type_name: query_object_pos.type_name.clone(),
+                field_name: FEDERATION_SERVICE_FIELD_NAME,
+            };
+            if recovery_pos.try_get(self.schema()).is_none() {
+                recovery_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
+            }
         }
 
         Ok(())
@@ -1138,7 +1179,6 @@ impl FederationSchema {
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use apollo_compiler::ast::OperationType;
