@@ -1149,6 +1149,9 @@ impl TypeDefinitionPosition {
         }
 
         match self {
+            TypeDefinitionPosition::Scalar(_) => {
+                schema.referencers.rename_scalar_type(&old_name, &new_name);
+            }
             TypeDefinitionPosition::Object(_) => {
                 schema.referencers.rename_object_type(&old_name, &new_name);
             }
@@ -1157,7 +1160,17 @@ impl TypeDefinitionPosition {
                     .referencers
                     .rename_interface_type(&old_name, &new_name);
             }
-            _ => {}
+            TypeDefinitionPosition::Union(_) => {
+                schema.referencers.rename_union_type(&old_name, &new_name);
+            }
+            TypeDefinitionPosition::Enum(_) => {
+                schema.referencers.rename_enum_type(&old_name, &new_name);
+            }
+            TypeDefinitionPosition::InputObject(_) => {
+                schema
+                    .referencers
+                    .rename_input_object_type(&old_name, &new_name);
+            }
         }
 
         Ok(())

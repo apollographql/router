@@ -21,7 +21,6 @@ use self::layers::query_analysis::ParsedDocument;
 use self::visitor::OverrideLabelVisitor;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
 use crate::services::*;
 use crate::spec;
 use crate::spec::query::traverse;

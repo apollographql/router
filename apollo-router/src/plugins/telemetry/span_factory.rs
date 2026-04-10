@@ -93,7 +93,7 @@ impl SpanMode {
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_private.duration_ns" = ::tracing::field::Empty,
                     "apollo_private.http.request_headers" = ::tracing::field::Empty,
-                    "apollo_private.http.response_headers" = ::tracing::field::Empty
+                    "apollo_private.http.response_headers" = ::tracing::field::Empty,
                 );
                 span
             }
@@ -163,7 +163,7 @@ impl SpanMode {
                     apollo_private.graphql.variables = Telemetry::filter_variables_values(
                         &request.supergraph_request.body().variables,
                         &send_variable_values,
-                    )
+                    ),
                 )
             }
         }

@@ -14,6 +14,7 @@ use tracing::instrument::Instrumented;
 
 use crate::error::Error;
 use crate::http_ext;
+use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::subscription::SubscriptionTaskParams;
 use crate::query_planner::OperationKind;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
@@ -49,6 +50,12 @@ pub(crate) fn fetch_service_handle_subscription(
 
     let service_name = service_name.clone();
     let fetch_time_offset = context.created_at.elapsed().as_nanos() as i64;
+
+    // Store the subgraph name in context so it's available for metrics at the router layer
+    let _ = context.insert(
+        SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY,
+        service_name.to_string(),
+    );
 
     // Subscriptions are not supported for connectors, so they always go to the subgraph service
     subscription_with_subgraph_service(schema, subgraph_service_factory, request).instrument(
@@ -91,6 +98,12 @@ fn subscription_with_subgraph_service(
         .and_then(|s| s.max_opened_subscriptions)
         && OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= max_opened_subscriptions
     {
+        u64_counter!(
+            "apollo.router.operations.subscriptions.rejected",
+            "Number of subscription requests rejected",
+            1,
+            reason = "max_opened_subscriptions_limit_reached"
+        );
         return Box::pin(async {
             Ok((
                 Value::default(),
@@ -226,4 +239,102 @@ fn subscription_with_subgraph_service(
         };
         Ok((Value::default(), response))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+
+    use apollo_federation::query_plan::serializable_document::SerializableDocument;
+    use serde_json_bytes::Value;
+    use tokio::sync::mpsc;
+
+    use super::subscription_with_subgraph_service;
+    use crate::Context;
+    use crate::json_ext::Path;
+    use crate::metrics::FutureMetricsExt;
+    use crate::plugins::subscription::SubscriptionConfig;
+    use crate::query_planner::OperationKind;
+    use crate::query_planner::fetch::Variables;
+    use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
+    use crate::query_planner::subscription::SubscriptionNode;
+    use crate::services::SubgraphServiceFactory;
+    use crate::services::fetch::SubscriptionRequest;
+
+    #[tokio::test]
+    async fn test_subscription_limit_reached_emits_metric() {
+        async {
+            let original_count = OPENED_SUBSCRIPTIONS.swap(1, Ordering::Relaxed);
+
+            let subscription_config = SubscriptionConfig {
+                max_opened_subscriptions: Some(1),
+                ..Default::default()
+            };
+
+            let subscription_node = SubscriptionNode {
+                service_name: Arc::from("subgraph-a"),
+                variable_usages: Vec::new(),
+                operation: SerializableDocument::from_string("subscription { onEvent { id } }"),
+                operation_name: None,
+                operation_kind: OperationKind::Subscription,
+                input_rewrites: None,
+                output_rewrites: None,
+            };
+
+            let (sender, _receiver) = mpsc::channel(1);
+            let supergraph_request = Arc::new(
+                http::Request::builder()
+                    .body(crate::graphql::Request::builder().build())
+                    .unwrap(),
+            );
+
+            let schema = Arc::new(
+                crate::spec::Schema::parse(
+                    include_str!("../../testdata/minimal_supergraph.graphql"),
+                    &Default::default(),
+                )
+                .expect("could not parse schema"),
+            );
+
+            let factory = Arc::new(SubgraphServiceFactory {
+                services: Arc::new(HashMap::new()),
+            });
+
+            let request = SubscriptionRequest::builder()
+                .context(Context::new())
+                .subscription_node(subscription_node)
+                .supergraph_request(supergraph_request)
+                .variables(Variables::default())
+                .current_dir(Path(Vec::new()))
+                .sender(sender)
+                .subscription_config(subscription_config)
+                .build();
+
+            let (data, errors) = subscription_with_subgraph_service(schema, factory, request)
+                .await
+                .expect("call should not fail");
+
+            assert_eq!(data, Value::default());
+            assert_eq!(errors.len(), 1);
+            assert_eq!(
+                errors[0].message,
+                "can't open new subscription, limit reached"
+            );
+            assert_eq!(
+                errors[0].extensions.get("code").and_then(|v| v.as_str()),
+                Some("SUBSCRIPTION_MAX_LIMIT")
+            );
+            assert_counter!(
+                "apollo.router.operations.subscriptions.rejected",
+                1,
+                "reason" = "max_opened_subscriptions_limit_reached"
+            );
+
+            OPENED_SUBSCRIPTIONS.store(original_count, Ordering::Relaxed);
+        }
+        .with_metrics()
+        .await;
+    }
 }

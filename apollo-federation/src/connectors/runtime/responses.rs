@@ -39,12 +39,17 @@ pub enum HandleResponseError {
 
 /// Converts a response body into a json Value based on the Content-Type header.
 pub fn deserialize_response(body: &[u8], headers: &HeaderMap) -> Result<Value, DeserializeError> {
-    // If the body is obviously empty, don't try to parse it
-    if headers
-        .get(CONTENT_LENGTH)
-        .and_then(|len| len.to_str().ok())
-        .and_then(|s| s.parse::<usize>().ok())
-        .is_some_and(|content_length| content_length == 0)
+    // If the body is empty, there's nothing to parse. We check body.is_empty()
+    // directly because spec-compliant HTTP 204 responses must not include a
+    // Content-Length header — so we can't rely on that header alone to detect
+    // empty bodies. The Content-Length: 0 check is kept for non-compliant
+    // servers that do send it, but body.is_empty() covers both cases.
+    if body.is_empty()
+        || headers
+            .get(CONTENT_LENGTH)
+            .and_then(|len| len.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok())
+            .is_some_and(|content_length| content_length == 0)
     {
         return Ok(Value::Null);
     }
@@ -728,5 +733,41 @@ impl MappedResponse {
             // When operation_option.is_none(), return self unmodified.
             (mapped, None) => mapped,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http::HeaderMap;
+    use http::HeaderValue;
+    use serde_json_bytes::Value;
+
+    use super::deserialize_response;
+
+    fn headers_with(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (k, v) in pairs {
+            map.insert(
+                http::header::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        map
+    }
+
+    #[test]
+    fn empty_body_no_content_length_returns_null() {
+        // Spec-compliant 204: no Content-Length header, no body.
+        let headers = HeaderMap::new();
+        let result = deserialize_response(b"", &headers).unwrap();
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn empty_body_with_content_length_zero_returns_null() {
+        // Non-compliant server that sends Content-Length: 0 on a 204.
+        let headers = headers_with(&[("content-length", "0")]);
+        let result = deserialize_response(b"", &headers).unwrap();
+        assert_eq!(result, Value::Null);
     }
 }

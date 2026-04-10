@@ -641,7 +641,6 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .cloned()
             .map(|v| v.as_object().unwrap().clone())
             .collect_vec();
 

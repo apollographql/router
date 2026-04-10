@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.13.0"
+version = "2.13.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.91.1"
+rust-version = "1.94.1"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -56,10 +56,10 @@ ci = []
 snapshot = []
 
 [dependencies]
-addr2line = "0.25.0"
+addr2line = "0.26.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.13.0" }
+apollo-federation = { path = "../apollo-federation", version = "=2.13.1" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -105,7 +105,7 @@ fred = { version = "10.1.0", features = [
 # "tcp-user-timeouts" feature to work: https://github.com/aembke/fred.rs/pull/369
 socket2 = { version = "0.5", features = ["all"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
-graphql_client = "0.14.0"
+graphql_client = "0.16.0"
 # Not used directly, but declared here to enforce a minimum version floor for this
 # transitive dependency and to allow Renovate to manage future version bumps.
 h2 = "0.4.13"
@@ -137,7 +137,7 @@ indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.14.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
-jsonschema = { version = "0.36.0", default-features = false }
+jsonschema = { version = "0.45.0", default-features = false }
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
@@ -232,7 +232,7 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum = { version = "0.28.0", features = ["derive"] }
 sys-info = "0.9.1"
-sysinfo = { version = "0.37.0", features = [
+sysinfo = { version = "0.38.0", features = [
     "system",
     "windows",
 ], default-features = false }
@@ -309,7 +309,7 @@ tikv-jemalloc-sys = { version = "0.6.0", features = ["profiling"] }
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
-ctor = "0.8.0"
+ctor = "0.9.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 encoding_rs.workspace = true
 fred = { version = "10.1.0", features = [
