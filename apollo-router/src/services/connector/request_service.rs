@@ -162,6 +162,9 @@ impl ConnectorRequestServiceFactory {
     ) -> Self {
         let mut map = HashMap::with_capacity(connector_sources.len());
         for source in connector_sources.iter() {
+            // One buffer per connector source provides per-source backpressure and is
+            // required for correct LoadShed / RateLimit behaviour from traffic-shaping
+            // plugins (mirrors the per-subgraph buffer in SubgraphServiceFactory).
             let service = UnconstrainedBuffer::new(
                 plugins
                     .iter()

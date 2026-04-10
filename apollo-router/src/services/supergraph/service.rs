@@ -576,6 +576,9 @@ impl PluggableSupergraphServiceBuilder {
             .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
             .map(|t| t.config.apollo.clone());
 
+        // The buffer between SubscriptionExecutionLayer and the inner plugin/execution
+        // pipeline provides backpressure: if the execution pipeline is busy, callers
+        // block here rather than propagating poll_ready latency upward.
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
@@ -607,6 +610,9 @@ impl PluggableSupergraphServiceBuilder {
         let supergraph_service =
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
+        // The outer buffer provides backpressure for the full supergraph pipeline and is
+        // required for correct LoadShed / ConcurrencyLimit / RateLimit behaviour introduced
+        // by traffic-shaping and other plugins (see ServiceBuilderExt::buffered).
         let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(content_negotiation::SupergraphLayer::default())

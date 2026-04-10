@@ -1156,6 +1156,9 @@ impl SubgraphServiceFactory {
                 ))
                 .service(service.clone().boxed_clone())
                 .boxed_clone();
+            // One buffer per named subgraph provides per-subgraph backpressure and is
+            // required for correct LoadShed / RateLimit behaviour from traffic-shaping
+            // plugins (see ServiceBuilderExt::buffered).
             let service = ServiceBuilder::new()
                 .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
                 .service(
@@ -1173,7 +1176,6 @@ impl SubgraphServiceFactory {
     }
 
     pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxCloneService> {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services.get(name).map(|svc| svc.clone().boxed_clone())
     }
 }

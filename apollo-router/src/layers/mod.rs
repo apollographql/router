@@ -158,7 +158,18 @@ pub trait ServiceBuilderExt<L>: Sized {
 
     /// Adds a buffer to the service stack with a default size.
     ///
-    /// This is useful for making services `Clone` and `Send`
+    /// The buffer spawns a dedicated worker task and queues requests in an in-memory channel.
+    /// The primary reasons to include a buffer are:
+    ///
+    /// - **Backpressure**: callers block (rather than failing immediately) when the inner
+    ///   service is busy processing previous requests.
+    /// - **`LoadShed` / `ConcurrencyLimit` / `RateLimit` interaction**: these layers
+    ///   signal overload by returning `Poll::Pending` from `poll_ready`. A buffer placed
+    ///   *before* them absorbs that pending state and prevents Tokio's cooperative-scheduling
+    ///   budget from causing spurious `Overloaded` responses.
+    ///
+    /// Now that pipeline services are `BoxCloneService`, a buffer is **no longer needed
+    /// merely to make a service `Clone` or `Send`**.
     ///
     /// # Examples
     ///

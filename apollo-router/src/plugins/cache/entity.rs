@@ -51,7 +51,6 @@ use crate::graphql::Error;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -407,10 +406,7 @@ impl PluginPrivate for EntityCache {
                     response
                 })
                 .service(CacheService {
-                    service: ServiceBuilder::new()
-                        .buffered()
-                        .service(service)
-                        .boxed_clone(),
+                    service,
                     entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage,

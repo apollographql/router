@@ -65,6 +65,8 @@ impl PluginPrivate for LicenseEnforcement {
     }
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
+        // Buffer required before load_shed() for correct cooperative-scheduling behaviour
+        // (see ServiceBuilderExt::buffered).
         ServiceBuilder::new()
             .buffered()
             .map_future_with_request_data(

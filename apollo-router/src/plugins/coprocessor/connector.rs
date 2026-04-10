@@ -215,6 +215,7 @@ impl ConnectorStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
+            // Buffer provides backpressure for the coprocessor HTTP call stack below.
             .buffered()
             .service(service)
             .boxed_clone()
