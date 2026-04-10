@@ -446,6 +446,110 @@ fn process_request(request) {
 }
 ```
 
+### Propagating extensions from subgraph responses
+
+By default, the router doesn't propagate the root-level `extensions` field from subgraph responses to the final client response. This is because merging extensions from multiple subgraphs can lead to conflicts when different subgraphs use the same extension keys.
+
+Use Rhai to propagate extensions from subgraph responses to the client response. The following example demonstrates how to safely collect extensions from subgraph responses and merge them into the final response.
+
+<Note>
+
+**Important considerations:**
+
+- **Race conditions**: Subgraph requests execute in parallel, so their responses might arrive in any order. Use defensive coding to handle concurrent updates.
+- **Key conflicts**: Different subgraphs might use the same extension keys. The last subgraph response to complete will overwrite earlier values for conflicting keys.
+- **Data types**: Extension values can be any valid JSON type (objects, arrays, strings, numbers, booleans).
+
+</Note>
+
+```rhai
+fn supergraph_service(service) {
+  let f = |response| {
+    // Check if the router collected any extensions from subgraphs
+    // The safe navigation operator (?.) returns () if the key doesn't exist
+    if response.context["extensions"]?.len > 0 {
+      // Merge all collected extensions into the response body
+      for extension in response.context["extensions"] {
+        response.body.extensions += extension;
+      }
+    }
+  };
+
+  service.map_response(f);
+}
+
+fn subgraph_service(service, subgraph) {
+    let f = |response| {
+      // Check if this subgraph response includes extensions
+      if response.body.extensions != () {
+        // Initialize the extensions array in context if it doesn't exist yet
+        if response.context["extensions"] == () {
+          response.context.extensions = [];
+        }
+
+        // Store this subgraph's extensions for later merging
+        // Note: Due to parallel execution, the order of these additions
+        // is non-deterministic. If multiple subgraphs use the same
+        // extension keys, the last one to complete will win.
+        response.context.extensions += response.body.extensions
+      }
+    };
+
+    service.map_response(f);
+}
+```
+
+**How it works:**
+
+1. The `subgraph_service` hook intercepts each subgraph response and checks for the presence of `extensions`.
+2. If the hook finds extensions, it stores them in the request context (shared across all services).
+3. The `supergraph_service` hook runs after the router collects and merges all subgraph responses.
+4. It retrieves all stored extensions from the context and adds them to the final response's `extensions` field.
+
+### Customization options
+
+Modify the script to control extension merging, handle key conflicts, or filter specific extensions:
+
+```rhai
+fn supergraph_service(service) {
+  let f = |response| {
+    if response.context["extensions"]?.len > 0 {
+      // Initialize extensions object if it doesn't exist
+      if response.body.extensions == () {
+        response.body.extensions = #{};
+      }
+      
+      // Merge extensions with custom logic
+      for extension_map in response.context["extensions"] {
+        for key in extension_map.keys() {
+          // Example: Prefix keys with subgraph name to avoid conflicts
+          // Or: Add your own conflict resolution logic here
+          response.body.extensions[key] = extension_map[key];
+        }
+      }
+    }
+  };
+
+  service.map_response(f);
+}
+
+fn subgraph_service(service, subgraph) {
+  let f = |response| {
+    if response.body.extensions != () {
+      if response.context["extensions"] == () {
+        response.context.extensions = [];
+      }
+      
+      // Store the subgraph name with the extensions if needed
+      // for conflict resolution or debugging
+      response.context.extensions += response.body.extensions;
+    }
+  };
+
+  service.map_response(f);
+}
+```
+
 ## Hot reloading
 
 The router "watches" your `rhai.scripts` directory (along with all subdirectories), and it initiates an interpreter reload whenever it detects one of the following changes:
