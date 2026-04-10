@@ -4,6 +4,8 @@ subtitle: Configure in-memory and distributed caching for query plans
 description: Configure query plan caching to improve router performance by storing generated query plans in memory or Redis.
 ---
 
+import RedisTls from '../../../shared/redis-tls.mdx';
+
 Whenever your router receives an incoming GraphQL operation, it generates a [query plan](/graphos/resources/federation/query-plans) to determine which subgraphs it needs to query to resolve that operation.
 
 By caching previously generated query plans, your router can skip generating them again if a client later sends the exact same operation—improving your router's responsiveness.
@@ -243,20 +245,7 @@ When using the same Redis instance for multiple purposes, the `namespace` option
 
 #### TLS
 
-For Redis TLS connections, you can set up a client certificate or override the root certificate authority by configuring `tls` in your router's [YAML config file](/graphos/routing/configuration/overview#yaml-config-file). For example:
-
-```yaml
-supergraph:
-  query_planning:
-    cache:
-      redis:
-        urls: ["rediss://redis.example.com:6379"]
-        tls:
-          certificate_authorities: ${file./path/to/ca.crt}
-          client_authentication:
-            certificate_chain: ${file./path/to/certificate_chain.pem}
-            key: ${file./path/to/key.pem}
-```
+<RedisTls />
 
 #### Required to start
 
