@@ -22,6 +22,7 @@ mod override_directive;
 mod subscription;
 mod supergraph_reversibility;
 mod validation_errors;
+mod compose_cache_tag;
 
 pub(crate) mod test_helpers {
     use std::iter::zip;
