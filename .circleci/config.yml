@@ -278,6 +278,12 @@ commands:
           name: Fetch dependencies
           command: cargo fetch --locked
 
+  xtask_fmt_check:
+    steps:
+      - run:
+          name: Check formatting
+          command: cargo fmt --all -- --config imports_granularity=Item,group_imports=StdExternalCrate --check
+
   xtask_lint:
     steps:
       - restore_cache:
@@ -418,6 +424,19 @@ commands:
           path: ./codecov_report.json
 
 jobs:
+  fmt_check:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_fmt_check
+
   lint:
     environment:
       <<: *common_job_environment
@@ -965,6 +984,10 @@ workflows:
           - << pipeline.parameters.quick_nightly >>
           - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
+      - fmt_check:
+          matrix:
+            parameters:
+              platform: [amd_linux_helm]
       - lint:
           matrix:
             parameters:
@@ -982,9 +1005,7 @@ workflows:
           # this should be changed back to true on dev after release
           fuzz: false
           requires:
-            - lint
-            - check_helm
-            - check_compliance
+            - fmt_check
           matrix:
             parameters:
               platform:
