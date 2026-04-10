@@ -632,9 +632,7 @@ impl RedisCacheStorage {
                 } else {
                     let error = RedisError::new(
                         RedisErrorKind::Unknown,
-                        format!(
-                            "Error: attempting to send a command to Redis while its client pool is recreating"
-                        ),
+                        "Error: attempting to send a command to Redis while its client pool is recreating",
                     );
                     record_redis_error(&error, self.redis_client_config.caller, "client");
                     return Err(error);

@@ -94,16 +94,16 @@ where
 
             // NOTE: this populates the inner client pool, but failure doesn't represent a terminal
             // state unless the router is configred to require connections to start
-            if let Some(storage) = storage.clone() {
-                if let Err(e) = storage.create_client_pool().await {
-                    tracing::error!(
-                        cache = caller,
-                        e,
-                        "could not open connection to Redis for caching",
-                    );
-                    if required_to_start {
-                        return Err(e);
-                    }
+            if let Some(storage) = storage.clone()
+                && let Err(e) = storage.create_client_pool().await
+            {
+                tracing::error!(
+                    cache = caller,
+                    e,
+                    "could not open connection to Redis for caching",
+                );
+                if required_to_start {
+                    return Err(e);
                 }
             }
 
