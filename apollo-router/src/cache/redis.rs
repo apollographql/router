@@ -43,6 +43,7 @@ use url::Url;
 use super::KeyType;
 use super::ValueType;
 use super::metrics::RedisMetricsCollector;
+use crate::cache::replica_filter::RouteableReplicaFilter;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
 
@@ -421,6 +422,8 @@ impl RedisCacheStorage {
                     max_timeout: Some(DEFAULT_INTERNAL_REDIS_TIMEOUT),
                     interval: Duration::from_secs(2),
                 };
+
+                config.replica.filter = Some(Arc::new(RouteableReplicaFilter::default()));
 
                 // PR-8405: must not use lazy connections or else commands will queue rather than being sent
                 // PR-8671: must only disable lazy connections in cluster mode. otherwise, fred will
