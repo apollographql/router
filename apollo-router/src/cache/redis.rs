@@ -386,7 +386,7 @@ impl RedisCacheStorage {
             pool_recreation_lock: Arc::new(Mutex::new(())),
         };
 
-        let _ = storage.create_client_pool().await?;
+        storage.create_client_pool().await?;
         Ok(storage)
     }
 
