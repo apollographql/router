@@ -698,6 +698,16 @@ jobs:
             - run:
                 command: >
                   cargo xtask package --output artifacts/
+      - when:
+          condition:
+            equal: [*amd_linux_build_executor, << parameters.platform >>]
+          steps:
+            - run:
+                name: Generate config schema
+                command: |
+                  BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
+                  VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
+                  ./target/release/router config schema > "artifacts/router-config-schema-${VERSION}.json"
       - persist_to_workspace:
           root: artifacts
           paths:
