@@ -17,6 +17,7 @@ use tower::Service;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use super::connectors::ConnectorCacheConfiguration;
 use super::invalidation::Invalidation;
 use super::plugin::Subgraph;
 use crate::ListenAddr;
@@ -47,8 +48,6 @@ pub(crate) struct InvalidationEndpointConfig {
     /// Listen address on which the invalidation endpoint must listen.
     pub(crate) listen: ListenAddr,
 }
-
-use super::plugin::ConnectorCacheConfiguration;
 
 #[derive(Clone)]
 pub(crate) struct InvalidationService {
@@ -328,7 +327,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::plugins::response_cache::plugin::ConnectorCacheSource;
+    use crate::plugins::response_cache::connectors::ConnectorCacheSource;
     use crate::plugins::response_cache::plugin::StorageInterface;
     use crate::plugins::response_cache::storage::redis::Config;
     use crate::plugins::response_cache::storage::redis::Storage;
