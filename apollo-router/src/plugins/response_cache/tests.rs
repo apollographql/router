@@ -12,13 +12,20 @@ use tokio_stream::wrappers::IntervalStream;
 use tower::Service;
 use tower::ServiceExt;
 use uuid::Uuid;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
 
 use super::plugin::ResponseCache;
+use crate::Configuration;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
+use crate::json_ext::ValueExt;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
@@ -32,6 +39,9 @@ use crate::plugins::response_cache::plugin::Subgraph;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::redis::Config;
 use crate::plugins::response_cache::storage::redis::Storage;
+use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::YamlRouterFactory;
+use crate::services::new_service::ServiceFactory;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
@@ -4072,12 +4082,6 @@ async fn create_connector_cache_service(
     Response = crate::services::router::Response,
     Error = tower::BoxError,
 > {
-    use crate::Configuration;
-    use crate::json_ext::ValueExt;
-    use crate::router_factory::RouterSuperServiceFactory;
-    use crate::router_factory::YamlRouterFactory;
-    use crate::services::new_service::ServiceFactory;
-
     let connector_url = format!("{connector_uri}/");
 
     let mut config = serde_json_bytes::json!({
@@ -4171,9 +4175,6 @@ async fn connector_response_body(
 
 #[tokio::test]
 async fn connector_root_field_cache_miss_then_hit() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -4230,9 +4231,6 @@ async fn connector_root_field_cache_miss_then_hit() {
 
 #[tokio::test]
 async fn connector_root_field_no_store() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -4272,9 +4270,6 @@ async fn connector_root_field_no_store() {
 
 #[tokio::test]
 async fn connector_entity_cache_miss_then_hit() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/1"))
@@ -4327,9 +4322,6 @@ async fn connector_entity_cache_miss_then_hit() {
 
 #[tokio::test]
 async fn connector_cache_disabled() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -4381,9 +4373,6 @@ async fn connector_cache_disabled() {
 
 #[tokio::test]
 async fn connector_root_field_with_cache_tag() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -4428,9 +4417,6 @@ async fn connector_root_field_with_cache_tag() {
 /// Request with `Cache-Control: no-store` should allow cache lookup but prevent storing.
 #[tokio::test]
 async fn connector_root_field_request_no_store() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -4478,9 +4464,6 @@ async fn connector_root_field_request_no_store() {
 /// Request with `Cache-Control: no-cache` should skip cache lookup but allow storing.
 #[tokio::test]
 async fn connector_root_field_request_no_cache() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -4528,9 +4511,6 @@ async fn connector_root_field_request_no_cache() {
 /// Request with `Cache-Control: no-cache, no-store` should bypass cache entirely.
 #[tokio::test]
 async fn connector_root_field_request_no_cache_no_store() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -4578,9 +4558,6 @@ async fn connector_root_field_request_no_cache_no_store() {
 /// Entity query with `Cache-Control: no-cache` should skip cache lookup.
 #[tokio::test]
 async fn connector_entity_request_no_cache() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/1"))
@@ -4626,9 +4603,6 @@ async fn connector_entity_request_no_cache() {
 /// Entity query with `Cache-Control: no-store` should allow cache lookup but prevent storing.
 #[tokio::test]
 async fn connector_entity_request_no_store() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/1"))
@@ -4675,9 +4649,6 @@ async fn connector_entity_request_no_store() {
 /// the response must NOT be stored in cache (prevents cross-user cache pollution).
 #[tokio::test]
 async fn connector_root_field_private_no_id_not_stored() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -4725,9 +4696,6 @@ async fn connector_root_field_private_no_id_not_stored() {
 /// entity responses must NOT be stored in cache.
 #[tokio::test]
 async fn connector_entity_private_no_id_not_stored() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/1"))
@@ -4771,9 +4739,6 @@ async fn connector_entity_private_no_id_not_stored() {
 
 #[tokio::test]
 async fn connector_mutation_not_cached() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/users"))
@@ -4823,9 +4788,6 @@ async fn connector_mutation_not_cached() {
 
 #[tokio::test]
 async fn connector_root_field_debug_requires_header() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -4876,9 +4838,6 @@ async fn connector_root_field_debug_requires_header() {
 
 #[tokio::test]
 async fn connector_entity_debug_requires_header() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/1"))
@@ -4927,9 +4886,6 @@ async fn connector_entity_debug_requires_header() {
 /// A malformed `Cache-Control` header on a root field request should return a GraphQL error.
 #[tokio::test]
 async fn connector_root_field_invalid_cache_control_header() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -4977,9 +4933,6 @@ async fn connector_root_field_invalid_cache_control_header() {
 /// A malformed `Cache-Control` header on an entity query should return a GraphQL error.
 #[tokio::test]
 async fn connector_entity_invalid_cache_control_header() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/1"))
@@ -5026,9 +4979,6 @@ async fn connector_entity_invalid_cache_control_header() {
 /// a debug entry with `key: "-"` and `shouldStore: false` should appear in `apolloCacheDebugging`.
 #[tokio::test]
 async fn connector_root_field_private_debug_entry() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
@@ -5090,9 +5040,6 @@ async fn connector_root_field_private_debug_entry() {
 /// a debug entry with `key: "-"` and `shouldStore: false` should appear in `apolloCacheDebugging`.
 #[tokio::test]
 async fn connector_entity_private_debug_entry() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/1"))
