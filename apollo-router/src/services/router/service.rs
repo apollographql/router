@@ -47,7 +47,6 @@ use crate::configuration::BatchingMode;
 use crate::graphql;
 use crate::http_ext;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
@@ -114,15 +113,12 @@ impl RouterService {
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
     ) -> Self {
-        let supergraph_service: supergraph::BoxCloneService =
-            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
-
         RouterService {
             apq_layer: Arc::new(apq_layer),
             persisted_query_layer,
             query_analysis_layer: Arc::new(query_analysis_layer),
             batching,
-            supergraph_service,
+            supergraph_service: sgb,
         }
     }
 }
@@ -267,16 +263,13 @@ impl RouterService {
                 {
                     Err(response) => response,
                     Ok(request) => {
-                        // self.supergraph_service here is a clone of the service that was readied
-                        // in RouterService::poll_ready. Clones are unready by default, so this
-                        // self.supergraph_service is actually not ready, which is why we need to
-                        // oneshot it here. That technically breaks backpressure, but because we are
-                        // still readying the supergraph service before calling into the router
-                        // service, backpressure is actually still exerted at that point--there's
-                        // just potential for some requests to slip through the cracks and end up
-                        // queueing up at this .oneshot() call.
-                        //
-                        // Not ideal, but an improvement on the situation in Router 1.x.
+                        // self here is a clone of `this` (the RouterService that was readied in
+                        // RouterService::poll_ready), created per-request in call_inner so that
+                        // batched requests can be executed concurrently. The clone's
+                        // supergraph_service is unready (Buffer clones start unready), so oneshot
+                        // is used to re-ready it before calling. Backpressure is still exerted at
+                        // the router level because poll_ready already acquired a slot from the
+                        // outer supergraph buffer on behalf of this request.
                         self.supergraph_service.oneshot(request).await?
                     }
                 },
