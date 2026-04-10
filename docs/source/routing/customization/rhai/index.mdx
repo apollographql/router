@@ -534,9 +534,9 @@ This is particularly risky when using closures within callbacks while referencin
 
 ### String interning and concurrent performance
 
-Router compiles Rhai with the [`sync` feature](https://rhai.rs/book/start/features.html) enabled, which makes the engine safe to share across threads. A side effect of this is that Rhai's string interner — which caches frequently-used strings to reduce allocations — is protected by a lock (namely a Rust `RwLock`). Under high concurrency, threads that encounter new strings must acquire a write lock, which serializes those operations across all concurrent requests.
+Apollo Router compiles Rhai with the [`sync` feature](https://rhai.rs/book/start/features.html) enabled, which makes the engine safe to share across threads. A side effect of this is that Rhai's string interner — which caches frequently-used strings to reduce allocations — is protected by a lock (namely a Rust `RwLock`).
 
-String interning is enabled by default. You can disable interning with the `intern_strings` configuration option, which removes the write lock:
+String interning is enabled by default. Under high concurrency, threads that encounter new strings must acquire a write lock, which serializes those operations across all concurrent requests. You can disable interning with the `intern_strings` configuration option:
 
 ```yaml title="config.yaml"
 rhai:
