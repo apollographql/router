@@ -211,7 +211,7 @@ fn add_connected_selections(
 
         // The connector's selection field names are the connected selection
         let shape = connector.selection.shape();
-        if let Some(selection_str) = extract_shape_field_names(&shape) {
+        if let Some(selection_str) = extract_shape_as_field_set(&shape) {
             annotations.push((
                 parent_type_name.clone(),
                 connector
@@ -320,29 +320,37 @@ fn build_service_name_to_enum_value(
     Ok(map)
 }
 
-/// Extract field names from a Shape, returning them as a space-separated string.
-/// Returns None if the shape is not an Object.
-fn extract_shape_field_names(shape: &shape::Shape) -> Option<String> {
+/// Extract a FieldSet string from a Shape, recursing into composite fields.
+///
+/// For a shape representing `{ id, name, friends: [{ id, name }] }`, this
+/// produces `"id name friends { id name }"`. This ensures the restricted copy
+/// node in the query graph accurately reflects which fields (including nested
+/// ones) the connector's HTTP endpoint returns, avoiding unnecessary entity
+/// resolution fetches.
+fn extract_shape_as_field_set(shape: &shape::Shape) -> Option<String> {
     match shape.case() {
         ShapeCase::Object { fields, .. } => {
-            let names: Vec<&str> = fields
-                .keys()
-                .filter(|k| *k != "__typename")
-                .map(|k| k.as_str())
+            let parts: Vec<String> = fields
+                .iter()
+                .filter(|(k, _)| k.as_str() != "__typename")
+                .filter_map(|(k, v)| match extract_shape_as_field_set(v) {
+                    Some(nested) => Some(format!("{k} {{ {nested} }}")),
+                    None => Some(k.to_string()),
+                })
                 .collect();
-            if names.is_empty() {
+            if parts.is_empty() {
                 None
             } else {
-                Some(names.join(" "))
+                Some(parts.join(" "))
             }
         }
         // Handle arrays: extract from the tail (element type)
-        ShapeCase::Array { tail, .. } => extract_shape_field_names(tail),
+        ShapeCase::Array { tail, .. } => extract_shape_as_field_set(tail),
         // Handle One (union): try each member
         ShapeCase::One(shapes) => {
             for member in shapes.iter() {
-                if let Some(names) = extract_shape_field_names(member) {
-                    return Some(names);
+                if let Some(field_set) = extract_shape_as_field_set(member) {
+                    return Some(field_set);
                 }
             }
             None
