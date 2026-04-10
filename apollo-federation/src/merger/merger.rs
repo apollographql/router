@@ -560,7 +560,7 @@ impl Merger {
                     hints,
                 });
             }
-            match Self::validate_supergraph_schema(self.merged) {
+            match Self::validate_supergraph_schema(self.merged.clone(), &self.subgraphs) {
                 Ok(supergraph) => Ok(MergeResult {
                     supergraph: Some(supergraph),
                     errors: Vec::default(),
@@ -579,6 +579,7 @@ impl Merger {
     /// computed.
     fn validate_supergraph_schema(
         merged: FederationSchema,
+        subgraphs: &[Subgraph<Validated>],
     ) -> Result<ValidFederationSchema, Vec<CompositionError>> {
         // TODO: Errors thrown by the `validate` below are likely to be confusing for users,
         // because they refer to a document they don't know about (the merged-but-not-returned
@@ -597,8 +598,11 @@ impl Merger {
         // other errors in theory, but if there are, better to find it now rather than later).
         api_schema::to_api_schema(supergraph_schema.clone(), Default::default()).map_err(
             |err| {
-                // TODO: port `updateInaccessibleErrorsWithLinkToSubgraphs` from JS (FED-882)
-                Self::convert_to_merge_errors(err)
+                super::supergraph_coordinate::update_inaccessible_errors_with_link_to_subgraphs(
+                    &supergraph_schema,
+                    subgraphs,
+                    err,
+                )
             },
         )?;
 
@@ -610,7 +614,10 @@ impl Merger {
         error
             .into_errors()
             .into_iter()
-            .map(|e| CompositionError::MergeError { error: e })
+            .map(|e| CompositionError::MergeError {
+                error: e,
+                locations: Vec::new(),
+            })
             .collect()
     }
 

@@ -307,6 +307,7 @@ fn compose_from_config_inner(
             error: SingleFederationError::Internal {
                 message: format!("Failed to parse YAML config: {}", e),
             },
+            locations: Vec::new(),
         }]
     })?;
 
@@ -337,6 +338,7 @@ fn compose_from_config_inner(
                         name
                     ),
                 },
+                locations: Vec::new(),
             }]);
         };
 
