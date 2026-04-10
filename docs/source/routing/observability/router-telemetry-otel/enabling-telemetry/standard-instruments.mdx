@@ -161,9 +161,9 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 ## Rhai
 
 - `apollo.router.operations.rhai.duration` - Time spent executing a Rhai script callback, in seconds
-  - `rhai.stage`: `String` (`RouterRequest`, `RouterResponse`, `SupergraphRequest`, `SupergraphResponse`, `ExecutionRequest`, `ExecutionResponse`, `SubgraphRequest`, `SubgraphResponse`)
-  - `rhai.succeeded`: `bool`
-  - `rhai.is_deferred`: `bool` — `true` for `@defer` stream-chunk callbacks (Supergraph and Execution response stages only)
+  - `rhai.stage`: string (`RouterRequest`, `RouterResponse`, `SupergraphRequest`, `SupergraphResponse`, `ExecutionRequest`, `ExecutionResponse`, `SubgraphRequest`, `SubgraphResponse`)
+  - `rhai.succeeded`: bool
+  - `rhai.is_deferred`: bool — present on response stages. `true` for `@defer` and subscription data chunks, `false` for the primary or initial response.
 
 ## Performance
 
