@@ -597,8 +597,9 @@ async fn subgraph_request(
         let mode = subscription_config.mode.get_subgraph_config(service_name);
         let context = request.context.clone();
 
-        let hashed_request = if subscription_config.deduplication.enabled {
-            request.to_sha256(&subscription_config.deduplication.ignored_headers)
+        let dedup = subscription_config.deduplication.get(service_name);
+        let hashed_request = if dedup.enabled {
+            request.to_sha256(&dedup.ignored_headers, dedup.ignore_auth_context)
         } else {
             Uuid::new_v4().to_string()
         };

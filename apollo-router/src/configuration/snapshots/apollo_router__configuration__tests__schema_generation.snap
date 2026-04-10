@@ -3200,6 +3200,11 @@ expression: "&schema"
           "description": "Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode.\n(default: true)",
           "type": "boolean"
         },
+        "ignore_auth_context": {
+          "default": false,
+          "description": "When true, JWT claims from the authorization context are excluded from the deduplication key.\nUse this when your subgraph data does not vary by user identity and you want authenticated\nusers to share a single subgraph WebSocket connection.\n\nSecurity note: with this enabled, a user may receive events from a connection originally\nopened by a different user.  Only enable this when subgraph subscription data is truly\nnon-personalized.\n(default: false)",
+          "type": "boolean"
+        },
         "ignored_headers": {
           "default": [],
           "description": "List of headers to ignore for deduplication. Even if these headers are different, the subscription request is considered identical.\nFor example, if you forward the \"User-Agent\" header, but the subgraph doesn't depend on the value of that header,\nadding it to this list will let the router dedupe subgraph subscriptions even if the header value is different.",
@@ -9931,6 +9936,33 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphDeduplicationConfigConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DeduplicationConfig"
+            }
+          ],
+          "default": {
+            "enabled": true,
+            "ignore_auth_context": false,
+            "ignored_headers": []
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/DeduplicationConfig"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphErrorConfig": {
       "additionalProperties": false,
       "properties": {
@@ -11110,12 +11142,16 @@ expression: "&schema"
         "deduplication": {
           "allOf": [
             {
-              "$ref": "#/definitions/DeduplicationConfig"
+              "$ref": "#/definitions/SubgraphDeduplicationConfigConfiguration"
             }
           ],
           "default": {
-            "enabled": true,
-            "ignored_headers": []
+            "all": {
+              "enabled": true,
+              "ignore_auth_context": false,
+              "ignored_headers": []
+            },
+            "subgraphs": {}
           },
           "description": "Configure subgraph subscription deduplication"
         },

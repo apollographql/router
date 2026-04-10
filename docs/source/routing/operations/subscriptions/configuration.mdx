@@ -315,6 +315,13 @@ The router considers subscription operations **identical** if all of the followi
 
 - The operations sent to the subgraph have identical GraphQL selection sets (i.e., requested fields).
 - The operations provide identical values for all headers that the router sends to the subgraph, except those listed in `ignored_headers`.
+- The requests carry identical JWT claims from the router's internal authorization context (unless `ignore_auth_context: true` is set).
+
+<Note>
+
+When the router's authentication plugin validates a JWT, it decodes the token and stores the claims internally — before any subgraph request is built.  The router then uses those stored claims when deciding whether two subscriptions are identical, *separately* from the HTTP headers it may or may not forward to your subgraph.  This means that even if you never propagate the `Authorization` header downstream, each user's unique claims will still cause the router to treat their subscription as distinct from every other user's.  Adding `authorization` to `ignored_headers` doesn't change this — it only affects headers, not the decoded claims.  See [Ignoring auth context](#ignoring-auth-context) for how to handle this case.
+
+</Note>
 
 ### Configuring deduplication
 
@@ -327,9 +334,63 @@ subscription:
   enabled: true
 # highlight-start
   deduplication:
-    enabled: true # default: true
-    ignored_headers:
-      - user-agent # It won't include this header in the deduplication algorithm, so even if the value is different it will still deduplicate
+    all:
+      enabled: true # default: true
+      ignored_headers:
+        - user-agent # It won't include this header in the deduplication algorithm, so even if the value is different it will still deduplicate
+# highlight-end
+```
+
+#### Per-subgraph deduplication
+
+You can also control deduplication per subgraph.  This is useful when some subgraph subscriptions are safe to deduplicate (e.g., shared market data) and others are not (e.g., personalized AI-generated streams):
+
+```yaml title="router.yaml"
+subscription:
+  enabled: true
+# highlight-start
+  deduplication:
+    all:
+      enabled: true    # default for all subgraphs
+    subgraphs:
+      article:
+        enabled: false # disable dedup for this subgraph only
+# highlight-end
+```
+
+#### Ignoring auth context
+
+If you use the router's built-in JWT authorization and your subgraph subscription data does *not* vary by user identity, you can exclude JWT claims from the deduplication check so that all authenticated users share a single subgraph WebSocket connection:
+
+```yaml title="router.yaml"
+subscription:
+  enabled: true
+# highlight-start
+  deduplication:
+    all:
+      enabled: true
+      ignore_auth_context: true  # default: false
+# highlight-end
+```
+
+<Caution>
+
+With `ignore_auth_context: true`, a user may receive subscription events from a connection that was originally opened by a different user.  Only enable this option when your subgraph's subscription data is truly non-personalized (e.g., product price updates, stock price feeds).
+
+</Caution>
+
+If you're also forwarding the `Authorization` header to your subgraph, add it to `ignored_headers` as well — otherwise the raw token value will still differentiate subscriptions even with `ignore_auth_context: true`.  For complete auth decoupling:
+
+```yaml title="router.yaml"
+subscription:
+  enabled: true
+# highlight-start
+  deduplication:
+    all:
+      enabled: true
+      ignore_auth_context: true  # drops JWT claims from the deduplication check
+      ignored_headers:
+        - authorization           # drops the raw Authorization header too
 # highlight-end
 ```
 
