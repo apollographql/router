@@ -333,9 +333,9 @@ fn extract_shape_as_field_set(shape: &shape::Shape) -> Option<String> {
             let parts: Vec<String> = fields
                 .iter()
                 .filter(|(k, _)| k.as_str() != "__typename")
-                .filter_map(|(k, v)| match extract_shape_as_field_set(v) {
-                    Some(nested) => Some(format!("{k} {{ {nested} }}")),
-                    None => Some(k.to_string()),
+                .map(|(k, v)| match extract_shape_as_field_set(v) {
+                    Some(nested) => format!("{k} {{ {nested} }}"),
+                    None => k.to_string(),
                 })
                 .collect();
             if parts.is_empty() {
