@@ -65,16 +65,13 @@ pub(crate) struct Conf {
     main: Option<String>,
     /// Whether to enable Rhai's internal string interning.
     ///
-    /// When the `sync` feature is active (required for multi-threaded use),
-    /// every string operation acquires a `RwLock` on the interner. Under high
-    /// concurrency this lock can become a bottleneck.
+    /// String interning can reduce memory allocations and string comparison
+    /// cost. But it also introduces synchronization overhead.
     ///
-    /// Set to `false` to disable string interning entirely, which eliminates
-    /// lock acquisition on every string operation and can improve throughput
+    /// Setting this to `false` can improve throughput and is recommended
     /// for workloads with many concurrent Rhai executions.
     ///
-    /// Defaults to `true`, which preserves Rhai's built-in default of 256
-    /// interned strings.
+    /// Defaults to `true`.
     #[serde(default = "default_intern_strings")]
     intern_strings: bool,
 }
