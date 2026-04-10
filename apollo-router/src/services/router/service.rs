@@ -225,13 +225,8 @@ impl Service<RouterRequest> for RouterService {
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
-        let self_clone = self.clone();
-
-        let this = std::mem::replace(self, self_clone);
-
-        let fut = async move { this.call_inner(req).await };
-
-        Box::pin(fut)
+        let this = self.clone();
+        Box::pin(async move { this.call_inner(req).await })
     }
 }
 
@@ -262,13 +257,10 @@ impl RouterService {
                 {
                     Err(response) => response,
                     Ok(request) => {
-                        // self here is a clone of `this` (the RouterService that was readied in
-                        // RouterService::poll_ready), created per-request in call_inner so that
-                        // batched requests can be executed concurrently. The clone's
-                        // supergraph_service is unready (Buffer clones start unready), so oneshot
-                        // is used to re-ready it before calling. Backpressure is still exerted at
-                        // the router level because poll_ready already acquired a slot from the
-                        // outer supergraph buffer on behalf of this request.
+                        // `self` is a per-request clone of the RouterService, allowing batch
+                        // items to be driven concurrently. Tower's contract requires poll_ready
+                        // to be called before each call, so oneshot (poll_ready + call) is used
+                        // rather than calling the service directly.
                         self.supergraph_service.oneshot(request).await?
                     }
                 },
