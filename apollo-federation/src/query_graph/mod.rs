@@ -55,6 +55,27 @@ use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_plan::QueryPlanCost;
 use crate::query_plan::query_planning_traversal::non_local_selections_estimation;
 
+/// Distinguishes the two kinds of copy nodes in the query graph.
+///
+/// Both `@provides` and `connectedSelection` create copies of type nodes, but
+/// with opposite semantics:
+///
+/// - `More`: Created by `@provides`. The copy has all the original node's edges
+///   **plus** additional provided field edges. Re-entering the subgraph from
+///   such a copy is always a longer path — cost optimization prunes it.
+///
+/// - `Fewer`: Created by `connectedSelection` (connector restricted copies).
+///   The copy has **only** the fields the connector endpoint returns, plus key
+///   resolution edges. Re-entering the subgraph via entity resolution is the
+///   only way to access the missing fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ProvidesCopy {
+    /// `@provides` copy: all original edges + provided extras.
+    More,
+    /// Connector restricted copy: subset of original edges + key resolution.
+    Fewer,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct QueryGraphNode {
     /// The GraphQL type this node points to.
@@ -72,6 +93,8 @@ pub(crate) struct QueryGraphNode {
     /// nodes copied for a given @provides application will have the same `provide_id`. Overall,
     /// this mostly exists for debugging visualization.
     pub(crate) provide_id: Option<u32>,
+    /// What kind of copy node this is, if any. See [`ProvidesCopy`] for details.
+    pub(crate) copy_kind: Option<ProvidesCopy>,
     // If present, this node represents a root node of the corresponding kind.
     pub(crate) root_kind: Option<SchemaRootDefinitionKind>,
 }

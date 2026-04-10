@@ -26,6 +26,7 @@ use crate::operation::SelectionSet;
 use crate::operation::merge_selection_sets;
 use crate::query_graph::ContextCondition;
 use crate::query_graph::OverrideCondition;
+use crate::query_graph::ProvidesCopy;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
@@ -255,6 +256,7 @@ impl BaseQueryGraphBuilder {
             source: self.query_graph.current_source.clone(),
             has_reachable_cross_subgraph_edges: false,
             provide_id: None,
+            copy_kind: None,
             root_kind: None,
         });
         if let QueryGraphNodeType::SchemaType(pos) = type_ {
@@ -2187,6 +2189,7 @@ impl FederatedQueryGraphBuilder {
         let new_node = base.create_new_node(type_pos.clone().into())?;
         let new_node_weight = base.query_graph.node_weight_mut(new_node)?;
         new_node_weight.provide_id = Some(provide_id);
+        new_node_weight.copy_kind = Some(ProvidesCopy::More);
         new_node_weight.has_reachable_cross_subgraph_edges = has_reachable_cross_subgraph_edges;
 
         let mut new_edges = Vec::new();
@@ -2369,6 +2372,7 @@ impl FederatedQueryGraphBuilder {
 
         let new_node_weight = self.base.query_graph.node_weight_mut(new_node)?;
         new_node_weight.provide_id = Some(provide_id);
+        new_node_weight.copy_kind = Some(ProvidesCopy::Fewer);
         // Restricted copies have fewer fields than the schema type, so we must
         // prevent the "fully local" optimization from short-circuiting. Setting
         // this to true forces the planner to process fields individually, which
@@ -2772,6 +2776,7 @@ mod tests {
                 source: SCHEMA_NAME.into(),
                 has_reachable_cross_subgraph_edges: false,
                 provide_id: None,
+                copy_kind: None,
                 root_kind,
             },
         );
