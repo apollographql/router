@@ -15,7 +15,6 @@ use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceExt;
 use tower::service_fn;
-use tower_service::Service;
 use tracing::Instrument;
 
 use crate::AllowedFeature;
@@ -43,7 +42,6 @@ use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
-use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
@@ -140,20 +138,12 @@ impl Endpoint {
         }
     }
 }
-/// Factory for creating a RouterService
+/// Factory for creating a router service instance.
 ///
-/// Instances of this traits are used by the HTTP server to generate a new
-/// RouterService on each request
-pub(crate) trait RouterFactory:
-    ServiceFactory<router::Request, Service = Self::RouterService> + Clone + Send + Sync + 'static
-{
-    type RouterService: Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = Self::Future,
-        > + Send;
-    type Future: Send;
+/// Instances of this trait are used by the HTTP server to obtain a new
+/// router service for each incoming request.
+pub(crate) trait RouterFactory: Clone + Send + Sync + 'static {
+    fn create(&self) -> router::BoxCloneService;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 
@@ -387,7 +377,7 @@ impl YamlRouterFactory {
                 create_subgraph_services(&http_service_factory, &configuration).await?;
             builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
-                builder = builder.with_subgraph_service(&name, subgraph_service);
+                builder = builder.with_subgraph_service(&name, subgraph_service.boxed_clone());
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.

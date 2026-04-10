@@ -39,7 +39,6 @@ use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExt
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 
-pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 

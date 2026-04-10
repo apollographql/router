@@ -80,7 +80,6 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
-            .buffered()
             .service(service)
             .boxed_clone()
     }
@@ -108,7 +107,6 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
-            .buffered()
             .service(service)
             .boxed_clone()
     }
@@ -149,7 +147,6 @@ impl PluginPrivate for FileUploadsPlugin {
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
-            .buffered()
             .service(service)
             .boxed_clone()
     }

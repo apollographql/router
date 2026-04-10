@@ -1139,13 +1139,13 @@ pub(crate) struct SubgraphServiceFactory {
 
 impl SubgraphServiceFactory {
     pub(crate) fn new(
-        services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
+        services: Vec<(String, subgraph::BoxCloneService)>,
         plugins: Arc<Plugins>,
         notify: Notify<String, graphql::Response>,
         subscription_config: Option<Arc<SubscriptionConfig>>,
     ) -> Self {
         let mut map = HashMap::with_capacity(services.len());
-        for (name, maker) in services.into_iter() {
+        for (name, service) in services.into_iter() {
             // We have to do a little dance here to insert the subscription layer at the right
             // place: *after* all user plugins, but *before* the subgraph service proper.
             let inner_service = ServiceBuilder::new()
@@ -1154,8 +1154,11 @@ impl SubgraphServiceFactory {
                     subscription_config.clone(),
                     Arc::from(name.clone()),
                 ))
-                .service(maker.make())
+                .service(service.clone().boxed_clone())
                 .boxed_clone();
+            // One buffer per named subgraph provides per-subgraph backpressure and is
+            // required for correct LoadShed / RateLimit behaviour from traffic-shaping
+            // plugins (see ServiceBuilderExt::buffered).
             let service = ServiceBuilder::new()
                 .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
                 .service(
@@ -1173,29 +1176,7 @@ impl SubgraphServiceFactory {
     }
 
     pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxCloneService> {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services.get(name).map(|svc| svc.clone().boxed_clone())
-    }
-}
-
-/// make new instances of the subgraph service
-///
-/// there can be multiple instances of that service executing at any given time
-pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
-    fn make(&self) -> subgraph::BoxCloneService;
-}
-
-impl<S> MakeSubgraphService for S
-where
-    S: Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <S as Service<SubgraphRequest>>::Future: Send,
-{
-    fn make(&self) -> subgraph::BoxCloneService {
-        self.clone().boxed_clone()
     }
 }
 

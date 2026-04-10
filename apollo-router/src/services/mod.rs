@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-pub(crate) use self::execution::service::*;
 pub(crate) use self::query_planner::*;
 pub(crate) use self::subgraph_service::*;
 pub(crate) use self::supergraph::service::*;

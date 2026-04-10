@@ -38,6 +38,7 @@ use crate::plugins::connectors::query_plans::store_connectors_labels;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionExecutionLayer;
+use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
@@ -46,7 +47,6 @@ use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlannerService;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
-use crate::services::ExecutionServiceFactory;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
 use crate::services::SubgraphServiceFactory;
@@ -55,7 +55,8 @@ use crate::services::SupergraphResponse;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::execution;
-use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::execution::service::ExecutionService;
+use crate::services::fetch_service::FetchService;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
@@ -64,7 +65,7 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
 use crate::services::router::ClientRequestAccepts;
-use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::spec::operation_limits::OperationLimits;
@@ -452,7 +453,7 @@ async fn plan_query(
 /// through the entire stack to return a response.
 pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Arc<Plugins>,
-    subgraph_services: Vec<(String, Box<dyn MakeSubgraphService>)>,
+    subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
     http_service_factory: IndexMap<String, HttpClientServiceFactory>,
     configuration: Option<Arc<Configuration>>,
     planner: QueryPlannerService,
@@ -477,16 +478,12 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
-    pub(crate) fn with_subgraph_service<S>(
+    pub(crate) fn with_subgraph_service(
         mut self,
         name: &str,
-        service_maker: S,
-    ) -> PluggableSupergraphServiceBuilder
-    where
-        S: MakeSubgraphService,
-    {
-        self.subgraph_services
-            .push((name.to_string(), Box::new(service_maker)));
+        service: subgraph::BoxCloneService,
+    ) -> PluggableSupergraphServiceBuilder {
+        self.subgraph_services.push((name.to_string(), service));
         self
     }
 
@@ -544,14 +541,11 @@ impl PluggableSupergraphServiceBuilder {
             .map(|c| c.source_config_keys.clone())
             .unwrap_or_default();
 
-        let fetch_service_factory = Arc::new(FetchServiceFactory::new(
+        let fetch_service = FetchService::new(
             schema.clone(),
             subgraph_schemas.clone(),
             Arc::new(SubgraphServiceFactory::new(
-                self.subgraph_services
-                    .into_iter()
-                    .map(|(name, service)| (name, service.into()))
-                    .collect(),
+                self.subgraph_services,
                 self.plugins.clone(),
                 configuration.notify.clone(),
                 subscription_plugin_conf.clone().map(Arc::new),
@@ -560,7 +554,7 @@ impl PluggableSupergraphServiceBuilder {
             Arc::new(ConnectorServiceFactory::new(
                 schema.clone(),
                 subgraph_schemas,
-                subscription_plugin_conf,
+                subscription_plugin_conf.clone(),
                 schema
                     .connectors
                     .as_ref()
@@ -573,25 +567,37 @@ impl PluggableSupergraphServiceBuilder {
                 )),
             )),
             Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
-        ));
+        );
 
-        let execution_service_factory = ExecutionServiceFactory {
-            schema: schema.clone(),
-            subgraph_schemas: query_planner_service.subgraph_schemas(),
-            plugins: self.plugins.clone(),
-            fetch_service_factory,
-            configuration: Arc::clone(&configuration),
-        };
+        let apollo_telemetry_conf = self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == "apollo.telemetry")
+            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
+            .map(|t| t.config.apollo.clone());
 
+        // The buffer between SubscriptionExecutionLayer and the inner plugin/execution
+        // pipeline provides backpressure: if the execution pipeline is busy, callers
+        // block here rather than propagating poll_ready latency upward.
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()
-            // We attach the subscription execution-side layer here instead of inside
-            // the `ExecutionServiceFactory` because the subscription layer requires the
-            // inner service is cloneable, and ESF does not produce a cloneable service.
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
             ))
             .buffered()
-            .service(execution_service_factory.create())
+            .service(
+                self.plugins.iter().rev().fold(
+                    ExecutionService {
+                        schema: schema.clone(),
+                        fetch_service,
+                        subscription_config: subscription_plugin_conf,
+                        subgraph_schemas: query_planner_service.subgraph_schemas(),
+                        apollo_telemetry_config: apollo_telemetry_conf,
+                        configuration: Arc::clone(&configuration),
+                    }
+                    .boxed_clone(),
+                    |acc, (_, e)| e.execution_service(acc),
+                ),
+            )
             .boxed_clone();
 
         let supergraph_service = SupergraphService::builder()
@@ -604,6 +610,9 @@ impl PluggableSupergraphServiceBuilder {
         let supergraph_service =
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
+        // The outer buffer provides backpressure for the full supergraph pipeline and is
+        // required for correct LoadShed / ConcurrencyLimit / RateLimit behaviour introduced
+        // by traffic-shaping and other plugins (see ServiceBuilderExt::buffered).
         let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(content_negotiation::SupergraphLayer::default())

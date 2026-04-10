@@ -84,7 +84,6 @@ use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
-use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::test_harness::http_client;
@@ -144,20 +143,10 @@ struct TestRouterFactory {
     inner: MockRouterServiceType,
 }
 
-impl ServiceFactory<router::Request> for TestRouterFactory {
-    type Service = MockRouterServiceType;
-
-    fn create(&self) -> Self::Service {
-        self.inner.clone()
-    }
-}
-
 impl RouterFactory for TestRouterFactory {
-    type RouterService = MockRouterServiceType;
-
-    type Future = <<TestRouterFactory as ServiceFactory<router::Request>>::Service as Service<
-        router::Request,
-    >>::Future;
+    fn create(&self) -> router::BoxCloneService {
+        self.inner.clone().boxed_clone()
+    }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()

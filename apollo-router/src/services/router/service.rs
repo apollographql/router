@@ -47,7 +47,6 @@ use crate::configuration::BatchingMode;
 use crate::graphql;
 use crate::http_ext;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
@@ -80,7 +79,6 @@ use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_V
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
-use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
@@ -114,15 +112,12 @@ impl RouterService {
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
     ) -> Self {
-        let supergraph_service: supergraph::BoxCloneService =
-            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
-
         RouterService {
             apq_layer: Arc::new(apq_layer),
             persisted_query_layer,
             query_analysis_layer: Arc::new(query_analysis_layer),
             batching,
-            supergraph_service,
+            supergraph_service: sgb,
         }
     }
 }
@@ -230,13 +225,8 @@ impl Service<RouterRequest> for RouterService {
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
-        let self_clone = self.clone();
-
-        let this = std::mem::replace(self, self_clone);
-
-        let fut = async move { this.call_inner(req).await };
-
-        Box::pin(fut)
+        let this = self.clone();
+        Box::pin(async move { this.call_inner(req).await })
     }
 }
 
@@ -267,16 +257,10 @@ impl RouterService {
                 {
                     Err(response) => response,
                     Ok(request) => {
-                        // self.supergraph_service here is a clone of the service that was readied
-                        // in RouterService::poll_ready. Clones are unready by default, so this
-                        // self.supergraph_service is actually not ready, which is why we need to
-                        // oneshot it here. That technically breaks backpressure, but because we are
-                        // still readying the supergraph service before calling into the router
-                        // service, backpressure is actually still exerted at that point--there's
-                        // just potential for some requests to slip through the cracks and end up
-                        // queueing up at this .oneshot() call.
-                        //
-                        // Not ideal, but an improvement on the situation in Router 1.x.
+                        // `self` is a per-request clone of the RouterService, allowing batch
+                        // items to be driven concurrently. Tower's contract requires poll_ready
+                        // to be called before each call, so oneshot (poll_ready + call) is used
+                        // rather than calling the service directly.
                         self.supergraph_service.oneshot(request).await?
                     }
                 },
@@ -827,19 +811,10 @@ pub(crate) struct RouterCreator {
     pub(crate) configuration: Arc<Configuration>,
 }
 
-impl ServiceFactory<router::Request> for RouterCreator {
-    type Service = router::BoxCloneService;
-    fn create(&self) -> Self::Service {
-        self.make().boxed_clone()
-    }
-}
-
 impl RouterFactory for RouterCreator {
-    type RouterService = router::BoxCloneService;
-
-    type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
-        router::Request,
-    >>::Future;
+    fn create(&self) -> router::BoxCloneService {
+        self.make()
+    }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut mm = MultiMap::new();
@@ -892,14 +867,19 @@ impl RouterCreator {
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
         let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
-            supergraph_creator.create(),
+            supergraph_creator.make(),
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
             configuration.batching.clone(),
         ));
 
-        // NOTE: This is the start of the router pipeline (router_service)
+        // NOTE: This is the start of the router pipeline (router_service).
+        // The buffer provides backpressure for the full router pipeline and is required
+        // for correct LoadShed / ConcurrencyLimit / RateLimit behaviour: without a buffer
+        // before those layers (potentially introduced by traffic-shaping or license-
+        // enforcement plugins), Tokio's cooperative scheduling would cause poll_ready to
+        // return Pending spuriously and trigger Overloaded responses.
         let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(static_page.clone())

@@ -46,7 +46,6 @@ use crate::services::Plugins;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
 
-pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub(crate) type ServiceResult = Result<Response, BoxError>;
 
@@ -163,6 +162,9 @@ impl ConnectorRequestServiceFactory {
     ) -> Self {
         let mut map = HashMap::with_capacity(connector_sources.len());
         for source in connector_sources.iter() {
+            // One buffer per connector source provides per-source backpressure and is
+            // required for correct LoadShed / RateLimit behaviour from traffic-shaping
+            // plugins (mirrors the per-subgraph buffer in SubgraphServiceFactory).
             let service = UnconstrainedBuffer::new(
                 plugins
                     .iter()
@@ -185,11 +187,11 @@ impl ConnectorRequestServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, source_name: String) -> BoxService {
+    pub(crate) fn create(&self, source_name: String) -> BoxCloneService {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services
             .get(&source_name)
-            .map(|svc| svc.clone().boxed())
+            .map(|svc| svc.clone().boxed_clone())
             .expect("We should always get a service, even if it is a blank/default one")
     }
 }
