@@ -7,7 +7,6 @@ use shape::ShapeCase;
 
 use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
-use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
@@ -23,40 +22,32 @@ impl_arrow_method!(
     keys_to_camel_case_shape
 );
 
-/// Converts all keys of an object to camelCase.
+/// Converts the top-level keys of an object to camelCase.
 ///
 /// Handles PascalCase, snake_case, and SCREAMING_SNAKE_CASE inputs.
-/// By default, the transformation applies only to the top-level keys.
-/// Pass `true` to apply recursively to nested objects and objects within
-/// arrays.
+/// The transformation applies only to the top-level keys. For recursive
+/// transformation of nested objects, use `keysToCamelCaseDeep`.
 ///
 /// Examples:
 ///
 /// $->keysToCamelCase
 /// given {"property_one": 1, "PropertyTwo": 2, "PROPERTY_THREE": 3}
 /// results in {"propertyOne": 1, "propertyTwo": 2, "propertyThree": 3}
-///
-/// $->keysToCamelCase(true)
-/// given {"outer_key": {"inner_key": 1}}
-/// results in {"outerKey": {"innerKey": 1}}
 fn keys_to_camel_case_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
-    vars: &VarsWithPathsMap,
+    _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
-
-    if arg_count > 1 {
+    if method_args.is_some() {
         return (
             None,
             vec![ApplyToError::new(
                 format!(
-                    "Method ->{} takes at most one argument, but {} were provided",
+                    "Method ->{} does not take any arguments",
                     method_name.as_ref(),
-                    arg_count,
                 ),
                 input_path.to_vec(),
                 method_name.range(),
@@ -65,37 +56,10 @@ fn keys_to_camel_case_method(
         );
     }
 
-    let recursive = if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        let (arg_value, arg_errors) = first_arg.apply_to_path(data, vars, input_path, spec);
-        if !arg_errors.is_empty() {
-            return (None, arg_errors);
-        }
-        match arg_value {
-            Some(JSON::Bool(b)) => b,
-            _ => {
-                return (
-                    None,
-                    vec![ApplyToError::new(
-                        format!(
-                            "Method ->{} requires a boolean argument",
-                            method_name.as_ref(),
-                        ),
-                        input_path.to_vec(),
-                        method_name.range(),
-                        spec,
-                    )],
-                );
-            }
-        }
-    } else {
-        false
-    };
-
     match data {
         JSON::Object(_) => {
             let mut errors = Vec::new();
-            let result =
-                transform_keys(data, recursive, method_name, input_path, spec, &mut errors);
+            let result = transform_keys(data, false, method_name, input_path, spec, &mut errors);
             (Some(result), errors)
         }
         _ => (
@@ -114,7 +78,7 @@ fn keys_to_camel_case_method(
     }
 }
 
-fn transform_keys(
+pub(super) fn transform_keys(
     data: &JSON,
     recursive: bool,
     method_name: &WithRange<String>,
@@ -161,7 +125,7 @@ fn transform_keys(
     }
 }
 
-fn transform_shape(
+pub(super) fn transform_shape(
     input_shape: Shape,
     recursive: bool,
     locations: impl IntoIterator<Item = shape::location::Location> + Clone,
@@ -208,34 +172,20 @@ fn keys_to_camel_case_shape(
     input_shape: Shape,
     _dollar_shape: Shape,
 ) -> Shape {
-    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
-
-    if arg_count > 1 {
+    if method_args.is_some() {
         return Shape::error(
             format!(
-                "Method ->{} takes at most one argument, but {} were provided",
+                "Method ->{} does not take any arguments",
                 method_name.as_ref(),
-                arg_count,
             ),
             method_name.shape_location(context.source_id()),
         );
     }
 
-    // Determine recursive flag from literal argument if possible
-    let recursive = if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        use crate::connectors::json_selection::lit_expr::LitExpr;
-        match first_arg.as_ref() {
-            LitExpr::Bool(b) => *b,
-            _ => false, // Default to false for non-literal args
-        }
-    } else {
-        false
-    };
-
     let locations = method_name.shape_location(context.source_id());
 
     match input_shape.case() {
-        ShapeCase::Object { .. } => transform_shape(input_shape, recursive, locations),
+        ShapeCase::Object { .. } => transform_shape(input_shape, false, locations),
         ShapeCase::Name(_, _) | ShapeCase::Unknown => input_shape,
         _ => Shape::error(
             format!("Method ->{} requires an object input", method_name.as_ref()),
@@ -323,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn should_not_recursively_transform_nested_objects_by_default() {
+    fn should_not_recursively_transform_nested_objects() {
         assert_eq!(
             selection!("$->keysToCamelCase").apply_to(&json!({
                 "outer_key": {
@@ -342,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn should_not_recursively_transform_objects_in_arrays_by_default() {
+    fn should_not_recursively_transform_objects_in_arrays() {
         assert_eq!(
             selection!("$->keysToCamelCase").apply_to(&json!({
                 "array_key": [
@@ -356,44 +306,6 @@ mod tests {
                         { "nested_key": 1 },
                         { "another_key": 2 },
                     ],
-                })),
-                vec![],
-            ),
-        );
-    }
-
-    #[test]
-    fn should_apply_shallowly_when_false_is_passed() {
-        assert_eq!(
-            selection!("$->keysToCamelCase(false)").apply_to(&json!({
-                "outer_key": {
-                    "inner_key": 1,
-                },
-            })),
-            (
-                Some(json!({
-                    "outerKey": {
-                        "inner_key": 1,
-                    },
-                })),
-                vec![],
-            ),
-        );
-    }
-
-    #[test]
-    fn should_apply_recursively_when_true_is_passed() {
-        assert_eq!(
-            selection!("$->keysToCamelCase(true)").apply_to(&json!({
-                "outer_key": {
-                    "inner_key": 1,
-                },
-            })),
-            (
-                Some(json!({
-                    "outerKey": {
-                        "innerKey": 1,
-                    },
                 })),
                 vec![],
             ),
@@ -447,28 +359,13 @@ mod tests {
     }
 
     #[test]
-    fn should_error_on_too_many_arguments() {
+    fn should_error_when_args_provided() {
         assert_eq!(
-            selection!("$->keysToCamelCase(true, false)").apply_to(&json!({})),
+            selection!("$->keysToCamelCase(true)").apply_to(&json!({})),
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->keysToCamelCase takes at most one argument, but 2 were provided",
-                    "path": ["->keysToCamelCase"],
-                    "range": [3, 18],
-                }))]
-            ),
-        );
-    }
-
-    #[test]
-    fn should_error_on_non_boolean_argument() {
-        assert_eq!(
-            selection!("$->keysToCamelCase(42)").apply_to(&json!({})),
-            (
-                None,
-                vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->keysToCamelCase requires a boolean argument",
+                    "message": "Method ->keysToCamelCase does not take any arguments",
                     "path": ["->keysToCamelCase"],
                     "range": [3, 18],
                 }))]
@@ -507,12 +404,12 @@ mod shape_tests {
         }
     }
 
-    fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
+    fn get_shape(input: Shape) -> Shape {
         let location = get_location();
         keys_to_camel_case_shape(
             &ShapeContext::new(location.source_id),
             &WithRange::new("keysToCamelCase".to_string(), Some(location.span)),
-            Some(&MethodArgs { args, range: None }),
+            None,
             input,
             Shape::unknown([]),
         )
@@ -525,7 +422,7 @@ mod shape_tests {
         fields.insert("PascalCase".to_string(), Shape::string([]));
         let input = Shape::object(fields, Shape::none(), []);
 
-        let result = get_shape(vec![], input);
+        let result = get_shape(input);
 
         match result.case() {
             ShapeCase::Object { fields, .. } => {
@@ -541,23 +438,27 @@ mod shape_tests {
     #[test]
     fn shape_should_return_unknown_for_unknown_input() {
         let input = Shape::unknown([]);
-        let result = get_shape(vec![], input.clone());
+        let result = get_shape(input.clone());
         assert_eq!(result, input);
     }
 
     #[test]
     fn shape_should_error_on_non_object_input() {
-        let result = get_shape(vec![], Shape::string([]));
+        let result = get_shape(Shape::string([]));
         assert!(matches!(result.case(), ShapeCase::Error { .. }));
     }
 
     #[test]
-    fn shape_should_error_on_too_many_args() {
-        let result = get_shape(
-            vec![
-                WithRange::new(LitExpr::Bool(true), None),
-                WithRange::new(LitExpr::Bool(false), None),
-            ],
+    fn shape_should_error_when_args_provided() {
+        let location = get_location();
+        let result = keys_to_camel_case_shape(
+            &ShapeContext::new(location.source_id),
+            &WithRange::new("keysToCamelCase".to_string(), Some(location.span)),
+            Some(&MethodArgs {
+                args: vec![WithRange::new(LitExpr::Bool(true), None)],
+                range: None,
+            }),
+            Shape::unknown([]),
             Shape::unknown([]),
         );
         assert!(matches!(result.case(), ShapeCase::Error { .. }));
@@ -577,7 +478,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn shape_should_not_recursively_transform_nested_object_fields_by_default() {
+    fn shape_should_not_recursively_transform_nested_object_fields() {
         let mut inner_fields = Shape::empty_map();
         inner_fields.insert("inner_key".to_string(), Shape::int([]));
         let inner = Shape::object(inner_fields, Shape::none(), []);
@@ -586,7 +487,7 @@ mod shape_tests {
         outer_fields.insert("outer_key".to_string(), inner);
         let input = Shape::object(outer_fields, Shape::none(), []);
 
-        let result = get_shape(vec![], input);
+        let result = get_shape(input);
 
         match result.case() {
             ShapeCase::Object { fields, .. } => {
@@ -606,35 +507,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn shape_should_not_transform_nested_fields_when_recursive_false() {
-        let mut inner_fields = Shape::empty_map();
-        inner_fields.insert("inner_key".to_string(), Shape::int([]));
-        let inner = Shape::object(inner_fields, Shape::none(), []);
-
-        let mut outer_fields = Shape::empty_map();
-        outer_fields.insert("outer_key".to_string(), inner);
-        let input = Shape::object(outer_fields, Shape::none(), []);
-
-        let result = get_shape(vec![WithRange::new(LitExpr::Bool(false), None)], input);
-
-        match result.case() {
-            ShapeCase::Object { fields, .. } => {
-                assert!(fields.contains_key("outerKey"));
-                let inner_shape = fields.get("outerKey").unwrap();
-                match inner_shape.case() {
-                    ShapeCase::Object { fields, .. } => {
-                        assert!(fields.contains_key("inner_key"));
-                        assert!(!fields.contains_key("innerKey"));
-                    }
-                    _ => panic!("Expected nested object shape"),
-                }
-            }
-            _ => panic!("Expected object shape"),
-        }
-    }
-
-    #[test]
-    fn shape_should_not_recursively_transform_objects_inside_arrays_by_default() {
+    fn shape_should_not_recursively_transform_objects_inside_arrays() {
         let mut item_fields = Shape::empty_map();
         item_fields.insert("array_item_key".to_string(), Shape::string([]));
         let item = Shape::object(item_fields, Shape::none(), []);
@@ -643,36 +516,7 @@ mod shape_tests {
         outer_fields.insert("my_list".to_string(), Shape::list(item, []));
         let input = Shape::object(outer_fields, Shape::none(), []);
 
-        let result = get_shape(vec![], input);
-
-        match result.case() {
-            ShapeCase::Object { fields, .. } => {
-                assert!(fields.contains_key("myList"));
-                let list_shape = fields.get("myList").unwrap();
-                let item_shape = list_shape.any_item([]);
-                match item_shape.case() {
-                    ShapeCase::Object { fields, .. } => {
-                        assert!(fields.contains_key("array_item_key"));
-                        assert!(!fields.contains_key("arrayItemKey"));
-                    }
-                    _ => panic!("Expected object shape inside array"),
-                }
-            }
-            _ => panic!("Expected object shape"),
-        }
-    }
-
-    #[test]
-    fn shape_should_not_transform_array_contents_when_recursive_false() {
-        let mut item_fields = Shape::empty_map();
-        item_fields.insert("array_item_key".to_string(), Shape::string([]));
-        let item = Shape::object(item_fields, Shape::none(), []);
-
-        let mut outer_fields = Shape::empty_map();
-        outer_fields.insert("my_list".to_string(), Shape::list(item, []));
-        let input = Shape::object(outer_fields, Shape::none(), []);
-
-        let result = get_shape(vec![WithRange::new(LitExpr::Bool(false), None)], input);
+        let result = get_shape(input);
 
         match result.case() {
             ShapeCase::Object { fields, .. } => {
@@ -699,7 +543,7 @@ mod shape_tests {
         fields.insert("bool_field".to_string(), Shape::bool([]));
         let input = Shape::object(fields, Shape::none(), []);
 
-        let result = get_shape(vec![], input);
+        let result = get_shape(input);
 
         match result.case() {
             ShapeCase::Object { fields, .. } => {

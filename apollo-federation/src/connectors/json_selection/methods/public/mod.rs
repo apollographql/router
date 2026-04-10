@@ -55,6 +55,8 @@ mod parse_int;
 pub(crate) use parse_int::ParseIntMethod;
 mod keys_to_camel_case;
 pub(crate) use keys_to_camel_case::KeysToCamelCaseMethod;
+mod keys_to_camel_case_deep;
+pub(crate) use keys_to_camel_case_deep::KeysToCamelCaseDeepMethod;
 mod contains;
 pub(crate) use contains::ContainsMethod;
 mod arithmetic;
