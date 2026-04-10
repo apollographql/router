@@ -328,7 +328,10 @@ impl PluginPrivate for TrafficShaping {
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         // NB: consider each triplet (map_future_with_request_data, load_shed, layer) as a unit of
-        //  behavior
+        //  behavior.
+        // The outer buffer before the first load_shed() is required for correct cooperative-
+        // scheduling behaviour: without it, Tokio's budget can cause poll_ready to return
+        // Pending spuriously and the load_shed would emit false Overloaded errors.
         ServiceBuilder::new()
             .buffered()
             .map_future_with_request_data(
@@ -433,6 +436,10 @@ impl PluginPrivate for TrafficShaping {
                         .clone()
                 });
 
+            // Outer buffer: required before load_shed() for correct cooperative-scheduling
+            // behaviour (see router_service above for the full explanation).
+            // Inner buffer (below): provides a backpressure surface so that RateLimitLayer
+            // can return poll_ready Pending and LoadShed will actually shed that load.
             ServiceBuilder::new()
                 .buffered()
                 .map_future_with_request_data(
@@ -514,6 +521,9 @@ impl PluginPrivate for TrafficShaping {
                     .clone()
             });
 
+            // Outer buffer: required before load_shed() for correct cooperative-scheduling
+            // behaviour (see router_service above for the full explanation).
+            // Inner buffer (below): provides the backpressure surface for RateLimitLayer.
             ServiceBuilder::new()
                 .buffered()
                 .map_future_with_request_data(

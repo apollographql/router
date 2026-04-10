@@ -9,7 +9,6 @@ use http::header;
 use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
@@ -17,7 +16,6 @@ use super::entity::REPRESENTATIONS;
 use super::entity::Ttl;
 use super::entity::hash_query;
 use super::entity::hash_vary_headers;
-use crate::layers::ServiceBuilderExt;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
 
@@ -32,10 +30,7 @@ impl CacheMetricsService {
         separate_per_type: bool,
     ) -> subgraph::BoxCloneService {
         tower::util::BoxCloneService::new(CacheMetricsService {
-            service: ServiceBuilder::new()
-                .buffered()
-                .service(service)
-                .boxed_clone(),
+            service,
             name: Arc::new(name),
             counter: Some(Arc::new(Mutex::new(CacheCounter::new(
                 ttl.map(|t| t.0).unwrap_or_else(|| Duration::from_secs(60)),

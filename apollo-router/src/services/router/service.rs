@@ -874,7 +874,12 @@ impl RouterCreator {
             configuration.batching.clone(),
         ));
 
-        // NOTE: This is the start of the router pipeline (router_service)
+        // NOTE: This is the start of the router pipeline (router_service).
+        // The buffer provides backpressure for the full router pipeline and is required
+        // for correct LoadShed / ConcurrencyLimit / RateLimit behaviour: without a buffer
+        // before those layers (potentially introduced by traffic-shaping or license-
+        // enforcement plugins), Tokio's cooperative scheduling would cause poll_ready to
+        // return Pending spuriously and trigger Overloaded responses.
         let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(static_page.clone())
