@@ -23,7 +23,6 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::protocols::websocket::WebSocketProtocol;
 use crate::query_planner::OperationKind;
-use crate::register_plugin;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
@@ -36,6 +35,8 @@ pub(crate) mod notification;
 pub(crate) mod subgraph;
 
 pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
+pub(crate) use execution::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
+pub(crate) use execution::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
 pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
 pub(crate) use fetch::fetch_service_handle_subscription;
@@ -45,6 +46,8 @@ pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
 pub(crate) const SUBSCRIPTION_ERROR_EXTENSION_KEY: &str = "apollo::subscriptions::fatal_error";
 pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
     "apollo.subscription.custom_connection_params";
+pub(crate) const SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY: &str =
+    "apollo::subscription::subgraph_name";
 
 #[derive(Debug, Clone)]
 pub(crate) struct Subscription {
@@ -253,7 +256,7 @@ impl Plugin for Subscription {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let mut callback_hmac_key = None;
-        if init.config.mode.callback.is_some() {
+        if let Some(callback) = &init.config.mode.callback {
             callback_hmac_key = Some(
                 SUBSCRIPTION_CALLBACK_HMAC_KEY
                     .get_or_init(|| Uuid::new_v4().to_string())
@@ -261,16 +264,10 @@ impl Plugin for Subscription {
             );
             #[cfg(not(test))]
             init.notify
-                .set_ttl(
-                    init.config
-                        .mode
-                        .callback
-                        .as_ref()
-                        .expect("we checked in the condition the callback conf")
-                        .heartbeat_interval
-                        .into_option(),
-                )
+                .set_ttl(callback.heartbeat_interval.into_option())
                 .await?;
+            #[cfg(test)]
+            let _ = callback;
         }
 
         Ok(Subscription {

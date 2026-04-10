@@ -18,7 +18,6 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::connectors::configuration::ConnectorsConfig;
 use crate::plugins::connectors::request_limit::RequestLimits;
-use crate::register_plugin;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::execution;
 use crate::services::supergraph;
