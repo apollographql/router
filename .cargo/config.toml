@@ -5,3 +5,13 @@ fed = "run -p apollo-federation-cli --"
 [profile.profiling]
 inherits = "release"
 debug = true
+
+# aarch64-linux jemalloc page size -- fix for Graviton and other large-page ARM64 Linux platforms.
+# jemalloc compiled with the default 4KiB page size fails on startup with
+# "Unsupported system page size" on kernels configured for larger pages (e.g. AWS Graviton uses 16KiB).
+# LG_PAGE=16 means 2^16 = 64KiB -- compatible with all ARM64 page sizes (4KiB, 16KiB, 64KiB).
+# This value is detected automatically when compiling natively on a large-page system,
+# but the CI arm_linux_build executor uses a 4KiB kernel, so it must be set explicitly here.
+# See: https://github.com/apollographql/router/issues/3382
+[target.aarch64-unknown-linux-gnu.env]
+JEMALLOC_SYS_WITH_LG_PAGE = "16"
