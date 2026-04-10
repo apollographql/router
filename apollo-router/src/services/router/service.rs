@@ -79,7 +79,6 @@ use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_V
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
-use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
@@ -820,19 +819,10 @@ pub(crate) struct RouterCreator {
     pub(crate) configuration: Arc<Configuration>,
 }
 
-impl ServiceFactory<router::Request> for RouterCreator {
-    type Service = router::BoxCloneService;
-    fn create(&self) -> Self::Service {
+impl RouterFactory for RouterCreator {
+    fn create(&self) -> router::BoxCloneService {
         self.make()
     }
-}
-
-impl RouterFactory for RouterCreator {
-    type RouterService = router::BoxCloneService;
-
-    type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
-        router::Request,
-    >>::Future;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut mm = MultiMap::new();
@@ -885,7 +875,7 @@ impl RouterCreator {
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
         let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
-            supergraph_creator.create(),
+            supergraph_creator.make(),
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
