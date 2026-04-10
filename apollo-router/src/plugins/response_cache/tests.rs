@@ -4073,14 +4073,17 @@ const CONNECTOR_SCHEMA: &str = include_str!("../../testdata/connector_response_c
 ///
 /// We cannot use TestHarness because connectors are extracted during YamlRouterFactory
 /// initialization, not during TestHarness construction.
-async fn create_connector_cache_service(
+async fn create_connector_cache_factory(
     connector_uri: &str,
     namespace: &str,
     extra_config: Option<serde_json_bytes::Value>,
-) -> impl tower::Service<
+) -> impl crate::services::new_service::ServiceFactory<
     crate::services::router::Request,
-    Response = crate::services::router::Response,
-    Error = tower::BoxError,
+    Service = impl tower::Service<
+        crate::services::router::Request,
+        Response = crate::services::router::Response,
+        Error = tower::BoxError,
+    >,
 > {
     let connector_url = format!("{connector_uri}/");
 
@@ -4117,7 +4120,7 @@ async fn create_connector_cache_service(
 
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();
     let mut factory = YamlRouterFactory;
-    let router_creator = factory
+    factory
         .create(
             false,
             Arc::new(config.clone()),
@@ -4127,9 +4130,21 @@ async fn create_connector_cache_service(
             Arc::new(LicenseState::Licensed { limits: None }),
         )
         .await
-        .unwrap();
+        .unwrap()
+}
 
-    router_creator.create()
+async fn create_connector_cache_service(
+    connector_uri: &str,
+    namespace: &str,
+    extra_config: Option<serde_json_bytes::Value>,
+) -> impl tower::Service<
+    crate::services::router::Request,
+    Response = crate::services::router::Response,
+    Error = tower::BoxError,
+> {
+    create_connector_cache_factory(connector_uri, namespace, extra_config)
+        .await
+        .create()
 }
 
 /// Make a supergraph query request with cache debug header enabled.
@@ -4995,8 +5010,11 @@ async fn connector_root_field_private_debug_entry() {
     let uri = mock_server.uri();
     let namespace = Uuid::new_v4().to_string();
 
+    // Use a shared factory so the in-memory private_queries LRU persists across requests
+    let factory = create_connector_cache_factory(&uri, &namespace, None).await;
+
     // First request: populates the private query LRU
-    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let service = factory.create();
     let request = make_connector_cache_request("query { users { id name } }");
     let response = service.oneshot(request).await.unwrap();
     let body = connector_response_body(response).await;
@@ -5008,14 +5026,14 @@ async fn connector_root_field_private_debug_entry() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Second request: known-private bypass path should include debug entry
-    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let service = factory.create();
     let request = make_connector_cache_request("query { users { id name } }");
     let response = service.oneshot(request).await.unwrap();
     let body = connector_response_body(response).await;
 
     let debug_entries = body
-        .pointer("/extensions/apolloCacheDebugging")
-        .expect("response should contain apolloCacheDebugging extension");
+        .pointer("/extensions/apolloCacheDebugging/data")
+        .expect("response should contain apolloCacheDebugging extension with data");
 
     let entries = debug_entries
         .as_array()
@@ -5054,8 +5072,11 @@ async fn connector_entity_private_debug_entry() {
     let uri = mock_server.uri();
     let namespace = Uuid::new_v4().to_string();
 
+    // Use a shared factory so the in-memory private_queries LRU persists across requests
+    let factory = create_connector_cache_factory(&uri, &namespace, None).await;
+
     // First request: populates the private query LRU
-    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let service = factory.create();
     let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
     let response = service.oneshot(request).await.unwrap();
     let body = connector_response_body(response).await;
@@ -5067,14 +5088,14 @@ async fn connector_entity_private_debug_entry() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Second request: known-private bypass path should include debug entry
-    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let service = factory.create();
     let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
     let response = service.oneshot(request).await.unwrap();
     let body = connector_response_body(response).await;
 
     let debug_entries = body
-        .pointer("/extensions/apolloCacheDebugging")
-        .expect("response should contain apolloCacheDebugging extension");
+        .pointer("/extensions/apolloCacheDebugging/data")
+        .expect("response should contain apolloCacheDebugging extension with data");
 
     let entries = debug_entries
         .as_array()
