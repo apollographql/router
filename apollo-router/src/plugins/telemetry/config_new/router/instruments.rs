@@ -24,6 +24,8 @@ use crate::plugins::telemetry::config_new::instruments::ActiveRequestsCounter;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
+use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedAttributes;
+use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedCounter;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadAttributes;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
@@ -56,6 +58,11 @@ pub(crate) struct RouterInstrumentsConfig {
     #[serde(rename = "apollo.router.overhead")]
     pub(crate) router_overhead:
         DefaultedStandardInstrument<Extendable<RouterOverheadAttributes, RouterSelector>>,
+
+    /// Counter of subscriptions terminated
+    #[serde(rename = "apollo.router.operations.subscriptions.terminated.client")]
+    pub(crate) subscriptions_terminated:
+        DefaultedStandardInstrument<Extendable<SubscriptionsTerminatedAttributes, RouterSelector>>,
 }
 
 impl DefaultForLevel for RouterInstrumentsConfig {
@@ -73,6 +80,8 @@ impl DefaultForLevel for RouterInstrumentsConfig {
         self.http_server_response_body_size
             .defaults_for_levels(requirement_level, kind);
         self.router_overhead
+            .defaults_for_levels(requirement_level, kind);
+        self.subscriptions_terminated
             .defaults_for_levels(requirement_level, kind);
     }
 }
@@ -98,6 +107,7 @@ pub(crate) struct RouterInstruments {
         >,
     >,
     pub(crate) custom: RouterCustomInstruments,
+    pub(crate) subscriptions_terminated: Option<SubscriptionsTerminatedCounter>,
 }
 
 impl Instrumented for RouterInstruments {
@@ -120,6 +130,12 @@ impl Instrumented for RouterInstruments {
         }
         if let Some(router_overhead) = &self.router_overhead {
             router_overhead.on_request(request);
+        }
+        if let Some(subscriptions_terminated_counter) = &self.subscriptions_terminated {
+            request
+                .context
+                .extensions()
+                .with_lock(|ext| ext.insert(subscriptions_terminated_counter.clone()));
         }
         self.custom.on_request(request);
     }

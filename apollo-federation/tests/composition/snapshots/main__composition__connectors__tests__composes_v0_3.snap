@@ -2,7 +2,7 @@
 source: apollo-federation/tests/composition/connectors.rs
 expression: schema_string
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"]) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_3_], args: {url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"]}) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_1_], args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_3_], args: {name: "v1", http: {baseURL: "http://v1", path: "", queryParams: ""}, errors: {message: "", extensions: ""}, isSuccess: ""}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_1_], args: {name: "v1", http: {baseURL: "http://v1"}}) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"]) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_1_], args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_3_], args: {url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"]}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_1_], args: {name: "v1", http: {baseURL: "http://v1"}}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_3_], args: {name: "v1", http: {baseURL: "http://v1", path: "", queryParams: ""}, errors: {message: "", extensions: ""}, isSuccess: ""}) {
   query: Query
 }
 
@@ -36,8 +36,8 @@ enum link__Purpose {
 scalar link__Import
 
 enum join__Graph {
-  WITH_CONNECTORS_V0_3_ @join__graph(name: "with-connectors-v0_3", url: "http://with-connectors-v0_3")
   WITH_CONNECTORS_V0_1_ @join__graph(name: "with-connectors-v0_1", url: "http://with-connectors-v0_1")
+  WITH_CONNECTORS_V0_3_ @join__graph(name: "with-connectors-v0_3", url: "http://with-connectors-v0_3")
 }
 
 scalar join__FieldSet
@@ -53,17 +53,17 @@ input join__ContextArgument {
   selection: join__FieldValue!
 }
 
-type Query @join__type(graph: WITH_CONNECTORS_V0_3_) @join__type(graph: WITH_CONNECTORS_V0_1_) {
-  resources: [Resource!]! @join__field(graph: WITH_CONNECTORS_V0_3_) @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_3_], args: {source: "v1", http: {GET: "/resources"}, selection: ""})
+type Query @join__type(graph: WITH_CONNECTORS_V0_1_) @join__type(graph: WITH_CONNECTORS_V0_3_) {
   widgets: [Widget!]! @join__field(graph: WITH_CONNECTORS_V0_1_) @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_1_], args: {source: "v1", http: {GET: "/widgets"}, selection: ""})
+  resources: [Resource!]! @join__field(graph: WITH_CONNECTORS_V0_3_) @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_3_], args: {source: "v1", http: {GET: "/resources"}, selection: ""})
 }
 
-type Resource @join__type(graph: WITH_CONNECTORS_V0_3_, key: "id") @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_3_], args: {id: "conn_id", source: "v1", http: {GET: "/resources", path: "", queryParams: ""}, batch: {maxSize: 5}, errors: {message: "", extensions: ""}, isSuccess: "", selection: ""}) {
+type Widget @join__type(graph: WITH_CONNECTORS_V0_1_, key: "id") {
   id: ID!
   name: String!
 }
 
-type Widget @join__type(graph: WITH_CONNECTORS_V0_1_, key: "id") {
+type Resource @join__type(graph: WITH_CONNECTORS_V0_3_, key: "id") @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_3_], args: {id: "conn_id", source: "v1", http: {GET: "/resources", path: "", queryParams: ""}, batch: {maxSize: 5}, errors: {message: "", extensions: ""}, isSuccess: "", selection: ""}) {
   id: ID!
   name: String!
 }

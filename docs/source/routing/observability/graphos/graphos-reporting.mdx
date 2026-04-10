@@ -71,6 +71,21 @@ telemetry:
 
 <OTelEnvVarsCaution />
 
+#### Configuring the transport protocol
+
+<MinVersionBadge version="Router v2.14.0" />
+
+By default, the router sends GraphOS OTLP data over gRPC. To switch to HTTP protobuf, set `experimental_otlp_tracing_protocol` and `experimental_otlp_metrics_protocol`:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    experimental_otlp_tracing_protocol: http   # grpc (default) | http
+    experimental_otlp_metrics_protocol: http   # grpc (default) | http
+```
+
+Use HTTP when your network or proxy infrastructure handles HTTP traffic but not gRPC. For proxy routing, see [HTTP proxy support](#http-proxy-support).
+
 ## Reporting field-level traces
 
 In their responses to your router, your subgraphs can include [field-level traces](/federation/metrics) that indicate how long the subgraph took to resolve each field in an operation. By analyzing this data in GraphOS Studio, you can identify and optimize your slower fields:
@@ -440,3 +455,22 @@ telemetry:
         batch_processor:
           scheduled_delay: 1s # default is 5s
 ```
+
+### HTTP proxy support
+
+<MinVersionBadge version="Router v2.14.0" />
+
+The router's GraphOS OTLP exporters respect the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables. Set them before starting your router to route OTLP traffic through a proxy:
+
+```bash
+export HTTPS_PROXY=https://your-proxy.example.com:3128
+export NO_PROXY=localhost,127.0.0.1
+```
+
+The router reads these variables at startup — restart your router for changes to take effect.
+
+<Note>
+
+HTTP proxy routing applies to the HTTP transport. Set `experimental_otlp_tracing_protocol` and `experimental_otlp_metrics_protocol` to `http` to route GraphOS OTLP traffic through a proxy. See [Configuring the transport protocol](#configuring-the-transport-protocol) for details.
+
+</Note>
