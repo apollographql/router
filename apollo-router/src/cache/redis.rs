@@ -285,7 +285,7 @@ where
 }
 
 impl RedisCacheStorage {
-    /// Create a new RedisCacheStorage without an inner client. To create an inner client, you must call `initialize_client`
+    /// Create a new RedisCacheStorage without an inner client. To create an inner client, you must call `create_client_pool`
     pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)
             .inspect_err(|err| record_redis_error(err, caller, "startup"))?;
@@ -386,24 +386,13 @@ impl RedisCacheStorage {
             pool_recreation_lock: Arc::new(Mutex::new(())),
         };
 
-        let _ = storage.initialize_client().await?;
+        let _ = storage.create_client_pool().await?;
         Ok(storage)
     }
 
     /// Initializes an inner client pool
-    pub(crate) async fn initialize_client(&self) -> Result<(), BoxError> {
-        let inner = self.create_client_pool().await?;
-        // NOTE: this is the real behavior of the fn, hiding that we're setting the new pool to inner
-        *self.inner.write() = inner;
-        Ok(())
-    }
-
-    /// Creates the inner redis client for RedisCacheStorage
-    // NOTE: this splits up the actual inner's creation from the RedisCacheStorage creation because
-    // we need to have a way to recreate the inner client when it errors out but we don't need to
-    // recreate all of RedisCacheStorage
-    async fn create_client_pool(&self) -> Result<Option<DropSafeRedisPool>, BoxError> {
-        let pooled_client = Builder::from_config(self.redis_client_config.client_config.clone())
+    pub(crate) async fn create_client_pool(&self) -> Result<(), BoxError> {
+        let client_pool = Builder::from_config(self.redis_client_config.client_config.clone())
             .with_config(|client_config| {
                 if self.is_cluster {
                     // use `ClusterDiscoveryPolicy::ConfigEndpoint` - explicit in case the default changes.
@@ -447,15 +436,15 @@ impl RedisCacheStorage {
             .set_policy(ReconnectPolicy::new_exponential(0, 1, 2000, 5))
             .build_pool(self.redis_client_config.pool_size)?;
 
-        for client in pooled_client.clients() {
+        for client in client_pool.clients() {
             setup_event_listeners(self.redis_client_config.caller, client);
             ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
         }
 
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
-        let client_handles = pooled_client.connect_pool();
+        let client_handles = client_pool.connect_pool();
         if self.redis_client_config.required_to_start {
-            pooled_client.wait_for_connect().await?;
+            client_pool.wait_for_connect().await?;
             tracing::trace!("redis connections established");
         }
 
@@ -475,38 +464,46 @@ impl RedisCacheStorage {
         // reference, we don't increment the refcount by 1 for what's held in the watcher; rather,
         // we have to upgrade() to see if that data still exists; this means that we can drop the
         // RedisCacheStorage from the previous config without leaking it
-        let client_pool = Arc::downgrade(&self.inner);
+        let client_pool_downgraded = Arc::downgrade(&self.inner);
         let watcher_handle = tokio::spawn(async move {
             // WARN: the client_handles returning is the signal that fred has been aborted; don't
             // remove it!
             let _fred_aborted = join_all(client_handles).await;
-            if let Some(inner) = client_pool.upgrade() {
+            if let Some(inner) = client_pool_downgraded.upgrade() {
                 inner.write().take();
                 tracing::info!("redis client aborted; marking for recreation");
             }
         });
 
-        let heartbeat_clients = pooled_client.clone();
+        let client_heartbeats = client_pool.clone();
         let heartbeat_handle = tokio::spawn(async move {
-            heartbeat_clients
+            client_heartbeats
                 .enable_heartbeat(REDIS_HEARTBEAT_INTERVAL, false)
                 .await
         });
 
-        let pooled_client_arc = Arc::new(pooled_client);
+        let pooled_client_arc = Arc::new(client_pool);
         let metrics_collector = RedisMetricsCollector::new(
             pooled_client_arc.clone(),
             self.redis_client_config.caller,
             self.redis_client_config.metrics_interval,
         );
 
-        Ok(Some(DropSafeRedisPool {
+        let inner = DropSafeRedisPool {
             pool: pooled_client_arc,
             caller: self.redis_client_config.caller,
             heartbeat_abort_handle: heartbeat_handle.abort_handle(),
             watcher_abort_handle: watcher_handle.abort_handle(),
             metrics_collector,
-        }))
+        };
+
+        // replace the current pool (if there is one) with the new one
+        *self.inner.write() = Some(inner);
+
+        // set up metrics
+        self.activate();
+
+        Ok(())
     }
 
     pub(crate) fn ttl(&self) -> Option<Duration> {
@@ -653,31 +650,19 @@ impl RedisCacheStorage {
 
                 let cloned_self = self.clone();
                 tokio::task::spawn(async move {
-                    let new_inner = match cloned_self.create_client_pool().await {
-                        Ok(new_inner) => new_inner,
-                        Err(e) => {
-                            let error = RedisError::new(
-                                RedisErrorKind::Unknown,
-                                format!("Error attempting to recreate client: {e:?}"),
-                            );
-                            record_redis_error(
-                                &error,
-                                cloned_self.redis_client_config.caller,
-                                "client",
-                            );
-
-                            return Err(error);
-                        }
-                    };
-
-                    {
-                        let mut guard = cloned_self.inner.write();
-                        *guard = new_inner;
-                        if let Some(inner) = guard.as_ref() {
-                            inner.activate();
-                        }
+                    // this will attempt to recreate the client pool on the next command, so we
+                    // don't do any special retry logic here; we just record failures
+                    if let Err(e) = cloned_self.create_client_pool().await {
+                        let error = RedisError::new(
+                            RedisErrorKind::Unknown,
+                            format!("Error attempting to recreate client: {e:?}"),
+                        );
+                        record_redis_error(
+                            &error,
+                            cloned_self.redis_client_config.caller,
+                            "client",
+                        );
                     }
-                    Ok(())
                 });
 
                 // rather than get into either recursion or a loop, we just return an error and let
@@ -1246,12 +1231,6 @@ mod test {
             serde_json::from_value(config_json).expect("invalid redis cache configuration")
         }
 
-        async fn create_and_connect(clustered: bool) -> Result<RedisCacheStorage, BoxError> {
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
-            storage.initialize_client().await?;
-            Ok(storage)
-        }
-
         async fn wait_for_recreation(storage: &RedisCacheStorage) {
             for _ in 0..100 {
                 if storage.inner.read().is_some() {
@@ -1264,14 +1243,14 @@ mod test {
 
         #[tokio::test]
         #[rstest::rstest]
-        async fn new_starts_empty_and_initialize_client_populates(
+        async fn new_starts_empty_and_create_client_pool_populates(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
             let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
             assert!(storage.inner.read().is_none());
 
-            storage.initialize_client().await?;
+            storage.create_client_pool().await?;
             assert!(storage.inner.read().is_some());
             Ok(())
         }
@@ -1283,7 +1262,8 @@ mod test {
             #[values("client", "pipeline")] method: &str,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = create_and_connect(clustered).await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
             storage.inner.write().take();
             assert!(storage.inner.read().is_none());
 
@@ -1311,7 +1291,8 @@ mod test {
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = create_and_connect(clustered).await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
 
             let key = RedisKey("recreation_test_key".to_string());
             storage
@@ -1338,8 +1319,8 @@ mod test {
             #[values("client", "pipeline")] method: &str,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = create_and_connect(clustered).await?;
-            storage.activate();
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
 
             let (old_heartbeat, old_metrics) = {
                 let guard = storage.inner.read();
@@ -1395,28 +1376,20 @@ mod test {
             Ok(())
         }
 
-        /// activate() after initial initialize_client() populates the metrics abort handle
+        /// activate() after initial create_client_pool() populates the metrics abort handle
         #[tokio::test]
         #[rstest::rstest]
-        async fn activate_after_initialize_client_starts_metrics(
+        async fn create_client_pool_starts_metrics(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = create_and_connect(clustered).await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
 
-            // before activate, metrics abort handle should be None
-            assert!(
-                storage
-                    .inner
-                    .read()
-                    .as_ref()
-                    .unwrap()
-                    .metrics_collector
-                    .abort_handle()
-                    .is_none()
-            );
+            // before initialize, which calls activate(), metrics abort handle should be None
+            // (because the inner is None!)
+            assert!(storage.inner.read().as_ref().is_none());
 
-            storage.activate();
+            storage.create_client_pool().await?;
 
             let handle = storage
                 .inner
@@ -1438,8 +1411,8 @@ mod test {
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = create_and_connect(clustered).await?;
-            storage.activate();
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
 
             let first_handle = storage
                 .inner
@@ -1479,7 +1452,8 @@ mod test {
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = create_and_connect(clustered).await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
 
             storage.inner.write().take();
             let _ = storage.client().await;
@@ -1512,7 +1486,8 @@ mod test {
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = create_and_connect(clustered).await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
             let clone = storage.clone();
 
             storage.inner.write().take();
@@ -1534,7 +1509,8 @@ mod test {
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = create_and_connect(clustered).await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
             storage.inner.write().take();
 
             let handles: Vec<_> = (0..10)
@@ -1562,7 +1538,8 @@ mod test {
             use fred::types::scan::Scanner;
             use futures::StreamExt;
 
-            let storage = create_and_connect(clustered).await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
             let key = RedisKey("scan_test_key".to_string());
             storage
                 .insert(key, RedisValue("value".to_string()), None)
@@ -1599,7 +1576,7 @@ mod test {
             let clustered = true;
             let storage =
                 RedisCacheStorage::new(redis_config(clustered), "test_redis_storage").await?;
-            storage.initialize_client().await?;
+            storage.create_client_pool().await?;
 
             // insert values which reflect different cluster slots
             let mut data = HashMap::default();
@@ -1644,15 +1621,16 @@ mod test {
             Ok(())
         }
 
-        /// Calling initialize_client() on an already-connected storage replaces the pool. The old
+        /// Calling create_client_pool() on an already-connected storage replaces the pool. The old
         /// pool's watcher must not clear the new pool from `inner`.
         #[tokio::test]
         #[rstest::rstest]
-        async fn initialize_client_replaces_existing_inner(
+        async fn create_client_pool_replaces_existing_inner(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = create_and_connect(clustered).await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
 
             let (old_heartbeat, old_watcher) = {
                 let guard = storage.inner.read();
@@ -1665,7 +1643,7 @@ mod test {
             assert!(!old_heartbeat.is_finished());
             assert!(!old_watcher.is_finished());
 
-            storage.initialize_client().await?;
+            storage.create_client_pool().await?;
             tokio::task::yield_now().await;
 
             assert!(old_heartbeat.is_finished());
@@ -1684,7 +1662,8 @@ mod test {
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let old_storage = create_and_connect(clustered).await?;
+            let old_storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            old_storage.create_client_pool().await?;
             let (old_heartbeat, old_watcher) = {
                 let guard = old_storage.inner.read();
                 let inner = guard.as_ref().unwrap();
@@ -1694,7 +1673,8 @@ mod test {
                 )
             };
 
-            let new_storage = create_and_connect(clustered).await?;
+            let new_storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            new_storage.create_client_pool().await?;
 
             // drop the old storage, simulating the router swapping to a new config
             drop(old_storage);
@@ -1716,7 +1696,8 @@ mod test {
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = create_and_connect(clustered).await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
             assert!(storage.inner.read().is_some());
 
             let pool_clone = {
@@ -1750,7 +1731,7 @@ mod test {
             let storage =
                 RedisCacheStorage::new(redis_config(clustered), "test_get_multiple_is_ordered")
                     .await?;
-            storage.initialize_client().await?;
+            storage.create_client_pool().await?;
 
             let data = [("a", "1"), ("b", "2"), ("c", "3")]
                 .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
@@ -1795,7 +1776,8 @@ mod test {
             let _guard = lock_for_static().lock().await;
             let before = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
 
-            let storage = create_and_connect(clustered).await?;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
             let after_create = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
 
             assert!(

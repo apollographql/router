@@ -95,7 +95,7 @@ where
             // NOTE: this populates the inner client pool, but failure doesn't represent a terminal
             // state unless the router is configred to require connections to start
             if let Some(storage) = storage.clone() {
-                if let Err(e) = storage.initialize_client().await {
+                if let Err(e) = storage.create_client_pool().await {
                     tracing::error!(
                         cache = caller,
                         e,

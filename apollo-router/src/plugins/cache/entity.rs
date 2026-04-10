@@ -229,8 +229,8 @@ impl PluginPrivate for EntityCache {
             all = match RedisCacheStorage::new(redis_config, "entity").await {
                 Ok(storage) => {
                     // WARN: on new(), RedisCacheStorage doesn't have an inner client pool; it must be
-                    // created with initialize_client()
-                    if let Err(e) = storage.clone().initialize_client().await {
+                    // created with create_client_pool()
+                    if let Err(e) = storage.clone().create_client_pool().await {
                         tracing::error!(
                             cache = "entity",
                             e,
@@ -290,7 +290,7 @@ impl PluginPrivate for EntityCache {
                 if let Some(storage) = storage {
                     // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
                     // for wrapped client
-                    if let Err(e) = storage.clone().initialize_client().await {
+                    if let Err(e) = storage.clone().create_client_pool().await {
                         tracing::error!(
                             cache = "entity",
                             e,

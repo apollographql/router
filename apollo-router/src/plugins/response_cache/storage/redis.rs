@@ -93,7 +93,7 @@ impl Storage {
         let storage = RedisCacheStorage::new(config.into(), "response-cache").await?;
         // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
         // for wrapped client
-        storage.clone().initialize_client().await?;
+        storage.clone().create_client_pool().await?;
 
         let (cache_tag_tx, cache_tag_rx) = mpsc::channel(1000);
         let s = Self {
