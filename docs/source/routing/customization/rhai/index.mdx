@@ -40,8 +40,9 @@ rhai:
   # The router looks for this filename in your Rhai script directory.
   main: "test.rhai"
 
-  # Set to false to disable string interning and eliminate RwLock contention
-  # under concurrent load. See String interning and concurrent performance under Limitations for details.
+  # Set to false to disable string interning and eliminate lock contention
+  # under concurrent load. See String interning and concurrent performance
+  # under Limitations for details.
   # intern_strings: false
 ```
 
@@ -533,27 +534,23 @@ This is particularly risky when using closures within callbacks while referencin
 
 ### String interning and concurrent performance
 
-Router compiles Rhai with the [`sync` feature](https://rhai.rs/book/start/features.html) enabled, which makes the engine safe to share across threads. A side effect of this is that Rhai's string interner — which caches frequently-used strings to reduce allocations — is protected by a `RwLock`. Under high concurrency, threads that encounter new strings must acquire a write lock, which serializes those operations across all concurrent requests.
+Router compiles Rhai with the [`sync` feature](https://rhai.rs/book/start/features.html) enabled, which makes the engine safe to share across threads. A side effect of this is that Rhai's string interner — which caches frequently-used strings to reduce allocations — is protected by a lock (namely a Rust `RwLock`). Under high concurrency, threads that encounter new strings must acquire a write lock, which serializes those operations across all concurrent requests.
 
-By default, Rhai engine interns up to 256 strings. You can disable interning with the `intern_strings` configuration option:
+String interning is enabled by default. You can disable interning with the `intern_strings` configuration option, which removes the write lock:
 
 ```yaml title="config.yaml"
 rhai:
   scripts: "./rhai"
   main: "main.rhai"
-  intern_strings: false  # disable interning entirely
+  intern_strings: false  # disable interning
 ```
 
 <Note>
 
-**Pros of disabling string interning (`intern_strings: false`):**
-- Eliminates `RwLock` contention on the string interner under concurrent load, which can meaningfully improve throughput for deployments processing many concurrent requests through Rhai scripts
-- Most beneficial for deployments processing many concurrent requests through scripts that access many distinct string values (such as long context keys, header names, and template-interpolated values)
-
-**Considerations for disabling string interning:**
-- Repeated identical strings are each allocated separately rather than sharing a single allocation. This increases memory pressure and allocation frequency, which might be noticeable in scripts that produce a high volume of repeated short strings
-- String equality comparisons lose the interning fast path (pointer equality) and must compare bytes. This effect is small in practice
-- For low-concurrency deployments or scripts with limited string variety, the default of 256 interned strings might offer better overall performance by spreading out allocation costs
+Considerations for disabling string interning:
+- Eliminating `RwLock` contention on the string interner can meaningfully improve throughput for deployments processing many concurrent requests through Rhai scripts.
+- Without interning, repeated identical strings are each allocated separately rather than sharing a single allocation. This increases memory pressure and allocation frequency, which might be noticeable in scripts that produce a high volume of repeated short strings.
+- Without interning, string equality comparisons lose the interning fast path (pointer equality) and must compare bytes. This effect is unlikely to be noticeable in most scripts.
 
 Benchmark your specific script workload under realistic concurrency before you change this setting.
 
