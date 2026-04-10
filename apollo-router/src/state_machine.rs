@@ -690,7 +690,6 @@ mod tests {
     use serde_json::json;
     use test_log::test;
     use tower::BoxError;
-    use tower::Service;
 
     use super::*;
     use crate::AllowedFeature;
@@ -701,7 +700,6 @@ mod tests {
     use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterSuperServiceFactory;
-    use crate::services::RouterRequest;
     use crate::services::router;
     use crate::services::router::pipeline_handle::PipelineRef;
     use crate::uplink::schema::SchemaState;
