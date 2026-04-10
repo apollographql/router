@@ -21,7 +21,6 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugin::test::MockSubgraph;
-use crate::plugin::test::MockSubgraphService;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
 use crate::plugins::cache::entity::CacheKeyContext;
 use crate::plugins::cache::entity::CacheKeysContext;
@@ -964,12 +963,10 @@ async fn no_data() {
         .extra_private_plugin(entity_cache)
         .subgraph_hook(|name, service| {
             if name == "orga" {
-                let mut subgraph = MockSubgraphService::new();
-                subgraph
-                    .expect_call()
-                    .times(1)
-                    .returning(move |_req: subgraph::Request| Err("orga not found".into()));
-                subgraph.boxed_clone()
+                tower::service_fn(|_req: subgraph::Request| async {
+                    Err::<subgraph::Response, _>("orga not found".into())
+                })
+                .boxed_clone()
             } else {
                 service
             }
