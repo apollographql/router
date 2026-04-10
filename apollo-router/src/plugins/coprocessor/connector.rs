@@ -428,7 +428,7 @@ where
                 .then(|| http_response.inner.status.as_u16());
             (headers, status)
         }
-        Err(_) => (None, None),
+        Ok(TransportResponse::CacheHit) | Err(_) => (None, None),
     };
 
     // Extract body from mapped response

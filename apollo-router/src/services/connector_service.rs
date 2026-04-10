@@ -30,6 +30,7 @@ use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
+use crate::services::Plugins;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::spec::Schema;
 
@@ -236,6 +237,7 @@ pub(crate) struct ConnectorServiceFactory {
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
     pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+    pub(crate) plugins: Arc<Plugins>,
 }
 
 impl ConnectorServiceFactory {
@@ -245,6 +247,7 @@ impl ConnectorServiceFactory {
         subscription_config: Option<SubscriptionConfig>,
         connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
         connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+        plugins: Arc<Plugins>,
     ) -> Self {
         Self {
             subgraph_schemas,
@@ -255,6 +258,7 @@ impl ConnectorServiceFactory {
                 schema.connectors.as_ref(),
             ),
             connector_request_service_factory,
+            plugins,
         }
     }
 
@@ -270,6 +274,7 @@ impl ConnectorServiceFactory {
                 Default::default(),
                 Default::default(),
             )),
+            Default::default(),
         )
     }
 }
@@ -278,13 +283,16 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
     type Service = BoxService;
 
     fn create(&self) -> Self::Service {
-        ConnectorService {
-            _schema: self.schema.clone(),
-            _subgraph_schemas: self.subgraph_schemas.clone(),
-            _subscription_config: self.subscription_config.clone(),
-            connectors_by_service_name: self.connectors_by_service_name.clone(),
-            connector_request_service_factory: self.connector_request_service_factory.clone(),
-        }
-        .boxed()
+        self.plugins.iter().rev().fold(
+            ConnectorService {
+                _schema: self.schema.clone(),
+                _subgraph_schemas: self.subgraph_schemas.clone(),
+                _subscription_config: self.subscription_config.clone(),
+                connectors_by_service_name: self.connectors_by_service_name.clone(),
+                connector_request_service_factory: self.connector_request_service_factory.clone(),
+            }
+            .boxed(),
+            |acc, (_, e)| e.connector_service(acc),
+        )
     }
 }

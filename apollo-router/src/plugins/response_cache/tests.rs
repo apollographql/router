@@ -34,6 +34,7 @@ use crate::plugins::response_cache::storage::redis::Config;
 use crate::plugins::response_cache::storage::redis::Storage;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::uplink::license_enforcement::LicenseState;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 const SCHEMA_CACHE_TAG: &str =
@@ -3914,7 +3915,7 @@ async fn no_store_on_subgraph_timeout() {
         .subgraph_hook(|name, service| {
             if name == "orga" {
                 tower::service_fn(|_req: subgraph::Request| async move {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                     // Unreachable in practice — the traffic shaping timeout fires first.
                     Err::<subgraph::Response, tower::BoxError>("orga sleep exceeded".into())
                 })
@@ -4049,5 +4050,1100 @@ async fn no_store_on_partial_subgraph_failure() {
     assert!(
         !body.errors.is_empty(),
         "expected errors in response body due to failing subgraph"
+    );
+}
+
+// ================================================================================================
+// Connector response cache integration tests
+// ================================================================================================
+
+const CONNECTOR_SCHEMA: &str = include_str!("../../testdata/connector_response_cache.graphql");
+
+/// Helper to create a router service with connector caching enabled via YamlRouterFactory.
+///
+/// We cannot use TestHarness because connectors are extracted during YamlRouterFactory
+/// initialization, not during TestHarness construction.
+async fn create_connector_cache_service(
+    connector_uri: &str,
+    namespace: &str,
+    extra_config: Option<serde_json_bytes::Value>,
+) -> impl tower::Service<
+    crate::services::router::Request,
+    Response = crate::services::router::Response,
+    Error = tower::BoxError,
+> {
+    use crate::Configuration;
+    use crate::json_ext::ValueExt;
+    use crate::router_factory::RouterSuperServiceFactory;
+    use crate::router_factory::YamlRouterFactory;
+    use crate::services::new_service::ServiceFactory;
+
+    let connector_url = format!("{connector_uri}/");
+
+    let mut config = serde_json_bytes::json!({
+        "include_subgraph_errors": { "all": true },
+        "connectors": {
+            "sources": {
+                "connectors.json": {
+                    "override_url": connector_url
+                }
+            }
+        },
+        "response_cache": {
+            "enabled": true,
+            "debug": true,
+            "connector": {
+                "all": {
+                    "enabled": true,
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "pool_size": 1,
+                        "namespace": namespace,
+                        "required_to_start": true,
+                    },
+                    "ttl": "10m",
+                }
+            }
+        }
+    });
+
+    if let Some(extra) = extra_config {
+        config.deep_merge(extra);
+    }
+
+    let config: Configuration = serde_json_bytes::from_value(config).unwrap();
+    let mut factory = YamlRouterFactory;
+    let router_creator = factory
+        .create(
+            false,
+            Arc::new(config.clone()),
+            Arc::new(crate::spec::Schema::parse(CONNECTOR_SCHEMA, &config).unwrap()),
+            None,
+            None,
+            Arc::new(LicenseState::Licensed { limits: None }),
+        )
+        .await
+        .unwrap();
+
+    router_creator.create()
+}
+
+/// Make a supergraph query request with cache debug header enabled.
+fn make_connector_cache_request(query: &str) -> crate::services::router::Request {
+    make_connector_cache_request_with_cache_control(query, None)
+}
+
+/// Make a supergraph query request WITHOUT the cache debug header.
+fn make_connector_cache_request_no_debug(query: &str) -> crate::services::router::Request {
+    supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap()
+        .try_into()
+        .unwrap()
+}
+
+fn make_connector_cache_request_with_cache_control(
+    query: &str,
+    cache_control: Option<&str>,
+) -> crate::services::router::Request {
+    let mut builder = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        );
+    if let Some(cc) = cache_control {
+        builder = builder.header(CACHE_CONTROL, HeaderValue::from_str(cc).unwrap());
+    }
+    builder.build().unwrap().try_into().unwrap()
+}
+
+/// Extract the response body as a JSON value from a router response.
+async fn connector_response_body(
+    mut response: crate::services::router::Response,
+) -> serde_json::Value {
+    let bytes = response.next_response().await.unwrap().unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+#[tokio::test]
+async fn connector_root_field_cache_miss_then_hit() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"},
+                    {"id": 2, "name": "Bob"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+
+    // First request: cache miss
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+    assert!(
+        received_after_first >= 1,
+        "mock server should have received at least 1 request"
+    );
+
+    // Wait for async cache insert
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request: cache hit — recreate service to ensure no in-memory state
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "second request should return data, got: {body:?}"
+    );
+
+    // Wiremock should NOT have received a new request for /users (served from cache)
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+    assert_eq!(
+        received_after_first, received_after_second,
+        "second request should be served from cache, but mock received new requests"
+    );
+}
+
+#[tokio::test]
+async fn connector_root_field_no_store() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "no-store")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+
+    // First request
+    let request = make_connector_cache_request("query { users { id name } }");
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request should NOT be cached due to no-store
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+
+    assert!(
+        received_after_second > received_after_first,
+        "no-store responses should not be cached, but no new request was made"
+    );
+}
+
+#[tokio::test]
+async fn connector_entity_cache_miss_then_hit() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": 1, "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+
+    // First request: cache miss
+    let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+    assert!(
+        received_after_first >= 1,
+        "mock server should have received at least 1 request"
+    );
+
+    // Wait for async cache insert
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request: cache hit
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "second request should return data, got: {body:?}"
+    );
+
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+    assert_eq!(
+        received_after_first, received_after_second,
+        "second request should be served from cache, but mock received new requests"
+    );
+}
+
+#[tokio::test]
+async fn connector_cache_disabled() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Disable connector caching explicitly
+    let extra_config = serde_json_bytes::json!({
+        "response_cache": {
+            "connector": {
+                "all": {
+                    "enabled": false,
+                }
+            }
+        }
+    });
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    let service =
+        create_connector_cache_service(&uri, &namespace, Some(extra_config.clone())).await;
+
+    // First request
+    let request = make_connector_cache_request("query { users { id name } }");
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request should still hit the backend (caching disabled)
+    let service = create_connector_cache_service(&uri, &namespace, Some(extra_config)).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+
+    assert!(
+        received_after_second > received_after_first,
+        "with caching disabled, every request should hit the backend"
+    );
+}
+
+#[tokio::test]
+async fn connector_root_field_with_cache_tag() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+
+    // Execute query — the schema has @cacheTag(format: "users") on the users field
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "request should return data, got: {body:?}"
+    );
+
+    // Wait for async cache insert
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Verify it was cached by checking second request doesn't hit mock
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "cached request should return data, got: {body:?}"
+    );
+}
+
+/// Request with `Cache-Control: no-store` should allow cache lookup but prevent storing.
+#[tokio::test]
+async fn connector_root_field_request_no_store() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // First request WITH no-store: response should NOT be cached
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_with_cache_control(
+        "query { users { id name } }",
+        Some("no-store"),
+    );
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request WITHOUT no-store: should be a cache miss since first request didn't store
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+
+    assert!(
+        received_after_second > received_after_first,
+        "no-store request should prevent caching, but second request was served from cache"
+    );
+}
+
+/// Request with `Cache-Control: no-cache` should skip cache lookup but allow storing.
+#[tokio::test]
+async fn connector_root_field_request_no_cache() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // First request with no-cache: should hit backend (skip cache), but store the response
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_with_cache_control(
+        "query { users { id name } }",
+        Some("no-cache"),
+    );
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request WITHOUT no-cache: should be served from cache (first request stored it)
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+
+    assert_eq!(
+        received_after_first, received_after_second,
+        "no-cache should still allow storing, so second request should be served from cache"
+    );
+}
+
+/// Request with `Cache-Control: no-cache, no-store` should bypass cache entirely.
+#[tokio::test]
+async fn connector_root_field_request_no_cache_no_store() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // First request with both no-cache and no-store: bypass cache entirely
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_with_cache_control(
+        "query { users { id name } }",
+        Some("no-cache, no-store"),
+    );
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request without cache-control: should be a cache miss (first didn't store)
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+
+    assert!(
+        received_after_second > received_after_first,
+        "no-cache+no-store should bypass cache entirely, but second request was served from cache"
+    );
+}
+
+/// Entity query with `Cache-Control: no-cache` should skip cache lookup.
+#[tokio::test]
+async fn connector_entity_request_no_cache() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": 1, "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // First request (no special headers): populates cache
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request with no-cache: should skip cache and hit backend
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_with_cache_control(
+        "query { user(id: \"1\") { id name } }",
+        Some("no-cache"),
+    );
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+
+    assert!(
+        received_after_second > received_after_first,
+        "no-cache request should skip cache lookup and hit backend"
+    );
+}
+
+/// Entity query with `Cache-Control: no-store` should allow cache lookup but prevent storing.
+#[tokio::test]
+async fn connector_entity_request_no_store() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": 1, "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // First request WITH no-store: response should NOT be cached
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_with_cache_control(
+        "query { user(id: \"1\") { id name } }",
+        Some("no-store"),
+    );
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request WITHOUT no-store: should be a cache miss since first request didn't store
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+
+    assert!(
+        received_after_second > received_after_first,
+        "no-store request should prevent caching, but second request was served from cache"
+    );
+}
+
+/// When a connector returns `Cache-Control: private` and no `private_id` is configured,
+/// the response must NOT be stored in cache (prevents cross-user cache pollution).
+#[tokio::test]
+async fn connector_root_field_private_no_id_not_stored() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "private, max-age=300")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // No private_id configured — private responses must not be cached
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+
+    // First request
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request: should NOT be served from cache (private without private_id)
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+
+    assert!(
+        received_after_second > received_after_first,
+        "private response without private_id should not be cached, but second request was served from cache"
+    );
+}
+
+/// When a connector returns `Cache-Control: private` and no `private_id` is configured,
+/// entity responses must NOT be stored in cache.
+#[tokio::test]
+async fn connector_entity_private_no_id_not_stored() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "private, max-age=300")
+                .set_body_json(serde_json::json!({"id": 1, "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // No private_id configured — private responses must not be cached
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+
+    // First request
+    let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request: should NOT be served from cache (private without private_id)
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
+    let _response = service.oneshot(request).await.unwrap();
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+
+    assert!(
+        received_after_second > received_after_first,
+        "private entity response without private_id should not be cached, but second request was served from cache"
+    );
+}
+
+#[tokio::test]
+async fn connector_mutation_not_cached() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": 1, "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+
+    // First request: mutation
+    let request =
+        make_connector_cache_request("mutation { createUser(name: \"Alice\") { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first mutation should return data, got: {body:?}"
+    );
+    let received_after_first = mock_server.received_requests().await.unwrap().len();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request: same mutation — should NOT be served from cache
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request =
+        make_connector_cache_request("mutation { createUser(name: \"Alice\") { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "second mutation should return data, got: {body:?}"
+    );
+    let received_after_second = mock_server.received_requests().await.unwrap().len();
+
+    assert!(
+        received_after_second > received_after_first,
+        "mutation responses should not be cached, but second request was served from cache"
+    );
+}
+
+#[tokio::test]
+async fn connector_root_field_debug_requires_header() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"},
+                    {"id": 2, "name": "Bob"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // Request WITHOUT debug header — should not have apolloCacheDebugging extension
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_no_debug("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "request without debug header should return data, got: {body:?}"
+    );
+    assert!(
+        body.pointer("/extensions/apolloCacheDebugging").is_none(),
+        "response should NOT contain apolloCacheDebugging without the debug header, got: {body:?}"
+    );
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Request WITH debug header — should have apolloCacheDebugging extension (cache hit)
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "request with debug header should return data, got: {body:?}"
+    );
+    assert!(
+        body.pointer("/extensions/apolloCacheDebugging").is_some(),
+        "response should contain apolloCacheDebugging with the debug header, got: {body:?}"
+    );
+}
+
+#[tokio::test]
+async fn connector_entity_debug_requires_header() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": 1, "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // Request WITHOUT debug header — should not have apolloCacheDebugging extension
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_no_debug("query { user(id: \"1\") { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "request without debug header should return data, got: {body:?}"
+    );
+    assert!(
+        body.pointer("/extensions/apolloCacheDebugging").is_none(),
+        "response should NOT contain apolloCacheDebugging without the debug header, got: {body:?}"
+    );
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Request WITH debug header — should have apolloCacheDebugging extension (cache hit)
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "request with debug header should return data, got: {body:?}"
+    );
+    assert!(
+        body.pointer("/extensions/apolloCacheDebugging").is_some(),
+        "response should contain apolloCacheDebugging with the debug header, got: {body:?}"
+    );
+}
+
+/// A malformed `Cache-Control` header on a root field request should return a GraphQL error.
+#[tokio::test]
+async fn connector_root_field_invalid_cache_control_header() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_with_cache_control(
+        "query { users { id name } }",
+        Some("max-age=notanumber"),
+    );
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+
+    let errors = body.get("errors").and_then(|e| e.as_array());
+    assert!(
+        errors.is_some_and(|errs| !errs.is_empty()),
+        "response should contain errors for invalid cache-control header, got: {body:?}"
+    );
+    assert_eq!(
+        errors.unwrap()[0]
+            .pointer("/extensions/code")
+            .and_then(|v| v.as_str()),
+        Some("INVALID_CACHE_CONTROL_HEADER"),
+        "error should have INVALID_CACHE_CONTROL_HEADER extension code, got: {body:?}"
+    );
+
+    let received = mock_server.received_requests().await.unwrap().len();
+    assert_eq!(
+        received, 0,
+        "upstream should not be called when cache-control header is invalid"
+    );
+}
+
+/// A malformed `Cache-Control` header on an entity query should return a GraphQL error.
+#[tokio::test]
+async fn connector_entity_invalid_cache_control_header() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!({"id": 1, "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request_with_cache_control(
+        "query { user(id: \"1\") { id name } }",
+        Some("max-age=notanumber"),
+    );
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+
+    let errors = body.get("errors").and_then(|e| e.as_array());
+    assert!(
+        errors.is_some_and(|errs| !errs.is_empty()),
+        "response should contain errors for invalid cache-control header, got: {body:?}"
+    );
+    assert_eq!(
+        errors.unwrap()[0]
+            .pointer("/extensions/code")
+            .and_then(|v| v.as_str()),
+        Some("INVALID_CACHE_CONTROL_HEADER"),
+        "error should have INVALID_CACHE_CONTROL_HEADER extension code, got: {body:?}"
+    );
+
+    let received = mock_server.received_requests().await.unwrap().len();
+    assert_eq!(
+        received, 0,
+        "upstream should not be called when cache-control header is invalid"
+    );
+}
+
+/// When a known-private root field query bypasses cache (no private_id configured),
+/// a debug entry with `key: "-"` and `shouldStore: false` should appear in `apolloCacheDebugging`.
+#[tokio::test]
+async fn connector_root_field_private_debug_entry() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "private, max-age=300")
+                .set_body_json(serde_json::json!([
+                    {"id": 1, "name": "Alice"}
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // First request: populates the private query LRU
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request: known-private bypass path should include debug entry
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { users { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+
+    let debug_entries = body
+        .pointer("/extensions/apolloCacheDebugging")
+        .expect("response should contain apolloCacheDebugging extension");
+
+    let entries = debug_entries
+        .as_array()
+        .expect("debug entries should be an array");
+    let private_entry = entries
+        .iter()
+        .find(|e| e.pointer("/key").and_then(|v| v.as_str()) == Some("-"));
+    assert!(
+        private_entry.is_some(),
+        "should have a debug entry with key '-' for the known-private bypass, got: {entries:?}"
+    );
+
+    let entry = private_entry.unwrap();
+    assert_eq!(
+        entry.pointer("/shouldStore").and_then(|v| v.as_bool()),
+        Some(false),
+        "known-private debug entry should have shouldStore: false, got: {entry:?}"
+    );
+}
+
+/// When a known-private entity query bypasses cache (no private_id configured),
+/// a debug entry with `key: "-"` and `shouldStore: false` should appear in `apolloCacheDebugging`.
+#[tokio::test]
+async fn connector_entity_private_debug_entry() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "private, max-age=300")
+                .set_body_json(serde_json::json!({"id": 1, "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    // First request: populates the private query LRU
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+    assert!(
+        body.get("data").is_some(),
+        "first request should return data, got: {body:?}"
+    );
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Second request: known-private bypass path should include debug entry
+    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let request = make_connector_cache_request("query { user(id: \"1\") { id name } }");
+    let response = service.oneshot(request).await.unwrap();
+    let body = connector_response_body(response).await;
+
+    let debug_entries = body
+        .pointer("/extensions/apolloCacheDebugging")
+        .expect("response should contain apolloCacheDebugging extension");
+
+    let entries = debug_entries
+        .as_array()
+        .expect("debug entries should be an array");
+    let private_entry = entries
+        .iter()
+        .find(|e| e.pointer("/key").and_then(|v| v.as_str()) == Some("-"));
+    assert!(
+        private_entry.is_some(),
+        "should have a debug entry with key '-' for the known-private bypass, got: {entries:?}"
+    );
+
+    let entry = private_entry.unwrap();
+    assert_eq!(
+        entry.pointer("/shouldStore").and_then(|v| v.as_bool()),
+        Some(false),
+        "known-private debug entry should have shouldStore: false, got: {entry:?}"
     );
 }

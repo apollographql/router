@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/cache_tag_on_connector.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Product {
+  id: ID!
+  title: String
+}
+
+type Query {
+  users: [User]
+  products: [Product]
+}
+
+type User {
+  id: ID!
+  name: String
+}

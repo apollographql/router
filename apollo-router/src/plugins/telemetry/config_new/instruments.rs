@@ -25,6 +25,7 @@ use super::Selector;
 use super::cache::CACHE_METRIC;
 use super::cache::CacheInstruments;
 use super::cache::CacheInstrumentsConfig;
+use super::cache::ConnectorCacheInstruments;
 use super::cache::attributes::CacheAttributes;
 use super::graphql::FIELD_EXECUTION;
 use super::graphql::FIELD_LENGTH;
@@ -1055,6 +1056,21 @@ impl InstrumentsConfig {
                 }
             }),
         }
+    }
+
+    pub(crate) fn new_connector_cache_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        source_name: String,
+    ) -> ConnectorCacheInstruments {
+        let counter = if self.cache.attributes.response_cache.is_enabled() {
+            static_instruments
+                .get(RESPONSE_CACHE_METRIC)
+                .and_then(|s| s.as_counter_f64().cloned())
+        } else {
+            None
+        };
+        ConnectorCacheInstruments::new(counter, source_name)
     }
 }
 

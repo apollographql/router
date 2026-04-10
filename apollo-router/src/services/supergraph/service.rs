@@ -571,6 +571,7 @@ impl PluggableSupergraphServiceBuilder {
                     self.plugins.clone(),
                     connector_sources,
                 )),
+                self.plugins.clone(),
             )),
             Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
         ));
