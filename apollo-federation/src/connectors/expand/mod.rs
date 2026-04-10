@@ -212,16 +212,29 @@ fn add_connected_selections(
         // The connector's selection field names are the connected selection
         let shape = connector.selection.shape();
         if let Some(selection_str) = extract_shape_as_field_set(&shape) {
+            let field_def = connector
+                .id
+                .directive
+                .field_definition(original_schema)
+                .ok_or_else(|| {
+                    FederationError::internal("field definition not found for connector")
+                })?;
+            let return_type_name = field_def.ty.inner_named_type();
+
+            // Validate that the selection includes key fields at every level
+            // where an entity type appears. This ensures the restricted copy
+            // node has the key fields needed for entity resolution.
+            validate_entity_keys_in_shape(
+                original_schema,
+                &shape,
+                return_type_name,
+                &connector.id.directive.coordinate(),
+                &mut Vec::new(),
+            )?;
+
             annotations.push((
                 parent_type_name.clone(),
-                connector
-                    .id
-                    .directive
-                    .field_definition(original_schema)
-                    .map(|f| f.name.clone())
-                    .ok_or_else(|| {
-                        FederationError::internal("field definition not found for connector")
-                    })?,
+                field_def.name.clone(),
                 graph_enum_value.clone(),
                 selection_str,
             ));
@@ -356,6 +369,102 @@ fn extract_shape_as_field_set(shape: &shape::Shape) -> Option<String> {
             None
         }
         _ => None,
+    }
+}
+
+/// Validate that entity types in the connector's selection shape include their
+/// key fields at every level. Without key fields, the query planner cannot
+/// perform entity resolution to fetch additional fields beyond what the
+/// connector returns.
+///
+/// Checks both the top-level shape (the connector's return type) and any nested
+/// composite fields that return entity types.
+fn validate_entity_keys_in_shape(
+    schema: &Schema,
+    shape: &shape::Shape,
+    type_name: &Name,
+    coordinate: &str,
+    path: &mut Vec<String>,
+) -> Result<(), FederationError> {
+    // Unwrap arrays at the top level
+    let shape = unwrap_array_shape(shape);
+
+    let ShapeCase::Object { fields, .. } = shape.case() else {
+        return Ok(());
+    };
+
+    // Check if *this* type is an entity — the shape must include its key fields
+    if let Some(ExtendedType::Object(obj)) = schema.types.get(type_name) {
+        let key_field_names: Vec<&str> = obj
+            .directives
+            .get_all(&name!("join__type"))
+            .filter_map(|d| {
+                d.argument_by_name("key", schema)
+                    .ok()
+                    .and_then(|v| v.as_str())
+            })
+            .collect();
+
+        if !key_field_names.is_empty() {
+            let shape_field_names: HashSet<&str> = fields.keys().map(|k| k.as_str()).collect();
+
+            let any_key_satisfied = key_field_names.iter().any(|key_str| {
+                key_str
+                    .split_whitespace()
+                    .filter(|f| !f.contains('{') && !f.contains('}'))
+                    .all(|f| shape_field_names.contains(f))
+            });
+
+            if !any_key_satisfied {
+                let path_str = if path.is_empty() {
+                    type_name.to_string()
+                } else {
+                    path.join(".")
+                };
+                return Err(FederationError::internal(format!(
+                    "Connector `{coordinate}` returns `{type_name}` at \
+                     path `{path_str}` but the selection is missing key field(s) \
+                     required by `@key`. The connector's `selection` must include \
+                     the key fields (e.g. `{example_key}`) so the router can resolve \
+                     additional fields via entity resolution.",
+                    example_key = key_field_names.first().unwrap_or(&"id"),
+                )));
+            }
+        }
+    }
+
+    // Recurse into nested composite fields
+    let type_fields = match schema.types.get(type_name) {
+        Some(ExtendedType::Object(obj)) => &obj.fields,
+        Some(ExtendedType::Interface(iface)) => &iface.fields,
+        _ => return Ok(()),
+    };
+
+    for (field_name, field_shape) in fields {
+        if field_name.as_str() == "__typename" {
+            continue;
+        }
+        let Some(field_def) = type_fields.get(field_name.as_str()) else {
+            continue;
+        };
+        let return_type_name = field_def.ty.inner_named_type();
+        let inner_shape = unwrap_array_shape(field_shape);
+
+        if matches!(inner_shape.case(), ShapeCase::Object { .. }) {
+            path.push(field_name.to_string());
+            validate_entity_keys_in_shape(schema, inner_shape, return_type_name, coordinate, path)?;
+            path.pop();
+        }
+    }
+
+    Ok(())
+}
+
+/// Unwrap array shapes to get the element type.
+fn unwrap_array_shape(shape: &shape::Shape) -> &shape::Shape {
+    match shape.case() {
+        ShapeCase::Array { tail, .. } => unwrap_array_shape(tail),
+        _ => shape,
     }
 }
 
