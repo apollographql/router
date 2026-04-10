@@ -172,11 +172,7 @@ impl Plugin for LimitsPlugin {
     }
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
-        // TODO: this stack has no LoadShed layer; the buffer was originally added to make
-        // the service Clone. Since the service is now BoxCloneService, this buffer can
-        // likely be removed in a follow-up cleanup.
         ServiceBuilder::new()
-            .buffered()
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },

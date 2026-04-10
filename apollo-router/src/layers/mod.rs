@@ -101,7 +101,9 @@ pub trait ServiceBuilderExt<L>: Sized {
 
     /// Decide if processing should continue or not, and if not allow returning of a response.
     /// Unlike checkpoint it is possible to perform async operations in the callback. However
-    /// this requires that the service is `Clone`. This can be achieved using `.buffered()`.
+    /// the resulting service requires `S: Clone`. Since `BoxCloneService` is already `Clone`,
+    /// a `.buffered()` call is only needed when the checkpoint layer is composed with other
+    /// non-`Clone` layers (e.g. `AsyncCheckpointLayer` uses `Box<dyn Fn>` internally).
     ///
     /// This is useful for things like authentication where you need to make an external call to
     /// check if a request should proceed or not.
