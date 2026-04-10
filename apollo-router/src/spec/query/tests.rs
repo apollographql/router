@@ -7418,3 +7418,28 @@ fn reformat_response_data_fragment_merge_still_works() {
         }))
         .test();
 }
+
+#[test]
+fn reformat_response_data_fragment_semantic_null_not_overwritten() {
+    // Regression guard for the semantic-null case raised during review.
+    //
+    // When the subgraph returns `null` for `collection` explicitly (a semantic
+    // null — the field exists but is intentionally null), a subsequent fragment
+    // must NOT overwrite it.  The guard `output[field].is_null()` must fire and
+    // preserve the null rather than re-entering format_value with a non-null
+    // input object.
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(NULLIFICATION_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        .test();
+}

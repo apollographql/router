@@ -831,9 +831,8 @@ impl Query {
                     // much more complicated reformatting heuristic.
                     //
                     // This formatter processes fragments sequentially rather than pre-merging them
-                    // via CollectFields (as the GraphQL spec prescribes).  That mismatch is the
-                    // root cause of several correctness bugs — see ROUTER-740 (architectural
-                    // tracking) and ROUTER-1598 (null propagation bypassed by a later fragment).
+                    // via CollectFields (as the GraphQL spec prescribes) — root cause of several
+                    // correctness bugs, tracked in ROUTER-740.
                     let is_apply = current_type.inner_named_type().as_str()
                         == type_condition.as_str()
                         || parameters
