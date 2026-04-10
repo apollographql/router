@@ -823,7 +823,7 @@ pub(crate) struct RouterCreator {
 impl ServiceFactory<router::Request> for RouterCreator {
     type Service = router::BoxCloneService;
     fn create(&self) -> Self::Service {
-        self.make().boxed_clone()
+        self.make()
     }
 }
 
