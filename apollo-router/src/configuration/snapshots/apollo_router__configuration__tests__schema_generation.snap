@@ -761,6 +761,45 @@ expression: "&schema"
         }
       ]
     },
+    "BodyConf": {
+      "anyOf": [
+        {
+          "description": "Send entire body (true) or nothing (false)",
+          "type": "boolean"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/BodyFieldsConf"
+            }
+          ],
+          "description": "Send specific fields"
+        }
+      ],
+      "description": "Configuration for which body fields to send to coprocessor"
+    },
+    "BodyFieldsConf": {
+      "additionalProperties": false,
+      "description": "Configuration for selective body fields",
+      "properties": {
+        "data": {
+          "default": false,
+          "description": "Send the data field",
+          "type": "boolean"
+        },
+        "errors": {
+          "default": false,
+          "description": "Send the errors field",
+          "type": "boolean"
+        },
+        "extensions": {
+          "default": false,
+          "description": "Send the extensions field",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "CSRFConfig": {
       "additionalProperties": false,
       "description": "CSRF protection configuration.\n\nSee <https://owasp.org/www-community/attacks/csrf> for an explanation on CSRF attacks.",
@@ -3803,9 +3842,12 @@ expression: "&schema"
       "description": "What information is passed to a router request/response stage",
       "properties": {
         "body": {
-          "default": false,
-          "description": "Send the body",
-          "type": "boolean"
+          "allOf": [
+            {
+              "$ref": "#/definitions/BodyConf"
+            }
+          ],
+          "description": "Send the body (can be true/false or selective with data/errors/extensions)"
         },
         "context": {
           "allOf": [
@@ -4251,6 +4293,28 @@ expression: "&schema"
             "null"
           ]
         },
+        "client.name": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StandardAttribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional client name populated from the request headers."
+        },
+        "client.version": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StandardAttribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional client version populated from the request headers."
+        },
         "dd.trace_id": {
           "anyOf": [
             {
@@ -4509,6 +4573,28 @@ expression: "&schema"
             "boolean",
             "null"
           ]
+        },
+        "client.name": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StandardAttribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional client name populated from the request headers."
+        },
+        "client.version": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StandardAttribute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional client version populated from the request headers."
         },
         "dd.trace_id": {
           "anyOf": [
@@ -4792,6 +4878,14 @@ expression: "&schema"
         "$ref": "#/definitions/Instrument"
       },
       "properties": {
+        "apollo.router.operations.subscriptions.terminated.client": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StandardInstrumentExtendedSubscriptionsTerminatedAttributesWithRouterSelector"
+            }
+          ],
+          "description": "Counter of subscriptions terminated"
+        },
         "apollo.router.overhead": {
           "allOf": [
             {
@@ -5028,6 +5122,38 @@ expression: "&schema"
             }
           ],
           "description": "Histogram of client response body size"
+        }
+      },
+      "type": "object"
+    },
+    "ExtendedSubscriptionsTerminatedAttributesWithRouterSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/RouterSelector"
+      },
+      "properties": {
+        "client.name": {
+          "default": null,
+          "description": "The client name",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "default": null,
+          "description": "The reason the subscription terminated",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "subgraph.name": {
+          "default": null,
+          "description": "The subgraph name",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -6556,6 +6682,11 @@ expression: "&schema"
             "array",
             "null"
           ]
+        },
+        "allow_missing_exp": {
+          "default": false,
+          "description": "Allow tokens without an `exp` claim for this JWKS.\n\nExpired tokens with `exp` are still rejected.\nEnable only when required by your issuer and with strict issuer/audience constraints.",
+          "type": "boolean"
         },
         "audiences": {
           "description": "Expected audiences for tokens verified by that JWKS\n\nIf not specified, the audience will not be checked.",
@@ -9324,6 +9455,28 @@ expression: "&schema"
         }
       ]
     },
+    "StandardInstrumentExtendedSubscriptionsTerminatedAttributesWithRouterSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedSubscriptionsTerminatedAttributesWithRouterSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "StandardInstrumentExtendedSupergraphAttributesWithSupergraphSelector": {
       "anyOf": [
         {
@@ -9957,9 +10110,12 @@ expression: "&schema"
       "description": "What information is passed to a subgraph request/response stage",
       "properties": {
         "body": {
-          "default": false,
-          "description": "Send the body",
-          "type": "boolean"
+          "allOf": [
+            {
+              "$ref": "#/definitions/BodyConf"
+            }
+          ],
+          "description": "Send the body (can be true/false or selective with data/errors/extensions)"
         },
         "condition": {
           "allOf": [
@@ -11186,9 +11342,12 @@ expression: "&schema"
       "description": "What information is passed to a router request/response stage",
       "properties": {
         "body": {
-          "default": false,
-          "description": "Send the body",
-          "type": "boolean"
+          "allOf": [
+            {
+              "$ref": "#/definitions/BodyConf"
+            }
+          ],
+          "description": "Send the body (can be true/false or selective with data/errors/extensions)"
         },
         "condition": {
           "allOf": [
@@ -12285,6 +12444,11 @@ expression: "&schema"
                     }
                   ],
                   "description": "Include the trace id (if any) with the log event. (default: true)"
+                },
+                "expand_json_string_values": {
+                  "default": false,
+                  "description": "Output string attribute values that contain valid JSON objects or arrays\nas native JSON rather than quoted strings. Useful for log aggregators\n(e.g. Splunk) that can index nested JSON fields. (default: false)",
+                  "type": "boolean"
                 },
                 "span_attributes": {
                   "default": [],
