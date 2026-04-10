@@ -202,6 +202,12 @@ When using the same Redis instance for multiple purposes, the `namespace` option
 
 <RedisTls />
 
+<Note>
+
+Nest this `tls` configuration under `apq.router.cache`.
+
+</Note>
+
 #### Required to start
 
 When active, the `required_to_start` option will prevent the router from starting if it cannot connect to Redis. By default, the router will still start without a connection to Redis, which would result in only using the in-memory cache for APQ.

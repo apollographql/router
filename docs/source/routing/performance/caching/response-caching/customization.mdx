@@ -258,6 +258,12 @@ or, if configured with multiple URLs:
 
 <RedisTls />
 
+<Note>
+
+Nest this `tls` configuration under `response_cache.subgraph.all`.
+
+</Note>
+
 ### Timeout configuration
 
 Redis connections and commands have default timeouts that you can override. The timeouts are tailored to specific caching operations: fetch, insert, invalidate, and maintenance. Set a lower fetch timeout and a higher insert timeout for a good balance of reliability and client responsiveness:
