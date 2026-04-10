@@ -80,12 +80,6 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
-            // checkpoint_async requires S: Clone at the type level (AsyncCheckpointLayer<S>).
-            // The buffer satisfies that bound because AsyncCheckpointLayer stores a
-            // Box<dyn Fn(...)> which is not Clone, so the resulting service type is not Clone
-            // without the buffer. This buffer cannot be removed without refactoring
-            // AsyncCheckpointLayer to use Arc instead of Box.
-            .buffered()
             .service(service)
             .boxed_clone()
     }
@@ -113,8 +107,6 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
-            // See router_service above for why the buffer is needed with checkpoint_async.
-            .buffered()
             .service(service)
             .boxed_clone()
     }
@@ -155,8 +147,6 @@ impl PluginPrivate for FileUploadsPlugin {
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
-            // See router_service above for why the buffer is needed with checkpoint_async.
-            .buffered()
             .service(service)
             .boxed_clone()
     }
