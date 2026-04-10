@@ -4051,3 +4051,182 @@ async fn no_store_on_partial_subgraph_failure() {
         "expected errors in response body due to failing subgraph"
     );
 }
+
+/// Shared setup for send_cache_control_header integration tests.
+/// Returns (storage, response_cache, subgraph_mock_config).
+/// The `response_cache` has `send_cache_control_header = true` (the default).
+async fn setup_send_cache_control_test() -> (Storage, ResponseCache, serde_json::Value) {
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }
+            ],
+            "headers": {"cache-control": "public"},
+        },
+    });
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraphs_conf = create_subgraph_conf(
+        [
+            (
+                "user".to_string(),
+                Subgraph {
+                    redis: None,
+                    private_id: Some("sub".to_string()),
+                    enabled: true.into(),
+                    ttl: None,
+                    ..Default::default()
+                },
+            ),
+            (
+                "orga".to_string(),
+                Subgraph {
+                    redis: None,
+                    private_id: Some("sub".to_string()),
+                    enabled: true.into(),
+                    ttl: None,
+                    ..Default::default()
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let response_cache =
+        ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema, true, drop_tx)
+            .await
+            .unwrap();
+
+    (storage, response_cache, subgraphs)
+}
+
+#[tokio::test]
+async fn send_cache_control_header_false_suppresses_headers() {
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+    let (storage, mut response_cache, subgraphs) = setup_send_cache_control_test().await;
+
+    // Disable cache-control header on supergraph response
+    response_cache.send_cache_control_header = false;
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+
+    // Cache-Control header should NOT be present
+    assert!(
+        get_cache_control_header(&response).is_none(),
+        "Cache-Control header should be suppressed when send_cache_control_header is false"
+    );
+
+    // But data should still be cached (internal caching still works)
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
+
+    // Second request — verify cache hit and still no Cache-Control header
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+
+    // Still no Cache-Control header on cache hit
+    assert!(
+        get_cache_control_header(&response).is_none(),
+        "Cache-Control header should remain suppressed on cache hit"
+    );
+
+    // Verify we got a cache hit
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+    assert!(
+        cache_keys
+            .iter()
+            .any(|ck| matches!(ck.source, super::debugger::CacheKeySource::Cache)),
+        "second request should produce a cache hit"
+    );
+}
+
+#[tokio::test]
+async fn send_cache_control_header_true_sends_headers() {
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+    // send_cache_control_header defaults to true in for_test
+    let (_storage, response_cache, subgraphs) = setup_send_cache_control_test().await;
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+
+    // Cache-Control header SHOULD be present (regression test for default behavior)
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+}
