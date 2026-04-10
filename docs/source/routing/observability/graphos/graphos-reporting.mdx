@@ -73,7 +73,7 @@ telemetry:
 
 #### Configuring the transport protocol
 
-<MinVersionBadge version="Router v2.14.0" />
+<MinVersionBadge version="Router v1.49.0" />
 
 By default, the router sends GraphOS OTLP data over gRPC. To switch to HTTP protobuf, set `experimental_otlp_tracing_protocol` and `experimental_otlp_metrics_protocol`:
 
@@ -460,14 +460,7 @@ telemetry:
 
 <MinVersionBadge version="Router v2.14.0" />
 
-The router's GraphOS OTLP exporters respect the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables. Set them before starting your router to route OTLP traffic through a proxy:
-
-```bash
-export HTTPS_PROXY=https://your-proxy.example.com:3128
-export NO_PROXY=localhost,127.0.0.1
-```
-
-The router reads these variables at startup — restart your router for changes to take effect.
+The router's GraphOS OTLP exporters respect the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables. For full setup instructions, including TLS certificate configuration for inspecting proxies, see [HTTP proxy configuration](/graphos/routing/self-hosted/containerization/proxy-certificates).
 
 <Note>
 
