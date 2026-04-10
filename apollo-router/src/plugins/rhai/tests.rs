@@ -47,7 +47,6 @@ use crate::plugins::rhai::engine::RhaiRouterResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphResponse;
 use crate::services::ExecutionRequest;
-use crate::services::RouterRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -1217,8 +1216,7 @@ async fn test_rhai_metric_router_request() {
             "apollo.router.operations.rhai.duration",
             1,
             "rhai.stage" = "RouterRequest",
-            "rhai.succeeded" = true,
-            "rhai.is_deferred" = false
+            "rhai.succeeded" = true
         );
     }
     .with_metrics()
@@ -1258,8 +1256,7 @@ async fn test_rhai_metric_supergraph_request() {
             "apollo.router.operations.rhai.duration",
             1,
             "rhai.stage" = "SupergraphRequest",
-            "rhai.succeeded" = true,
-            "rhai.is_deferred" = false
+            "rhai.succeeded" = true
         );
     }
     .with_metrics()
@@ -1298,8 +1295,7 @@ async fn test_rhai_metric_subgraph_request() {
             "apollo.router.operations.rhai.duration",
             1,
             "rhai.stage" = "SubgraphRequest",
-            "rhai.succeeded" = true,
-            "rhai.is_deferred" = false
+            "rhai.succeeded" = true
         );
     }
     .with_metrics()
@@ -1340,8 +1336,7 @@ async fn test_rhai_metric_failed_callback() {
             "apollo.router.operations.rhai.duration",
             1,
             "rhai.stage" = "SupergraphRequest",
-            "rhai.succeeded" = false,
-            "rhai.is_deferred" = false
+            "rhai.succeeded" = false
         );
     }
     .with_metrics()
