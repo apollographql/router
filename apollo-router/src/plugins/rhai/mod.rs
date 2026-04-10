@@ -341,7 +341,7 @@ macro_rules! gen_map_router_deferred_request {
                                 let result = execute(
                                     &rhai_service,
                                     $stage,
-                                    BodyChunk::Stream,
+                                    None,
                                     &callback,
                                     (shared_request.clone(),),
                                 );
