@@ -16,6 +16,7 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tower::BoxError;
+use tower::util::BoxService;
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -33,6 +34,7 @@ use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
+use crate::plugins::subscription::provider;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
@@ -110,6 +112,44 @@ where
     fn call(&mut self, req: SubgraphRequest) -> Self::Future {
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
+
+        // Check for Custom Mode
+        if let Some(config) = &self.subscription_config {
+            if let Some(SubscriptionMode::Custom(custom_cfg)) =
+                config.mode.get_subgraph_config(&self.service_name)
+            {
+                if let Some(provider) = provider::get_provider(&custom_cfg.provider_name) {
+                    let service_name = self.service_name.to_string();
+                    let notify = self.notify.clone();
+                    let custom_config_val = custom_cfg.config.clone();
+
+                    // Wrap inner service in BoxService for the provider
+                    let boxed_inner = BoxService::new(inner);
+                    // Let the provider create the service chain
+                    let mut service = provider.create_service(
+                        boxed_inner,
+                        notify,
+                        service_name,
+                        custom_config_val,
+                    );
+
+                    return Box::pin(async move { service.call(req).await });
+                } else {
+                    let service_name = self.service_name.to_string();
+                    let provider_name = custom_cfg.provider_name.clone();
+                    return Box::pin(async move {
+                        Err(Box::new(FetchError::SubrequestHttpError {
+                            service: service_name,
+                            reason: format!(
+                                "Custom subscription provider '{}' not found",
+                                provider_name
+                            ),
+                            status_code: None,
+                        }) as BoxError)
+                    });
+                }
+            }
+        }
 
         let notify = self.notify.clone();
         let subscription_config = self.subscription_config.clone();

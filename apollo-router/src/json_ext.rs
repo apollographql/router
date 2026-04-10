@@ -21,7 +21,7 @@ use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
 /// A JSON object.
-pub(crate) type Object = Map<ByteString, Value>;
+pub type Object = Map<ByteString, Value>;
 
 const FRAGMENT_PREFIX: &str = "... on ";
 

@@ -68,7 +68,7 @@ pub struct Request {
     /// Name of the subgraph
     pub(crate) subgraph_name: String,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
-    pub(crate) subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
+    pub subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
     /// Channel triggered when the client connection has been dropped
     pub(crate) connection_closed_signal: Option<broadcast::Receiver<()>>,
 
