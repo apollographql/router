@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use heck::ToLowerCamelCase;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
@@ -89,6 +91,7 @@ pub(super) fn transform_keys(
     match data {
         JSON::Object(map) => {
             let mut new_map = JSONMap::new();
+            let mut original_keys: HashMap<String, &str> = HashMap::new();
             for (key, value) in map.iter() {
                 let camel_key = key.as_str().to_lower_camel_case();
                 let new_value = if recursive {
@@ -97,11 +100,12 @@ pub(super) fn transform_keys(
                     value.clone()
                 };
                 if new_map.contains_key(camel_key.as_str()) {
+                    let first_key = original_keys.get(&camel_key).copied().unwrap_or("");
                     errors.push(ApplyToError::new(
                         format!(
                             "Method ->{}: key collision after camelCase conversion: \"{}\" and \"{}\" both map to \"{}\"",
                             method_name.as_ref(),
-                            new_map.iter().find(|(k, _)| k.as_str() == camel_key).map(|(k, _)| k.as_str()).unwrap_or(""),
+                            first_key,
                             key.as_str(),
                             camel_key,
                         ),
@@ -109,6 +113,8 @@ pub(super) fn transform_keys(
                         method_name.range(),
                         spec,
                     ));
+                } else {
+                    original_keys.insert(camel_key.clone(), key.as_str());
                 }
                 new_map.insert(ByteString::from(camel_key), new_value);
             }
@@ -383,9 +389,15 @@ mod tests {
         assert!(result.is_some());
         let obj = result.unwrap();
         assert!(obj.get("fooBar").is_some());
-        // Should have a collision warning
+        // Should have a collision warning that reports both original keys
         assert_eq!(errors.len(), 1);
-        assert!(errors[0].message().contains("key collision"));
+        assert!(
+            errors[0]
+                .message()
+                .contains("\"foo_bar\" and \"fooBar\" both map to \"fooBar\""),
+            "Expected error to mention both original keys, got: {}",
+            errors[0].message(),
+        );
     }
 }
 
