@@ -463,10 +463,8 @@ impl ConnectorCacheService {
             // Get the entity key from `representation`, only needed in debug for the cache debugger.
             // Connectors don't use @key directives — their key fields are derived from variable
             // references ($args, $this, $batch) and stored on ConnectRequest.keys as a FieldSet.
-            // Unlike subgraph representations where key fields are plain scalars (e.g. "id": "1"),
-            // connector representations may wrap values in objects (e.g. "id": {"value": 1}), so
-            // we extract key field values directly rather than using get_entity_key_from_selection_set
-            // which would recurse into the object and produce empty results.
+            // We extract key field values directly rather than using
+            // get_entity_key_from_selection_set.
             let representation_entity_key = if self.debug {
                 request.keys.as_ref().map(|keys| {
                     let default_document = Default::default();
@@ -474,10 +472,7 @@ impl ConnectorCacheService {
                     for field in keys.selection_set.root_fields(&default_document) {
                         let key = field.name.as_str();
                         if let Some(val) = representation_obj.get(key) {
-                            // Flatten nested single-value objects to leaf scalars so the
-                            // displayed entity key matches what $key resolves to in
-                            // @cacheTag format strings.
-                            entity_key.insert(ByteString::from(key), extract_leaf_scalar(val));
+                            entity_key.insert(ByteString::from(key), val.clone());
                         }
                     }
                     entity_key
@@ -505,18 +500,12 @@ impl ConnectorCacheService {
                 "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:connector:{source_name}:type:{typename}"
             )];
             // Extract @cacheTag invalidation keys from the supergraph schema.
-            // Connector representations may contain nested objects for key fields
-            // (e.g., "id": {"value": 1}) because connector selections extract raw
-            // upstream data. Flatten these to leaf scalars so that $key.id in
-            // @cacheTag format strings interpolates to "1" instead of failing on
-            // the object {"value": 1}.
-            let flattened = flatten_representation_for_cache_tag(representation_obj);
             if let Ok(cache_tag_keys) = get_invalidation_entity_keys_from_schema(
                 &self.supergraph_schema,
                 &connector_synthetic_name,
                 &self.subgraph_enums,
                 typename,
-                &flattened,
+                representation_obj,
             ) {
                 invalidation_keys.extend(cache_tag_keys);
             }
@@ -1647,32 +1636,6 @@ fn get_connector_root_cache_tags(
         }
     }
     Ok(keys)
-}
-
-/// Flatten a representation map so that nested single-value objects are replaced with their
-/// leaf scalar value. Connector representations may contain nested objects for key fields
-/// (e.g., `"id": {"value": 1}`) because connector selections extract raw upstream data rather
-/// than mapped GraphQL scalar values. This allows `$key.id` in `@cacheTag` format strings to
-/// resolve to `1` instead of failing on `{"value": 1}`.
-fn flatten_representation_for_cache_tag(
-    representation: &serde_json_bytes::Map<ByteString, Value>,
-) -> serde_json_bytes::Map<ByteString, Value> {
-    representation
-        .iter()
-        .map(|(k, v)| (k.clone(), extract_leaf_scalar(v)))
-        .collect()
-}
-
-/// Recursively walk into single-value objects to find the leaf scalar value.
-/// - `{"value": 1}` → `1`
-/// - `{"outer": {"inner": "hello"}}` → `"hello"`
-/// - `42` → `42` (already a scalar)
-/// - `{"a": 1, "b": 2}` → `{"a": 1, "b": 2}` (multi-key object, not flattened)
-fn extract_leaf_scalar(value: &Value) -> Value {
-    match value {
-        Value::Object(obj) if obj.len() == 1 => extract_leaf_scalar(obj.values().next().unwrap()),
-        other => other.clone(),
-    }
 }
 
 struct CacheMetadata {
