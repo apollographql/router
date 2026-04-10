@@ -389,7 +389,7 @@ impl PluginPrivate for ResponseCache {
 
         // Initialize connector storage
         if init.config.enabled
-            && init.config.connector.all.enabled.unwrap_or_default()
+            && init.config.connector.all.enabled.unwrap_or(true)
             && let Some(config) = init.config.connector.all.redis.clone()
         {
             let storage = Arc::new(OnceLock::new());
@@ -398,7 +398,11 @@ impl PluginPrivate for ResponseCache {
         }
 
         for (source, source_config) in &init.config.connector.sources {
-            if init.config.connector.is_source_enabled(source) {
+            if init
+                .config
+                .connector
+                .is_source_enabled(init.config.enabled, source)
+            {
                 match source_config.redis.clone() {
                     Some(config) => {
                         if Some(&config) != init.config.connector.all.redis.as_ref()
@@ -590,7 +594,10 @@ impl PluginPrivate for ResponseCache {
         service: crate::services::connector::request_service::BoxService,
         source_name: String,
     ) -> crate::services::connector::request_service::BoxService {
-        if !self.enabled || !self.connectors.is_source_enabled(&source_name) {
+        if !self
+            .connectors
+            .is_source_enabled(self.enabled, &source_name)
+        {
             // Even when caching is disabled for this connector source, we still need to
             // propagate Cache-Control headers from the connector HTTP response into the
             // shared context. This ensures the supergraph response Cache-Control header

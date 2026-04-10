@@ -95,11 +95,14 @@ impl ConnectorCacheConfiguration {
     }
 
     /// Returns whether caching is enabled for a specific connector source.
-    pub(super) fn is_source_enabled(&self, source_name: &str) -> bool {
+    pub(super) fn is_source_enabled(&self, plugin_enabled: bool, source_name: &str) -> bool {
+        if !plugin_enabled {
+            return false;
+        }
         match (self.all.enabled, self.get(source_name).enabled) {
             (_, Some(x)) => x, // explicit per-source setting overrides the `all` default
-            (Some(true), None) => true,
-            _ => false, // connectors default to disabled unlike subgraphs
+            (Some(true) | None, None) => true,
+            (Some(false), None) => false,
         }
     }
 }
@@ -184,7 +187,7 @@ impl ConnectorCacheService {
 
         // Check if caching is enabled for this connector source
         let connector_config = self.connectors_config.get(&source_name);
-        if !self.connectors_config.is_source_enabled(&source_name) {
+        if !self.connectors_config.is_source_enabled(true, &source_name) {
             return self.service.call(request).await;
         }
 
@@ -1643,4 +1646,80 @@ struct CacheMetadata {
     invalidation_keys: Vec<String>,
     // Only set when debug mode is enabled
     entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with(
+        all_enabled: Option<bool>,
+        sources: Vec<(&str, Option<bool>)>,
+    ) -> ConnectorCacheConfiguration {
+        let mut source_map = HashMap::new();
+        for (name, enabled) in sources {
+            source_map.insert(
+                name.to_string(),
+                ConnectorCacheSource {
+                    enabled,
+                    ..Default::default()
+                },
+            );
+        }
+        ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                enabled: all_enabled,
+                ..Default::default()
+            },
+            sources: source_map,
+        }
+    }
+
+    #[test]
+    fn plugin_disabled_returns_false() {
+        let config = config_with(None, vec![]);
+        assert!(!config.is_source_enabled(false, "any"));
+    }
+
+    #[test]
+    fn default_enabled_when_plugin_enabled() {
+        let config = config_with(None, vec![]);
+        assert!(config.is_source_enabled(true, "any"));
+    }
+
+    #[test]
+    fn all_explicitly_enabled() {
+        let config = config_with(Some(true), vec![]);
+        assert!(config.is_source_enabled(true, "any"));
+    }
+
+    #[test]
+    fn all_explicitly_disabled() {
+        let config = config_with(Some(false), vec![]);
+        assert!(!config.is_source_enabled(true, "any"));
+    }
+
+    #[test]
+    fn per_source_true_overrides_all_disabled() {
+        let config = config_with(Some(false), vec![("src", Some(true))]);
+        assert!(config.is_source_enabled(true, "src"));
+    }
+
+    #[test]
+    fn per_source_false_overrides_all_enabled() {
+        let config = config_with(Some(true), vec![("src", Some(false))]);
+        assert!(!config.is_source_enabled(true, "src"));
+    }
+
+    #[test]
+    fn plugin_disabled_overrides_per_source_true() {
+        let config = config_with(None, vec![("src", Some(true))]);
+        assert!(!config.is_source_enabled(false, "src"));
+    }
+
+    #[test]
+    fn unknown_source_uses_all_defaults() {
+        let config = config_with(None, vec![("known", Some(false))]);
+        assert!(config.is_source_enabled(true, "unknown"));
+    }
 }
