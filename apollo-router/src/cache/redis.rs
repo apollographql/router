@@ -423,7 +423,6 @@ impl RedisCacheStorage {
                     interval: Duration::from_secs(2),
                 };
 
-                // TODO: notes on wtf this does/is
                 config.replica.filter = Some(Arc::new(RouteableReplicaFilter::default()));
 
                 // PR-8405: must not use lazy connections or else commands will queue rather than being sent
