@@ -219,6 +219,7 @@ dependencies = [
  "encoding_rs",
  "form_urlencoded",
  "hashbrown 0.16.1",
+ "heck",
  "hex",
  "http 1.4.0",
  "indexmap 2.14.0",
