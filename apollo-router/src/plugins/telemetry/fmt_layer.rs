@@ -818,10 +818,10 @@ connector:
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
-                let transport_request = TransportRequest::Http(HttpRequest {
+                let transport_request = TransportRequest::Http(Box::new(HttpRequest {
                     inner: http_request,
                     debug: Default::default(),
-                });
+                }));
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
@@ -831,10 +831,10 @@ connector:
                         None,
                         0,
                     ),
-                    transport: HttpJsonTransport {
+                    transport: Some(HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
                         ..Default::default()
-                    },
+                    }),
                     selection: JSONSelection::empty(),
                     config: None,
                     max_requests: None,
@@ -1253,10 +1253,10 @@ subgraph:
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
-                let transport_request = TransportRequest::Http(HttpRequest {
+                let transport_request = TransportRequest::Http(Box::new(HttpRequest {
                     inner: http_request,
                     debug: Default::default(),
-                });
+                }));
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
@@ -1266,10 +1266,10 @@ subgraph:
                         None,
                         0,
                     ),
-                    transport: HttpJsonTransport {
+                    transport: Some(HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
                         ..Default::default()
-                    },
+                    }),
                     selection: JSONSelection::empty(),
                     config: None,
                     max_requests: None,

@@ -19,37 +19,39 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: Some(
-                StringTemplate {
+        transport: Some(
+            HttpJsonTransport {
+                source_template: Some(
+                    StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "https://jsonplaceholder.typicode.com/",
+                                    location: 0..37,
+                                },
+                            ),
+                        ],
+                    },
+                ),
+                connect_template: StringTemplate {
                     parts: [
                         Constant(
                             Constant {
-                                value: "https://jsonplaceholder.typicode.com/",
-                                location: 0..37,
+                                value: "/users",
+                                location: 0..6,
                             },
                         ),
                     ],
                 },
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/users",
-                            location: 0..6,
-                        },
-                    ),
-                ],
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -153,83 +155,85 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: Some(
-                StringTemplate {
+        transport: Some(
+            HttpJsonTransport {
+                source_template: Some(
+                    StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "https://jsonplaceholder.typicode.com/",
+                                    location: 0..37,
+                                },
+                            ),
+                        ],
+                    },
+                ),
+                connect_template: StringTemplate {
                     parts: [
                         Constant(
                             Constant {
-                                value: "https://jsonplaceholder.typicode.com/",
-                                location: 0..37,
+                                value: "/users/",
+                                location: 0..7,
+                            },
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $args,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    6..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    8..8,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..8,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..8,
+                                                ),
+                                            },
+                                        },
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 8..16,
                             },
                         ),
                     ],
                 },
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/users/",
-                            location: 0..7,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $args,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "id",
-                                                            ),
-                                                            range: Some(
-                                                                6..8,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                8..8,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..8,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..8,
-                                            ),
-                                        },
-                                    },
-                                ),
-                                spec: V0_1,
-                            },
-                            location: 8..16,
-                        },
-                    ),
-                ],
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -365,83 +369,85 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/steelth
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: Some(
-                StringTemplate {
+        transport: Some(
+            HttpJsonTransport {
+                source_template: Some(
+                    StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "https://jsonplaceholder.typicode.com/",
+                                    location: 0..37,
+                                },
+                            ),
+                        ],
+                    },
+                ),
+                connect_template: StringTemplate {
                     parts: [
                         Constant(
                             Constant {
-                                value: "https://jsonplaceholder.typicode.com/",
-                                location: 0..37,
+                                value: "/users/",
+                                location: 0..7,
+                            },
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $this,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "c",
+                                                                ),
+                                                                range: Some(
+                                                                    6..7,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    7..7,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..7,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..7,
+                                                ),
+                                            },
+                                        },
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 8..15,
                             },
                         ),
                     ],
                 },
-            ),
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "/users/",
-                            location: 0..7,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $this,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "c",
-                                                            ),
-                                                            range: Some(
-                                                                6..7,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Empty,
-                                                            range: Some(
-                                                                7..7,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..7,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..7,
-                                            ),
-                                        },
-                                    },
-                                ),
-                                spec: V0_1,
-                            },
-                            location: 8..15,
-                        },
-                    ),
-                ],
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: JSONSelection {
             inner: Path(
                 PathSelection {

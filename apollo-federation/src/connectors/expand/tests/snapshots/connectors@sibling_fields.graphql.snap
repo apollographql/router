@@ -17,26 +17,28 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "https://my.api/t",
-                            location: 0..16,
-                        },
-                    ),
-                ],
+        transport: Some(
+            HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "https://my.api/t",
+                                location: 0..16,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -142,87 +144,89 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling
                 },
             ),
         },
-        transport: HttpJsonTransport {
-            source_template: None,
-            connect_template: StringTemplate {
-                parts: [
-                    Constant(
-                        Constant {
-                            value: "https://my.api/t/",
-                            location: 0..17,
-                        },
-                    ),
-                    Expression(
-                        Expression {
-                            expression: JSONSelection {
-                                inner: Path(
-                                    PathSelection {
-                                        path: WithRange {
-                                            node: Var(
-                                                WithRange {
-                                                    node: $this,
-                                                    range: Some(
-                                                        0..5,
-                                                    ),
-                                                },
-                                                WithRange {
-                                                    node: Key(
-                                                        WithRange {
-                                                            node: Field(
-                                                                "k",
-                                                            ),
-                                                            range: Some(
-                                                                6..7,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Key(
-                                                                WithRange {
-                                                                    node: Field(
-                                                                        "id",
-                                                                    ),
-                                                                    range: Some(
-                                                                        8..10,
-                                                                    ),
-                                                                },
-                                                                WithRange {
-                                                                    node: Empty,
-                                                                    range: Some(
-                                                                        10..10,
-                                                                    ),
-                                                                },
-                                                            ),
-                                                            range: Some(
-                                                                7..10,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        5..10,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..10,
-                                            ),
-                                        },
-                                    },
-                                ),
-                                spec: V0_1,
+        transport: Some(
+            HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "https://my.api/t/",
+                                location: 0..17,
                             },
-                            location: 18..28,
-                        },
-                    ),
-                ],
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $this,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "k",
+                                                                ),
+                                                                range: Some(
+                                                                    6..7,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Key(
+                                                                    WithRange {
+                                                                        node: Field(
+                                                                            "id",
+                                                                        ),
+                                                                        range: Some(
+                                                                            8..10,
+                                                                        ),
+                                                                    },
+                                                                    WithRange {
+                                                                        node: Empty,
+                                                                        range: Some(
+                                                                            10..10,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    7..10,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..10,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..10,
+                                                ),
+                                            },
+                                        },
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 18..28,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
             },
-            method: Get,
-            headers: [],
-            body: None,
-            source_path: None,
-            source_query_params: None,
-            connect_path: None,
-            connect_query_params: None,
-        },
+        ),
         selection: JSONSelection {
             inner: Named(
                 SubSelection {

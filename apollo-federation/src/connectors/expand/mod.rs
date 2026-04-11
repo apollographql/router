@@ -476,6 +476,14 @@ mod helpers {
                         self.spec,
                     )?;
 
+                    // If the return type is an object with no fields after walking
+                    // the selection shape (e.g., an http-less connector with `$({})` for the
+                    // namespace pattern), synthesize a dummy inaccessible field so
+                    // the type is valid GraphQL.
+                    if let TypeDefinitionPosition::Object(obj) = &field_type {
+                        Self::ensure_type_not_empty(&mut schema, obj)?;
+                    }
+
                     // Add the root type for this connector, optionally inserting a dummy query root
                     // if the connector is not defined within a field on a Query (since a subgraph is invalid
                     // without at least a root-level Query)
@@ -589,6 +597,13 @@ mod helpers {
                 .map_err(|_| FederationError::internal("error creating resolvable key"))?;
 
             let Some(resolvable_key) = resolvable_key else {
+                // When an implicit entity resolver has no $this variables (e.g., the
+                // "namespace" pattern where a type acts as a grouping container), we use
+                // @key(fields: "__typename") as a singleton entity key. The query planner
+                // handles this correctly, fetching only __typename to identify the entity.
+                if matches!(connector.entity_resolver, Some(EntityResolver::Implicit)) {
+                    return self.add_singleton_entity_key(parent_type_name, to_schema);
+                }
                 return self.copy_interface_object_keys(output_type_name, to_schema);
             };
 
@@ -746,6 +761,58 @@ mod helpers {
                 pos.insert_directive(to_schema, Component::new(key))?;
             }
 
+            Ok(())
+        }
+
+        /// Add a `@key(fields: "__typename")` directive to a type to make it a
+        /// singleton entity. This is used for the "namespace" pattern where a
+        /// connector field doesn't reference `$this` but still needs to be
+        /// resolvable as an entity by the query planner.
+        fn add_singleton_entity_key(
+            &self,
+            type_name: Name,
+            to_schema: &mut FederationSchema,
+        ) -> Result<(), FederationError> {
+            let pos = ObjectTypeDefinitionPosition { type_name };
+            let key_directive = Directive {
+                name: self.key_name.clone(),
+                arguments: vec![Node::new(Argument {
+                    name: name!("fields"),
+                    value: Node::new(Value::String("__typename".to_string())),
+                })],
+            };
+            pos.insert_directive(to_schema, Component::new(key_directive))?;
+            Ok(())
+        }
+
+        /// If an object type exists in the schema but has no fields, add a dummy
+        /// `_: ID @inaccessible` field so it is valid GraphQL. This occurs for the
+        /// "namespace" pattern where a mapping-only (http-less) connector returns a type whose
+        /// fields all have their own connectors (expanded into separate subgraphs).
+        fn ensure_type_not_empty(
+            schema: &mut FederationSchema,
+            obj: &ObjectTypeDefinitionPosition,
+        ) -> Result<(), FederationError> {
+            let type_def = obj.get(schema.schema())?;
+            if type_def.fields.is_empty() {
+                let field_pos = ObjectFieldDefinitionPosition {
+                    type_name: obj.type_name.clone(),
+                    field_name: name!("_"),
+                };
+                field_pos.insert(
+                    schema,
+                    Component::new(FieldDefinition {
+                        description: None,
+                        name: name!("_"),
+                        arguments: Vec::new(),
+                        ty: ty!(ID),
+                        directives: ast::DirectiveList(vec![Node::new(Directive {
+                            name: name!("federation__inaccessible"),
+                            arguments: Vec::new(),
+                        })]),
+                    }),
+                )?;
+            }
             Ok(())
         }
 

@@ -248,8 +248,10 @@ where
         return Ok(ControlFlow::Continue(request));
     }
 
-    // Extract the transport request parts
-    let TransportRequest::Http(http_request) = request.transport_request;
+    // Mapping-only connectors have no HTTP transport request to intercept
+    let TransportRequest::Http(http_request) = request.transport_request else {
+        return Ok(ControlFlow::Continue(request));
+    };
     let debug = http_request.debug;
     let (parts, body) = http_request.inner.into_parts();
 
@@ -381,10 +383,10 @@ where
     }
 
     // Reconstruct the transport request
-    request.transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+    request.transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
         inner: http::Request::from_parts(new_parts, new_body),
         debug,
-    });
+    }));
 
     Ok(ControlFlow::Continue(request))
 }
@@ -428,7 +430,7 @@ where
                 .then(|| http_response.inner.status.as_u16());
             (headers, status)
         }
-        Err(_) => (None, None),
+        Ok(TransportResponse::MappingOnly) | Err(_) => (None, None),
     };
 
     // Extract body from mapped response

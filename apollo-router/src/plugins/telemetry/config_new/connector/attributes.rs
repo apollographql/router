@@ -116,21 +116,17 @@ impl Selectors<ConnectorRequest, ConnectorResponse, ()> for ConnectorAttributes 
             .connector_http_method
             .as_ref()
             .and_then(|a| a.key(CONNECTOR_HTTP_METHOD))
+            && let Some(transport) = request.connector.transport.as_ref()
         {
-            attrs.push(KeyValue::new(
-                key,
-                request.connector.transport.method.as_str().to_string(),
-            ));
+            attrs.push(KeyValue::new(key, transport.method.as_str().to_string()));
         }
         if let Some(key) = self
             .connector_url_template
             .as_ref()
             .and_then(|a| a.key(CONNECTOR_URL_TEMPLATE))
+            && let Some(transport) = request.connector.transport.as_ref()
         {
-            attrs.push(KeyValue::new(
-                key,
-                request.connector.transport.connect_template.to_string(),
-            ));
+            attrs.push(KeyValue::new(key, transport.connect_template.to_string()));
         }
 
         attrs
