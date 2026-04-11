@@ -66,28 +66,24 @@ fn request_params_to_requests(
     for response_key in request_params {
         let connector = connector.clone();
 
-        let (transport_request, mapping_problems) = if connector.mapping_only {
-            (TransportRequest::MappingOnly, Vec::new())
-        } else {
-            let transport = connector.transport.as_ref().ok_or_else(|| {
-                MakeRequestError::InvalidOperation(
-                    "connector has no transport and is not mapping_only".into(),
-                )
-            })?;
-            make_request(
-                transport,
-                response_key
-                    .inputs()
-                    .clone()
-                    .merger(&connector.request_variable_keys)
-                    .config(connector.config.as_ref())
-                    .context(context)
-                    .request(&connector.request_headers, supergraph_request.headers())
-                    .merge(),
-                supergraph_request.headers(),
-                debug,
-            )?
-        };
+        let (transport_request, mapping_problems) =
+            if let Some(transport) = connector.transport.as_ref() {
+                make_request(
+                    transport,
+                    response_key
+                        .inputs()
+                        .clone()
+                        .merger(&connector.request_variable_keys)
+                        .config(connector.config.as_ref())
+                        .context(context)
+                        .request(&connector.request_headers, supergraph_request.headers())
+                        .merge(),
+                    supergraph_request.headers(),
+                    debug,
+                )?
+            } else {
+                (TransportRequest::MappingOnly, Vec::new())
+            };
 
         results.push(Request {
             context: context.clone(),
@@ -618,7 +614,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r###"
@@ -691,7 +686,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r###"
@@ -793,7 +787,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &operation, &variables), @r###"
@@ -908,7 +901,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1022,7 +1014,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1117,7 +1108,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1234,7 +1224,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1386,7 +1375,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1535,7 +1523,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -1648,7 +1635,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &operation, &variables, Some(&keys)).unwrap(), @r###"
@@ -1748,7 +1734,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &operation, &variables, Some(&keys)).unwrap(), @r###"
@@ -1853,7 +1838,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &operation, &variables, Some(&keys)).unwrap(), @r###"
@@ -1964,7 +1948,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &operation, &variables).unwrap(), @r###"
@@ -2035,7 +2018,6 @@ mod tests {
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
             label: "test label".into(),
-            mapping_only: false,
         };
 
         let requests: Vec<_> = super::make_requests(

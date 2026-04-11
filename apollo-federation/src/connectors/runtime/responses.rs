@@ -261,7 +261,7 @@ fn is_success(
 
 /// Returns a response for a mapping-only connector by applying the selection against `{}`.
 ///
-/// Used when `mappingOnly: true` is set on a `@connect` directive, skipping the HTTP transport.
+/// Used when `http` is omitted from a `@connect` directive, skipping the HTTP transport.
 pub fn handle_mapping_only_response(
     key: ResponseKey,
     connector: &Connector,

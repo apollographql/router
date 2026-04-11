@@ -27,7 +27,6 @@ use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
 use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::connectors::spec::connect::CONNECT_ID_ARGUMENT_NAME;
-use crate::connectors::spec::connect::CONNECT_MAPPING_ONLY_ARGUMENT_NAME;
 use crate::connectors::spec::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
 use crate::connectors::spec::source::SOURCE_NAME_ARGUMENT_NAME;
@@ -131,7 +130,7 @@ pub(super) fn fields_seen_by_all_connects(
 /// A parsed `@connect` directive
 struct Connect<'schema> {
     selection: Selection<'schema>,
-    /// `None` when `mappingOnly: true` (no HTTP transport involved)
+    /// `None` when `http` is omitted (mapping-only, no HTTP transport involved)
     http: Option<Http<'schema>>,
     errors: Errors<'schema>,
     is_success: Option<IsSuccessArgument<'schema>>,
@@ -264,56 +263,26 @@ impl<'schema> Connect<'schema> {
             }]);
         }
 
-        // Check if mappingOnly is set
+        // Determine if this is a mapping-only connector (http is absent)
         let mapping_only = coordinate
             .directive
-            .specified_argument_by_name(&CONNECT_MAPPING_ONLY_ARGUMENT_NAME)
-            .and_then(|arg| arg.to_bool())
-            .unwrap_or(false);
+            .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
+            .is_none();
 
-        // Validate mappingOnly constraints
-        if mapping_only {
-            let mut mapping_only_errors: Vec<Message> = Vec::new();
-
-            // Require spec v0.4+
-            if schema.connect_link.spec < ConnectSpec::V0_4 {
-                mapping_only_errors.push(Message {
-                    code: Code::MappingOnlyRequiresV0_4,
-                    message: format!(
-                        "{coordinate} uses `mappingOnly: true` which requires connect spec v0.4 or later. \
-                        Use `@link(url: \"https://specs.apollo.dev/connect/v0.4\")` to enable this feature."
-                    ),
-                    locations: coordinate
-                        .directive
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-
-            // Error if http: is also present
-            if coordinate
-                .directive
-                .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
-                .is_some()
-            {
-                mapping_only_errors.push(Message {
-                    code: Code::MappingOnlyWithHttp,
-                    message: format!(
-                        "{coordinate} cannot use both `mappingOnly: true` and `http:`. \
-                        Use `mappingOnly: true` without `http:` to skip the HTTP request."
-                    ),
-                    locations: coordinate
-                        .directive
-                        .line_column_range(&schema.sources)
-                        .into_iter()
-                        .collect(),
-                });
-            }
-
-            if !mapping_only_errors.is_empty() {
-                return Err(mapping_only_errors);
-            }
+        // Omitting http requires spec v0.4+
+        if mapping_only && schema.connect_link.spec < ConnectSpec::V0_4 {
+            return Err(vec![Message {
+                code: Code::HttpOmittedRequiresV0_4,
+                message: format!(
+                    "{coordinate} omits `http:` which requires connect spec v0.4 or later. \
+                    Either add `http:` or use `@link(url: \"https://specs.apollo.dev/connect/v0.4\")`."
+                ),
+                locations: coordinate
+                    .directive
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }]);
         }
 
         let (selection, http, errors, is_success) = Selection::parse(coordinate, schema)

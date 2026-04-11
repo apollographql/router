@@ -8,7 +8,6 @@ extend schema
 type Query {
   me: User
     @connect(
-      mappingOnly: true
       selection: """
         id: "user-123"
       """

@@ -50,10 +50,8 @@ use crate::error::SingleFederationError;
 #[derive(Debug, Clone)]
 pub struct Connector {
     pub id: ConnectId,
-    /// HTTP transport configuration. `None` when `mapping_only` is true.
+    /// HTTP transport configuration. `None` for mapping-only connectors (where `http` is omitted).
     pub transport: Option<HttpJsonTransport>,
-    /// When true, no HTTP request is made; only the selection mapping is applied against `{}`.
-    pub mapping_only: bool,
     pub selection: JSONSelection,
     pub config: Option<CustomConfiguration>,
     pub max_requests: Option<usize>,
@@ -200,8 +198,6 @@ impl Connector {
             .and_then(|name| source_arguments.iter().find(|s| s.name == name));
         let source_name = source.map(|s| s.name.clone());
 
-        let mapping_only = connect.mapping_only;
-
         // Create our transport (absent for mapping-only connectors)
         let source_http = source.map(|s| &s.http);
         let transport = connect
@@ -267,7 +263,6 @@ impl Connector {
         Ok(Connector {
             id,
             transport,
-            mapping_only,
             selection: connect.selection,
             entity_resolver,
             config: None,
@@ -622,7 +617,6 @@ mod tests {
                         connect_query_params: None,
                     },
                 ),
-                mapping_only: false,
                 selection: JSONSelection {
                     inner: Named(
                         SubSelection {
@@ -783,7 +777,6 @@ mod tests {
                         connect_query_params: None,
                     },
                 ),
-                mapping_only: false,
                 selection: JSONSelection {
                     inner: Named(
                         SubSelection {

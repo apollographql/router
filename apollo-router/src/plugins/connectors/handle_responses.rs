@@ -373,7 +373,6 @@ mod tests {
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             }),
-            mapping_only: false,
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -489,7 +488,6 @@ mod tests {
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             }),
-            mapping_only: false,
             selection: JSONSelection::parse("$.data { id }").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
@@ -606,7 +604,6 @@ mod tests {
                 body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
                 ..Default::default()
             }),
-            mapping_only: false,
             selection: JSONSelection::parse("$.data { id name }").unwrap(),
             entity_resolver: Some(EntityResolver::TypeBatch),
             config: Default::default(),
@@ -734,7 +731,6 @@ mod tests {
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             }),
-            mapping_only: false,
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Implicit),
             config: Default::default(),
@@ -866,7 +862,6 @@ mod tests {
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             }),
-            mapping_only: false,
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
@@ -1149,7 +1144,6 @@ mod tests {
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             }),
-            mapping_only: false,
             selection: selection.clone(),
             entity_resolver: None,
             config: Default::default(),
@@ -1248,7 +1242,6 @@ mod tests {
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             }),
-            mapping_only: false,
             selection: selection.clone(),
             entity_resolver: None,
             config: Default::default(),

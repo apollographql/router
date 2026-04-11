@@ -8,7 +8,6 @@ extend schema
 type Query {
   me: User
     @connect(
-      mappingOnly: true
       selection: """
         id: "user-123"
       """
@@ -17,7 +16,7 @@ type Query {
 
 type Mutation {
   user: UserMutations
-    @connect(mappingOnly: true, selection: "$({})")
+    @connect(selection: "$({})")
 }
 
 type UserMutations {

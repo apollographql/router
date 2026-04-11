@@ -8,7 +8,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/mapping_only_w
         code: GraphQLError,
         message: "`@connect(selection:)` on `Mutation.user` is required.",
         locations: [
-            10:5..10:32,
+            10:5..10:15,
         ],
     },
 ]

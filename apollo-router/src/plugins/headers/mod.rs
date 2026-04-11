@@ -1661,7 +1661,6 @@ mod test {
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             }),
-            mapping_only: false,
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
             config: Default::default(),

@@ -477,7 +477,7 @@ mod helpers {
                     )?;
 
                     // If the return type is an object with no fields after walking
-                    // the selection shape (e.g., mappingOnly with `$({})` for the
+                    // the selection shape (e.g., an http-less connector with `$({})` for the
                     // namespace pattern), synthesize a dummy inaccessible field so
                     // the type is valid GraphQL.
                     if let TypeDefinitionPosition::Object(obj) = &field_type {
@@ -787,7 +787,7 @@ mod helpers {
 
         /// If an object type exists in the schema but has no fields, add a dummy
         /// `_: ID @inaccessible` field so it is valid GraphQL. This occurs for the
-        /// "namespace" pattern where a `mappingOnly` connector returns a type whose
+        /// "namespace" pattern where a mapping-only (http-less) connector returns a type whose
         /// fields all have their own connectors (expanded into separate subgraphs).
         fn ensure_type_not_empty(
             schema: &mut FederationSchema,

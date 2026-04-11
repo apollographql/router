@@ -72,7 +72,7 @@ type User
 type Mutation
   @join__type(graph: CONNECTORS)
 {
-  user: UserMutations @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {mappingOnly: true, selection: "$({})"})
+  user: UserMutations @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {selection: "$({})"})
 }
 
 type UserMutations

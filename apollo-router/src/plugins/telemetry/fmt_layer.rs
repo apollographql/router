@@ -835,7 +835,6 @@ connector:
                         connect_template: StringTemplate::from_str("/test").unwrap(),
                         ..Default::default()
                     }),
-                    mapping_only: false,
                     selection: JSONSelection::empty(),
                     config: None,
                     max_requests: None,
@@ -1271,7 +1270,6 @@ subgraph:
                         connect_template: StringTemplate::from_str("/test").unwrap(),
                         ..Default::default()
                     }),
-                    mapping_only: false,
                     selection: JSONSelection::empty(),
                     config: None,
                     max_requests: None,

@@ -185,7 +185,6 @@ mod tests {
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
                 }),
-                mapping_only: false,
                 selection: JSONSelection::empty(),
                 config: None,
                 max_requests: None,
@@ -273,7 +272,6 @@ mod tests {
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
                 }),
-                mapping_only: false,
                 selection: JSONSelection::empty(),
                 config: None,
                 max_requests: None,

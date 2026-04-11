@@ -85,7 +85,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 connect_query_params: None,
             },
         ),
-        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -339,7 +338,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 connect_query_params: None,
             },
         ),
-        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -542,7 +540,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 connect_query_params: None,
             },
         ),
-        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -744,7 +741,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 connect_query_params: None,
             },
         ),
-        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -972,7 +968,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 connect_query_params: None,
             },
         ),
-        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -1149,7 +1144,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 connect_query_params: None,
             },
         ),
-        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -1376,7 +1370,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 connect_query_params: None,
             },
         ),
-        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -1572,7 +1565,6 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/keys.gr
                 connect_query_params: None,
             },
         ),
-        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {

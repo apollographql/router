@@ -845,7 +845,6 @@ mod test {
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             }),
-            mapping_only: false,
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),

@@ -75,7 +75,6 @@ expression: "&connectors"
                 connect_query_params: None,
             },
         ),
-        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
@@ -324,7 +323,6 @@ expression: "&connectors"
                 connect_query_params: None,
             },
         ),
-        mapping_only: false,
         selection: JSONSelection {
             inner: Named(
                 SubSelection {
