@@ -50,6 +50,10 @@ struct Rhai {
     scope: Arc<Mutex<Scope<'static>>>,
 }
 
+fn default_intern_strings() -> bool {
+    true
+}
+
 /// Configuration for the Rhai Plugin
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -59,6 +63,17 @@ pub(crate) struct Conf {
     scripts: Option<PathBuf>,
     /// The main entry point for Rhai script evaluation
     main: Option<String>,
+    /// Whether to enable Rhai's internal string interning.
+    ///
+    /// String interning can reduce memory allocations and string comparison
+    /// cost. But it also introduces synchronization overhead.
+    ///
+    /// Setting this to `false` can improve throughput and is recommended
+    /// for workloads with many concurrent Rhai executions.
+    ///
+    /// Defaults to `true`.
+    #[serde(default = "default_intern_strings")]
+    intern_strings: bool,
 }
 
 #[async_trait::async_trait]
@@ -83,6 +98,7 @@ impl Plugin for Rhai {
             Some(scripts_path),
             sdl.to_string(),
             main.clone(),
+            init.config.intern_strings,
         ));
         let ast = engine
             .compile_file(main.clone())

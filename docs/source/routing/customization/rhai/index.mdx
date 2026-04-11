@@ -39,6 +39,11 @@ rhai:
   # Specify a different name for your "main" Rhai file with this key.
   # The router looks for this filename in your Rhai script directory.
   main: "test.rhai"
+
+  # Set to false to disable string interning and eliminate lock contention
+  # under concurrent load. See String interning and concurrent performance
+  # under Limitations for details.
+  # intern_strings: false
 ```
 
 1. Add the `rhai` top-level key to your router's [YAML config file](/router/configuration/overview/#yaml-config-file).
@@ -526,6 +531,30 @@ fn process_request(request) {
 The router requires its Rhai engine to implement the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within Rhai might cause a deadlock.
 
 This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/surrogate-cache-key) contains an example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.
+
+### String interning and concurrent performance
+
+Apollo Router compiles Rhai with the [`sync` feature](https://rhai.rs/book/start/features.html) enabled, which makes the engine safe to share across threads. A side effect of this is that Rhai's string interner — which caches frequently used strings to reduce allocations — is protected by a lock (namely a Rust `RwLock`).
+
+String interning is enabled by default. Under high concurrency, threads that encounter new strings must acquire a write lock, which serializes those operations across all concurrent requests. You can disable interning with the `intern_strings` configuration option:
+
+```yaml title="config.yaml"
+rhai:
+  scripts: "./rhai"
+  main: "main.rhai"
+  intern_strings: false  # disable interning
+```
+
+<Note>
+
+Considerations for disabling string interning:
+- Eliminating `RwLock` contention on the string interner can meaningfully improve throughput for deployments processing many concurrent requests through Rhai scripts.
+- Without interning, repeated identical strings are each allocated separately rather than sharing a single allocation. This increases memory pressure and allocation frequency, which might be noticeable in scripts that produce a high volume of repeated short strings.
+- Without interning, string equality comparisons lose the interning fast path (pointer equality) and must compare bytes. This effect is unlikely to be noticeable in most scripts.
+
+Always benchmark your specific script workload under realistic concurrency before you change this setting.
+
+</Note>
 
 ### Services
 
