@@ -131,6 +131,7 @@
     [ rules.allowlist ]
         paths = [
             '''^docs/source/routing/performance/caching/response-caching/invalidation.mdx$''',
+            '''^docs/source/routing/performance/caching/response-caching/customization.mdx$''',
         ]
 
 [[ rules ]]
