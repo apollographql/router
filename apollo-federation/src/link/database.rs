@@ -99,14 +99,13 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
     let mut by_name_in_schema = IndexMap::default();
     let mut types_by_imported_name = IndexMap::default();
     let mut directives_by_imported_name = IndexMap::default();
-    let mut directives_by_original_name = IndexMap::default();
     let link_applications = schema
         .schema_definition
         .directives
         .iter()
         .filter(|d| d.name == *link_name_in_schema);
     for application in link_applications {
-        let mut link = Link::from_directive_application(application)?;
+        let mut link = Link::from_directive_application(application, schema)?;
         if link.url.identity == Identity::federation_identity() && link.url.version.major == 1 {
             // add fake imports for the fed1 federation link.
             if !link.imports.is_empty() {
@@ -180,11 +179,6 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
                     import.imported_display_name()
                 )));
             }
-
-            if import.is_directive {
-                directives_by_original_name
-                    .insert(import.element.clone(), (link.clone(), import.clone()));
-            }
         }
     }
 
@@ -194,7 +188,6 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
         by_name_in_schema,
         types_by_imported_name,
         directives_by_imported_name,
-        directives_by_original_name,
     }))
 }
 

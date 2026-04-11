@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Range;
 use std::str;
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::Component;
 use thiserror::Error;
 
@@ -297,6 +299,7 @@ pub struct Link {
     pub spec_alias: Option<Name>,
     pub imports: Vec<Arc<Import>>,
     pub purpose: Option<Purpose>,
+    pub line_column_range: Option<Range<LineColumn>>,
 }
 
 impl Link {
@@ -348,7 +351,10 @@ impl Link {
         }
     }
 
-    pub fn from_directive_application(directive: &Node<Directive>) -> Result<Link, LinkError> {
+    pub fn from_directive_application(
+        directive: &Node<Directive>,
+        schema: &Schema,
+    ) -> Result<Link, LinkError> {
         let (url, is_link) = if let Some(value) = directive.specified_argument_by_name("url") {
             (value, true)
         } else if let Some(value) = directive.specified_argument_by_name("feature") {
@@ -399,11 +405,14 @@ impl Link {
             Default::default()
         };
 
+        let line_column_range = directive.line_column_range(&schema.sources);
+
         Ok(Link {
             url,
             spec_alias,
             imports,
             purpose,
+            line_column_range,
         })
     }
 
@@ -416,7 +425,7 @@ impl Link {
             .directives
             .iter()
             .find_map(|directive| {
-                let link = Link::from_directive_application(directive).ok()?;
+                let link = Link::from_directive_application(directive, schema).ok()?;
                 if link.url.identity == *identity {
                     Some((link, directive))
                 } else {
@@ -464,16 +473,17 @@ impl fmt::Display for Link {
 pub struct LinkedElement {
     pub link: Arc<Link>,
     pub import: Option<Arc<Import>>,
+    pub name: Name,
+    pub name_in_spec: Name,
 }
 
-#[derive(Clone, Default, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct LinksMetadata {
     pub(crate) links: Vec<Arc<Link>>,
     pub(crate) by_identity: IndexMap<Identity, Arc<Link>>,
     pub(crate) by_name_in_schema: IndexMap<Name, Arc<Link>>,
     pub(crate) types_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
     pub(crate) directives_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
-    pub(crate) directives_by_original_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
 }
 
 impl LinksMetadata {
@@ -511,54 +521,74 @@ impl LinksMetadata {
         self.by_identity.get(identity).cloned()
     }
 
-    pub fn source_link_of_type(&self, type_name: &Name) -> Option<LinkedElement> {
-        // For types, it's either an imported name or it must be fully qualified
-
-        if let Some((link, import)) = self.types_by_imported_name.get(type_name) {
-            Some(LinkedElement {
-                link: Arc::clone(link),
-                import: Some(Arc::clone(import)),
-            })
-        } else {
-            type_name.split_once("__").and_then(|(spec_name, _)| {
-                self.by_name_in_schema
-                    .get(spec_name)
-                    .map(|link| LinkedElement {
-                        link: Arc::clone(link),
-                        import: None,
-                    })
-            })
-        }
-    }
-
-    pub fn source_link_of_directive(&self, directive_name: &Name) -> Option<LinkedElement> {
-        // For directives, it can be either:
-        //   1. be an imported name,
-        //   2. be the "imported" name of a linked spec (special case of a directive named like the
-        //      spec),
-        //   3. or it must be fully qualified.
-        if let Some((link, import)) = self.directives_by_imported_name.get(directive_name) {
-            return Some(LinkedElement {
-                link: Arc::clone(link),
-                import: Some(Arc::clone(import)),
-            });
-        }
-
-        if let Some(link) = self.by_name_in_schema.get(directive_name) {
-            return Some(LinkedElement {
-                link: Arc::clone(link),
-                import: None,
-            });
-        }
-
-        directive_name.split_once("__").and_then(|(spec_name, _)| {
-            self.by_name_in_schema
+    pub fn source_link_of_type<'e>(&'e self, type_name: &'e Name) -> Option<LinkedElement> {
+        // For types, it's either fully qualified or it must be an imported name.
+        if let Some((spec_name, name_in_spec)) = type_name.split_once("__") {
+            let Ok(name_in_spec) = Name::new(name_in_spec) else {
+                return None;
+            };
+            return self
+                .by_name_in_schema
                 .get(spec_name)
                 .map(|link| LinkedElement {
                     link: Arc::clone(link),
                     import: None,
-                })
-        })
+                    name: type_name.clone(),
+                    name_in_spec,
+                });
+        }
+
+        self.types_by_imported_name
+            .get(type_name)
+            .map(|(link, import)| LinkedElement {
+                link: Arc::clone(link),
+                import: Some(Arc::clone(import)),
+                name: type_name.clone(),
+                name_in_spec: import.element.clone(),
+            })
+    }
+
+    pub fn source_link_of_directive<'e>(
+        &'e self,
+        directive_name: &'e Name,
+    ) -> Option<LinkedElement> {
+        // For directives, it can be either:
+        //   1. be fully qualified,
+        //   2. be an imported name,
+        //   2. or it must be the "imported" name of a linked spec (special case of a directive
+        //      named like the spec).
+        if let Some((spec_name, name_in_spec)) = directive_name.split_once("__") {
+            let Ok(name_in_spec) = Name::new(name_in_spec) else {
+                return None;
+            };
+            return self
+                .by_name_in_schema
+                .get(spec_name)
+                .map(|link| LinkedElement {
+                    link: Arc::clone(link),
+                    import: None,
+                    name: directive_name.clone(),
+                    name_in_spec,
+                });
+        }
+
+        if let Some((link, import)) = self.directives_by_imported_name.get(directive_name) {
+            return Some(LinkedElement {
+                link: Arc::clone(link),
+                import: Some(Arc::clone(import)),
+                name: directive_name.clone(),
+                name_in_spec: import.element.clone(),
+            });
+        }
+
+        self.by_name_in_schema
+            .get(directive_name)
+            .map(|link| LinkedElement {
+                link: Arc::clone(link),
+                import: None,
+                name: directive_name.clone(),
+                name_in_spec: link.url.identity.name.clone(),
+            })
     }
 
     pub(crate) fn import_to_feature_url_map(&self) -> HashMap<String, Url> {
