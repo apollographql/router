@@ -160,6 +160,7 @@ impl ConnectorStage {
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
+            let service_name = service_name.clone();
 
             MapFutureWithRequestDataLayer::new(
                 |req: &request_service::Request| req.context.clone(),
@@ -215,7 +216,13 @@ impl ConnectorStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered()
+            .buffered(
+                "connector",
+                vec![
+                    opentelemetry::KeyValue::new("source.name", service_name.clone()),
+                    opentelemetry::KeyValue::new("plugin.name", "coprocessor"),
+                ],
+            )
             .service(service)
             .boxed()
     }

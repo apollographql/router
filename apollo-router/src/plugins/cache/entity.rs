@@ -405,7 +405,13 @@ impl PluginPrivate for EntityCache {
                 })
                 .service(CacheService {
                     service: ServiceBuilder::new()
-                        .buffered()
+                        .buffered(
+                            "subgraph",
+                            vec![
+                                opentelemetry::KeyValue::new("subgraph.name", name.clone()),
+                                opentelemetry::KeyValue::new("plugin.name", "entity_cache"),
+                            ],
+                        )
                         .service(service)
                         .boxed_clone(),
                     entity_type: self.entity_type.clone(),

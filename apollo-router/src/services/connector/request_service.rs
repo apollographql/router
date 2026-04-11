@@ -163,6 +163,7 @@ impl ConnectorRequestServiceFactory {
         let mut map = HashMap::with_capacity(connector_sources.len());
         for source in connector_sources.iter() {
             let service = UnconstrainedBuffer::new(
+                "factory",
                 plugins
                     .iter()
                     .rev()
@@ -175,6 +176,10 @@ impl ConnectorRequestServiceFactory {
                     )
                     .boxed(),
                 DEFAULT_BUFFER_SIZE,
+                vec![
+                    KeyValue::new("factory.name", "connector_request_service"),
+                    KeyValue::new("source.name", source.clone()),
+                ],
             );
             map.insert(source.clone(), service);
         }

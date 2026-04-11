@@ -150,7 +150,7 @@ impl Plugin for AllowClientIdFromFile {
         // or ControlFlow::Break(response) with a crafted response if we don't want the request to go through.
         ServiceBuilder::new()
             .checkpoint_async(handler)
-            .buffered()
+            .buffered("supergraph", vec![])
             .service(service)
             .boxed()
     }

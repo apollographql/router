@@ -172,7 +172,10 @@ impl ExecutionStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
+            .buffered(
+                "execution",
+                vec![opentelemetry::KeyValue::new("plugin.name", "coprocessor")],
+            ) // XXX: Added during backpressure fixing
             .service(service)
             .boxed()
     }

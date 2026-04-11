@@ -327,6 +327,20 @@ impl PluginPrivate for TrafficShaping {
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        let concurrency_limit = self.config.router.as_ref().and_then(|router| {
+            router
+                .concurrency_limit
+                .as_ref()
+                .map(|limit| ConcurrencyLimitLayer::new(*limit))
+        });
+
+        let rate_limit = self.config.router.as_ref().and_then(|router| {
+            router
+                .global_rate_limit
+                .as_ref()
+                .map(|limit| RateLimitLayer::new(limit.capacity.into(), limit.interval))
+        });
+
         // NB: consider each triplet (map_future_with_request_data, load_shed, layer) as a unit of
         //  behavior
         ServiceBuilder::new()
@@ -346,7 +360,13 @@ impl PluginPrivate for TrafficShaping {
                     }
                 },
             )
-            .load_shed()
+            .instrumented_load_shed(
+                "router",
+                vec![
+                    opentelemetry::KeyValue::new("plugin.name", "traffic_shaping"),
+                    opentelemetry::KeyValue::new("layer.chain.name", "timeout"),
+                ],
+            )
             .layer(TimeoutLayer::new(
                 self.config
                     .router
@@ -370,13 +390,20 @@ impl PluginPrivate for TrafficShaping {
                     }
                 },
             )
-            .load_shed()
-            .option_layer(self.config.router.as_ref().and_then(|router| {
-                router
-                    .concurrency_limit
-                    .as_ref()
-                    .map(|limit| ConcurrencyLimitLayer::new(*limit))
-            }))
+            .instrumented_load_shed(
+                "router",
+                std::iter::once(opentelemetry::KeyValue::new(
+                    "plugin.name",
+                    "traffic_shaping",
+                ))
+                .chain(
+                    concurrency_limit
+                        .is_some()
+                        .then(|| opentelemetry::KeyValue::new("layer.chain.name", "timeout")),
+                )
+                .collect(),
+            )
+            .option_layer(concurrency_limit)
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| async {
@@ -393,13 +420,20 @@ impl PluginPrivate for TrafficShaping {
                     }
                 },
             )
-            .load_shed()
-            .option_layer(self.config.router.as_ref().and_then(|router| {
-                router
-                    .global_rate_limit
-                    .as_ref()
-                    .map(|limit| RateLimitLayer::new(limit.capacity.into(), limit.interval))
-            }))
+            .instrumented_load_shed(
+                "router",
+                std::iter::once(opentelemetry::KeyValue::new(
+                    "plugin.name",
+                    "traffic_shaping",
+                ))
+                .chain(
+                    rate_limit
+                        .is_some()
+                        .then(|| opentelemetry::KeyValue::new("layer.chain.name", "rate_limit")),
+                )
+                .collect(),
+            )
+            .option_layer(rate_limit)
             .service(service)
             .boxed()
     }
@@ -458,7 +492,20 @@ impl PluginPrivate for TrafficShaping {
                         }
                     },
                 )
-                .load_shed()
+                .instrumented_load_shed(
+                    "subgraph",
+                    vec![
+                        opentelemetry::KeyValue::new("plugin.name", "traffic_shaping"),
+                        opentelemetry::KeyValue::new("subgraph.name", name.to_string()),
+                        // This layer covers Timeout, Optional RateLimit, and Optional Query Dedup.
+                        // We use a different name for the chain to be able to differentiate it in
+                        // the metrics.
+                        opentelemetry::KeyValue::new(
+                            "layer.chain.name",
+                            "shaping",
+                        ),
+                    ],
+                )
                 .layer(TimeoutLayer::new(
                     config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
                 ))
@@ -477,7 +524,13 @@ impl PluginPrivate for TrafficShaping {
                     }
                     req
                 })
-                .buffered()
+                .buffered(
+                    "subgraph",
+                    vec![
+                        opentelemetry::KeyValue::new("plugin.name", "traffic_shaping"),
+                        opentelemetry::KeyValue::new("subgraph.name", name.to_string()),
+                    ]
+                )
                 .service(service)
                 .boxed()
         } else {
@@ -539,7 +592,20 @@ impl PluginPrivate for TrafficShaping {
                         }
                     },
                 )
-                .load_shed()
+                .instrumented_load_shed(
+                    "connector",
+                    vec![
+                        opentelemetry::KeyValue::new("plugin.name", "traffic_shaping"),
+                        opentelemetry::KeyValue::new("connector.source", source_name.clone()),
+                        // This layer covers Timeout, Optional RateLimit, and Compression.
+                        // We use a different name for the chain to be able to differentiate it in
+                        // the metrics.
+                        opentelemetry::KeyValue::new(
+                            "layer.chain.name",
+                            "shaping",
+                        ),
+                    ],
+                )
                 .layer(TimeoutLayer::new(
                     config.timeout.unwrap_or(DEFAULT_TIMEOUT),
                 ))
@@ -552,7 +618,12 @@ impl PluginPrivate for TrafficShaping {
                     }
                     req
                 })
-                .buffered()
+                .buffered("connector",
+                          vec![
+                              opentelemetry::KeyValue::new("source.name", source_name.to_string()),
+                              opentelemetry::KeyValue::new("plugin.name", "traffic_shaping"),
+                          ]
+                )
                 .service(service)
                 .boxed()
         } else {

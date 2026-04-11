@@ -80,7 +80,10 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
-            .buffered()
+            .buffered(
+                "router",
+                vec![opentelemetry::KeyValue::new("plugin.name", "file_uploads")],
+            )
             .service(service)
             .boxed()
     }
@@ -105,7 +108,10 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
-            .buffered()
+            .buffered(
+                "supergraph",
+                vec![opentelemetry::KeyValue::new("plugin.name", "file_uploads")],
+            )
             .service(service)
             .boxed()
     }
@@ -133,7 +139,7 @@ impl PluginPrivate for FileUploadsPlugin {
 
     fn subgraph_service(
         &self,
-        _subgraph_name: &str,
+        subgraph_name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         if !self.enabled {
@@ -146,7 +152,13 @@ impl PluginPrivate for FileUploadsPlugin {
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
-            .buffered()
+            .buffered(
+                "subgraph",
+                vec![
+                    opentelemetry::KeyValue::new("subgraph.name", subgraph_name.to_string()),
+                    opentelemetry::KeyValue::new("plugin.name", "file_uploads"),
+                ],
+            )
             .service(service)
             .boxed()
     }

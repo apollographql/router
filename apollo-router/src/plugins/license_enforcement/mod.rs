@@ -88,7 +88,9 @@ impl PluginPrivate for LicenseEnforcement {
                     }
                 },
             )
-            .load_shed()
+            .instrumented_load_shed("router", vec![
+                opentelemetry::KeyValue::new("plugin.name", "license_enforcement"),
+            ])
             .option_layer(
                 self.tps
                     .as_ref()
