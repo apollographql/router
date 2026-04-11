@@ -158,6 +158,13 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.operations.coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
   - `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
 
+## Rhai
+
+- `apollo.router.operations.rhai.duration` - Time spent executing a Rhai script callback, in seconds
+  - `rhai.stage`: string (`RouterRequest`, `RouterResponse`, `SupergraphRequest`, `SupergraphResponse`, `ExecutionRequest`, `ExecutionResponse`, `SubgraphRequest`, `SubgraphResponse`)
+  - `rhai.succeeded`: bool
+  - `rhai.is_deferred`: bool — present on response stages. `true` for `@defer` and subscription data chunks, `false` for the primary or initial response.
+
 ## Performance
 
 - `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
