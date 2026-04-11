@@ -909,7 +909,7 @@ mod progressive_override {
         "#);
 
         insta::assert_snapshot!(supergraph.schema().schema(), @r#"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.6", for: EXECUTION) {
           query: Query
         }
 
@@ -919,7 +919,7 @@ mod progressive_override {
 
         directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
-        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!], connectedSelection: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
         directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 

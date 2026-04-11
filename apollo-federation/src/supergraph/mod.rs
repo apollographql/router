@@ -1501,6 +1501,7 @@ fn add_subgraph_field(
             override_label: None,
             user_overridden: None,
             context_arguments: None,
+            connected_selection: None,
         });
     let subgraph_field_type = match &field_directive_application.type_ {
         Some(t) => decode_type(t)?,
@@ -1643,6 +1644,7 @@ fn add_subgraph_input_field(
             override_label: None,
             user_overridden: None,
             context_arguments: None,
+            connected_selection: None,
         });
     let subgraph_input_field_type = match &field_directive_application.type_ {
         Some(t) => Node::new(decode_type(t)?),

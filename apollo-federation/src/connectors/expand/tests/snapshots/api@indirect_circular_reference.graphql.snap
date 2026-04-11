@@ -1,0 +1,22 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/indirect_circular_reference.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Query {
+  track(id: ID!): Track
+}
+
+type Track {
+  id: ID!
+  title: String
+  modules: [Module]
+}
+
+type Module {
+  id: ID!
+  title: String
+  track: Track
+}

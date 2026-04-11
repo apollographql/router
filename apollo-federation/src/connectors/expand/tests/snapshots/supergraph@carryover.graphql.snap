@@ -13,7 +13,7 @@ directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
 directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean, contextArguments: [join__ContextArgument!], connectedSelection: join__FieldSet) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
 
@@ -86,7 +86,7 @@ type T @join__type(graph: ONE_QUERY_T_0, key: "id") @join__type(graph: ONE_QUERY
   policy: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @policy(policies: [["admin"]])
   requiresScopes: String @join__field(graph: ONE_QUERY_T_0, type: "String") @join__field(graph: ONE_QUERY_TS_0, type: "String") @requiresScopes(scopes: ["scope"])
   tagged: TEnum @join__field(graph: ONE_QUERY_T_0, type: "TEnum") @join__field(graph: ONE_QUERY_TS_0, type: "TEnum") @tag(name: "tag")
-  r: R @join__field(graph: ONE_T_R_0, type: "R")
+  r: R @join__field(graph: ONE_T_R_0, type: "R", connectedSelection: "id")
 }
 
 type Query @join__type(graph: ONE_QUERY_T_0) @join__type(graph: ONE_QUERY_TS_0) @join__type(graph: ONE_T_R_0) @join__type(graph: TWO) {

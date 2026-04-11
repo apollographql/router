@@ -132,7 +132,7 @@ impl<'schema> Selection<'schema> {
 
         match coordinate.element {
             ConnectedElement::Field {
-                parent_type,
+                parent_type: _,
                 field_def,
                 ..
             } => {
@@ -176,18 +176,7 @@ impl<'schema> Selection<'schema> {
                     return Ok(Vec::new());
                 }
 
-                let mut validator = SelectionValidator::new(
-                    schema,
-                    PathPart::Root(parent_type),
-                    &self.node,
-                    self.coordinate,
-                );
-
-                // Add the connector field to the initial path for field connectors
-                validator.path.push(PathPart::Field {
-                    definition: field_def,
-                    ty: parent_type,
-                });
+                let mut validator = SelectionValidator::new(schema, &self.node, self.coordinate);
 
                 // Clear seen_fields for this connector
                 validator.seen_fields.clear();
@@ -223,12 +212,7 @@ impl<'schema> Selection<'schema> {
                     });
                 }
 
-                let mut validator = SelectionValidator::new(
-                    schema,
-                    PathPart::Root(type_ref),
-                    &self.node,
-                    self.coordinate,
-                );
+                let mut validator = SelectionValidator::new(schema, &self.node, self.coordinate);
 
                 // Clear seen_fields for this connector
                 validator.seen_fields.clear();
@@ -378,8 +362,6 @@ pub(super) fn validate_selection_variables<'a>(
 
 struct SelectionValidator<'schema> {
     schema: &'schema SchemaInfo<'schema>,
-    root: PathPart<'schema>,
-    path: Vec<PathPart<'schema>>,
     node: &'schema Node<Value>,
     coordinate: SelectionCoordinate<'schema>,
     seen_fields: Vec<(Name, Name)>,
@@ -388,14 +370,11 @@ struct SelectionValidator<'schema> {
 impl<'schema> SelectionValidator<'schema> {
     const fn new(
         schema: &'schema SchemaInfo<'schema>,
-        root: PathPart<'schema>,
         node: &'schema Node<Value>,
         coordinate: SelectionCoordinate<'schema>,
     ) -> Self {
         Self {
             schema,
-            root,
-            path: Vec::new(),
             node,
             coordinate,
             seen_fields: Vec::new(),
@@ -404,51 +383,6 @@ impl<'schema> SelectionValidator<'schema> {
 }
 
 impl<'schema> SelectionValidator<'schema> {
-    fn check_for_circular_reference(
-        &self,
-        field_def: &Node<FieldDefinition>,
-        current_ty: SchemaTypeRef<'schema>,
-    ) -> Result<(), Message> {
-        for (depth, seen_part) in self.path_with_root().enumerate() {
-            let (seen_type, ancestor_field) = match seen_part {
-                PathPart::Root(root) => (root, None),
-                PathPart::Field { ty, definition } => (ty, Some(definition)),
-            };
-
-            if seen_type == current_ty {
-                return Err(Message {
-                    code: Code::CircularReference,
-                    message: format!(
-                        "Circular reference detected in {coordinate}: type `{type_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        coordinate = &self.coordinate,
-                        selection_path = self
-                            .path_with_root()
-                            .map(|part| match part {
-                                PathPart::Root(ty) => ty.name().as_str(),
-                                PathPart::Field { definition, .. } => definition.name.as_str(),
-                            })
-                            .join("."),
-                        type_name = current_ty.name(),
-                    ),
-                    // TODO: make a helper function for easier range collection
-                    locations: if depth > 1 {
-                        ancestor_field
-                            .and_then(|def| def.line_column_range(&self.schema.sources))
-                            .into_iter()
-                            .chain(field_def.line_column_range(&self.schema.sources))
-                            .collect()
-                    } else {
-                        field_def
-                            .line_column_range(&self.schema.sources)
-                            .into_iter()
-                            .collect()
-                    },
-                });
-            }
-        }
-        Ok(())
-    }
-
     fn get_shape_locations<'a>(
         &self,
         shape_locations: impl IntoIterator<Item = &'a Location>,
@@ -467,10 +401,6 @@ impl<'schema> SelectionValidator<'schema> {
                 }
             })
             .collect()
-    }
-
-    fn path_with_root(&self) -> impl Iterator<Item = PathPart<'_>> {
-        once(self.root).chain(self.path.iter().copied())
     }
 
     fn walk_selection_with_shape(
@@ -506,19 +436,7 @@ impl<'schema> SelectionValidator<'schema> {
                             continue;
                         };
 
-                        // Add current field to path for nested traversal
-                        self.path.push(PathPart::Field {
-                            definition: field_def,
-                            ty: type_ref,
-                        });
-
-                        // Check for circular reference after adding field to path
                         let inner_type_name = field_def.ty.inner_named_type();
-                        if let Some(field_type_ref) =
-                            SchemaTypeRef::new(self.schema, inner_type_name)
-                        {
-                            self.check_for_circular_reference(field_def, field_type_ref)?;
-                        }
 
                         // Validate field without arguments
                         if !field_def.arguments.is_empty() {
@@ -582,8 +500,6 @@ impl<'schema> SelectionValidator<'schema> {
                                 }
                             }
                         }
-
-                        self.path.pop();
                     }
                 }
                 Ok(self.seen_fields.clone())
@@ -625,16 +541,6 @@ impl<'schema> SelectionValidator<'schema> {
             _ => Ok(Vec::new()), // Handle other shape cases
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum PathPart<'a> {
-    // Query, Mutation, Subscription OR an Entity type
-    Root(SchemaTypeRef<'a>),
-    Field {
-        definition: &'a Node<FieldDefinition>,
-        ty: SchemaTypeRef<'a>,
-    },
 }
 
 /// Legacy validation structures for v0.1/v0.2 (frozen, will be removed)

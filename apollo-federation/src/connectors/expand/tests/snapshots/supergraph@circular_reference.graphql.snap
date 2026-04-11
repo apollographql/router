@@ -1,9 +1,10 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
+assertion_line: 27
 expression: raw_sdl
-input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/sibling_fields.graphql
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/circular_reference.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [CONNECTORS_QUERY_F_0, CONNECTORS_T_B_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [CONNECTORS_QUERY_USER_0, CONNECTORS_USER_FRIENDS_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) {
   query: Query
 }
 
@@ -50,20 +51,17 @@ input join__ContextArgument {
 scalar join__DirectiveArguments
 
 enum join__Graph {
-  CONNECTORS_QUERY_F_0 @join__graph(name: "connectors_Query_f_0", url: "none")
-  CONNECTORS_T_B_0 @join__graph(name: "connectors_T_b_0", url: "none")
+  CONNECTORS_QUERY_USER_0 @join__graph(name: "connectors_Query_user_0", url: "none")
+  CONNECTORS_USER_FRIENDS_0 @join__graph(name: "connectors_User_friends_0", url: "none")
 }
 
-type K @join__type(graph: CONNECTORS_QUERY_F_0) @join__type(graph: CONNECTORS_T_B_0) {
-  id: ID! @join__field(graph: CONNECTORS_QUERY_F_0, type: "ID!") @join__field(graph: CONNECTORS_T_B_0, type: "ID!")
+type User @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_USER_FRIENDS_0) {
+  id: ID! @join__field(graph: CONNECTORS_QUERY_USER_0, type: "ID!") @join__field(graph: CONNECTORS_USER_FRIENDS_0, type: "ID!")
+  name: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_USER_FRIENDS_0, type: "String")
+  friends: [User] @join__field(graph: CONNECTORS_USER_FRIENDS_0, type: "[User]", connectedSelection: "id name")
 }
 
-type T @join__type(graph: CONNECTORS_QUERY_F_0) @join__type(graph: CONNECTORS_T_B_0, key: "k { id }") {
-  k: K @join__field(graph: CONNECTORS_QUERY_F_0, type: "K") @join__field(graph: CONNECTORS_T_B_0, type: "K")
-  b: String @join__field(graph: CONNECTORS_T_B_0, type: "String", connectedSelection: "b")
-}
-
-type Query @join__type(graph: CONNECTORS_QUERY_F_0) @join__type(graph: CONNECTORS_T_B_0) {
-  f: T @join__field(graph: CONNECTORS_QUERY_F_0, type: "T")
-  _: ID @inaccessible @join__field(graph: CONNECTORS_T_B_0, type: "ID")
+type Query @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_USER_FRIENDS_0) {
+  user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0, type: "User")
+  _: ID @inaccessible @join__field(graph: CONNECTORS_USER_FRIENDS_0, type: "ID")
 }

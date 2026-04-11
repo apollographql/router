@@ -35,6 +35,7 @@ use crate::operation::FieldSetDisplay;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::query_graph::OverrideConditions;
+use crate::query_graph::ProvidesCopy;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
@@ -1545,7 +1546,20 @@ where
                 // interested (we've already checked for a direct transition from that original
                 // subgraph). One exception though is if we're just after a @defer, in which case
                 // re-entering the current subgraph is actually useful.
-                if edge_tail_weight.source == original_source && to_advance.defer_on_tail.is_none()
+                //
+                // Allow re-entry when on a restricted connector copy node.
+                // Restricted copies (ProvidesCopy::Fewer) have fewer edges
+                // than the original, so re-entering via entity resolution is
+                // the only way to access the missing fields.
+                // @provides copies (ProvidesCopy::More) are NOT included here:
+                // they have all original edges plus extras, so re-entry is
+                // always a longer path that cost optimization prunes.
+                let advance_tail_weight = self.graph.node_weight(to_advance.tail)?;
+                let tail_is_restricted_copy =
+                    matches!(advance_tail_weight.copy_kind, Some(ProvidesCopy::Fewer));
+                if edge_tail_weight.source == original_source
+                    && to_advance.defer_on_tail.is_none()
+                    && !tail_is_restricted_copy
                 {
                     debug!("Ignored: edge get us back to our original source");
                     continue;
@@ -1711,8 +1725,15 @@ where
                 // branch of the algorithm. In that case, we can ignore the edge to C, knowing a
                 // better path exists. Doing this drastically reduces state explosion in a number of
                 // cases.
-                if let Some(last_subgraph_entering_edge_info) =
-                    &to_advance.last_subgraph_entering_edge_info
+                // Skip the detour optimization when we're on a restricted copy
+                // node (ProvidesCopy::Fewer). These have fewer fields than
+                // the original, so the "detour" (re-entering the subgraph) is
+                // actually necessary to access fields not on the copy.
+                // @provides copies (More) keep the optimization — they have all
+                // original edges, so the "non-detour" path is always valid.
+                if !tail_is_restricted_copy
+                    && let Some(last_subgraph_entering_edge_info) =
+                        &to_advance.last_subgraph_entering_edge_info
                 {
                     let Some(last_subgraph_entering_edge) =
                         to_advance.edges[last_subgraph_entering_edge_info.index].into()

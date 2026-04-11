@@ -367,19 +367,6 @@ impl<'schema> Connect<'schema> {
                 object_name: parent_type.name().clone(),
                 field_name: field_def.name.clone(),
             });
-            // direct recursion isn't allowed, like a connector on User.friends: [User]
-            if parent_type.name() == field_def.ty.inner_named_type().as_str() {
-                messages.push(Message {
-                    code: Code::CircularReference,
-                    message: format!(
-                        "Direct circular reference detected in `{}.{}: {}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        parent_type.name(),
-                        field_def.name,
-                        field_def.ty
-                    ),
-                    locations: field_def.line_column_range(&self.schema.sources).into_iter().collect(),
-                });
-            }
         }
 
         if messages.is_empty() {
