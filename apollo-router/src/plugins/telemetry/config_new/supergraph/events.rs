@@ -21,6 +21,8 @@ use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
+#[cfg(not(test))]
+use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::supergraph;
 
 pub(crate) type SupergraphEvents = CustomEvents<
@@ -45,21 +47,35 @@ impl
             && request_event.condition.evaluate_request(request) == Some(true)
         {
             let mut attrs = Vec::with_capacity(5);
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = request
-                .supergraph_request
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = request.supergraph_request.headers();
+            let header_string = {
+                #[cfg(test)]
+                {
+                    let mut headers: indexmap::IndexMap<String, http::HeaderValue> = request
+                        .supergraph_request
+                        .headers()
+                        .clone()
+                        .into_iter()
+                        .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                        .collect();
+                    headers.sort_keys();
+                    // In test mode, use Debug format for deterministic output
+                    format!("{headers:?}")
+                }
+                #[cfg(not(test))]
+                {
+                    let headers = request.supergraph_request.headers();
+                    request.context.extensions().with_lock(|lock| {
+                        if let Some(rules) = lock.get::<Arc<HeaderMaskingRules>>() {
+                            rules.mask_headers_debug(headers)
+                        } else {
+                            format!("{headers:?}")
+                        }
+                    })
+                }
+            };
             attrs.push(KeyValue::new(
                 HTTP_REQUEST_HEADERS,
-                opentelemetry::Value::String(format!("{headers:?}").into()),
+                opentelemetry::Value::String(header_string.into()),
             ));
             attrs.push(KeyValue::new(
                 HTTP_REQUEST_METHOD,

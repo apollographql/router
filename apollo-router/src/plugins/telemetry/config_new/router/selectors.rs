@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use derivative::Derivative;
 use http_body::Body;
 use schemars::JsonSchema;
@@ -97,8 +99,6 @@ pub(crate) enum RouterSelector {
     RequestHeader {
         /// The name of the request header.
         request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -231,13 +231,41 @@ impl Selector for RouterSelector {
             RouterSelector::RequestHeader {
                 request_header,
                 default,
-                ..
-            } => request
-                .router_request
-                .headers()
-                .get(request_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
-                .or_else(|| default.maybe_to_otel_value()),
+                redact,
+            } => {
+                let header_value = request
+                    .router_request
+                    .headers()
+                    .get(request_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                // Apply redaction logic
+                let value = match (redact.as_deref(), &header_value) {
+                    // If redact is "allow", return the actual value
+                    (Some("allow"), _) => header_value,
+                    // If redact has any other value, mask it
+                    (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                    // If redact is None, check global rules
+                    (None, Some(_)) => {
+                        let should_mask = request.context.extensions().with_lock(|lock| {
+                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
+                                .map(|rules| rules.should_mask(request_header))
+                                .unwrap_or(false)
+                        });
+                        if should_mask {
+                            Some("***MASKED***".to_string())
+                        } else {
+                            header_value
+                        }
+                    }
+                    // No value to mask
+                    _ => header_value,
+                };
+
+                value
+                    .map(|v| v.into())
+                    .or_else(|| default.maybe_to_otel_value())
+            }
             RouterSelector::Env {
                 env,
                 default,

@@ -2414,6 +2414,13 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "description": "Optional redaction pattern.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -5760,6 +5767,39 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "HeaderMaskingConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for header masking in logs and telemetry",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enable header masking globally (default: true for fail-secure behavior)",
+          "type": "boolean"
+        },
+        "sensitive_headers": {
+          "default": [
+            "authorization",
+            "proxy-authorization",
+            "proxy-authenticate",
+            "cookie",
+            "set-cookie",
+            "x-api-key",
+            "api-key",
+            "x-auth-token",
+            "x-session-id",
+            "x-session-token",
+            "x-csrf-token",
+            "x-xsrf-token"
+          ],
+          "description": "List of header names to mask (case-insensitive)\nDefault includes common sensitive headers",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "HeadersConfig": {
       "additionalProperties": false,
       "description": "Configuration for header propagation",
@@ -8598,6 +8638,13 @@ expression: "&schema"
               ],
               "description": "Optional default value."
             },
+            "redact": {
+              "description": "Optional redaction pattern.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "request_header": {
               "description": "The name of the request header.",
               "type": "string"
@@ -10332,6 +10379,13 @@ expression: "&schema"
                 "null"
               ]
             },
+            "redact": {
+              "description": "Optional redaction pattern.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "subgraph_request_header": {
               "description": "The name of a subgraph request header.",
               "type": "string"
@@ -10360,6 +10414,13 @@ expression: "&schema"
           "properties": {
             "default": {
               "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "redact": {
+              "description": "Optional redaction pattern.",
               "type": [
                 "string",
                 "null"
@@ -10523,6 +10584,13 @@ expression: "&schema"
           "properties": {
             "default": {
               "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "redact": {
+              "description": "Optional redaction pattern.",
               "type": [
                 "string",
                 "null"
@@ -11501,6 +11569,13 @@ expression: "&schema"
                 "null"
               ]
             },
+            "redact": {
+              "description": "Optional redaction pattern.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "request_header": {
               "description": "The name of the request header.",
               "type": "string"
@@ -11516,6 +11591,13 @@ expression: "&schema"
           "properties": {
             "default": {
               "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "redact": {
+              "description": "Optional redaction pattern.",
               "type": [
                 "string",
                 "null"
@@ -12738,6 +12820,31 @@ expression: "&schema"
     },
     "forbid_mutations": {
       "$ref": "#/definitions/ForbidMutationsConfig"
+    },
+    "header_masking": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/HeaderMaskingConfig"
+        }
+      ],
+      "default": {
+        "enabled": true,
+        "sensitive_headers": [
+          "authorization",
+          "proxy-authorization",
+          "proxy-authenticate",
+          "cookie",
+          "set-cookie",
+          "x-api-key",
+          "api-key",
+          "x-auth-token",
+          "x-session-id",
+          "x-session-token",
+          "x-csrf-token",
+          "x-xsrf-token"
+        ]
+      },
+      "description": "Header masking configuration"
     },
     "headers": {
       "$ref": "#/definitions/HeadersConfig"

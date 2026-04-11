@@ -17,6 +17,7 @@ use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
+use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
@@ -76,6 +77,7 @@ impl SupergraphStage {
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
+        header_masking_rules: Option<Arc<HeaderMaskingRules>>,
     ) -> supergraph::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -90,12 +92,14 @@ impl SupergraphStage {
             let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
+            let header_masking_rules = header_masking_rules.clone();
 
             AsyncCheckpointLayer::new(move |request: supergraph::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
                 let sdl = sdl.clone();
+                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
                     let mut succeeded = true;
@@ -108,6 +112,7 @@ impl SupergraphStage {
                         request_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -126,12 +131,14 @@ impl SupergraphStage {
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
+            let header_masking_rules = header_masking_rules.clone();
 
             MapFutureLayer::new(move |fut| {
                 let coprocessor_url = coprocessor_url.clone();
                 let sdl: Arc<String> = sdl.clone();
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
+                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
                     let response: supergraph::Response = fut.await?;
@@ -146,6 +153,7 @@ impl SupergraphStage {
                         response_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -188,6 +196,7 @@ impl SupergraphStage {
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_supergraph_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -196,6 +205,7 @@ async fn process_supergraph_request_stage<C>(
     mut request_config: SupergraphRequestConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -217,6 +227,16 @@ where
     let headers_to_send = request_config
         .headers
         .then(|| externalize_header_map(&parts.headers));
+
+    // Log headers with masking for security
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.mask_headers_debug(&parts.headers),
+            "Supergraph request headers (masked)"
+        );
+    }
 
     let body_to_send = request_config
         .body
@@ -340,6 +360,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_supergraph_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -348,6 +369,7 @@ async fn process_supergraph_response_stage<C>(
     response_config: SupergraphResponseConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
 ) -> Result<supergraph::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -378,6 +400,17 @@ where
     let headers_to_send = response_config
         .headers
         .then(|| externalize_header_map(&parts.headers));
+
+    // Log headers with masking for security
+    if response_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.mask_headers_debug(&parts.headers),
+            "Supergraph response headers (masked)"
+        );
+    }
+
     let body_to_send = filter_graphql_response_body(&first, &response_config.body);
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.get_context(&response.context);
@@ -756,6 +789,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -835,6 +869,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::fake_builder()
@@ -913,6 +948,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let crate::services::supergraph::Response { context, .. } =
@@ -1029,6 +1065,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1145,6 +1182,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder()
@@ -1263,6 +1301,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder()
@@ -1479,6 +1518,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1498,6 +1538,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1520,6 +1561,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1539,6 +1581,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1563,6 +1606,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1587,6 +1631,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1606,6 +1651,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1627,6 +1673,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1649,6 +1696,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1667,6 +1715,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1684,6 +1733,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1701,6 +1751,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();

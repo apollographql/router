@@ -36,6 +36,7 @@ pub mod execution;
 pub(crate) mod external;
 pub(crate) mod fetch;
 pub(crate) mod fetch_service;
+pub(crate) mod header_masking;
 pub(crate) mod hickory_dns_connector;
 pub(crate) mod http;
 pub(crate) mod layers;

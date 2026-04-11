@@ -94,7 +94,6 @@ mod tests {
     use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
-    use crate::plugins::coprocessor::was_incoming_payload_valid;
     use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::external::EXTERNALIZABLE_VERSION;
@@ -222,6 +221,7 @@ mod tests {
             "http://127.0.0.1:8081".to_string(), // global URL - should NOT be used
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -298,6 +298,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -362,6 +363,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -425,6 +427,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -481,6 +484,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -624,6 +628,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -777,6 +782,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -944,6 +950,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1028,6 +1035,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1092,6 +1100,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1149,6 +1158,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1267,6 +1277,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1383,6 +1394,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1511,6 +1523,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1660,6 +1673,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1797,6 +1811,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1876,6 +1891,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true,
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1967,6 +1983,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true,
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -2066,6 +2083,7 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true,
+            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -2216,6 +2234,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2364,6 +2383,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2498,6 +2518,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2629,6 +2650,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::fake_builder()
@@ -2705,6 +2727,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2791,6 +2814,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2926,6 +2950,7 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
+            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -3007,6 +3032,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation - doesn't matter for router stage
+                None,
             )
             .boxed();
 
@@ -3038,6 +3064,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
+                None,
             )
             .boxed();
 
@@ -3062,6 +3089,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
+                None,
             )
             .boxed();
 
@@ -3087,6 +3115,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
+                None,
             )
             .boxed();
 
@@ -3112,6 +3141,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
+                None,
             )
             .boxed();
 
@@ -3136,6 +3166,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
+                None,
             )
             .boxed();
 
@@ -3161,6 +3192,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
+                None,
             )
             .boxed();
 
@@ -3379,6 +3411,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled
+                None,
             )
             .boxed();
 
@@ -3410,6 +3443,7 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled
+                None,
             )
             .boxed();
 
@@ -3859,6 +3893,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3882,6 +3917,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3903,6 +3939,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3926,6 +3963,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3949,6 +3987,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3970,6 +4009,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3990,6 +4030,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4011,6 +4052,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4031,6 +4073,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4048,6 +4091,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4065,6 +4109,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4085,6 +4130,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4169,6 +4215,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4255,6 +4302,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4327,6 +4375,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4412,6 +4461,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4504,6 +4554,7 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Disable response validation since coprocessor returns only extensions
+            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4526,21 +4577,29 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    fn mock_with_callback(
-        callback: fn(
-            http::Request<RouterBody>,
-        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> MockInternalHttpClientService {
+    fn mock_with_callback<F>(callback: F) -> MockInternalHttpClientService
+    where
+        F: Fn(
+                http::Request<RouterBody>,
+            ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        let callback = Arc::new(callback);
         let mut mock_http_client = MockInternalHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
+            let callback = callback.clone();
             let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
+                let callback = callback.clone();
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_call().returning(
                     move |req: crate::services::http::HttpRequest| {
+                        let callback = callback.clone();
                         let context = req.context.clone();
-                        let fut = callback(req.http_request);
                         Box::pin(async move {
+                            let fut = callback(req.http_request);
                             let response = fut.await?;
                             Ok(crate::services::http::HttpResponse {
                                 http_response: response,
@@ -4553,7 +4612,6 @@ mod tests {
             });
             mock_http_client
         });
-
         mock_http_client
     }
 
@@ -4618,14 +4676,6 @@ mod tests {
         crate::graphql::Response::builder().build() // No data, no errors
     }
 
-    fn valid_copro_body() -> Value {
-        json!({"data": {"field": "new_value"}})
-    }
-
-    fn invalid_copro_body() -> Value {
-        json!({}) // No data, no errors
-    }
-
     #[test]
     fn test_minimal_graphql_validation() {
         assert!(is_graphql_response_minimally_valid(&valid_response()));
@@ -4633,476 +4683,6 @@ mod tests {
             &valid_response_with_errors()
         ));
         assert!(!is_graphql_response_minimally_valid(&invalid_response()));
-    }
-
-    #[test]
-    fn test_was_incoming_payload_valid() {
-        // When body is not sent, always return true
-        assert!(was_incoming_payload_valid(
-            &valid_response(),
-            &BodyConf::All(false)
-        ));
-        assert!(was_incoming_payload_valid(
-            &invalid_response(),
-            &BodyConf::All(false)
-        ));
-
-        // When body is sent, check validity
-        assert!(was_incoming_payload_valid(
-            &valid_response(),
-            &BodyConf::All(true)
-        ));
-        assert!(!was_incoming_payload_valid(
-            &invalid_response(),
-            &BodyConf::All(true)
-        ));
-
-        // With selective body config, should check validity when any field is sent
-        assert!(was_incoming_payload_valid(
-            &valid_response(),
-            &BodyConf::Selective(BodyFieldsConf {
-                data: false,
-                errors: true,
-                extensions: false,
-            })
-        ));
-        assert!(!was_incoming_payload_valid(
-            &invalid_response(),
-            &BodyConf::Selective(BodyFieldsConf {
-                data: false,
-                errors: true,
-                extensions: false,
-            })
-        ));
-
-        // When no fields are sent in selective mode, assume valid
-        assert!(was_incoming_payload_valid(
-            &invalid_response(),
-            &BodyConf::Selective(BodyFieldsConf {
-                data: false,
-                errors: false,
-                extensions: false,
-            })
-        ));
-
-        // When only extensions are sent, skip GraphQL spec validation
-        // This is valid even if the response has no data and no errors
-        assert!(was_incoming_payload_valid(
-            &invalid_response(),
-            &BodyConf::Selective(BodyFieldsConf {
-                data: false,
-                errors: false,
-                extensions: true,
-            })
-        ));
-    }
-
-    #[test]
-    fn test_filter_graphql_response_body() {
-        use crate::plugins::coprocessor::BodyFieldsConf;
-        use crate::plugins::coprocessor::filter_graphql_response_body;
-
-        // Test BodyConf::All(false) returns None
-        let response = valid_response();
-        assert!(filter_graphql_response_body(&response, &BodyConf::All(false)).is_none());
-
-        // Test BodyConf::All(true) returns full body
-        let result = filter_graphql_response_body(&response, &BodyConf::All(true));
-        assert!(result.is_some());
-        let body = result.unwrap();
-        assert!(body.get("data").is_some());
-
-        // Test selective: only errors
-        let response_with_errors = graphql::Response::builder()
-            .data(serde_json_bytes::json!({"test": "data"}))
-            .errors(vec![
-                graphql::Error::builder().message("test error").build(),
-            ])
-            .extensions(serde_json_bytes::Map::from_iter([(
-                "ext_key".into(),
-                serde_json_bytes::json!("ext_value"),
-            )]))
-            .build();
-
-        let result = filter_graphql_response_body(
-            &response_with_errors,
-            &BodyConf::Selective(BodyFieldsConf {
-                data: false,
-                errors: true,
-                extensions: false,
-            }),
-        );
-        assert!(result.is_some());
-        let body = result.unwrap();
-        assert!(body.get("data").is_none(), "data should not be included");
-        assert!(body.get("errors").is_some(), "errors should be included");
-        assert!(
-            body.get("extensions").is_none(),
-            "extensions should not be included"
-        );
-
-        // Test selective: only data
-        let result = filter_graphql_response_body(
-            &response_with_errors,
-            &BodyConf::Selective(BodyFieldsConf {
-                data: true,
-                errors: false,
-                extensions: false,
-            }),
-        );
-        assert!(result.is_some());
-        let body = result.unwrap();
-        assert!(body.get("data").is_some(), "data should be included");
-        assert!(
-            body.get("errors").is_none(),
-            "errors should not be included"
-        );
-
-        // Test selective: all fields
-        let result = filter_graphql_response_body(
-            &response_with_errors,
-            &BodyConf::Selective(BodyFieldsConf {
-                data: true,
-                errors: true,
-                extensions: true,
-            }),
-        );
-        assert!(result.is_some());
-        let body = result.unwrap();
-        assert!(body.get("data").is_some());
-        assert!(body.get("errors").is_some());
-        assert!(body.get("extensions").is_some());
-
-        // Test selective: no fields returns None
-        let result = filter_graphql_response_body(
-            &response_with_errors,
-            &BodyConf::Selective(BodyFieldsConf {
-                data: false,
-                errors: false,
-                extensions: false,
-            }),
-        );
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_filter_graphql_response_body_includes_empty_fields() {
-        use crate::plugins::coprocessor::BodyFieldsConf;
-        use crate::plugins::coprocessor::filter_graphql_response_body;
-
-        // Test that configured fields are always included, even when empty
-        // This ensures coprocessors receive a consistent structure
-
-        // Response with data but no errors or extensions
-        let response_data_only = graphql::Response::builder()
-            .data(serde_json_bytes::json!({"test": "data"}))
-            .build();
-
-        // When errors are configured but not present, should send errors: []
-        let result = filter_graphql_response_body(
-            &response_data_only,
-            &BodyConf::Selective(BodyFieldsConf {
-                data: false,
-                errors: true,
-                extensions: false,
-            }),
-        );
-        assert!(result.is_some());
-        let body = result.unwrap();
-        assert!(
-            body.get("errors").is_some(),
-            "errors field should be included even when empty"
-        );
-        assert_eq!(
-            body.get("errors").unwrap().as_array().unwrap().len(),
-            0,
-            "errors should be empty array"
-        );
-        assert!(body.get("data").is_none(), "data should not be included");
-
-        // When extensions are configured but not present, should send extensions: {}
-        let result = filter_graphql_response_body(
-            &response_data_only,
-            &BodyConf::Selective(BodyFieldsConf {
-                data: false,
-                errors: false,
-                extensions: true,
-            }),
-        );
-        assert!(result.is_some());
-        let body = result.unwrap();
-        assert!(
-            body.get("extensions").is_some(),
-            "extensions field should be included even when empty"
-        );
-        assert_eq!(
-            body.get("extensions").unwrap().as_object().unwrap().len(),
-            0,
-            "extensions should be empty object"
-        );
-
-        // When data is configured but is None, should send data: null
-        let response_no_data = graphql::Response::builder()
-            .errors(vec![
-                graphql::Error::builder().message("test error").build(),
-            ])
-            .build();
-
-        let result = filter_graphql_response_body(
-            &response_no_data,
-            &BodyConf::Selective(BodyFieldsConf {
-                data: true,
-                errors: false,
-                extensions: false,
-            }),
-        );
-        assert!(result.is_some());
-        let body = result.unwrap();
-        assert!(
-            body.get("data").is_some(),
-            "data field should be included even when null"
-        );
-        assert!(body.get("data").unwrap().is_null(), "data should be null");
-        assert!(
-            body.get("errors").is_none(),
-            "errors should not be included"
-        );
-    }
-
-    #[test]
-    fn test_body_conf_should_send_data_or_errors() {
-        use crate::plugins::coprocessor::BodyFieldsConf;
-
-        // Test BodyConf::All
-        assert!(BodyConf::All(true).should_send_data_or_errors());
-        assert!(!BodyConf::All(false).should_send_data_or_errors());
-
-        // Test BodyConf::Selective - only extensions should return false
-        let extensions_only = BodyConf::Selective(BodyFieldsConf {
-            data: false,
-            errors: false,
-            extensions: true,
-        });
-        assert!(!extensions_only.should_send_data_or_errors());
-
-        // Test BodyConf::Selective - errors only should return true
-        let errors_only = BodyConf::Selective(BodyFieldsConf {
-            data: false,
-            errors: true,
-            extensions: false,
-        });
-        assert!(errors_only.should_send_data_or_errors());
-
-        // Test BodyConf::Selective - data only should return true
-        let data_only = BodyConf::Selective(BodyFieldsConf {
-            data: true,
-            errors: false,
-            extensions: false,
-        });
-        assert!(data_only.should_send_data_or_errors());
-
-        // Test BodyConf::Selective - data with extensions should return true
-        let data_and_extensions = BodyConf::Selective(BodyFieldsConf {
-            data: true,
-            errors: false,
-            extensions: true,
-        });
-        assert!(data_and_extensions.should_send_data_or_errors());
-    }
-
-    #[test]
-    fn test_conditional_validation_logic() {
-        // Invalid incoming + validation enabled = validation bypassed (succeeds with invalid copro response)
-        assert!(
-            handle_graphql_response(
-                invalid_response(),
-                Some(invalid_copro_body()),
-                true,
-                false,
-                &BodyConf::All(true)
-            )
-            .is_ok()
-        );
-
-        // Valid incoming + validation enabled + invalid copro response = validation applied (fails)
-        assert!(
-            handle_graphql_response(
-                valid_response(),
-                Some(invalid_copro_body()),
-                true,
-                true,
-                &BodyConf::All(true)
-            )
-            .is_err()
-        );
-
-        // Valid incoming + validation enabled + valid copro response = validation applied (succeeds)
-        assert!(
-            handle_graphql_response(
-                valid_response(),
-                Some(valid_copro_body()),
-                true,
-                true,
-                &BodyConf::All(true)
-            )
-            .is_ok()
-        );
-
-        // Validation disabled = always bypassed (succeeds regardless)
-        assert!(
-            handle_graphql_response(
-                valid_response(),
-                Some(invalid_copro_body()),
-                false,
-                true,
-                &BodyConf::All(true)
-            )
-            .is_ok()
-        );
-    }
-
-    #[test]
-    fn test_selective_body_field_merging() {
-        use crate::plugins::coprocessor::BodyFieldsConf;
-
-        // Original response with data, errors, and extensions
-        let original = graphql::Response::builder()
-            .data(json!({"original": "data"}))
-            .error(Error::builder().message("original error").build())
-            .extension("original_ext", json!("original_value"))
-            .build();
-
-        // Test 1: Send only data, coprocessor modifies data
-        // Errors and extensions should be preserved from original
-        let selective_data = BodyConf::Selective(BodyFieldsConf {
-            data: true,
-            errors: false,
-            extensions: false,
-        });
-
-        let copro_response = json!({
-            "data": {"modified": "data"},
-            "errors": [], // Coprocessor might return empty errors
-            "extensions": {} // Coprocessor might return empty extensions
-        });
-
-        let result = handle_graphql_response(
-            original.clone(),
-            Some(copro_response),
-            false,
-            true,
-            &selective_data,
-        )
-        .unwrap();
-
-        // Data should be modified from coprocessor
-        assert_eq!(result.data, Some(json!({"modified": "data"})));
-        // Errors should be preserved from original (not empty from copro)
-        assert_eq!(result.errors.len(), 1);
-        assert_eq!(result.errors[0].message, "original error");
-        // Extensions should be preserved from original (not empty from copro)
-        assert_eq!(
-            result.extensions.get("original_ext"),
-            Some(&json!("original_value"))
-        );
-
-        // Test 2: Send only errors, coprocessor modifies errors
-        // Data and extensions should be preserved from original
-        let selective_errors = BodyConf::Selective(BodyFieldsConf {
-            data: false,
-            errors: true,
-            extensions: false,
-        });
-
-        let copro_response = json!({
-            "data": null, // Coprocessor might return null data
-            "errors": [{"message": "modified error"}]
-        });
-
-        let result = handle_graphql_response(
-            original.clone(),
-            Some(copro_response),
-            false,
-            true,
-            &selective_errors,
-        )
-        .unwrap();
-
-        // Data should be preserved from original
-        assert_eq!(result.data, Some(json!({"original": "data"})));
-        // Errors should be modified from coprocessor
-        assert_eq!(result.errors.len(), 1);
-        assert_eq!(result.errors[0].message, "modified error");
-        // Extensions should be preserved from original
-        assert_eq!(
-            result.extensions.get("original_ext"),
-            Some(&json!("original_value"))
-        );
-
-        // Test 3: Send only extensions, coprocessor modifies extensions
-        // Data and errors should be preserved from original
-        let selective_extensions = BodyConf::Selective(BodyFieldsConf {
-            data: false,
-            errors: false,
-            extensions: true,
-        });
-
-        let copro_response = json!({
-            "extensions": {"modified_ext": "modified_value"}
-        });
-
-        let result = handle_graphql_response(
-            original.clone(),
-            Some(copro_response),
-            false,
-            true,
-            &selective_extensions,
-        )
-        .unwrap();
-
-        // Data should be preserved from original
-        assert_eq!(result.data, Some(json!({"original": "data"})));
-        // Errors should be preserved from original
-        assert_eq!(result.errors.len(), 1);
-        assert_eq!(result.errors[0].message, "original error");
-        // Extensions should be modified from coprocessor
-        assert_eq!(
-            result.extensions.get("modified_ext"),
-            Some(&json!("modified_value"))
-        );
-        assert_eq!(result.extensions.get("original_ext"), None);
-
-        // Test 4: Send data and extensions, but not errors
-        let selective_data_ext = BodyConf::Selective(BodyFieldsConf {
-            data: true,
-            errors: false,
-            extensions: true,
-        });
-
-        let copro_response = json!({
-            "data": {"modified": "data"},
-            "extensions": {"modified_ext": "modified_value"}
-        });
-
-        let result = handle_graphql_response(
-            original.clone(),
-            Some(copro_response),
-            false,
-            true,
-            &selective_data_ext,
-        )
-        .unwrap();
-
-        // Data should be modified from coprocessor
-        assert_eq!(result.data, Some(json!({"modified": "data"})));
-        // Errors should be preserved from original
-        assert_eq!(result.errors.len(), 1);
-        assert_eq!(result.errors[0].message, "original error");
-        // Extensions should be modified from coprocessor
-        assert_eq!(
-            result.extensions.get("modified_ext"),
-            Some(&json!("modified_value"))
-        );
     }
 
     #[test]
@@ -5262,6 +4842,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5291,6 +4872,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5320,6 +4902,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5346,6 +4929,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5372,6 +4956,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5388,6 +4973,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5416,6 +5002,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5445,6 +5032,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5474,6 +5062,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5490,6 +5079,7 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
+                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5522,6 +5112,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5551,6 +5142,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5581,6 +5173,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5611,6 +5204,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5641,6 +5235,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5661,6 +5256,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5693,6 +5289,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
+                        None,
                     )
                     .boxed();
 
@@ -5722,6 +5319,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5755,6 +5353,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -5775,6 +5374,7 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
+                        None,
                     )
                     .boxed();
 
@@ -6272,20 +5872,28 @@ mod tests {
         use crate::services::router;
 
         #[allow(clippy::type_complexity)]
-        fn mock_with_callback(
-            callback: fn(
-                http::Request<RouterBody>,
-            )
-                -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-        ) -> MockInternalHttpClientService {
+        fn mock_with_callback<F>(callback: F) -> MockInternalHttpClientService
+        where
+            F: Fn(
+                    http::Request<RouterBody>,
+                )
+                    -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
+                + Send
+                + Sync
+                + 'static,
+        {
+            let callback = Arc::new(callback);
             let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
+                let callback = callback.clone();
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
+                    let callback = callback.clone();
                     let mut mock_http_client = MockInternalHttpClientService::new();
                     mock_http_client
                         .expect_call()
                         .returning(move |req: HttpRequest| {
+                            let callback = callback.clone();
                             let context = req.context.clone();
                             let fut = callback(req.http_request);
                             Box::pin(async move {
@@ -6408,6 +6016,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6459,6 +6068,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6510,6 +6120,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             // Create a request with a non-JSON body
@@ -6574,6 +6185,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6647,6 +6259,7 @@ mod tests {
                 inner_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6703,6 +6316,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6751,6 +6365,7 @@ mod tests {
                         mock_connector_service.boxed(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
+                        None,
                     );
 
                     let request = create_test_connector_request();
@@ -6804,6 +6419,7 @@ mod tests {
                         mock_connector_service.boxed(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
+                        None,
                     );
 
                     let request = create_test_connector_request();
@@ -6851,6 +6467,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -6894,6 +6511,7 @@ mod tests {
                         mock_connector_service.boxed(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
+                        None,
                     );
 
                     let request = create_test_connector_request();
@@ -6952,6 +6570,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7000,6 +6619,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7058,6 +6678,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7119,6 +6740,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7165,6 +6787,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7210,6 +6833,7 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7278,6 +6902,7 @@ mod tests {
                 create_error_connector_service(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7327,6 +6952,7 @@ mod tests {
                 create_error_connector_service(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
+                None,
             );
 
             let request = create_test_connector_request();
@@ -7338,6 +6964,560 @@ mod tests {
                 }
                 _ => panic!("Expected MappedResponse::Error"),
             }
+        }
+    }
+
+    // Header masking integration tests
+    mod header_masking_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn router_request_headers_sent_unmasked_to_coprocessor() {
+            // Test that sensitive headers (like Authorization) are sent unmasked to the coprocessor
+            // for functionality, even when header masking is enabled
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            // Mock coprocessor that captures the headers it receives
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    // Capture the headers from the coprocessor request
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Create masking rules for sensitive headers
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
+                    },
+                ),
+            ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+                masking_rules,
+            );
+
+            // Send a request with sensitive headers
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer secret-token-12345") // gitleaks:allow
+                .header("cookie", "session=my-session-id")
+                .header("user-agent", "test-agent")
+                .build()
+                .unwrap();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify the coprocessor received the FULL headers (unmasked)
+            let headers = received_headers.lock().unwrap();
+            assert!(headers.is_some(), "Headers should be sent to coprocessor");
+
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            // Authorization header should be unmasked
+            assert_eq!(
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer secret-token-12345", // gitleaks:allow
+                "Authorization header should be sent unmasked to coprocessor"
+            );
+
+            // Cookie header should be unmasked
+            assert_eq!(
+                headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "session=my-session-id",
+                "Cookie header should be sent unmasked to coprocessor"
+            );
+
+            // Non-sensitive header should also be present
+            assert_eq!(
+                headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "test-agent"
+            );
+        }
+
+        #[tokio::test]
+        async fn subgraph_request_headers_sent_unmasked_to_coprocessor() {
+            // Test that subgraph request headers are sent unmasked to coprocessor
+            let subgraph_stage = SubgraphStage {
+                request: SubgraphRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    uri: false,
+                    method: false,
+                    service_name: false,
+                    subgraph_request_id: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mut mock_subgraph_service = MockSubgraphService::new();
+            mock_subgraph_service
+                .expect_call()
+                .returning(|req: subgraph::Request| {
+                    Ok(subgraph::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .errors(Vec::new())
+                        .extensions(Object::new())
+                        .context(req.context)
+                        .subgraph_name("test_subgraph".to_string())
+                        .build())
+                });
+
+            // Mock coprocessor that captures headers
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Create masking rules
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["x-api-key".to_string()],
+                    },
+                ),
+            ));
+
+            let service = subgraph_stage.as_service(
+                mock_http_client,
+                mock_subgraph_service.boxed(),
+                "http://test".to_string(),
+                "test_subgraph".to_string(),
+                false,
+                masking_rules,
+            );
+
+            let request = subgraph::Request::fake_builder()
+                .subgraph_request(
+                    http::Request::builder()
+                        .header("x-api-key", "secret-api-key-67890") // gitleaks:allow
+                        .header("content-type", "application/json")
+                        .body(graphql::Request::fake_builder().query("{ test }").build())
+                        .unwrap(),
+                )
+                .build();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify the coprocessor received unmasked headers
+            let headers = received_headers.lock().unwrap();
+            assert!(headers.is_some());
+
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            assert_eq!(
+                headers_obj.get("x-api-key").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "secret-api-key-67890", // gitleaks:allow
+                "API key should be sent unmasked to coprocessor"
+            );
+        }
+
+        #[tokio::test]
+        async fn headers_sent_when_masking_disabled() {
+            // Test that when masking is disabled, headers are still sent normally
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // No masking rules (disabled)
+            let masking_rules = None;
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+                masking_rules,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer token") // gitleaks:allow
+                .build()
+                .unwrap();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify headers are still sent
+            let headers = received_headers.lock().unwrap();
+            assert!(headers.is_some());
+
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+            assert_eq!(
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer token"
+            );
+        }
+
+        #[tokio::test]
+        async fn multiple_headers_selective_masking() {
+            // Test that with multiple headers, only configured ones would be masked in logs
+            // (but all are sent unmasked to coprocessor)
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Configure to mask only authorization and cookie
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
+                    },
+                ),
+            ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+                masking_rules,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer secret") // gitleaks:allow
+                .header("cookie", "session=secret") // gitleaks:allow
+                .header("user-agent", "test-agent")
+                .header("x-custom-header", "custom-value")
+                .build()
+                .unwrap();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify ALL headers are sent unmasked to coprocessor
+            let headers = received_headers.lock().unwrap();
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            assert_eq!(
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer secret" // gitleaks:allow
+            );
+            assert_eq!(
+                headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "session=secret" // gitleaks:allow
+            );
+            assert_eq!(
+                headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "test-agent"
+            );
+            assert_eq!(
+                headers_obj
+                    .get("x-custom-header")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "custom-value"
+            );
+        }
+
+        #[tokio::test]
+        async fn custom_sensitive_headers_list() {
+            // Test using a custom list of sensitive headers
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Custom sensitive headers list
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec![
+                            "x-internal-token".to_string(),
+                            "x-secret-key".to_string(),
+                        ],
+                    },
+                ),
+            ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+                masking_rules,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("x-internal-token", "internal-secret") // gitleaks:allow
+                .header("x-secret-key", "secret-key-value") // gitleaks:allow
+                .header("authorization", "Bearer public-token") // Not in custom list
+                .build()
+                .unwrap();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify all headers sent unmasked (including custom ones and non-configured ones)
+            let headers = received_headers.lock().unwrap();
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            assert_eq!(
+                headers_obj
+                    .get("x-internal-token")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "internal-secret" // gitleaks:allow
+            );
+            assert_eq!(
+                headers_obj.get("x-secret-key").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "secret-key-value" // gitleaks:allow
+            );
+            // Authorization is not in the custom list, so it's treated as non-sensitive
+            assert_eq!(
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer public-token"
+            );
         }
     }
 }

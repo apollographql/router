@@ -1444,3 +1444,244 @@ fn hoist_orphan_errors_all_with_subgraph_override() {
             .enabled
     );
 }
+
+// Header masking configuration tests
+#[test]
+fn header_masking_default_config() {
+    // Test that header_masking has correct default values
+    let config: Configuration = serde_json::from_value(json!({})).expect("valid config");
+
+    assert!(
+        config.header_masking.enabled,
+        "Header masking should be enabled by default for fail-secure behavior"
+    );
+    assert!(
+        !config.header_masking.sensitive_headers.is_empty(),
+        "Default sensitive headers list should not be empty"
+    );
+
+    // Verify common sensitive headers are in the default list
+    let sensitive_headers = &config.header_masking.sensitive_headers;
+    assert!(
+        sensitive_headers.contains(&"authorization".to_string()),
+        "Default list should include 'authorization'"
+    );
+    assert!(
+        sensitive_headers.contains(&"cookie".to_string()),
+        "Default list should include 'cookie'"
+    );
+    assert!(
+        sensitive_headers.contains(&"x-api-key".to_string()),
+        "Default list should include 'x-api-key'"
+    );
+}
+
+#[test]
+fn header_masking_parses_correctly() {
+    // Test that header_masking config parses correctly with explicit values
+    let config: Configuration = serde_json::from_value(json!({
+        "header_masking": {
+            "enabled": true,
+            "sensitive_headers": [
+                "authorization",
+                "x-custom-secret"
+            ]
+        }
+    }))
+    .expect("valid config");
+
+    assert!(config.header_masking.enabled);
+    assert_eq!(config.header_masking.sensitive_headers.len(), 2);
+    assert!(
+        config
+            .header_masking
+            .sensitive_headers
+            .contains(&"authorization".to_string())
+    );
+    assert!(
+        config
+            .header_masking
+            .sensitive_headers
+            .contains(&"x-custom-secret".to_string())
+    );
+}
+
+#[test]
+fn header_masking_can_be_disabled() {
+    // Test that header masking can be explicitly disabled
+    let config: Configuration = serde_json::from_value(json!({
+        "header_masking": {
+            "enabled": false
+        }
+    }))
+    .expect("valid config");
+
+    assert!(
+        !config.header_masking.enabled,
+        "Header masking should be disabled when explicitly set to false"
+    );
+    // Even when disabled, sensitive_headers should still have defaults
+    assert!(!config.header_masking.sensitive_headers.is_empty());
+}
+
+#[test]
+fn header_masking_custom_headers_list() {
+    // Test custom sensitive headers list
+    let config: Configuration = serde_json::from_value(json!({
+        "header_masking": {
+            "enabled": true,
+            "sensitive_headers": [
+                "x-internal-token",
+                "x-secret-key",
+                "custom-auth-header"
+            ]
+        }
+    }))
+    .expect("valid config");
+
+    assert!(config.header_masking.enabled);
+    assert_eq!(config.header_masking.sensitive_headers.len(), 3);
+    assert!(
+        config
+            .header_masking
+            .sensitive_headers
+            .contains(&"x-internal-token".to_string())
+    );
+    assert!(
+        config
+            .header_masking
+            .sensitive_headers
+            .contains(&"x-secret-key".to_string())
+    );
+    assert!(
+        config
+            .header_masking
+            .sensitive_headers
+            .contains(&"custom-auth-header".to_string())
+    );
+}
+
+#[test]
+fn header_masking_empty_headers_list() {
+    // Test with empty sensitive headers list
+    let config: Configuration = serde_json::from_value(json!({
+        "header_masking": {
+            "enabled": true,
+            "sensitive_headers": []
+        }
+    }))
+    .expect("valid config");
+
+    assert!(config.header_masking.enabled);
+    assert!(
+        config.header_masking.sensitive_headers.is_empty(),
+        "Empty list should be respected"
+    );
+}
+
+#[test]
+fn header_masking_partial_config() {
+    // Test that partial config (only enabled field) uses defaults for sensitive_headers
+    let config: Configuration = serde_json::from_value(json!({
+        "header_masking": {
+            "enabled": false
+        }
+    }))
+    .expect("valid config");
+
+    assert!(!config.header_masking.enabled);
+    // Should still have default sensitive headers
+    assert!(!config.header_masking.sensitive_headers.is_empty());
+}
+
+#[test]
+fn header_masking_in_full_config() {
+    // Test header_masking as part of a more complete configuration
+    let config: Configuration = serde_json::from_value(json!({
+        "supergraph": {
+            "listen": "127.0.0.1:4000"
+        },
+        "header_masking": {
+            "enabled": true,
+            "sensitive_headers": ["authorization", "cookie"]
+        },
+        "health_check": {
+            "enabled": true
+        }
+    }))
+    .expect("valid config");
+
+    assert!(config.header_masking.enabled);
+    assert_eq!(config.header_masking.sensitive_headers.len(), 2);
+    assert!(config.health_check.enabled);
+}
+
+#[test]
+fn header_masking_yaml_parsing() {
+    // Test that header_masking parses correctly from YAML format
+    let yaml = r#"
+        header_masking:
+          enabled: true
+          sensitive_headers:
+            - authorization
+            - cookie
+            - x-api-key
+    "#;
+
+    let config: Configuration = serde_yaml::from_str(yaml).expect("valid YAML config");
+
+    assert!(config.header_masking.enabled);
+    assert_eq!(config.header_masking.sensitive_headers.len(), 3);
+}
+
+#[test]
+fn header_masking_rejects_unknown_fields() {
+    // Test that unknown fields in header_masking config are rejected
+    let result: Result<Configuration, _> = serde_json::from_value(json!({
+        "header_masking": {
+            "enabled": true,
+            "unknown_field": "value"
+        }
+    }));
+
+    assert!(
+        result.is_err(),
+        "Unknown fields should be rejected due to deny_unknown_fields"
+    );
+}
+
+#[test]
+fn header_masking_schema_includes_fields() {
+    // Test that the generated JSON schema includes header_masking configuration
+    let schema = generate_config_schema();
+    let schema_str = serde_json::to_string(&schema).expect("schema should serialize");
+
+    assert!(
+        schema_str.contains("header_masking"),
+        "Schema should include header_masking field"
+    );
+    assert!(
+        schema_str.contains("sensitive_headers"),
+        "Schema should include sensitive_headers field"
+    );
+}
+
+#[test]
+fn header_masking_case_sensitivity() {
+    // Test that header names can be specified in any case (implementation is case-insensitive)
+    let config: Configuration = serde_json::from_value(json!({
+        "header_masking": {
+            "enabled": true,
+            "sensitive_headers": [
+                "Authorization",  // Capital A
+                "COOKIE",         // All caps
+                "x-Api-Key"       // Mixed case
+            ]
+        }
+    }))
+    .expect("valid config");
+
+    assert!(config.header_masking.enabled);
+    assert_eq!(config.header_masking.sensitive_headers.len(), 3);
+    // The actual case-insensitive matching is tested in header_masking.rs unit tests
+}

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use derivative::Derivative;
 use opentelemetry::Value;
 use schemars::JsonSchema;
@@ -133,8 +135,6 @@ pub(crate) enum SubgraphSelector {
     SubgraphRequestHeader {
         /// The name of a subgraph request header.
         subgraph_request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -147,8 +147,6 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseHeader {
         /// The name of a subgraph response header.
         subgraph_response_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -207,8 +205,6 @@ pub(crate) enum SubgraphSelector {
     SupergraphRequestHeader {
         /// The supergraph request header name.
         supergraph_request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -423,25 +419,79 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::SubgraphRequestHeader {
                 subgraph_request_header,
                 default,
-                ..
-            } => request
-                .subgraph_request
-                .headers()
-                .get(subgraph_request_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string()))
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+                redact,
+            } => {
+                let header_value = request
+                    .subgraph_request
+                    .headers()
+                    .get(subgraph_request_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                // Apply redaction logic
+                let value = match (redact.as_deref(), &header_value) {
+                    // If redact is "allow", return the actual value
+                    (Some("allow"), _) => header_value,
+                    // If redact has any other value, mask it
+                    (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                    // If redact is None, check global rules
+                    (None, Some(_)) => {
+                        let should_mask = request.context.extensions().with_lock(|lock| {
+                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
+                                .map(|rules| rules.should_mask(subgraph_request_header))
+                                .unwrap_or(false)
+                        });
+                        if should_mask {
+                            Some("***MASKED***".to_string())
+                        } else {
+                            header_value
+                        }
+                    }
+                    // No value to mask
+                    _ => header_value,
+                };
+
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             SubgraphSelector::SupergraphRequestHeader {
                 supergraph_request_header,
                 default,
-                ..
-            } => request
-                .supergraph_request
-                .headers()
-                .get(supergraph_request_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string()))
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+                redact,
+            } => {
+                let header_value = request
+                    .supergraph_request
+                    .headers()
+                    .get(supergraph_request_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                // Apply redaction logic
+                let value = match (redact.as_deref(), &header_value) {
+                    // If redact is "allow", return the actual value
+                    (Some("allow"), _) => header_value,
+                    // If redact has any other value, mask it
+                    (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                    // If redact is None, check global rules
+                    (None, Some(_)) => {
+                        let should_mask = request.context.extensions().with_lock(|lock| {
+                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
+                                .map(|rules| rules.should_mask(supergraph_request_header))
+                                .unwrap_or(false)
+                        });
+                        if should_mask {
+                            Some("***MASKED***".to_string())
+                        } else {
+                            header_value
+                        }
+                    }
+                    // No value to mask
+                    _ => header_value,
+                };
+
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             SubgraphSelector::RequestContext {
                 request_context,
                 default,
@@ -502,14 +552,41 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::SubgraphResponseHeader {
                 subgraph_response_header,
                 default,
-                ..
-            } => response
-                .response
-                .headers()
-                .get(subgraph_response_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string()))
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+                redact,
+            } => {
+                let header_value = response
+                    .response
+                    .headers()
+                    .get(subgraph_response_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                // Apply redaction logic
+                let value = match (redact.as_deref(), &header_value) {
+                    // If redact is "allow", return the actual value
+                    (Some("allow"), _) => header_value,
+                    // If redact has any other value, mask it
+                    (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                    // If redact is None, check global rules
+                    (None, Some(_)) => {
+                        let should_mask = response.context.extensions().with_lock(|lock| {
+                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
+                                .map(|rules| rules.should_mask(subgraph_response_header))
+                                .unwrap_or(false)
+                        });
+                        if should_mask {
+                            Some("***MASKED***".to_string())
+                        } else {
+                            header_value
+                        }
+                    }
+                    // No value to mask
+                    _ => header_value,
+                };
+
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             SubgraphSelector::SubgraphResponseStatus {
                 subgraph_response_status: response_status,
             } => match response_status {

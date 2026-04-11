@@ -1,6 +1,7 @@
 //! Connector coprocessor stage implementation
 
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
@@ -39,6 +40,7 @@ use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::externalize_header_map;
+use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 
@@ -111,6 +113,7 @@ impl ConnectorStage {
         service: request_service::BoxService,
         default_url: String,
         service_name: String,
+        header_masking_rules: Option<Arc<HeaderMaskingRules>>,
     ) -> request_service::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -125,12 +128,14 @@ impl ConnectorStage {
             let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let http_client = http_client.clone();
             let service_name = service_name.clone();
+            let header_masking_rules = header_masking_rules.clone();
 
             AsyncCheckpointLayer::new(move |request: request_service::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
                 let service_name = service_name.clone();
+                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
                     let mut succeeded = true;
@@ -142,6 +147,7 @@ impl ConnectorStage {
                         request,
                         request_config,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -160,6 +166,7 @@ impl ConnectorStage {
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
+            let header_masking_rules = header_masking_rules.clone();
 
             MapFutureWithRequestDataLayer::new(
                 |req: &request_service::Request| req.context.clone(),
@@ -168,6 +175,7 @@ impl ConnectorStage {
                     let coprocessor_url = coprocessor_url.clone();
                     let response_config = response_config.clone();
                     let service_name = service_name.clone();
+                    let header_masking_rules = header_masking_rules.clone();
 
                     async move {
                         let response: request_service::Response = fut.await?;
@@ -182,6 +190,7 @@ impl ConnectorStage {
                             response_config,
                             context,
                             &mut executed,
+                            header_masking_rules,
                         )
                         .await
                         .map_err(|error| {
@@ -235,6 +244,7 @@ async fn process_connector_request_stage<C>(
     mut request: request_service::Request,
     mut request_config: ConnectorRequestConf,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
 ) -> Result<ControlFlow<request_service::Response, request_service::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -256,6 +266,17 @@ where
     let headers_to_send = request_config
         .headers
         .then(|| externalize_header_map(&parts.headers));
+
+    // Log headers with masking for security
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.mask_headers_debug(&parts.headers),
+            service = %service_name,
+            "Connector request headers (masked)"
+        );
+    }
 
     let body_to_send = request_config.body.then(|| {
         serde_json::from_str::<Value>(&body).unwrap_or_else(|_| Value::String(body.clone().into()))
@@ -396,6 +417,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_connector_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -404,6 +426,7 @@ async fn process_connector_response_stage<C>(
     response_config: ConnectorResponseConf,
     context: Context,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
 ) -> Result<request_service::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -423,6 +446,18 @@ where
             let headers = response_config
                 .headers
                 .then(|| externalize_header_map(&http_response.inner.headers));
+
+            // Log headers with masking for security
+            if response_config.headers
+                && let Some(rules) = header_masking_rules.as_deref()
+            {
+                tracing::debug!(
+                    headers = %rules.mask_headers_debug(&http_response.inner.headers),
+                    service = %service_name,
+                    "Connector response headers (masked)"
+                );
+            }
+
             let status = response_config
                 .status_code
                 .then(|| http_response.inner.status.as_u16());
