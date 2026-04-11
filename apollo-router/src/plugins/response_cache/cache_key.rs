@@ -106,6 +106,121 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
     }
 }
 
+/// Cache key for connector root field
+pub(super) struct ConnectorCacheKeyRoot<'a> {
+    pub(super) source_name: &'a str,
+    pub(super) graphql_type: &'a str,
+    pub(super) operation_hash: &'a str,
+    pub(super) additional_data_hash: &'a str,
+    pub(super) private_id: Option<&'a str>,
+}
+
+impl<'a> ConnectorCacheKeyRoot<'a> {
+    pub(super) fn hash(&self) -> String {
+        let Self {
+            source_name,
+            graphql_type,
+            operation_hash,
+            additional_data_hash,
+            private_id,
+        } = self;
+
+        let mut key = format!(
+            "version:{RESPONSE_CACHE_VERSION}:connector:{source_name}:type:{graphql_type}:hash:{operation_hash}:data:{additional_data_hash}"
+        );
+        if let Some(private_id) = private_id {
+            let _ = write!(&mut key, ":{private_id}");
+        }
+
+        key
+    }
+}
+
+/// Cache key for a connector entity
+pub(super) struct ConnectorCacheKeyEntity<'a> {
+    pub(super) source_name: &'a str,
+    pub(super) entity_type: &'a str,
+    pub(super) representation: &'a Map<ByteString, Value>,
+    pub(super) operation_hash: &'a str,
+    pub(super) additional_data_hash: &'a str,
+    pub(super) private_id: Option<&'a str>,
+}
+
+impl<'a> ConnectorCacheKeyEntity<'a> {
+    pub(super) fn hash(&mut self) -> String {
+        let Self {
+            source_name,
+            entity_type,
+            operation_hash,
+            additional_data_hash,
+            private_id,
+            representation,
+        } = self;
+
+        let hashed_representation = if representation.is_empty() {
+            String::new()
+        } else {
+            sort_and_hash_object(representation)
+        };
+
+        let mut key = format!(
+            "version:{RESPONSE_CACHE_VERSION}:connector:{source_name}:type:{entity_type}:representation:{hashed_representation}:hash:{operation_hash}:data:{additional_data_hash}"
+        );
+
+        if let Some(private_id) = private_id {
+            let _ = write!(&mut key, ":{private_id}");
+        }
+
+        key
+    }
+}
+
+/// Hash an operation document for use as a connector query hash
+pub(super) fn hash_operation(operation: &str) -> String {
+    let mut digest = blake3::Hasher::new();
+    digest.update(operation.as_bytes());
+    digest.update(&[0u8; 1][..]);
+    digest.finalize().to_hex().to_string()
+}
+
+/// Hash additional data for connector cache keys.
+/// Similar to `hash_additional_data` but works with connector `Variables` instead of `graphql::Request`.
+pub(super) fn hash_connector_additional_data(
+    source_name: &str,
+    variables: &Object,
+    context: &Context,
+    cache_key: &CacheKeyMetadata,
+) -> String {
+    let mut hasher = blake3::Hasher::new();
+
+    let repr_key = ByteString::from(REPRESENTATIONS);
+    hash(
+        &mut hasher,
+        variables.iter().filter(|(key, _value)| key != &&repr_key),
+    );
+
+    cache_key
+        .serialize(Blake3Serializer::new(&mut hasher))
+        .expect("this serializer doesn't throw any errors; qed");
+
+    // Takes value specific for a connector source, if it doesn't exist take value for all
+    if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
+        if let Some(v) = cache_data
+            .get("connectors")
+            .and_then(|s| s.as_object())
+            .and_then(|connector_data| connector_data.get(source_name))
+        {
+            v.serialize(Blake3Serializer::new(&mut hasher))
+                .expect("this serializer doesn't throw any errors; qed");
+        } else if let Some(v) = cache_data.get("all") {
+            v.serialize(Blake3Serializer::new(&mut hasher))
+                .expect("this serializer doesn't throw any errors; qed");
+        }
+    }
+
+    hasher.finalize().to_hex().to_string()
+}
+
 /// Hash subgraph query
 pub(super) fn hash_query(query_hash: &QueryHash) -> String {
     let mut digest = blake3::Hasher::new();
@@ -292,5 +407,188 @@ mod tests {
         assert_ne!(value1, value2);
         assert_snapshot!(value1);
         assert_snapshot!(value2);
+    }
+
+    #[test]
+    fn connector_root_cache_key_format() {
+        let key = ConnectorCacheKeyRoot {
+            source_name: "mysubgraph.my_api",
+            graphql_type: "Query",
+            operation_hash: "abc123",
+            additional_data_hash: "def456",
+            private_id: None,
+        };
+        let hash = key.hash();
+        assert!(hash.starts_with("version:"));
+        assert!(hash.contains(":connector:mysubgraph.my_api:"));
+        assert!(hash.contains(":type:Query:"));
+        assert!(hash.contains(":hash:abc123:"));
+        assert!(hash.contains(":data:def456"));
+        assert!(!hash.contains(":subgraph:"));
+        assert_snapshot!(hash);
+    }
+
+    #[test]
+    fn connector_root_cache_key_with_private_id() {
+        let without_private = ConnectorCacheKeyRoot {
+            source_name: "mysubgraph.my_api",
+            graphql_type: "Query",
+            operation_hash: "abc123",
+            additional_data_hash: "def456",
+            private_id: None,
+        };
+        let with_private = ConnectorCacheKeyRoot {
+            source_name: "mysubgraph.my_api",
+            graphql_type: "Query",
+            operation_hash: "abc123",
+            additional_data_hash: "def456",
+            private_id: Some("user_hash_xyz"),
+        };
+        let hash_without = without_private.hash();
+        let hash_with = with_private.hash();
+        assert!(hash_with.ends_with(":user_hash_xyz"));
+        assert!(!hash_without.contains("user_hash_xyz"));
+    }
+
+    #[test]
+    fn connector_entity_cache_key_format() {
+        let repr = serde_json_bytes::json!({"id": "1"});
+        let mut key = ConnectorCacheKeyEntity {
+            source_name: "mysubgraph.my_api",
+            entity_type: "User",
+            representation: repr.as_object().unwrap(),
+            operation_hash: "abc123",
+            additional_data_hash: "def456",
+            private_id: None,
+        };
+        let hash = key.hash();
+        assert!(hash.contains(":connector:mysubgraph.my_api:"));
+        assert!(hash.contains(":type:User:"));
+        assert!(hash.contains(":representation:"));
+        assert!(!hash.contains(":subgraph:"));
+        assert_snapshot!(hash);
+    }
+
+    #[test]
+    fn connector_entity_cache_key_empty_representation() {
+        let repr = serde_json_bytes::Map::new();
+        let mut key = ConnectorCacheKeyEntity {
+            source_name: "mysubgraph.my_api",
+            entity_type: "User",
+            representation: &repr,
+            operation_hash: "abc123",
+            additional_data_hash: "def456",
+            private_id: None,
+        };
+        let hash = key.hash();
+        assert!(hash.contains(":representation::hash:"));
+    }
+
+    #[test]
+    fn connector_entity_cache_key_representation_changes_hash() {
+        let repr1 = serde_json_bytes::json!({"id": "1"});
+        let repr2 = serde_json_bytes::json!({"id": "2"});
+        let mut key1 = ConnectorCacheKeyEntity {
+            source_name: "mysubgraph.my_api",
+            entity_type: "User",
+            representation: repr1.as_object().unwrap(),
+            operation_hash: "abc123",
+            additional_data_hash: "def456",
+            private_id: None,
+        };
+        let mut key2 = ConnectorCacheKeyEntity {
+            source_name: "mysubgraph.my_api",
+            entity_type: "User",
+            representation: repr2.as_object().unwrap(),
+            operation_hash: "abc123",
+            additional_data_hash: "def456",
+            private_id: None,
+        };
+        assert_ne!(key1.hash(), key2.hash());
+    }
+
+    #[test]
+    fn hash_operation_deterministic() {
+        let hash1 = hash_operation("query { users { id name } }");
+        let hash2 = hash_operation("query { users { id name } }");
+        assert_eq!(hash1, hash2);
+        assert_snapshot!(hash1);
+    }
+
+    #[test]
+    fn hash_operation_different_input() {
+        let hash1 = hash_operation("query { users { id name } }");
+        let hash2 = hash_operation("query { posts { id title } }");
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn hash_connector_additional_data_source_specific() {
+        let context = Context::new();
+        context.insert_json_value(
+            CONTEXT_CACHE_KEY,
+            serde_json_bytes::json!({
+                "all": { "locale": "en" },
+                "connectors": {
+                    "source_a": { "foo": "bar" },
+                    "source_b": { "baz": "qux" }
+                }
+            }),
+        );
+        let vars = serde_json_bytes::json!({"key": "value"});
+        let hash_a = hash_connector_additional_data(
+            "source_a",
+            vars.as_object().unwrap(),
+            &context,
+            &Default::default(),
+        );
+        let hash_b = hash_connector_additional_data(
+            "source_b",
+            vars.as_object().unwrap(),
+            &context,
+            &Default::default(),
+        );
+        assert_ne!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn hash_connector_additional_data_fallback_to_all() {
+        let context = Context::new();
+        context.insert_json_value(
+            CONTEXT_CACHE_KEY,
+            serde_json_bytes::json!({
+                "all": { "locale": "en" },
+                "connectors": {
+                    "source_a": { "foo": "bar" }
+                }
+            }),
+        );
+        let vars = serde_json_bytes::json!({"key": "value"});
+        let hash_unknown_1 = hash_connector_additional_data(
+            "unknown_source",
+            vars.as_object().unwrap(),
+            &context,
+            &Default::default(),
+        );
+        let hash_unknown_2 = hash_connector_additional_data(
+            "another_unknown",
+            vars.as_object().unwrap(),
+            &context,
+            &Default::default(),
+        );
+        assert_eq!(hash_unknown_1, hash_unknown_2);
+    }
+
+    #[test]
+    fn connector_key_uses_connector_prefix() {
+        let connector_key = ConnectorCacheKeyRoot {
+            source_name: "test_source",
+            graphql_type: "Query",
+            operation_hash: "hash",
+            additional_data_hash: "data",
+            private_id: None,
+        };
+        assert!(connector_key.hash().contains(":connector:"));
+        assert!(!connector_key.hash().contains(":subgraph:"));
     }
 }

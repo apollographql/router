@@ -145,7 +145,10 @@ impl CacheControl {
             }
         }
 
-        if !found {
+        // Only mark as no_store when there's no Cache-Control header AND no default_ttl.
+        // When a default_ttl is configured, it's already set as max_age above, so we
+        // should allow caching with that TTL even without an explicit Cache-Control header.
+        if !found && default_ttl.is_none() {
             result.no_store = true;
         }
 

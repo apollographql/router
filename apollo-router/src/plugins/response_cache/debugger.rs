@@ -65,6 +65,8 @@ pub(crate) enum CacheKeySource {
     Subgraph,
     /// Data fetched from cache
     Cache,
+    /// Data fetched from connector
+    Connector,
 }
 
 impl CacheKeyContext {

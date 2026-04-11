@@ -140,3 +140,19 @@ During internal testing\*, the Router was able to fetch at least 5000 entities p
 98% of inserts under 15ms.
 
 \*Tests conducted against a single-shard Redis cluster running on a [`redis-standard-small`](https://docs.cloud.google.com/memorystore/docs/cluster/cluster-node-specification#node_type_specification) instance.
+
+### How does response caching work with Apollo Connectors?
+
+Connectors use the same response caching infrastructure as subgraphs, but with a separate `response_cache.connector` configuration block. The router caches connector responses at both the entity level and the root field (HTTP request) level. Configuration uses `connector.all` for global defaults and `connector.sources` for per-source overrides, where sources are identified by `subgraph_name.source_name`.
+
+### How do I identify a connector source in the configuration?
+
+Connector sources use the `subgraph_name.source_name` format. For example, if your subgraph is named `products` and the connector source is `my_rest_api`, the source identifier is `products.my_rest_api`. This format appears in the `connector.sources` configuration map, invalidation requests, and telemetry labels.
+
+### Can I cache subgraphs and connectors simultaneously?
+
+Yes. The `response_cache.subgraph` and `response_cache.connector` blocks are independent. You can enable caching for subgraphs, connectors, or both. Each has its own Redis configuration, TTLs, and invalidation settings.
+
+### Do connectors support `@cacheControl` directives?
+
+Connectors don't use `@cacheControl` directives because they call HTTP APIs directly. Instead, the router reads the `Cache-Control` HTTP headers returned by the upstream REST API. If the API returns `Cache-Control: max-age=300`, the router caches the response for 300 seconds. The configured `ttl` serves as a fallback when no `Cache-Control` header is present.

@@ -25,6 +25,7 @@ The router caches origin query responses—specifically, root query fields as co
 The `Cache-Control` header itself is derived from `@cacheControl` directives in your origin schema. When an origin response contains multiple entity representations, the origin generates a `Cache-Control` header with the minimum TTL value across all representations in that response. (You can use the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger) to inspect these headers.)
 
 When responding to client queries, the router:
+
 1. Calculates the overall response TTL by taking the minimum TTL from all cached origin responses included in the client response
 2. Generates a `Cache-Control` header for the client response reflecting this minimum TTL
 3. Returns cached data as long as the TTL hasn't expired
@@ -41,10 +42,29 @@ response_cache:
   subgraph:
     all:
       enabled: true
-      ttl: 60s  # Default TTL for all subgraphs
+      ttl: 60s # Default TTL for all subgraphs
       redis:
         urls: ["redis://localhost:6379"]
 ```
+
+For connector sources, configure the TTL in the `connector` block:
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  connector:
+    all:
+      enabled: true
+      ttl: 60s # Default TTL for all connector sources
+      redis:
+        urls: ["redis://localhost:6379"]
+```
+
+<Note>
+
+Apollo Connectors don't use `@cacheControl` directives because they call HTTP APIs directly. Instead, the router reads the `Cache-Control` HTTP headers returned by the upstream REST API. If the API returns `Cache-Control: max-age=300`, the router caches the response for 300 seconds. The configured `ttl` serves as a fallback when no `Cache-Control` header is present.
+
+</Note>
 
 ### Control TTL with `@cacheControl`
 
@@ -104,7 +124,7 @@ type Post @cacheControl(maxAge: 240) {
 }
 
 type Comment {
-  post: Post!  # Cached for up to 240 seconds
+  post: Post! # Cached for up to 240 seconds
   body: String!
 }
 ```
@@ -115,7 +135,7 @@ Field-level settings override type-level settings:
 
 ```graphql
 type Comment {
-  post: Post! @cacheControl(maxAge: 120)  # Overrides the 240s type-level setting
+  post: Post! @cacheControl(maxAge: 120) # Overrides the 240s type-level setting
   body: String!
 }
 ```
@@ -132,8 +152,8 @@ The `scope` argument controls whether cached data can be shared across users:
 ```graphql
 type User {
   id: ID!
-  name: String @cacheControl(maxAge: 3600)  # Public: same for all users
-  cart: [Product!]! @cacheControl(maxAge: 60, scope: PRIVATE)  # Private: per-user
+  name: String @cacheControl(maxAge: 3600) # Public: same for all users
+  cart: [Product!]! @cacheControl(maxAge: 60, scope: PRIVATE) # Private: per-user
 }
 ```
 
@@ -142,6 +162,7 @@ See the [Customization](/router/performance/caching/response-caching/customizati
 #### Learn more about TTL
 
 For complete details on cache control configuration in Apollo Server, including:
+
 - Dynamic TTL setting in resolvers
 - Default `maxAge` behavior for root fields vs. other fields
 - Recommendations for TTL configuration
@@ -153,6 +174,7 @@ See the [Apollo Server caching documentation](https://www.apollographql.com/docs
 Active invalidation enables you to remove specific cached data before its TTL expires. This is useful when you know data has changed and want to ensure clients receive fresh data immediately.
 
 Use active invalidation when:
+
 - Changes happen infrequently and unpredictably (product updates, price changes)
 - You need immediate cache updates when data changes
 - The cost of serving stale data is high
@@ -196,6 +218,31 @@ response_cache:
           # whether invalidation is enabled for this subgraph
           enabled: true
           # override the shared key for this particular subgraph. If another key is provided, the invalidation requests for this subgraph's entities will not be executed
+          shared_key: ${env.INVALIDATION_SHARED_KEY_PRODUCTS}
+```
+
+For connector sources, configure invalidation in the `connector` block:
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+
+  invalidation:
+    listen: "127.0.0.1:3000"
+    path: "/invalidation"
+
+  connector:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+      invalidation:
+        enabled: true
+        shared_key: ${env.INVALIDATION_SHARED_KEY}
+    sources:
+      "products.my_rest_api":
+        invalidation:
+          enabled: true
           shared_key: ${env.INVALIDATION_SHARED_KEY_PRODUCTS}
 ```
 
@@ -265,6 +312,7 @@ flowchart RL
 ```
 
 One invalidation request can invalidate multiple cached entries at the same time. It can invalidate:
+
 - All cached entries for a specific subgraph
 - All cached entries for a specific type in a specific subgraph
 - All cached entries marked with a cache tag in specific subgraphs
@@ -275,10 +323,7 @@ Consider the following subgraph schema, which is part of a federated schema:
 
 ```graphql title=accounts.graphql
 extend schema
-  @link(
-    url: "https://specs.apollo.dev/federation/v2.12"
-    import: ["@key", "@requires", "@external", "@cacheTag"]
-  )
+  @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key", "@requires", "@external", "@cacheTag"])
 
 type Query {
   user(id: ID!): User @cacheTag(format: "profile")
@@ -297,7 +342,6 @@ type Post @key(fields: "id") {
   id: ID!
   content: String! @external
 }
-
 ```
 
 #### By subgraph
@@ -305,10 +349,12 @@ type Post @key(fields: "id") {
 To invalidate all cached data from the `accounts` subgraph, send a request with the following format:
 
 ```json
-[{
-  "kind": "subgraph",
-  "subgraph": "accounts"
-}]
+[
+  {
+    "kind": "subgraph",
+    "subgraph": "accounts"
+  }
+]
 ```
 
 #### By entity type
@@ -316,11 +362,13 @@ To invalidate all cached data from the `accounts` subgraph, send a request with 
 To invalidate all cached data for entity type `User` in the `accounts` subgraph, send a JSON payload in this format:
 
 ```json
-[{
-  "kind": "type",
-  "subgraph": "accounts",
-  "type": "User"
-}]
+[
+  {
+    "kind": "type",
+    "subgraph": "accounts",
+    "type": "User"
+  }
+]
 ```
 
 #### By cache tag
@@ -330,31 +378,37 @@ To invalidate all cached data with a specific cache tag `profile` in the `accoun
 Send a JSON payload in this format:
 
 ```json
-[{
-  "kind": "cache_tag",
-  "subgraphs": ["accounts"],
-  "cache_tag": "profile"
-}]
+[
+  {
+    "kind": "cache_tag",
+    "subgraphs": ["accounts"],
+    "cache_tag": "profile"
+  }
+]
 ```
 
 You can also add a dynamic cache tag containing the entity key to the `User` entity type, specified like this: `@cacheTag(format: "user-{$key.id}")`. This enables you to invalidate cached data for a specific `User`, such as one with an ID of `42`:
 
 ```json
-[{
-  "kind": "cache_tag",
-  "subgraphs": ["accounts"],
-  "cache_tag": "user-42"
-}]
+[
+  {
+    "kind": "cache_tag",
+    "subgraphs": ["accounts"],
+    "cache_tag": "user-42"
+  }
+]
 ```
 
 Invalidate root fields with parameters using dynamic cache tags. Set a cache tag on root fields with parameters by interpolating parameters in the cache tag format using `$args`. For example, on the `postsByUser` root field, set `@cacheTag(format: "posts-user-{$args.userId}")`, which becomes `posts-user-42` when you pass `42` as the `userId` parameter:
 
 ```json
-[{
-  "kind": "cache_tag",
-  "subgraphs": ["accounts"],
-  "cache_tag": "posts-user-42"
-}]
+[
+  {
+    "kind": "cache_tag",
+    "subgraphs": ["accounts"],
+    "cache_tag": "posts-user-42"
+  }
+]
 ```
 
 <Note>
@@ -368,11 +422,10 @@ The `@cacheTag` directive has the following constraints regarding its applicatio
 - The `format` must always generate a valid string (not an object)
 
 ❌ Invalid example (field not in all keys):
+
 ```graphql
-type Product
-  @key(fields: "upc") @key(fields: "name")
-  @cacheTag(format: "product-{$key.name}") {
-# Error at composition: name isn't in all @key directives
+type Product @key(fields: "upc") @key(fields: "name") @cacheTag(format: "product-{$key.name}") {
+  # Error at composition: name isn't in all @key directives
   upc: String!
   name: String!
   price: Int
@@ -380,10 +433,9 @@ type Product
 ```
 
 ✅ Valid example (field in all keys):
+
 ```graphql
-type Product
-  @key(fields: "upc") @key(fields: "upc isbn")
-  @cacheTag(format: "product-{$key.upc}") {
+type Product @key(fields: "upc") @key(fields: "upc isbn") @cacheTag(format: "product-{$key.upc}") {
   upc: String!
   isbn: String!
   name: String!
@@ -392,6 +444,7 @@ type Product
 ```
 
 ❌ Invalid example (format generates an object):
+
 ```graphql
 type Product
   @key(fields: "upc country { name }")
@@ -404,6 +457,7 @@ type Product
 ```
 
 ✅ Valid example (format generates a string):
+
 ```graphql
 type Product
   @key(fields: "upc country { name }")
@@ -424,12 +478,14 @@ type Country {
 If you need to set cache tags programmatically (for example, if the tag depends on neither root field arguments nor entity keys), create the cache tags in your subgraph and set them in the response extensions.
 
 The router uses two different extensions because entities and root fields are cached differently:
+
 - **Entities** are cached individually—each entity in an `_entities` response gets its own cache entry. Use `apolloEntityCacheTags` with an array of arrays to assign different tags to different entities.
 - **Root fields** are cached as a single unit—the entire subgraph response is one cache entry. Use `apolloCacheTags` with a flat array of tags that apply to the whole response.
 
 #### Entity cache tags
 
 For cache tags on _entities_, set `apolloEntityCacheTags` in `extensions`. This field must be an array of arrays, where:
+
 - The outer array corresponds **positionally** to the entities in the `_entities` array
 - Each inner array contains string cache tags for that specific entity
 
@@ -437,20 +493,25 @@ The following example shows a response payload that sets cache tags for entities
 
 ```json
 {
-   "data": {"_entities": [
-       {"__typename": "User", "id": 42, "name": "Alice"},
-       {"__typename": "User", "id": 1023, "name": "Bob"},
-       {"__typename": "User", "id": 7, "name": "Charlie"}
-   ]},
-   "extensions": {"apolloEntityCacheTags": [
-       ["users", "user-42"],
-       ["users", "user-1023"],
-       ["users", "user-7"]
-   ]}
+  "data": {
+    "_entities": [
+      { "__typename": "User", "id": 42, "name": "Alice" },
+      { "__typename": "User", "id": 1023, "name": "Bob" },
+      { "__typename": "User", "id": 7, "name": "Charlie" }
+    ]
+  },
+  "extensions": {
+    "apolloEntityCacheTags": [
+      ["users", "user-42"],
+      ["users", "user-1023"],
+      ["users", "user-7"]
+    ]
+  }
 }
 ```
 
 In this example:
+
 - The first entity (User with id 42) is tagged with `["users", "user-42"]`
 - The second entity (User with id 1023) is tagged with `["users", "user-1023"]`
 - The third entity (User with id 7) is tagged with `["users", "user-7"]`
@@ -460,11 +521,13 @@ Because each entity is cached separately with its own tags, you can invalidate i
 To invalidate using these programmatically-set tags, send a request to the invalidation endpoint:
 
 ```json
-[{
-  "kind": "cache_tag",
-  "subgraphs": ["your-subgraph-name"],
-  "cache_tag": "user-42"
-}]
+[
+  {
+    "kind": "cache_tag",
+    "subgraphs": ["your-subgraph-name"],
+    "cache_tag": "user-42"
+  }
+]
 ```
 
 #### Root field cache tags
@@ -486,6 +549,51 @@ The following example shows a response payload that sets cache tags for a `homep
 ```
 
 In this example, both tags (`homepage` and `user-9001-homepage`) are applied to the cached response. Later, you can invalidate this cached response by targeting either tag.
+
+### Connector invalidation methods
+
+For Apollo Connectors, the invalidation endpoint supports connector-specific request formats. Connector sources are identified using the `subgraph_name.source_name` format.
+
+#### By connector source
+
+To invalidate all cached data from a connector source, send a request with the following format:
+
+```json
+[
+  {
+    "kind": "connector",
+    "source": "products.my_rest_api"
+  }
+]
+```
+
+#### By entity type
+
+To invalidate all cached data for a specific entity type in a connector source, use `"source"` instead of `"subgraph"`:
+
+```json
+[
+  {
+    "kind": "type",
+    "source": "products.my_rest_api",
+    "type": "Product"
+  }
+]
+```
+
+#### By cache tag
+
+To invalidate cached data with a specific cache tag in connector sources, use `"sources"` instead of `"subgraphs"`:
+
+```json
+[
+  {
+    "kind": "cache_tag",
+    "sources": ["products.my_rest_api"],
+    "cache_tag": "product-42"
+  }
+]
+```
 
 ### Invalidation HTTP endpoint
 
@@ -533,20 +641,11 @@ You can use both `@cacheControl` (for TTL-based passive invalidation) and `@cach
 Here's a simple example combining both directives:
 
 ```graphql
-extend schema
-  @link(
-    url: "https://specs.apollo.dev/federation/v2.12"
-    import: ["@key", "@cacheTag"]
-  )
+extend schema @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key", "@cacheTag"])
 
-directive @cacheControl(
-  maxAge: Int
-  scope: CacheControlScope
-) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
+directive @cacheControl(maxAge: Int, scope: CacheControlScope) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
 
-type User @key(fields: "id")
-         @cacheControl(maxAge: 60)
-         @cacheTag(format: "user-{$key.id}") {
+type User @key(fields: "id") @cacheControl(maxAge: 60) @cacheTag(format: "user-{$key.id}") {
   id: ID!
   name: String!
   email: String!
@@ -554,6 +653,7 @@ type User @key(fields: "id")
 ```
 
 In this example:
+
 - The `@cacheControl(maxAge: 60)` directive sets a 60-second TTL—data automatically expires after one minute
 - The `@cacheTag(format: "user-{$key.id}")` directive enables immediate invalidation when user data changes
 

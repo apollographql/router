@@ -41,6 +41,9 @@ use tracing::Level;
 use tracing::Span;
 
 use super::cache_control::CacheControl;
+use super::connectors::ConnectorCacheConfiguration;
+use super::connectors::ConnectorCacheService;
+use super::connectors::ConnectorRequestCacheService;
 use super::invalidation::Invalidation;
 use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationService;
@@ -80,6 +83,7 @@ use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
+use crate::services::connect;
 use crate::services::subgraph;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
@@ -112,6 +116,7 @@ pub(crate) struct ResponseCache {
     pub(super) storage: Arc<StorageInterface>,
     endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
+    connectors: Arc<ConnectorCacheConfiguration>,
     entity_type: Option<String>,
     enabled: bool,
     debug: bool,
@@ -126,20 +131,31 @@ pub(crate) struct ResponseCache {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-struct PrivateQueryKey {
-    query_hash: String,
-    has_private_id: bool,
+pub(super) struct PrivateQueryKey {
+    pub(super) query_hash: String,
+    pub(super) has_private_id: bool,
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct StorageInterface {
     all: Option<Arc<OnceLock<Storage>>>,
     subgraphs: HashMap<String, Arc<OnceLock<Storage>>>,
+    connector_all: Option<Arc<OnceLock<Storage>>>,
+    connector_sources: HashMap<String, Arc<OnceLock<Storage>>>,
 }
 
 impl StorageInterface {
     pub(crate) fn get(&self, subgraph: &str) -> Option<&Storage> {
         let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
+        storage.get()
+    }
+
+    /// Get storage for a connector source, falling back to connector `all` storage.
+    pub(crate) fn get_connector(&self, source_name: &str) -> Option<&Storage> {
+        let storage = self
+            .connector_sources
+            .get(source_name)
+            .or(self.connector_all.as_ref())?;
         storage.get()
     }
 
@@ -151,6 +167,16 @@ impl StorageInterface {
             storage.activate();
         }
         for storage in self.subgraphs.values() {
+            if let Some(storage) = storage.get() {
+                storage.activate();
+            }
+        }
+        if let Some(all) = &self.connector_all
+            && let Some(storage) = all.get()
+        {
+            storage.activate();
+        }
+        for storage in self.connector_sources.values() {
             if let Some(storage) = storage.get() {
                 storage.activate();
             }
@@ -181,6 +207,8 @@ impl From<Storage> for StorageInterface {
         Self {
             all: Some(Arc::new(storage.into())),
             subgraphs: HashMap::new(),
+            connector_all: None,
+            connector_sources: HashMap::new(),
         }
     }
 }
@@ -198,7 +226,12 @@ pub(crate) struct Config {
     debug: bool,
 
     /// Configure invalidation per subgraph
+    #[serde(default)]
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
+
+    /// Configure response caching per connector source
+    #[serde(default)]
+    pub(crate) connector: ConnectorCacheConfiguration,
 
     /// Global invalidation configuration
     invalidation: Option<InvalidationEndpointConfig>,
@@ -354,6 +387,51 @@ impl PluginPrivate for ResponseCache {
             }
         }
 
+        // Initialize connector storage
+        if init.config.enabled
+            && init.config.connector.all.enabled.unwrap_or(true)
+            && let Some(config) = init.config.connector.all.redis.clone()
+        {
+            let storage = Arc::new(OnceLock::new());
+            storage_interface.connector_all = Some(storage.clone());
+            connect_or_spawn_reconnection_task(config, storage, drop_tx.subscribe()).await?;
+        }
+
+        for (source, source_config) in &init.config.connector.sources {
+            if init
+                .config
+                .connector
+                .is_source_enabled(init.config.enabled, source)
+            {
+                match source_config.redis.clone() {
+                    Some(config) => {
+                        if Some(&config) != init.config.connector.all.redis.as_ref()
+                            || storage_interface.connector_all.is_none()
+                        {
+                            let storage = Arc::new(OnceLock::new());
+                            storage_interface
+                                .connector_sources
+                                .insert(source.clone(), storage.clone());
+                            connect_or_spawn_reconnection_task(
+                                config,
+                                storage,
+                                drop_tx.subscribe(),
+                            )
+                            .await?;
+                        }
+                    }
+                    None => {
+                        if storage_interface.connector_all.is_none() {
+                            return Err(
+                                format!("you must have a redis configured either for all connectors or for connector source {source:?}")
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         let storage_interface = Arc::new(storage_interface);
         let invalidation = Invalidation::new(storage_interface.clone()).await?;
 
@@ -364,6 +442,7 @@ impl PluginPrivate for ResponseCache {
             debug: init.config.debug,
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
+            connectors: Arc::new(init.config.connector),
             private_queries: Arc::new(RwLock::new(LruCache::new(
                 init.config.private_queries_buffer_size,
             ))),
@@ -480,6 +559,111 @@ impl PluginPrivate for ResponseCache {
         }
     }
 
+    fn connector_service(&self, service: connect::BoxService) -> connect::BoxService {
+        if !self.enabled {
+            return service;
+        }
+
+        let storage = self.storage.clone();
+        let connectors_config = self.connectors.clone();
+        let private_queries = self.private_queries.clone();
+        let debug = self.debug;
+        let supergraph_schema = self.supergraph_schema.clone();
+        let subgraph_enums = self.subgraph_enums.clone();
+        let lru_size_instrument = self.lru_size_instrument.clone();
+
+        ServiceBuilder::new()
+            .service(ConnectorCacheService {
+                service: ServiceBuilder::new()
+                    .buffered()
+                    .service(service)
+                    .boxed_clone(),
+                storage,
+                connectors_config,
+                private_queries,
+                debug,
+                supergraph_schema,
+                subgraph_enums,
+                lru_size_instrument,
+            })
+            .boxed()
+    }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        if !self
+            .connectors
+            .is_source_enabled(self.enabled, &source_name)
+        {
+            // Even when caching is disabled for this connector source, we still need to
+            // propagate Cache-Control headers from the connector HTTP response into the
+            // shared context. This ensures the supergraph response Cache-Control header
+            // correctly reflects all upstream responses (matching the subgraph behavior).
+            let connector_ttl = self
+                .connector_ttl(&source_name)
+                .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24));
+            return ServiceBuilder::new()
+                .map_response(
+                    move |response: crate::services::connector::request_service::Response| {
+                        if let Ok(
+                            apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
+                                ref http_response,
+                            ),
+                        ) = response.transport_result
+                        {
+                            update_cache_control(
+                                &response.context,
+                                &CacheControl::new(
+                                    &http_response.inner.headers,
+                                    connector_ttl.into(),
+                                )
+                                .ok()
+                                .unwrap_or_else(CacheControl::no_store),
+                            );
+                        }
+                        response
+                    },
+                )
+                .service(service)
+                .boxed();
+        }
+
+        let connector_ttl = self
+            .connector_ttl(&source_name)
+            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24));
+        let storage = self.storage.clone();
+        let private_id_key = self
+            .connectors
+            .get(&source_name)
+            .private_id
+            .clone()
+            .or_else(|| self.connectors.all.private_id.clone());
+        let source_name_owned = source_name;
+
+        let debug = self.debug;
+
+        ServiceBuilder::new()
+            .service(ConnectorRequestCacheService {
+                service: ServiceBuilder::new()
+                    .buffered()
+                    .service(service)
+                    .boxed_clone(),
+                storage,
+                source_name: source_name_owned,
+                connector_ttl,
+                private_id_key,
+                debug,
+                supergraph_schema: self.supergraph_schema.clone(),
+                subgraph_enums: self.subgraph_enums.clone(),
+                private_queries: self.private_queries.clone(),
+                lru_size_instrument: self.lru_size_instrument.clone(),
+            })
+            .boxed()
+    }
+
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut map = MultiMap::new();
         // At least 1 subgraph enabled caching
@@ -509,16 +693,43 @@ impl PluginPrivate for ResponseCache {
                         .unwrap_or_default()
             });
 
+        let any_connector_caching_enabled = self.connectors.all.enabled.unwrap_or(false)
+            || self
+                .connectors
+                .sources
+                .values()
+                .any(|s| s.enabled.unwrap_or(false));
+
+        let any_connector_invalidation_enabled = self
+            .connectors
+            .all
+            .invalidation
+            .as_ref()
+            .map(|i| i.enabled)
+            .unwrap_or_default()
+            || self.connectors.sources.values().any(|s| {
+                s.invalidation
+                    .as_ref()
+                    .map(|i| i.enabled)
+                    .unwrap_or_default()
+            });
+
         if self.enabled
-            && any_caching_enabled
-            && (global_invalidation_enabled || any_subgraph_invalidation_enabled)
+            && (any_caching_enabled || any_connector_caching_enabled)
+            && (global_invalidation_enabled
+                || any_subgraph_invalidation_enabled
+                || any_connector_invalidation_enabled)
         {
             match &self.endpoint_config {
                 Some(endpoint_config) => {
                     let endpoint = Endpoint::from_router_service(
                         endpoint_config.path.clone(),
-                        InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
-                            .boxed(),
+                        InvalidationService::new(
+                            self.subgraphs.clone(),
+                            self.connectors.clone(),
+                            self.invalidation.clone(),
+                        )
+                        .boxed(),
                     );
                     tracing::info!(
                         "Response cache invalidation endpoint listening on: {}{}",
@@ -569,6 +780,8 @@ impl ResponseCache {
         let storage = Arc::new(StorageInterface {
             all: Some(Arc::new(storage.into())),
             subgraphs: HashMap::new(),
+            connector_all: None,
+            connector_sources: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await?;
         Ok(Self {
@@ -577,6 +790,7 @@ impl ResponseCache {
             enabled: true,
             debug: true,
             subgraphs: Arc::new(subgraphs),
+            connectors: Arc::new(ConnectorCacheConfiguration::default()),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
@@ -611,6 +825,8 @@ impl ResponseCache {
         let storage = Arc::new(StorageInterface {
             all: Some(Default::default()),
             subgraphs: HashMap::new(),
+            connector_all: None,
+            connector_sources: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await?;
         let (drop_tx, _drop_rx) = broadcast::channel(2);
@@ -630,6 +846,7 @@ impl ResponseCache {
                 },
                 subgraphs,
             }),
+            connectors: Arc::new(ConnectorCacheConfiguration::default()),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
@@ -678,6 +895,16 @@ impl ResponseCache {
             .clone()
             .map(|t| t.0)
             .or_else(|| self.subgraphs.all.ttl.clone().map(|ttl| ttl.0))
+    }
+
+    // Returns the configured ttl for this connector source
+    fn connector_ttl(&self, source_name: &str) -> Option<Duration> {
+        self.connectors
+            .get(source_name)
+            .ttl
+            .clone()
+            .map(|t| t.0)
+            .or_else(|| self.connectors.all.ttl.clone().map(|ttl| ttl.0))
     }
 }
 
@@ -1217,13 +1444,19 @@ impl CacheService {
     }
 
     fn get_private_id(&self, context: &Context) -> Option<String> {
-        let private_id_value = context.get_json_value(self.private_id_key_name.as_ref()?)?;
-        let private_id = private_id_value.as_str()?;
-
-        let mut digest = blake3::Hasher::new();
-        digest.update(private_id.as_bytes());
-        Some(digest.finalize().to_hex().to_string())
+        hash_private_id(context, self.private_id_key_name.as_ref()?)
     }
+}
+
+/// Hashes a private ID value from the request context using blake3.
+/// Used by all cache service types (subgraph, connector, connector request) to generate
+/// the private_id suffix for cache keys.
+pub(super) fn hash_private_id(context: &Context, key_name: &str) -> Option<String> {
+    let value = context.get_json_value(key_name)?;
+    let id = value.as_str()?;
+    let mut digest = blake3::Hasher::new();
+    digest.update(id.as_bytes());
+    Some(digest.finalize().to_hex().to_string())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1631,7 +1864,7 @@ async fn cache_lookup_entities(
     }
 }
 
-fn update_cache_control(context: &Context, cache_control: &CacheControl) {
+pub(super) fn update_cache_control(context: &Context, cache_control: &CacheControl) {
     context.extensions().with_lock(|lock| {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
@@ -1959,7 +2192,7 @@ fn extract_cache_keys(
 }
 
 /// Get invalidation keys from @cacheTag directives in supergraph schema for entities
-fn get_invalidation_entity_keys_from_schema(
+pub(super) fn get_invalidation_entity_keys_from_schema(
     supergraph_schema: &Arc<Valid<Schema>>,
     subgraph_name: &str,
     subgraph_enums: &HashMap<String, String>,
@@ -2312,13 +2545,13 @@ fn get_entity_key_from_selection_set(
 }
 
 /// represents the result of a cache lookup for an entity type and key
-struct IntermediateResult {
-    key: String,
-    invalidation_keys: Vec<String>,
-    typename: String,
+pub(super) struct IntermediateResult {
+    pub(super) key: String,
+    pub(super) invalidation_keys: Vec<String>,
+    pub(super) typename: String,
     // Only set when debug mode is enabled
-    entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
-    cache_entry: Option<CacheEntry>,
+    pub(super) entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
+    pub(super) cache_entry: Option<CacheEntry>,
 }
 
 // build a new list of representations without the ones we got from the cache
@@ -2574,14 +2807,16 @@ async fn insert_entities_in_result(
     Ok((new_entities, new_errors))
 }
 
-fn external_invalidation_keys<I: IntoIterator<Item = String>>(invalidation_keys: I) -> Vec<String> {
+pub(super) fn external_invalidation_keys<I: IntoIterator<Item = String>>(
+    invalidation_keys: I,
+) -> Vec<String> {
     invalidation_keys
         .into_iter()
         .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
         .collect()
 }
 
-fn assemble_response_from_errors(
+pub(super) fn assemble_response_from_errors(
     graphql_errors: &[Error],
     result: &mut Vec<IntermediateResult>,
 ) -> (Vec<Value>, Vec<Error>) {

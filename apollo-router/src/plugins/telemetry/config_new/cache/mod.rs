@@ -3,6 +3,7 @@ use std::sync::Arc;
 use attributes::CacheAttributes;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use opentelemetry::metrics::Counter;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -226,6 +227,66 @@ impl Instrumented for CacheInstruments {
         }
         if let Some(field_length) = &self.cache_hit_response_cache {
             field_length.on_error(error, ctx);
+        }
+    }
+}
+
+/// Cache instruments for connector services.
+///
+/// Unlike `CacheInstruments` which is typed on `subgraph::Request/Response` and uses the
+/// `CustomCounter` generic machinery, this struct directly holds an OTel counter and reads
+/// cache hit/miss data from the request context. This avoids needing `Selector`/`Selectors`
+/// trait impls for connector request/response types.
+pub(crate) struct ConnectorCacheInstruments {
+    counter: Option<Counter<f64>>,
+    source_name: String,
+}
+
+impl ConnectorCacheInstruments {
+    pub(crate) fn new(counter: Option<Counter<f64>>, source_name: String) -> Self {
+        Self {
+            counter,
+            source_name,
+        }
+    }
+
+    /// Read cache hit/miss data from context and record metrics.
+    /// Call this after the connector service response is available.
+    pub(crate) fn on_response(&self, context: &crate::Context) {
+        let Some(counter) = &self.counter else {
+            return;
+        };
+
+        let cache_info: ResponseCacheSubgraph = match context
+            .get(ResponseCacheMetricContextKey::new(self.source_name.clone()))
+            .ok()
+            .flatten()
+        {
+            Some(cache_info) => cache_info,
+            None => {
+                return;
+            }
+        };
+
+        for (entity_type, ResponseCacheHitMiss { hit, miss }) in &cache_info.0 {
+            if *hit > 0 {
+                counter.add(
+                    *hit as f64,
+                    &[
+                        KeyValue::new(ENTITY_TYPE, entity_type.to_string()),
+                        KeyValue::new(CACHE_HIT, true),
+                    ],
+                );
+            }
+            if *miss > 0 {
+                counter.add(
+                    *miss as f64,
+                    &[
+                        KeyValue::new(ENTITY_TYPE, entity_type.to_string()),
+                        KeyValue::new(CACHE_HIT, false),
+                    ],
+                );
+            }
         }
     }
 }

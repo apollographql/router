@@ -19,13 +19,14 @@ Consider these advanced customization options when:
 For basic response caching setup, see the [Quickstart](/router/performance/caching/response-caching/quickstart) page.
 
 <Note>
-    Response caching is happening at the subgraph service level and this plugin is happening right after coprocessor and Rhai plugins which means you'll always call the coprocessor or Rhai script even if the response is cached (both at request and response level).
+  Response caching happens at the subgraph service level (for subgraphs) and the connector service level (for
+  connectors). This plugin runs right after coprocessor and Rhai plugins, which means you'll always call the coprocessor
+  or Rhai script even if the response is cached (both at request and response level).
 </Note>
 
 ## Private data caching
 
 A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router can recognize different users and store their data in different parts of the cache.
-
 
 Use private data caching when:
 
@@ -78,6 +79,21 @@ fn supergraph_service(service) {
 }
 ```
 
+For connector sources, configure `private_id` in the `connector` block:
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  connector:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+    sources:
+      "accounts.rest_api":
+        private_id: "user_id"
+```
+
 ### How private data caching works
 
 The router performs the following sequence to determine whether a particular query returns private data:
@@ -86,13 +102,13 @@ The router performs the following sequence to determine whether a particular que
 2. When the subgraph returns the response with private data, the router recognizes it and stores the data in a user-specific part of the cache.
 3. The router stores the query in a list of known queries with private data.
 4. When the router subsequently sees a known query:
-  - If the private ID isn't provided, the router doesn't check the cache and instead transmits the subgraph response directly.
-  - If the private ID is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
+
+- If the private ID isn't provided, the router doesn't check the cache and instead transmits the subgraph response directly.
+- If the private ID is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
 
 ## Custom cache keys
 
 To store data for a particular request in different cache entries, configure the cache key through the `apollo::response_cache::key` context entry.
-
 
 Use custom cache keys when you need to:
 
@@ -105,6 +121,7 @@ Use custom cache keys when you need to:
 You can customize the response cache key with the `apollo::response_cache::key` context entry. Data in this entry modifies the data used to generate the cache key, and it can be any valid JSON.
 
 You can apply customizations at multiple scales using different fields in `apollo::response_cache::key`:
+
 - An `all` field, which affects all subgraph requests
 - A `subgraphs` field, which contains an object with per-subgraph customization
 - A field for each operation name, which affects only a specific operation
@@ -115,16 +132,16 @@ Example:
 
 ```json
 {
-    "all": 1,
-    "subgraph_operation1": "key1",
-    "subgraph_operation2": {
-      "data": "key2"
-    },
-    "subgraphs": {
-      "my_subgraph": {
-        "locale": "be"
-      }
+  "all": 1,
+  "subgraph_operation1": "key1",
+  "subgraph_operation2": {
+    "data": "key2"
+  },
+  "subgraphs": {
+    "my_subgraph": {
+      "locale": "be"
     }
+  }
 }
 ```
 
@@ -211,6 +228,28 @@ response_cache:
         enabled: false # Disable for a specific subgraph
 ```
 
+### Per-source Redis instances (connectors)
+
+Configure a global Redis instance for connectors and override it for specific connector sources:
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  connector:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+    sources:
+      "products.rest_api":
+        redis:
+          urls: ["redis://products-cache:6379"]
+          pool_size: 15
+          namespace: products_connector_cache
+      "inventory.stock_api":
+        enabled: false # Disable caching for this source
+```
+
 ### Redis URL formats
 
 <Tip>
@@ -248,7 +287,7 @@ or, if configured with multiple URLs:
 [
   "redis|rediss[-cluster] :// [[username:]password@] host [:port]",
   "redis|rediss[-cluster] :// [[username:]password@] host1 [:port1]",
-  "redis|rediss[-cluster] :// [[username:]password@] host2 [:port2]"
+  "redis|rediss[-cluster] :// [[username:]password@] host2 [:port2]",
 ]
 ```
 
@@ -265,7 +304,7 @@ response_cache:
       enabled: true
       # Configure Redis globally
       redis:
-        urls: [ "rediss://redis.example.com:6379" ]
+        urls: ["rediss://redis.example.com:6379"]
         #highlight-start
         username: root
         password: ${env.REDIS_PASSWORD}
@@ -310,6 +349,20 @@ response_cache:
     products:
       enabled: true
       ttl: 6h
+```
+
+For connector sources, configure TTL with `connector.all.ttl` or per source. Connectors respect `Cache-Control` headers from the upstream HTTP response directly—the configured TTL is used as a fallback when no header is present:
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  connector:
+    all:
+      enabled: true
+      ttl: 24h
+    sources:
+      "products.rest_api":
+        ttl: 6h
 ```
 
 ### Namespace prefix

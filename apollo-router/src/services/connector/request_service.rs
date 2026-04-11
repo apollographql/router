@@ -28,6 +28,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::Context;
+use crate::batching::BatchQuery;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -80,6 +81,14 @@ pub struct Request {
     /// req.connector.schema_subtypes_map, this document enables GraphQL
     /// execution of the document.
     pub(crate) operation: Option<Arc<Valid<ExecutableDocument>>>,
+}
+
+impl Request {
+    pub(crate) fn is_part_of_batch(&self) -> bool {
+        self.context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
+    }
 }
 
 /// Response type for a connector

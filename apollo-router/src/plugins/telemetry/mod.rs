@@ -13,6 +13,7 @@ use ::tracing::Span;
 use ::tracing::info_span;
 use config_new::Selectors;
 use config_new::cache::CacheInstruments;
+use config_new::cache::ConnectorCacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
@@ -137,6 +138,7 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::connect;
 use crate::services::connector;
 use crate::services::execution;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
@@ -1183,6 +1185,45 @@ impl PluginPrivate for Telemetry {
                         }
                         result
                     }
+                },
+            )
+            .service(service)
+            .boxed()
+    }
+
+    fn connector_service(&self, service: connect::BoxService) -> connect::BoxService {
+        let config = self.config.clone();
+        let static_cache_instruments = self
+            .builtin_instruments
+            .read()
+            .cache_custom_instruments
+            .clone();
+        ServiceBuilder::new()
+            .map_future_with_request_data(
+                move |request: &connect::Request| {
+                    let connectors =
+                        crate::plugins::connectors::query_plans::get_connectors(&request.context);
+                    let source_name = connectors
+                        .as_ref()
+                        .and_then(|c| c.get(&request.service_name))
+                        .map(|c| c.source_config_key())
+                        .unwrap_or_default();
+                    let cache_instruments = config
+                        .instrumentation
+                        .instruments
+                        .new_connector_cache_instruments(
+                            static_cache_instruments.clone(),
+                            source_name,
+                        );
+                    (request.context.clone(), cache_instruments)
+                },
+                move |(context, cache_instruments): (Context, ConnectorCacheInstruments),
+                      f: BoxFuture<'static, Result<connect::Response, BoxError>>| async move {
+                    let result = f.await;
+                    if result.is_ok() {
+                        cache_instruments.on_response(&context);
+                    }
+                    result
                 },
             )
             .service(service)

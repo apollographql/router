@@ -37,6 +37,33 @@ response_cache:
         enabled: false
         shared_key: ''
     subgraphs: {}
+  connector:
+    all:
+      enabled: true
+      ttl: 30s
+      private_id: null
+      redis:
+        urls:
+        - redis://127.0.0.1:6379
+        username: example_username
+        password: example_password
+        fetch_timeout: 150ms
+        insert_timeout: 500ms
+        invalidate_timeout: 1s
+        maintenance_timeout: 500ms
+        namespace: example_namespace
+        tls:
+          certificate_authorities: null
+          client_authentication:
+            certificate_chain: example_certificate_chain
+            key: example_key
+        required_to_start: false
+        pool_size: 5
+        metrics_interval: 1s
+      invalidation:
+        enabled: false
+        shared_key: ''
+    sources: {}
 ```
 
 </ExpansionPanel>
