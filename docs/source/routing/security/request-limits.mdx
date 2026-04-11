@@ -1,6 +1,6 @@
 ---
 title: Request Limits
-subtitle: Protect your router from requests exceeding network, parser, and operation-based limits 
+subtitle: Protect your router from requests exceeding network, parser, operation-based, and subgraph response limits
 redirectFrom:
   - /router/configuration/operation-limits/
 ---
@@ -10,23 +10,41 @@ For enhanced security, the GraphOS Router can reject requests that violate any o
 - Operation-based semantic limits
 - Network-based limits
 - Parser-based lexical limits
+- Subgraph response size limits
 
 ```yaml title="router.yaml"
 limits:
-  # Network-based limits
-  http_max_request_bytes: 2000000 # Default value: 2 MB
-  http1_max_request_headers: 200 # Default value: 100
-  http1_max_request_buf_size: 800kb # Default value: 400kib
+  router:
+    # Network-based limits
+    http_max_request_bytes: 2000000 # Default value: 2 MB
+    http1_max_request_headers: 200 # Default value: 100
+    http1_max_request_buf_size: 800kb # Default value: 400kib
 
-  # Parser-based limits
-  parser_max_tokens: 15000 # Default value
-  parser_max_recursion: 500 # Default value
+    # Parser-based limits
+    parser_max_tokens: 15000 # Default value
+    parser_max_recursion: 500 # Default value
 
-  # Operation-based limits (License only)
-  max_depth: 100
-  max_height: 200
-  max_aliases: 30
-  max_root_fields: 20
+    # Operation-based limits (License only)
+    max_depth: 100
+    max_height: 200
+    max_aliases: 30
+    max_root_fields: 20
+
+  # Subgraph response size limits
+  subgraph:
+    all:
+      http_max_response_bytes: 10485760 # 10 MB for all subgraphs
+    subgraphs:
+      products:
+        http_max_response_bytes: 20971520 # per-subgraph override (20 MB)
+
+  # Connector response size limits
+  connector:
+    all:
+      http_max_response_bytes: 5242880 # 5 MB for all connector sources
+    sources:
+      products.rest:
+        http_max_response_bytes: 10485760 # per-source override (10 MB)
 ```
 
 ## Operation-based limits
@@ -48,13 +66,14 @@ You define operation limits in your router's [YAML config file](/graphos/referen
 
 ```yaml title="router.yaml"
 limits:
-  max_depth: 100
-  max_height: 200
-  max_aliases: 30
-  max_root_fields: 20
+  router:
+    max_depth: 100
+    max_height: 200
+    max_aliases: 30
+    max_root_fields: 20
 
-  # Uncomment to enable warn_only mode
-  # warn_only: true
+    # Uncomment to enable warn_only mode
+    # warn_only: true
 ```
 
 Each limit takes an integer value. You can define any combination of [supported limits](#supported-limits).
@@ -153,7 +172,8 @@ You can enable or disable `warn_only` mode in your router's [YAML config file](/
 
 ```yaml title="router.yaml"
 limits:
-  warn_only: true # warn_only mode always enabled
+  router:
+    warn_only: true # warn_only mode always enabled
 ```
 
 ### Response format for exceeded limits
@@ -331,3 +351,95 @@ Note that the router calculates the recursion depth for each operation and fragm
 In versions of the Apollo Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
 
 </Note>
+
+## Subgraph response size limits
+
+### `http_max_response_bytes`
+
+Limits the number of bytes the router reads from a subgraph's HTTP response body, to protect against unbounded memory consumption when a subgraph returns an unexpectedly large payload.
+
+This limit is enforced as the response body streams in — the router stops reading and returns an error as soon as the limit is exceeded, without buffering the entire body first.
+
+When the limit is exceeded, the router returns a GraphQL error to the client with extension code `SUBREQUEST_HTTP_ERROR`.
+
+There is no default limit; subgraph responses are unrestricted unless you configure this option.
+
+You can set a global default that applies to all subgraphs, and optionally override it per subgraph:
+
+```yaml title="router.yaml"
+limits:
+  subgraph:
+    all:
+      http_max_response_bytes: 10485760 # 10 MB for all subgraphs
+    subgraphs:
+      products:
+        http_max_response_bytes: 20971520 # 20 MB override for 'products'
+```
+
+The per-subgraph entry under `subgraphs` takes precedence over `all`. If only `all` is set, it applies to every subgraph. If only a named entry is set, only that subgraph is limited.
+
+### Choosing a limit value
+
+To determine the appropriate limit, measure the actual response sizes your subgraphs return. Use the built-in `http.client.response.body.size` histogram to collect a distribution of subgraph response sizes:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.response.body.size: true
+```
+
+This histogram is disabled by default. Once enabled, use it to observe the 95th or 99th percentile of response sizes across your subgraphs, then set `http_max_response_bytes` above that value with enough headroom for legitimate variation (for example, large page sizes in paginated queries).
+
+### Monitoring exceeded limits
+
+After a subgraph response is aborted because it exceeds the configured limit:
+
+- The router increments the `apollo.router.limits.subgraph_response_size.exceeded` counter with a `subgraph.name` attribute identifying the affected subgraph.
+- The subgraph request span gets an `apollo.subgraph.response.aborted` attribute set to `response_size_limit`.
+
+Monitor the counter to detect misconfigured limits or misbehaving subgraphs. Use the span attribute to filter limit-triggered aborts in your tracing backend.
+
+## Connector response size limits
+
+### `http_max_response_bytes`
+
+Limits the number of bytes the router reads from a connector's HTTP response body, to protect against unbounded memory consumption when a connector source returns an unexpectedly large payload.
+
+This limit is enforced as the response body streams in — the router stops reading and returns a GraphQL error as soon as the limit is exceeded.
+
+There is no default limit; connector responses are unrestricted unless you configure this option.
+
+Identify sources by `subgraph_name.source_name` (matching the key format used in connector configuration). You can set a global default that applies to all sources, and optionally override it per source:
+
+```yaml title="router.yaml"
+limits:
+  connector:
+    all:
+      http_max_response_bytes: 5242880 # 5 MB for all connector sources
+    sources:
+      products.rest:
+        http_max_response_bytes: 10485760 # 10 MB override for 'products.rest'
+```
+
+The per-source entry under `sources` takes precedence over `all`.
+
+### Choosing a limit value
+
+The built-in `http.client.response.body.size` histogram measures actual connector response sizes:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      connector:
+        http.client.response.body.size: true
+```
+
+### Monitoring exceeded limits
+
+When a connector response is aborted because it exceeds the configured limit:
+
+- The router increments the `apollo.router.limits.connector_response_size.exceeded` counter with a `connector.source` attribute identifying the affected source.
+- The connector request span gets an `apollo.connector.response.aborted` attribute set to `response_size_limit`.

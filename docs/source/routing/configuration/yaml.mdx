@@ -500,7 +500,8 @@ In case the router rejects legitimate queries, you can disable the limit by sett
 supergraph:
   introspection: true
 limits:
-  introspection_max_depth: false
+  router:
+    introspection_max_depth: false
 ```
 
 #### Redacting query validation errors

@@ -1,5 +1,6 @@
 limits:
-  http_max_request_bytes: 200
+  router:
+    http_max_request_bytes: 200
 telemetry:
   instrumentation:
     instruments:

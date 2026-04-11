@@ -58,7 +58,7 @@ impl OperationLimits<bool> {
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) fn check(
     query_metrics_in: &mut OperationLimits<u32>,
-    config_limits: &limits::Config,
+    config_limits: &limits::RouterLimitsConfig,
     query: &str,
     document: &ExecutableDocument,
     operation_name: Option<&str>,
@@ -81,7 +81,7 @@ pub(crate) fn check(
 
 pub(crate) fn check_measured(
     query_metrics: &OperationLimits<u32>,
-    config_limits: &limits::Config,
+    config_limits: &limits::RouterLimitsConfig,
     query: &str,
     operation_name: Option<&str>,
 ) -> Result<(), OperationLimits<bool>> {

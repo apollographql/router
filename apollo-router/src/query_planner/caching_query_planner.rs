@@ -126,7 +126,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     enable_authorization_directives: bool,
     config_mode_hash: Arc<ConfigModeHash>,
     cooperative_cancellation: CooperativeCancellation,
-    config_limits: limits::Config,
+    config_limits: limits::RouterLimitsConfig,
 }
 
 fn init_query_plan_from_redis(
@@ -189,7 +189,7 @@ where
             enable_authorization_directives,
             cooperative_cancellation,
             config_mode_hash,
-            config_limits: configuration.limits.clone(),
+            config_limits: configuration.limits.router.clone(),
         })
     }
 

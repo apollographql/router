@@ -19,6 +19,8 @@ use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
 use http::response::Parts;
 use http_body_util::BodyExt;
+use http_body_util::LengthLimitError;
+use http_body_util::Limited;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::Map;
@@ -28,6 +30,7 @@ use tracing::Span;
 use crate::Context;
 use crate::graphql;
 use crate::json_ext::Path;
+use crate::plugins::limits::ConnectorResponseSizeLimit;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
@@ -66,7 +69,7 @@ impl From<RuntimeError> for graphql::Error {
 // --- handle_responses --------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn process_response<T: HttpBody>(
+pub(crate) async fn process_response<T>(
     result: Result<http::Response<T>, Error>,
     response_key: ResponseKey,
     connector: Arc<Connector>,
@@ -75,7 +78,11 @@ pub(crate) async fn process_response<T: HttpBody>(
     debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
     operation: Option<Arc<Valid<ExecutableDocument>>>,
-) -> connector::request_service::Response {
+) -> connector::request_service::Response
+where
+    T: HttpBody,
+    T::Error: Into<tower::BoxError>,
+{
     let (mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
@@ -114,10 +121,35 @@ pub(crate) async fn process_response<T: HttpBody>(
                 err
             };
 
-            let deserialized_body = body
-                .collect()
-                .await
-                .map_err(|_| ())
+            let response_size_limit = context
+                .extensions()
+                .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
+
+            let body_result: Result<_, ()> = match response_size_limit {
+                Some(ConnectorResponseSizeLimit(limit)) => {
+                    Limited::new(body, limit)
+                        .collect()
+                        .await
+                        .map_err(|e| {
+                            if e.downcast_ref::<LengthLimitError>().is_some() {
+                                u64_counter!(
+                                    "apollo.router.limits.connector_response_size.exceeded",
+                                    "Number of connector responses aborted because they exceeded the configured response size limit",
+                                    1,
+                                    "connector.source" = connector.source_config_key()
+                                );
+                                tracing::Span::current()
+                                    .record("apollo.connector.response.aborted", "response_size_limit");
+                            }
+                        })
+                }
+                None => body
+                    .collect()
+                    .await
+                    .map_err(|_| ()),
+            };
+
+            let deserialized_body = body_result
                 .and_then(|body| {
                     let body = body.to_bytes();
                     let raw = deserialize_response(&body, &parts.headers).map_err(|_| {
@@ -1330,6 +1362,128 @@ mod tests {
         assert_eq!(
             &res_expect_success.body().data,
             &Some(json!({"hello": json!(400)}))
+        );
+    }
+
+    fn make_connector() -> Arc<Connector> {
+        Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test label".into(),
+        })
+    }
+
+    fn make_supergraph_request() -> Arc<http::Request<graphql::Request>> {
+        Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn process_response_under_size_limit() {
+        use crate::plugins::limits::ConnectorResponseSizeLimit;
+
+        let ctx = Context::new();
+        ctx.extensions()
+            .with_lock(|e| e.insert(ConnectorResponseSizeLimit(1000)));
+
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+        let response = http::Response::builder()
+            .body(router::body::from_bytes(r#"{"data":"world"}"#))
+            .unwrap();
+
+        let result = process_response(
+            Ok(response),
+            key,
+            make_connector(),
+            &ctx,
+            (None, Default::default()),
+            None,
+            make_supergraph_request(),
+            Default::default(),
+        )
+        .await;
+
+        let graphql_response =
+            super::aggregate_responses(vec![result.mapped_response], Context::new())
+                .unwrap()
+                .response;
+        assert!(
+            graphql_response.body().errors.is_empty(),
+            "expected no errors when response is under the limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn process_response_exceeds_size_limit() {
+        use crate::plugins::limits::ConnectorResponseSizeLimit;
+
+        let ctx = Context::new();
+        // Limit of 5 bytes — well under the response body size
+        ctx.extensions()
+            .with_lock(|e| e.insert(ConnectorResponseSizeLimit(5)));
+
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+        let response = http::Response::builder()
+            .body(router::body::from_bytes(r#"{"data":"world"}"#))
+            .unwrap();
+
+        let result = process_response(
+            Ok(response),
+            key,
+            make_connector(),
+            &ctx,
+            (None, Default::default()),
+            None,
+            make_supergraph_request(),
+            Default::default(),
+        )
+        .await;
+
+        let graphql_response =
+            super::aggregate_responses(vec![result.mapped_response], Context::new())
+                .unwrap()
+                .response;
+        let errors = &graphql_response.body().errors;
+        assert!(!errors.is_empty(), "expected an error for exceeded limit");
+        assert!(
+            errors[0].message.contains("exceeded limit of 5 bytes")
+                || errors[0].message.contains("unexpected format"),
+            "unexpected error message: {}",
+            errors[0].message
         );
     }
 }

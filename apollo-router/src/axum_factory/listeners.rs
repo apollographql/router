@@ -315,9 +315,9 @@ pub(super) fn serve_router_on_listen_addr(
     configuration: Arc<Configuration>,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
-    let opt_max_http1_headers = configuration.limits.http1_max_request_headers;
-    let opt_max_http1_buf_size = configuration.limits.http1_max_request_buf_size;
-    let opt_max_http2_headers_list_bytes = configuration.limits.http2_max_headers_list_bytes;
+    let opt_max_http1_headers = configuration.limits.router.http1_max_request_headers;
+    let opt_max_http1_buf_size = configuration.limits.router.http1_max_request_buf_size;
+    let opt_max_http2_headers_list_bytes = configuration.limits.router.http2_max_headers_list_bytes;
     let connection_shutdown_timeout = configuration.supergraph.connection_shutdown_timeout;
     let header_read_timeout = configuration.server.http.header_read_timeout;
     let tls_handshake_timeout = configuration.server.http.tls_handshake_timeout;
