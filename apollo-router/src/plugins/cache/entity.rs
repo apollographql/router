@@ -221,8 +221,27 @@ impl PluginPrivate for EntityCache {
             let required_to_start = redis_config.required_to_start;
             // we need to explicitly disable TTL reset because it is managed directly by this plugin
             redis_config.reset_ttl = false;
+
+            // NOTE: this is a bit of a dance, but we have to create a RedisCacheStorage before we can
+            // create its wrapped client because we want that client to be replaceable and need a
+            // standalone data container for certain fields used for its creation (and thus
+            // recreation)
             all = match RedisCacheStorage::new(redis_config, "entity").await {
-                Ok(storage) => Some(storage),
+                Ok(storage) => {
+                    // WARN: on new(), RedisCacheStorage doesn't have an inner client pool; it must be
+                    // created with create_client_pool()
+                    if let Err(e) = storage.clone().create_client_pool().await {
+                        tracing::error!(
+                            cache = "entity",
+                            e,
+                            "could not open connection to Redis for caching",
+                        );
+                        if required_to_start {
+                            return Err(e);
+                        }
+                    }
+                    Some(storage)
+                }
                 Err(e) => {
                     tracing::error!(
                         cache = "entity",
@@ -232,10 +251,13 @@ impl PluginPrivate for EntityCache {
                     if required_to_start {
                         return Err(e);
                     }
+                    // WARN: this is a terminal error; without a RedisCacheStorage, we won't be
+                    // able to connect or reconnect to redis
                     None
                 }
             };
         }
+
         let mut subgraph_storages = HashMap::new();
         for (subgraph, config) in &init.config.subgraph.subgraphs {
             if let Some(redis) = &config.redis {
@@ -243,7 +265,14 @@ impl PluginPrivate for EntityCache {
                 // we need to explicitly disable TTL reset because it is managed directly by this plugin
                 let mut redis_config = redis.clone();
                 redis_config.reset_ttl = false;
+
+                // NOTE: this is a bit of a dance, but we have to create a RedisCacheStorage before we can
+                // create its wrapped client because we want that client to be replaceable and need a
+                // standalone data container for certain fields used for its creation (and thus
+                // recreation)
                 let storage = match RedisCacheStorage::new(redis_config, "entity").await {
+                    // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
+                    // for wrapped client
                     Ok(storage) => Some(storage),
                     Err(e) => {
                         tracing::error!(
@@ -257,7 +286,20 @@ impl PluginPrivate for EntityCache {
                         None
                     }
                 };
+
                 if let Some(storage) = storage {
+                    // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
+                    // for wrapped client
+                    if let Err(e) = storage.clone().create_client_pool().await {
+                        tracing::error!(
+                            cache = "entity",
+                            e,
+                            "could not open connection to Redis for caching",
+                        );
+                        if required_to_start {
+                            return Err(e);
+                        }
+                    }
                     subgraph_storages.insert(subgraph.clone(), storage);
                 }
             }
@@ -1770,10 +1812,13 @@ async fn insert_entities_in_result(
         let span = tracing::info_span!("cache_store");
 
         tokio::spawn(async move {
-            cache
+            let _ = cache
                 .insert_multiple(&to_insert, ttl)
                 .instrument(span)
-                .await;
+                .await
+                .inspect_err(|e| {
+                    tracing::error!("error inserting multiple to entity cache: {e:?}")
+                });
         });
     }
 

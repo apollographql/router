@@ -71,6 +71,47 @@ where
         config: Option<RedisCache>,
         caller: &'static str,
     ) -> Result<Self, BoxError> {
+        let maybe_redis_cache_storage = if let Some(config) = config {
+            let required_to_start = config.required_to_start;
+            let storage = match RedisCacheStorage::new(config, caller).await {
+                Ok(storage) => Some(storage),
+                Err(e) => {
+                    tracing::error!(
+                        cache = caller,
+                        e,
+                        "could not open connection to Redis for caching",
+                    );
+                    if required_to_start {
+                        return Err(e);
+                    }
+                    // WARN: this is a terminal failure; we couldn't, for whatever reason noted in
+                    // the error log, connect to redis--maybe it doesn't exist, maybe it's
+                    // unreachable, who knows; but, this will prevent future commands from reaching
+                    // redis
+                    None
+                }
+            };
+
+            // NOTE: this populates the inner client pool, but failure doesn't represent a terminal
+            // state unless the router is configred to require connections to start
+            if let Some(storage) = storage.clone()
+                && let Err(e) = storage.create_client_pool().await
+            {
+                tracing::error!(
+                    cache = caller,
+                    e,
+                    "could not open connection to Redis for caching",
+                );
+                if required_to_start {
+                    return Err(e);
+                }
+            }
+
+            storage
+        } else {
+            None
+        };
+
         Ok(Self {
             cache_size_gauge: Default::default(),
             cache_estimated_storage_gauge: Default::default(),
@@ -78,25 +119,7 @@ where
             cache_estimated_storage: Default::default(),
             caller,
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: if let Some(config) = config {
-                let required_to_start = config.required_to_start;
-                match RedisCacheStorage::new(config, caller).await {
-                    Err(e) => {
-                        tracing::error!(
-                            cache = caller,
-                            e,
-                            "could not open connection to Redis for caching",
-                        );
-                        if required_to_start {
-                            return Err(e);
-                        }
-                        None
-                    }
-                    Ok(storage) => Some(storage),
-                }
-            } else {
-                None
-            },
+            redis: maybe_redis_cache_storage,
         })
     }
 

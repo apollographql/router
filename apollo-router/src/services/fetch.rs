@@ -173,6 +173,7 @@ impl<T> AddSubgraphNameExt for Result<T, Error> {
 }
 
 /// Extension trait for getting the subgraph name associated with an error, if any.
+/// This removes the subgraph name from the error's extensions.
 pub(crate) trait SubgraphNameExt {
     /// Get the subgraph name associated with an error, if any
     fn subgraph_name(&mut self) -> Option<String>;
