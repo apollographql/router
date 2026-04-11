@@ -33,7 +33,10 @@ impl CacheMetricsService {
     ) -> subgraph::BoxService {
         tower::util::BoxService::new(CacheMetricsService {
             service: ServiceBuilder::new()
-                .buffered()
+                .buffered(
+                    "cache_metrics",
+                    vec![opentelemetry::KeyValue::new("subgraph.name", name.clone())],
+                )
                 .service(service)
                 .boxed_clone(),
             name: Arc::new(name),

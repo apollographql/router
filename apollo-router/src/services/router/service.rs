@@ -117,8 +117,10 @@ impl RouterService {
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
     ) -> Self {
-        let supergraph_service: supergraph::BoxCloneService =
-            ServiceBuilder::new().buffered().service(sgb).boxed_clone();
+        let supergraph_service: supergraph::BoxCloneService = ServiceBuilder::new()
+            .buffered("router", vec![])
+            .service(sgb)
+            .boxed_clone();
 
         RouterService {
             apq_layer: Arc::new(apq_layer),
@@ -915,6 +917,7 @@ impl RouterCreator {
 
         // NOTE: This is the start of the router pipeline (router_service)
         let sb = UnconstrainedBuffer::new(
+            "factory",
             ServiceBuilder::new()
                 .layer(static_page.clone())
                 .service(
@@ -926,6 +929,7 @@ impl RouterCreator {
                 )
                 .boxed(),
             DEFAULT_BUFFER_SIZE,
+            vec![KeyValue::new("factory.name", "router_creator")],
         );
 
         Ok(Self {

@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::ops::ControlFlow;
 
+use opentelemetry::KeyValue;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::layer::util::Stack;
@@ -15,6 +16,7 @@ use crate::Context;
 use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::instrument::InstrumentLayer;
+use crate::layers::instrumented_load_shed::InstrumentedLoadShedLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
@@ -23,6 +25,7 @@ use crate::services::supergraph;
 
 pub mod async_checkpoint;
 pub mod instrument;
+pub mod instrumented_load_shed;
 pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
 pub mod sync_checkpoint;
@@ -174,7 +177,18 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///             .service(service);
     /// # }
     /// ```
-    fn buffered<Request>(self) -> ServiceBuilder<Stack<UnconstrainedBufferLayer<Request>, L>>;
+    fn buffered<Request>(
+        self,
+        name: impl Into<String>,
+        attributes: Vec<KeyValue>,
+    ) -> ServiceBuilder<Stack<UnconstrainedBufferLayer<Request>, L>>;
+
+    /// Adds load shedding to the service stack.
+    fn instrumented_load_shed(
+        self,
+        name: impl Into<String>,
+        attributes: Vec<KeyValue>,
+    ) -> ServiceBuilder<Stack<InstrumentedLoadShedLayer, L>>;
 
     /// Place a span around the request.
     ///
@@ -332,8 +346,24 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         ServiceBuilder::layer(self, layer)
     }
 
-    fn buffered<Request>(self) -> ServiceBuilder<Stack<UnconstrainedBufferLayer<Request>, L>> {
-        self.layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
+    fn buffered<Request>(
+        self,
+        name: impl Into<String>,
+        attributes: Vec<KeyValue>,
+    ) -> ServiceBuilder<Stack<UnconstrainedBufferLayer<Request>, L>> {
+        self.layer(UnconstrainedBufferLayer::new(
+            name.into(),
+            DEFAULT_BUFFER_SIZE,
+            attributes,
+        ))
+    }
+
+    fn instrumented_load_shed(
+        self,
+        name: impl Into<String>,
+        attributes: Vec<KeyValue>,
+    ) -> ServiceBuilder<Stack<InstrumentedLoadShedLayer, L>> {
+        self.layer(InstrumentedLoadShedLayer::new(name, attributes))
     }
 }
 

@@ -919,7 +919,9 @@ pub(crate) struct Handler {
 impl Handler {
     pub(crate) fn new(service: router::BoxService) -> Self {
         Self {
-            service: ServiceBuilder::new().buffered().service(service),
+            service: ServiceBuilder::new()
+                .buffered("handler", vec![])
+                .service(service),
         }
     }
 }

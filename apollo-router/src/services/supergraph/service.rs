@@ -590,7 +590,7 @@ impl PluggableSupergraphServiceBuilder {
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
             ))
-            .buffered()
+            .buffered("execution", vec![])
             .service(execution_service_factory.create())
             .boxed_clone();
 
@@ -605,6 +605,7 @@ impl PluggableSupergraphServiceBuilder {
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
         let sb = UnconstrainedBuffer::new(
+            "factory",
             ServiceBuilder::new()
                 .layer(content_negotiation::SupergraphLayer::default())
                 .service(
@@ -617,6 +618,7 @@ impl PluggableSupergraphServiceBuilder {
                 )
                 .boxed(),
             DEFAULT_BUFFER_SIZE,
+            vec![KeyValue::new("factory.name", "supergraph_creator")],
         );
 
         Ok(SupergraphCreator {

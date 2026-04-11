@@ -57,18 +57,25 @@ use std::marker::PhantomData;
 use std::task::Context;
 use std::task::Poll;
 
+use opentelemetry::KeyValue;
 use tower::BoxError;
 use tower::Layer;
 use tower::buffer::Buffer;
 use tower::buffer::future::ResponseFuture;
 use tower_service::Service;
 
+use crate::metrics::UpDownCounterGuard;
+
 /// Adds a [coop unconstrained](tokio::task::unconstrained) [`Buffer`] layer to a service.
 ///
 /// See the module documentation for more details.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct UnconstrainedBufferLayer<Request> {
+    /// Name of the buffer layer, used for metrics.
+    name: String,
     bound: usize,
+    /// Buffer attributes, used for metrics.
+    attributes: Vec<KeyValue>,
     _p: PhantomData<fn(Request)>,
 }
 
@@ -79,9 +86,11 @@ impl<Request> UnconstrainedBufferLayer<Request> {
     /// backpressure is applied to callers.
     ///
     /// See [`Buffer::new`] for guidance on choosing a `bound`.
-    pub const fn new(bound: usize) -> Self {
+    pub fn new(name: impl Into<String>, bound: usize, attributes: Vec<KeyValue>) -> Self {
         UnconstrainedBufferLayer {
+            name: name.into(),
             bound,
+            attributes,
             _p: PhantomData,
         }
     }
@@ -97,13 +106,19 @@ where
     type Service = UnconstrainedBuffer<Request, S::Future>;
 
     fn layer(&self, service: S) -> Self::Service {
-        UnconstrainedBuffer::new(service, self.bound)
+        UnconstrainedBuffer::new(
+            self.name.clone(),
+            service,
+            self.bound,
+            self.attributes.clone(),
+        )
     }
 }
 
 impl<Request> fmt::Debug for UnconstrainedBufferLayer<Request> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("UnconstrainedBufferLayer")
+            .field("name", &self.name)
             .field("bound", &self.bound)
             .finish()
     }
@@ -122,7 +137,9 @@ impl<Request> fmt::Debug for UnconstrainedBufferLayer<Request> {
 pub struct UnconstrainedBuffer<Req, F> {
     /// The inner [`Buffer`] layer, which wraps the actual service and is responsible for
     /// buffering requests.
-    inner: Buffer<Req, F>,
+    inner: Buffer<GaugedRequest<Req>, F>,
+    /// Buffer attributes, used for metrics.
+    attributes: Vec<KeyValue>,
 }
 
 impl<Req, F> UnconstrainedBuffer<Req, F>
@@ -130,16 +147,22 @@ where
     F: 'static,
 {
     /// Creates a new `UnconstrainedBuffer` with the specified service and buffer capacity.
-    pub fn new<S>(service: S, bound: usize) -> Self
+    pub fn new<S>(
+        name: impl Into<String>,
+        service: S,
+        bound: usize,
+        mut attributes: Vec<KeyValue>,
+    ) -> Self
     where
         S: Service<Req, Future = F> + Send + 'static,
         F: Send,
         S::Error: Into<BoxError> + Send + Sync,
         Req: Send + 'static,
     {
-        let inner = Buffer::new(service, bound);
-
-        Self { inner }
+        let inner = Buffer::new(GaugedRequestService(service), bound);
+        attributes.push(KeyValue::new("layer.service.name", name.into()));
+        attributes.push(KeyValue::new("buffer.capacity", bound as i64));
+        Self { inner, attributes }
     }
 }
 
@@ -162,7 +185,23 @@ where
     }
 
     fn call(&mut self, request: Req) -> Self::Future {
-        self.inner.call(request)
+        // Tracks the whole buffer pipeline from the moment the request is enqueued
+        // to the moment it's fully processed by the Worker.
+        // This means that at any given time, the counter represents the number of messages
+        // currently in the buffer + 1 if there's a message being processed by the Worker.
+        // In that scenario, it's completely possible to have `bound + 1` messages in flight,
+        // this is a tradeoff we accept to have a guard that automatically decrements on `drop`.
+        // To only track the number of messages in the buffer itself, we need to manually
+        // decrement the counter in upon the first `poll_ready` call in the inner service. However,
+        // that method doesn't know what request is going to be processed next.
+        let counter = i64_up_down_counter_with_unit!(
+            "apollo.router.buffer.messages",
+            "Number of messages currently in the buffer",
+            "{message}",
+            1,
+            self.attributes
+        );
+        self.inner.call(GaugedRequest(request, counter))
     }
 }
 
@@ -174,7 +213,48 @@ where
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            attributes: self.attributes.clone(),
         }
+    }
+}
+
+/// A wrapper around the request that holds an [`UpDownCounterGuard`] to track the number of
+/// messages in the buffer.
+#[derive(Debug)]
+struct GaugedRequest<S>(S, UpDownCounterGuard<i64>);
+
+/// A wrapper around the inner service that accepts a [`GaugedRequest`] and forwards the inner request
+/// to the actual service.
+/// This is necessary because the [`Buffer`] layer operates on [`GaugedRequest`] instead of the
+/// original request type, so we need to convert back before calling the inner service.
+#[derive(Debug)]
+struct GaugedRequestService<S>(S);
+
+impl<S, Req> Service<GaugedRequest<Req>> for GaugedRequestService<S>
+where
+    S: Service<Req>,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: GaugedRequest<Req>) -> Self::Future {
+        // Drop the `UpDownCounterGuard` after the request is processed by the inner service.
+
+        // When the Buffer's Worker picks up a message, it first calls `poll_ready` on the inner
+        // service, if the service reports `Ready`, `call` is called.
+        // Here we can either:
+        // 1. drop immediately to signal that the message is no longer in the
+        //    buffer queue, which is not entirely correct as it's dequeued before
+        //    `poll_ready` is even called, or
+        // 2. Keep the guard until the message is fully processed by the Worker,
+        //    which is more intuitive.
+        let GaugedRequest(request, _guard) = request;
+        self.0.call(request)
     }
 }
 

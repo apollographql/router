@@ -459,6 +459,7 @@ mod test_for_harness {
     use super::*;
     use crate::Context;
     use crate::graphql;
+    use crate::layers::ServiceBuilderExt;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::Plugin;
     use crate::services::router;
@@ -483,7 +484,13 @@ mod test_for_harness {
 
         fn router_service(&self, service: BoxService) -> BoxService {
             ServiceBuilder::new()
-                .load_shed()
+                .instrumented_load_shed(
+                    "router",
+                    vec![opentelemetry::KeyValue::new(
+                        "plugin.name",
+                        "my_test_plugin",
+                    )],
+                )
                 .concurrency_limit(1)
                 .service(service)
                 .boxed()

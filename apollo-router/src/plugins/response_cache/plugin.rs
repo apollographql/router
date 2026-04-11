@@ -448,7 +448,13 @@ impl PluginPrivate for ResponseCache {
                 })
                 .service(CacheService {
                     service: ServiceBuilder::new()
-                        .buffered()
+                        .buffered(
+                            "subgraph",
+                            vec![
+                                opentelemetry::KeyValue::new("subgraph.name", name.to_string()),
+                                opentelemetry::KeyValue::new("plugin.name", "response_cache"),
+                            ],
+                        )
                         .service(service)
                         .boxed_clone(),
                     entity_type: self.entity_type.clone(),

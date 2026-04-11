@@ -1157,7 +1157,14 @@ impl SubgraphServiceFactory {
                 .service(maker.make())
                 .boxed();
             let service = ServiceBuilder::new()
-                .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
+                .layer(UnconstrainedBufferLayer::new(
+                    "factory",
+                    DEFAULT_BUFFER_SIZE,
+                    vec![
+                        KeyValue::new("factory.name", "subgraph_service_factory"),
+                        KeyValue::new("subgraph.name", name.clone()),
+                    ],
+                ))
                 .service(
                     plugins
                         .iter()
