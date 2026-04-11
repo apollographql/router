@@ -5,6 +5,8 @@ description: Configure per-user caching with private data, create custom cache k
 minVersion: Router v2.10.0
 ---
 
+import RedisTls from '../../../../../shared/redis-tls.mdx';
+
 Beyond basic response caching, the router supports customization for caching private data, modifying cache keys, and advanced Redis configuration.
 
 ## When to customize
@@ -254,28 +256,7 @@ or, if configured with multiple URLs:
 
 ### TLS and authentication
 
-For Redis TLS connections, you can set up a client certificate or override the root certificate authority by configuring `tls` in your router's [YAML config file](https://www.apollographql.com/docs/router/overview/#yaml-config-file). For example:
-
-```yaml title="router.yaml"
-# Enable response caching globally
-response_cache:
-  enabled: true
-  subgraph:
-    all:
-      enabled: true
-      # Configure Redis globally
-      redis:
-        urls: [ "rediss://redis.example.com:6379" ]
-        #highlight-start
-        username: root
-        password: ${env.REDIS_PASSWORD}
-        tls:
-          certificate_authorities: ${file./path/to/ca.crt}
-          client_authentication:
-            certificate_chain: ${file./path/to/certificate_chain.pem}
-            key: ${file./path/to/key.pem}
-        #highlight-end
-```
+<RedisTls>Nest the following configuration under `response_cache.subgraph.all`:</RedisTls>
 
 ### Timeout configuration
 

@@ -4,6 +4,8 @@ subtitle: Configure caching for automatic persisted queries
 description: Configure automatic persisted queries (APQ) in GraphOS Router to reduce network usage by sending query hashes instead of full query strings.
 ---
 
+import RedisTls from '../../../shared/redis-tls.mdx';
+
 [Automatic Persisted Queries (**APQ**)](/apollo-server/performance/apq) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
 
 The router supports using APQ in its communications with both clients _and_ subgraphs:
@@ -198,20 +200,7 @@ When using the same Redis instance for multiple purposes, the `namespace` option
 
 #### TLS
 
-For Redis TLS connections, you can set up a client certificate or override the root certificate authority by configuring `tls` in your router's [YAML config file](/graphos/routing/configuration/overview#yaml-config-file). For example:
-
-```yaml
-apq:
-  router:
-    cache:
-      redis:
-        urls: ["rediss://redis.example.com:6379"]
-        tls:
-          certificate_authorities: ${file./path/to/ca.crt}
-          client_authentication:
-            certificate_chain: ${file./path/to/certificate_chain.pem}
-            key: ${file./path/to/key.pem}
-```
+<RedisTls>Nest the following configuration under `apq.router.cache`:</RedisTls>
 
 #### Required to start
 
