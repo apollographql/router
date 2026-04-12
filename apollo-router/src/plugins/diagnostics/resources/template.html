@@ -18,33 +18,37 @@
         <h1 class="text-xl font-semibold">Apollo Router Diagnostics</h1>
     </header>
 
-    <!-- Tabs Navigation -->
+    <!-- Tabs Navigation (hash in URL for reload/linking, e.g. #summary, #system-info) -->
     <nav class="bg-white border-b border-gray-200 px-6">
         <div class="flex space-x-8">
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-blue-500 text-blue-600"
-                    onclick="showTab('summary')" data-tab="summary" id="dashboard-tab">
+            <a href="" class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-blue-500 text-blue-600 no-underline"
+                    onclick="showTab('summary'); return false;" data-tab="summary" id="dashboard-tab">
                 Dashboard
-            </button>
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                    onclick="showTab('system')" data-tab="system">
-                System
-            </button>
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                    onclick="showTab('config')" data-tab="config">
+            </a>
+            <a href="#system-info" class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 no-underline"
+                    onclick="showTab('system-info'); return false;" data-tab="system-info">
+                System info
+            </a>
+            <a href="#resources" class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 no-underline"
+                    onclick="showTab('resources'); return false;" data-tab="resources">
+                Resources
+            </a>
+            <a href="#config" class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 no-underline"
+                    onclick="showTab('config'); return false;" data-tab="config">
                 Config
-            </button>
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                    onclick="showTab('supergraph')" data-tab="supergraph">
+            </a>
+            <a href="#supergraph" class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 no-underline"
+                    onclick="showTab('supergraph'); return false;" data-tab="supergraph">
                 Supergraph
-            </button>
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                    onclick="showTab('flamegraph')" data-tab="flamegraph">
+            </a>
+            <a href="#flamegraph" class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 no-underline"
+                    onclick="showTab('flamegraph'); return false;" data-tab="flamegraph">
                 Flamegraph
-            </button>
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                    onclick="showTab('callgraph')" data-tab="callgraph">
+            </a>
+            <a href="#callgraph" class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 no-underline"
+                    onclick="showTab('callgraph'); return false;" data-tab="callgraph">
                 Callgraph
-            </button>
+            </a>
         </div>
     </nav>
 
@@ -52,6 +56,27 @@
     <main class="flex-1 overflow-y-auto">
         <!-- Summary Tab -->
         <div id="summary" class="tab-content p-6">
+            <!-- Pinned: Router system info at top -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-900">Router system info</h2>
+                        <p class="text-sm text-gray-500 mt-0.5">Version, OS, and config/supergraph summary. Full detail (startup options, env vars) is in the System info tab.</p>
+                    </div>
+                    <a href="/diagnostics/system_info" download="router-system-info.json"
+                       class="inline-flex items-center px-4 py-2 bg-slate-600 text-white rounded-md hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 text-decoration-none text-sm font-medium">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        Download system info (JSON)
+                    </a>
+                </div>
+                <div class="p-6">
+                    <pre id="router-system-info-content" class="bg-gray-50 p-4 rounded-md text-sm overflow-x-auto whitespace-pre-wrap">Loading...</pre>
+                </div>
+            </div>
+
+            <!-- Memory profiling, Memory dumps, Download archive — one row -->
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <!-- Memory Profiling Control -->
                 <div class="bg-white rounded-lg shadow-sm border border-gray-200">
@@ -111,32 +136,55 @@
                     </div>
                 </div>
 
-                <!-- Export Diagnostics -->
+                <!-- Diagnostic report (time-dependent: memory, CPU, config, supergraph, dumps) -->
                 <div class="bg-white rounded-lg shadow-sm border border-gray-200">
                     <div class="px-6 py-4 border-b border-gray-200">
-                        <h2 class="text-lg font-semibold text-gray-900">Export Diagnostics</h2>
+                        <h2 class="text-lg font-semibold text-gray-900">Diagnostic report</h2>
                     </div>
                     <div class="p-6">
                         <p class="text-sm text-gray-600 mb-4">
-                            Download a complete diagnostics package containing all system information, configuration, schema, and memory dumps in a single tar file.
+                            Point-in-time snapshot including current memory, CPU, load, configuration, supergraph schema, and memory dumps. Download as an archive for offline analysis.
                         </p>
                         <a href="/diagnostics/export"
                            class="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 inline-flex items-center justify-center text-decoration-none">
                             <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
-                            Download Diagnostics Package
+                            Download diagnostic report (archive)
                         </a>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- System Tab -->
-        <div id="system" class="tab-content p-6 hidden">
+        <!-- System info tab (static: version, OS, paths, env names) -->
+        <div id="system-info" class="tab-content p-6 hidden">
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                <!-- Header row: light gray background so button never sits on transparent/white -->
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2 bg-gray-100">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-900">System info</h2>
+                        <p class="text-sm text-gray-500 mt-0.5">Static deployment info (version, OS, config/supergraph path and hash, set env var names). Safe to paste into support tickets. No memory or CPU data.</p>
+                    </div>
+                    <a href="/diagnostics/system_info" download="router-system-info.json" class="system-info-download-btn shrink-0">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        Download JSON
+                    </a>
+                </div>
+                <div class="p-6">
+                    <pre id="router-system-info-tab-content" class="bg-gray-50 p-4 rounded-md text-sm overflow-x-auto whitespace-pre-wrap">Loading...</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resources tab (time-dependent: memory, CPU, system load) -->
+        <div id="resources" class="tab-content p-6 hidden">
             <div class="bg-white rounded-lg shadow-sm border border-gray-200">
                 <div class="px-6 py-4 border-b border-gray-200">
-                    <h2 class="text-lg font-semibold text-gray-900">System Information</h2>
+                    <h2 class="text-lg font-semibold text-gray-900">Resources and system load</h2>
+                    <p class="text-sm text-gray-500 mt-1">Point-in-time snapshot: memory, CPU, load averages, jemalloc, container/cgroup info, and environment variables. This data changes with load.</p>
                 </div>
                 <div class="p-6">
                     <pre id="system-info-content" class="bg-gray-50 p-4 rounded-md text-sm overflow-x-auto whitespace-pre-wrap">Loading...</pre>
@@ -499,5 +547,26 @@
             </div>
         </div>
     </template>
+    <!-- Last in document so it wins over styles.css: Download JSON button (header only), softer color -->
+    <style>
+    html body #system-info a.system-info-download-btn {
+        background-color: #64748b !important;
+        color: #ffffff !important;
+        border: 1px solid #94a3b8 !important;
+        padding: 0.5rem 1rem !important;
+        border-radius: 0.375rem !important;
+        text-decoration: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        position: relative !important;
+        z-index: 1 !important;
+    }
+    html body #system-info a.system-info-download-btn:hover {
+        background-color: #475569 !important;
+    }
+    html body #system-info a.system-info-download-btn svg {
+        stroke: #ffffff !important;
+    }
+    </style>
 </body>
 </html>

@@ -131,7 +131,7 @@ async fn test_create_archive() {
             "manifest.txt" => found_manifest = true,
             "router.yaml" => found_router_yaml = true,
             "supergraph.graphql" => found_supergraph = true,
-            "system_info.txt" => found_system_info = true,
+            "report.txt" => found_system_info = true,
             "diagnostics_report.html" => found_html_report = true,
             // Router binary no longer included
             path if path.starts_with("memory/") => found_memory_content = true,
@@ -145,7 +145,7 @@ async fn test_create_archive() {
         found_supergraph,
         "Archive should contain supergraph.graphql"
     );
-    assert!(found_system_info, "Archive should contain system_info.txt");
+    assert!(found_system_info, "Archive should contain report.txt");
     assert!(
         found_memory_content,
         "Archive should contain memory/ content (files on Linux, README on other platforms)"
@@ -190,8 +190,8 @@ async fn test_create_main_manifest() {
         "Should mention supergraph.graphql file"
     );
     assert!(
-        manifest_str.contains("system_info.txt"),
-        "Should mention system_info.txt file"
+        manifest_str.contains("report.txt"),
+        "Should mention report.txt file"
     );
     assert!(
         manifest_str.contains("memory/"),
@@ -738,29 +738,13 @@ async fn test_non_unix_memory_handling() {
 #[tokio::test]
 async fn test_system_info_collection() {
     // Test that system information collection works on all platforms
-    let result = super::super::system_info::collect().await;
+    let result = super::super::system_info::collect_resources().await;
     assert!(result.is_ok(), "System info collection should succeed");
 
     let system_info = result.unwrap();
     assert!(!system_info.is_empty(), "System info should not be empty");
 
-    // Check for required sections that should exist on all platforms
-    assert!(
-        system_info.contains("SYSTEM INFORMATION"),
-        "Should contain system information header"
-    );
-    assert!(
-        system_info.contains("Operating System:"),
-        "Should contain OS information"
-    );
-    assert!(
-        system_info.contains("Architecture:"),
-        "Should contain architecture information"
-    );
-    assert!(
-        system_info.contains("Router Version:"),
-        "Should contain router version"
-    );
+    // collect_resources() returns only resources/load (memory, jemalloc, CPU, system load); env vars are in RouterSystemInfo
     assert!(
         system_info.contains("MEMORY INFORMATION"),
         "Should contain memory information section"
@@ -774,8 +758,8 @@ async fn test_system_info_collection() {
         "Should contain CPU core count"
     );
     assert!(
-        system_info.contains("RELEVANT ENVIRONMENT VARIABLES"),
-        "Should contain environment variables section"
+        !system_info.contains("RELEVANT ENVIRONMENT VARIABLES"),
+        "Resources output should not contain env vars (those are in System info / RouterSystemInfo)"
     );
 
     // Platform-specific checks
@@ -817,7 +801,7 @@ async fn test_system_info_in_archive_extraction() {
         .await
         .expect("Archive creation should succeed");
 
-    // Extract and verify system_info.txt
+    // Extract and verify report.txt
     let extract_dir = tempdir().expect("Failed to create extraction dir");
     let extract_path = extract_dir.path();
 
@@ -830,87 +814,50 @@ async fn test_system_info_in_archive_extraction() {
         .await
         .expect("Failed to extract archive");
 
-    // Verify system_info.txt was extracted and contains expected content
-    let system_info_path = extract_path.join("system_info.txt");
+    // Verify report.txt was extracted and contains expected content
+    let system_info_path = extract_path.join("report.txt");
     assert!(
         system_info_path.exists(),
-        "Extracted system_info.txt should exist"
+        "Extracted report.txt should exist"
     );
 
     let system_info_content =
-        fs::read_to_string(&system_info_path).expect("Failed to read system_info.txt");
+        fs::read_to_string(&system_info_path).expect("Failed to read report.txt");
 
-    // Verify basic structure exists
+    // report.txt = ROUTER SYSTEM INFO block (when set) + resources (memory, CPU, load)
     assert!(
-        system_info_content.contains("SYSTEM INFORMATION"),
-        "system_info.txt should contain system information header"
+        system_info_content.contains("MEMORY INFORMATION"),
+        "report.txt should contain memory information"
     );
     assert!(
-        system_info_content.contains(&format!("Operating System: {}", std::env::consts::OS)),
-        "system_info.txt should contain correct OS information"
-    );
-    assert!(
-        system_info_content.contains(&format!("Architecture: {}", std::env::consts::ARCH)),
-        "system_info.txt should contain correct architecture information"
+        system_info_content.contains("CPU INFORMATION"),
+        "report.txt should contain CPU information"
     );
 
     // The content should be substantial (more than just headers)
     assert!(
         system_info_content.len() > 500,
-        "system_info.txt should contain substantial information"
+        "report.txt should contain substantial information"
     );
 }
 
 #[tokio::test]
-async fn test_system_info_environment_variables() {
-    // Test that environment variable collection works properly
-    // This test only runs when APOLLO_GRAPH_REF is set (e.g., in CI)
-    if std::env::var("APOLLO_GRAPH_REF").is_ok() {
-        let system_info = super::super::system_info::collect()
-            .await
-            .expect("Should collect system info");
+async fn test_system_info_resources_only_no_env() {
+    // collect_resources() returns only resources/load; env vars are only in System info tab (RouterSystemInfo)
+    let system_info = super::super::system_info::collect_resources()
+        .await
+        .expect("Should collect system info");
 
-        // Should have environment variables section
-        assert!(
-            system_info.contains("RELEVANT ENVIRONMENT VARIABLES"),
-            "Should have environment variables section"
-        );
-
-        // Should contain the APOLLO_GRAPH_REF since it's set
-        assert!(
-            system_info.contains("APOLLO_GRAPH_REF:"),
-            "Should contain APOLLO_GRAPH_REF when it's set"
-        );
-
-        // Should not contain the "no variables" message
-        assert!(
-            !system_info.contains("No relevant Apollo environment variables set"),
-            "Should not show 'no variables' message when APOLLO_GRAPH_REF is set"
-        );
-    } else {
-        // When APOLLO_GRAPH_REF is not set, test the fallback behavior
-        let system_info = super::super::system_info::collect()
-            .await
-            .expect("Should collect system info");
-
-        // Should have environment variables section
-        assert!(
-            system_info.contains("RELEVANT ENVIRONMENT VARIABLES"),
-            "Should have environment variables section"
-        );
-
-        // Should indicate no relevant variables are set
-        assert!(
-            system_info.contains("No relevant Apollo environment variables set"),
-            "Should indicate no relevant variables when APOLLO_GRAPH_REF is not set"
-        );
-    }
+    assert!(
+        !system_info.contains("RELEVANT ENVIRONMENT VARIABLES"),
+        "Resources output should not contain env vars section (only in System info tab)"
+    );
 }
 
 #[tokio::test]
 async fn test_system_info_cpu_count() {
     // Test that CPU count detection works on all platforms
-    let system_info = super::super::system_info::collect()
+    let system_info = super::super::system_info::collect_resources()
         .await
         .expect("Should collect system info");
 

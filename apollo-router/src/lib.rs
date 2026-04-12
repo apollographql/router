@@ -64,6 +64,7 @@ mod files;
 pub mod graphql;
 mod http_ext;
 mod http_server_factory;
+mod info;
 mod introspection;
 pub mod layers;
 pub(crate) mod logging;

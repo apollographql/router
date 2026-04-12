@@ -66,26 +66,43 @@ function escapeJavaScript(text) {
 }
 
 
+const VALID_TAB_IDS = ['summary', 'system-info', 'resources', 'config', 'supergraph', 'flamegraph', 'callgraph'];
+
+function getTabFromHash() {
+    const hash = (window.location.hash || '').replace(/^#/, '').trim();
+    return VALID_TAB_IDS.includes(hash) ? hash : 'summary';
+}
+
 function showTab(tabName) {
+    if (!VALID_TAB_IDS.includes(tabName)) tabName = 'summary';
     // Hide all tab contents
     document.querySelectorAll('.tab-content').forEach(tab => {
         tab.classList.add('hidden');
     });
-    
     // Remove active classes from all buttons
     document.querySelectorAll('.tab-button').forEach(btn => {
         btn.classList.remove('border-blue-500', 'text-blue-600');
         btn.classList.add('border-transparent', 'text-gray-500');
     });
-    
     // Show selected tab
-    document.getElementById(tabName).classList.remove('hidden');
-    
+    const tabEl = document.getElementById(tabName);
+    if (tabEl) tabEl.classList.remove('hidden');
     // Mark button as active
     const activeButton = document.querySelector(`[data-tab="${tabName}"]`);
     if (activeButton) {
         activeButton.classList.remove('border-transparent', 'text-gray-500');
         activeButton.classList.add('border-blue-500', 'text-blue-600');
+    }
+    // Keep URL hash in sync so the tab can be reloaded or linked to (no hash for summary/first page)
+    if (tabName === 'summary') {
+        if (window.location.hash) {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+    } else {
+        const newHash = '#' + tabName;
+        if (window.location.hash !== newHash) {
+            window.location.hash = newHash;
+        }
     }
 }
 
@@ -776,6 +793,11 @@ function initializeSummaryTab() {
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', async function() {
+    // Restore tab from URL hash so links and reloads open the right tab
+    showTab(getTabFromHash());
+    window.addEventListener('hashchange', function() {
+        showTab(getTabFromHash());
+    });
     // Load all data and update UI
     await initializeApplicationData();
 });
@@ -823,8 +845,8 @@ async function initializeApplicationData() {
                 dashboardTab.style.display = 'none';
             }
 
-            // Show System tab as default instead of Dashboard
-            showTab('system');
+            // Show Resources tab as default instead of Dashboard
+            showTab('resources');
         }
 
         // Populate chart selectors
@@ -832,6 +854,15 @@ async function initializeApplicationData() {
 
         // Initialize dashboard-specific features (only in dashboard mode)
         if (DataAccess.isDashboardMode()) {
+            // Summary card: minimal info (version, OS, arch, config/supergraph one-liner)
+            const summaryPromise = DataAccess.fetchRouterSystemInfoSummary().catch(() => null);
+            // System info tab: full formatted detail
+            const formattedPromise = DataAccess.fetchRouterSystemInfoFormatted().catch(() => null);
+            const [summary, formatted] = await Promise.all([summaryPromise, formattedPromise]);
+            const summaryCardEl = document.getElementById('router-system-info-content');
+            if (summaryCardEl) summaryCardEl.textContent = summary != null ? summary : 'Router system info not available.';
+            const systemInfoTabEl = document.getElementById('router-system-info-tab-content');
+            if (systemInfoTabEl) systemInfoTabEl.textContent = formatted != null ? formatted : 'Router system info not available.';
             // Initialize memory profiling status and periodic updates
             initializeSummaryTab();
 

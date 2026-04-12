@@ -870,7 +870,9 @@ impl IntegrationTest {
                         );
                     };
                     // Omit this message from snapshots since it depends on external environment
-                    if !log.message.starts_with("RUST_BACKTRACE=full detected") {
+                    if !log.message.starts_with("RUST_BACKTRACE=full detected")
+                        && !log.message.starts_with("router info:")
+                    {
                         collected.push(format!(
                             "{}: {}",
                             log.level,

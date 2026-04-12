@@ -80,12 +80,13 @@ async fn test_dashboard_endpoint_returns_html() {
 // ============================================================================
 
 #[tokio::test]
-async fn test_system_info_endpoint() {
+async fn test_report_txt_endpoint() {
     let mut router = create_test_router();
-    let (status, body, headers) = make_request(&mut router, Method::GET, "/system_info.txt").await;
+    let (status, body, headers) = make_request(&mut router, Method::GET, "/report.txt").await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("SYSTEM INFORMATION"));
+    // Report content is produced by system_info::collect_resources(): MEMORY INFORMATION, CPU INFORMATION, SYSTEM LOAD, etc.
+    assert!(body.contains("MEMORY INFORMATION"));
     assert_eq!(
         headers.get(http::header::CONTENT_TYPE).unwrap(),
         "text/plain; charset=utf-8"
@@ -362,7 +363,7 @@ async fn test_wrong_http_method_on_post_endpoint() {
 async fn test_wrong_http_method_on_get_endpoint() {
     let mut router = create_test_router();
     // Try POST on a GET-only endpoint
-    let (status, _, _) = make_request(&mut router, Method::POST, "/system_info.txt").await;
+    let (status, _, _) = make_request(&mut router, Method::POST, "/report.txt").await;
 
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
 }
