@@ -245,7 +245,57 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
 // A Rhai engine suitable for minimal testing. There are no scripts and the SDL is an empty
 // string.
 fn new_rhai_test_engine() -> Engine {
-    Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new())
+    Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new(), true)
+}
+
+#[tokio::test]
+async fn it_creates_plugin_with_intern_strings_false() {
+    // Verify that intern_strings: false is accepted through the full config
+    // deserialization → plugin initialization path.
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(
+                r#"{"scripts":"tests/fixtures", "main":"test.rhai", "intern_strings": false}"#,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(dyn_plugin.as_any().downcast_ref::<Rhai>().is_some());
+}
+
+#[test]
+fn it_rejects_unknown_rhai_config_fields() {
+    // Verify that deny_unknown_fields is enforced on the Rhai Conf struct.
+    let result = serde_json::from_str::<super::Conf>(
+        r#"{"scripts":"tests/fixtures", "main":"test.rhai", "unknown_field": "value"}"#,
+    );
+    assert!(
+        result.is_err(),
+        "Config with unknown fields should be rejected"
+    );
+}
+
+#[test]
+fn it_disables_string_interning_when_false() {
+    let engine = Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new(), false);
+    // Verify the engine can still evaluate string-heavy expressions with interning disabled.
+    let result: String = engine
+        .eval(r#"let s = "hello"; s + " " + "world""#)
+        .expect("string ops work without interning");
+    assert_eq!(result, "hello world");
+}
+
+#[test]
+fn it_preserves_default_interning_when_true() {
+    let engine = Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new(), true);
+    // Verify the engine behaves identically to the default when no override is given.
+    let result: String = engine
+        .eval(r#"let s = "hello"; s + " " + "world""#)
+        .expect("string ops work with default interning");
+    assert_eq!(result, "hello world");
 }
 
 #[test]
