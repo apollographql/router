@@ -53,14 +53,6 @@ enum RhaiStage {
     SubgraphResponse,
 }
 
-/// Whether a Rhai callback is executing a primary response chunk or a streaming response chunk
-/// (such as with `@defer`red data).
-#[derive(Clone, Copy, Debug, Display, PartialEq, Eq)]
-enum ResponseChunk {
-    Primary,
-    Stream,
-}
-
 mod execution;
 mod router;
 mod subgraph;
@@ -243,7 +235,6 @@ macro_rules! gen_map_request {
                     let result: Result<Dynamic, Box<EvalAltResult>> = execute(
                         &$rhai_service,
                         $stage,
-                        None,
                         &$callback,
                         (shared_request.clone(),),
                     );
@@ -296,7 +287,7 @@ macro_rules! gen_map_router_deferred_request {
                         ),
                     };
                     let shared_request = Shared::new(Mutex::new(Some(request)));
-                    let result = execute(&$rhai_service, $stage, None, &$callback, (shared_request.clone(),));
+                    let result = execute(&$rhai_service, $stage, &$callback, (shared_request.clone(),));
 
                     if let Err(error) = result {
                         let error_details = process_error(error);
@@ -341,7 +332,6 @@ macro_rules! gen_map_router_deferred_request {
                                 let result = execute(
                                     &rhai_service,
                                     $stage,
-                                    None,
                                     &callback,
                                     (shared_request.clone(),),
                                 );
@@ -389,7 +379,6 @@ macro_rules! gen_map_response {
                     let result: Result<Dynamic, Box<EvalAltResult>> = execute(
                         &$rhai_service,
                         $stage,
-                        Some(ResponseChunk::Primary),
                         &$callback,
                         (shared_response.clone(),),
                     );
@@ -443,7 +432,7 @@ macro_rules! gen_map_router_deferred_response {
                     let result = execute(
                         &$rhai_service,
                         $stage,
-                        Some(ResponseChunk::Primary),
+
                         &$callback,
                         (shared_response.clone(),),
                     );
@@ -491,7 +480,6 @@ macro_rules! gen_map_router_deferred_response {
                             let result = execute(
                                 &rhai_service,
                                 $stage,
-                                Some(ResponseChunk::Stream),
                                 &callback,
                                 (shared_response.clone(),),
                             );
@@ -569,7 +557,7 @@ macro_rules! gen_map_deferred_response {
                     let result = execute(
                         &$rhai_service,
                         $stage,
-                        Some(ResponseChunk::Primary),
+
                         &$callback,
                         (shared_response.clone(),),
                     );
@@ -608,7 +596,6 @@ macro_rules! gen_map_deferred_response {
                             let result = execute(
                                 &rhai_service,
                                 $stage,
-                                Some(ResponseChunk::Stream),
                                 &callback,
                                 (shared_response.clone(),),
                             );
@@ -804,7 +791,6 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
 fn execute(
     rhai_service: &RhaiService,
     stage: RhaiStage,
-    chunk: Option<ResponseChunk>,
     callback: &FnPtr,
     args: impl FuncArgs,
 ) -> Result<Dynamic, Box<EvalAltResult>> {
@@ -821,45 +807,23 @@ fn execute(
 
     let duration = start.elapsed();
 
-    record_rhai_execution(
-        stage,
-        duration,
-        result.is_ok(),
-        chunk.map(|chunk| chunk == ResponseChunk::Stream),
-    );
+    record_rhai_execution(stage, duration, result.is_ok());
 
     result
 }
 
-fn record_rhai_execution(
-    stage: RhaiStage,
-    duration: Duration,
-    succeeded: bool,
-    is_deferred: Option<bool>,
-) {
+fn record_rhai_execution(stage: RhaiStage, duration: Duration, succeeded: bool) {
     let duration = duration.as_secs_f64();
     let stage = stage.to_string();
 
-    if let Some(is_deferred) = is_deferred {
-        f64_histogram_with_unit!(
-            "apollo.router.operations.rhai.duration",
-            "Time spent executing a Rhai script callback, in seconds",
-            "s",
-            duration,
-            "rhai.stage" = stage,
-            "rhai.succeeded" = succeeded,
-            "rhai.is_deferred" = is_deferred
-        );
-    } else {
-        f64_histogram_with_unit!(
-            "apollo.router.operations.rhai.duration",
-            "Time spent executing a Rhai script callback, in seconds",
-            "s",
-            duration,
-            "rhai.stage" = stage,
-            "rhai.succeeded" = succeeded
-        );
-    }
+    f64_histogram_with_unit!(
+        "apollo.router.operations.rhai.duration",
+        "Time spent executing a Rhai script callback, in seconds",
+        "s",
+        duration,
+        "rhai.stage" = stage,
+        "rhai.succeeded" = succeeded
+    );
 }
 
 register_plugin!("apollo", "rhai", Rhai);

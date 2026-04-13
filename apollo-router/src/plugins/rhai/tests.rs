@@ -1406,8 +1406,7 @@ async fn test_rhai_metric_subgraph_response() {
             "apollo.router.operations.rhai.duration",
             1,
             "rhai.stage" = "SubgraphResponse",
-            "rhai.succeeded" = true,
-            "rhai.is_deferred" = false
+            "rhai.succeeded" = true
         );
     }
     .with_metrics()
@@ -1415,7 +1414,7 @@ async fn test_rhai_metric_subgraph_response() {
 }
 
 #[tokio::test]
-async fn test_rhai_metric_deferred_response() {
+async fn test_rhai_metric_deferred_response_causes_multiple_executions() {
     async {
         let ctx = Context::default();
         let deferred_response = SupergraphResponse::fake_stream_builder()
@@ -1458,17 +1457,9 @@ async fn test_rhai_metric_deferred_response() {
 
         assert_histogram_count!(
             "apollo.router.operations.rhai.duration",
-            1,
+            2,
             "rhai.stage" = "SupergraphResponse",
-            "rhai.succeeded" = true,
-            "rhai.is_deferred" = false
-        );
-        assert_histogram_count!(
-            "apollo.router.operations.rhai.duration",
-            1,
-            "rhai.stage" = "SupergraphResponse",
-            "rhai.succeeded" = true,
-            "rhai.is_deferred" = true
+            "rhai.succeeded" = true
         );
     }
     .with_metrics()
