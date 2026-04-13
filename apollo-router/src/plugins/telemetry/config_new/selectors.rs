@@ -149,4 +149,20 @@ mod tests {
         let duration = Duration::from_secs(1);
         assert_eq!(unit.to_otel_value(duration), expected_value);
     }
+
+    #[rstest::rstest]
+    #[case(DurationUnit::Seconds, "s")]
+    #[case(DurationUnit::Seconds, "seconds")]
+    #[case(DurationUnit::Milliseconds, "ms")]
+    #[case(DurationUnit::Milliseconds, "milliseconds")]
+    #[case(DurationUnit::Nanoseconds, "ns")]
+    #[case(DurationUnit::Nanoseconds, "nanoseconds")]
+    fn test_duration_unit_deserialization(
+        #[case] expected_unit: DurationUnit,
+        #[case] unit_str: &str,
+    ) {
+        let unit_value = serde_json::Value::String(unit_str.to_string());
+        let unit: DurationUnit = serde_json::from_value(unit_value).unwrap();
+        assert_eq!(unit, expected_unit);
+    }
 }
