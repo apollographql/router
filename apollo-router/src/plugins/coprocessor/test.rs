@@ -3813,6 +3813,27 @@ mod tests {
         mock
     }
 
+    /// Creates a mock HTTP client that sleeps for `delay` before returning an error.
+    /// Useful for testing timeout behavior: wrap the returned mock with
+    /// `tower::timeout::TimeoutLayer` using a shorter deadline to trigger a real
+    /// `tower::timeout` error before the sleep completes.
+    fn create_mock_http_client_with_delay(
+        delay: std::time::Duration,
+    ) -> MockInternalHttpClientService {
+        let mut mock = MockInternalHttpClientService::new();
+        mock.expect_clone()
+            .returning(move || create_mock_http_client_with_delay(delay));
+        mock.expect_call().returning(move |_| {
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                Err::<crate::services::http::HttpResponse, tower::BoxError>(
+                    "mock: simulated slow coprocessor".into(),
+                )
+            })
+        });
+        mock
+    }
+
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_disabled_invalid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
