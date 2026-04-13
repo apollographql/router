@@ -156,8 +156,9 @@ fn misc_existing_authenticated_directive_with_fed1() {
           id: ID!
           name: String! @authenticated(scope: ["read:foo"])
         }
-        "#
-    ).expect("valid subgraph");
+        "#,
+    )
+    .expect("valid subgraph");
 
     let subgraph_b = Subgraph::parse(
         "subgraphB",
@@ -170,13 +171,20 @@ fn misc_existing_authenticated_directive_with_fed1() {
         type Foo @key(fields: "id") {
           id: ID!
         }
-        "#
-    ).expect("valid subgraph");
+        "#,
+    )
+    .expect("valid subgraph");
 
     let result = compose(vec![subgraph_a, subgraph_b])
         .expect("Expected composition to succeed with existing @authenticated directive");
 
-    assert!(!result.schema().schema().directive_definitions.contains_key("@authenticated"));
+    assert!(
+        !result
+            .schema()
+            .schema()
+            .directive_definitions
+            .contains_key("@authenticated")
+    );
 }
 
 #[test]
