@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use insta::assert_yaml_snapshot;
 use serde_json::json;
@@ -88,6 +89,70 @@ async fn test_coprocessor_limit_payload() -> Result<(), BoxError> {
     assert_yaml_snapshot!(response.text().await?);
 
     router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_metric() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Expect a small query
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .and(body_partial_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query ExampleQuery {topProducts{name}}\",\"variables\":{}}","method":"POST"})))
+        .respond_with(
+            // ResponseTemplate::new(200).set_delay(Duration::from_secs(10)).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
+            ResponseTemplate::new(200).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
+        )
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    // Do not expect a large query
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})))
+        .expect(0)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_body_limit.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // This query is small and should make it to the coprocessor
+    let (_trace_id, response) = router.execute_default_query().await;
+    // assert_eq!(response.status(), 504);
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    for line in metrics.split("\n") {
+        eprintln!("{}", line);
+    }
+
+    router.graceful_shutdown().await;
+
+    panic!();
     Ok(())
 }
 
