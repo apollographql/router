@@ -132,3 +132,21 @@ impl DurationUnit {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use opentelemetry::Value;
+
+    use super::DurationUnit;
+
+    #[rstest::rstest]
+    #[case(DurationUnit::Seconds, Value::F64(1.0))]
+    #[case(DurationUnit::Milliseconds, Value::I64(1000))]
+    #[case(DurationUnit::Nanoseconds, Value::I64(1_000_000_000))]
+    fn test_duration_unit(#[case] unit: DurationUnit, #[case] expected_value: Value) {
+        let duration = Duration::from_secs(1);
+        assert_eq!(unit.to_otel_value(duration), expected_value);
+    }
+}
