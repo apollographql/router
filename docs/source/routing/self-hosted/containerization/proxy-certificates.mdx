@@ -1,29 +1,72 @@
 ---
-title: Add Proxy Certificates to Router Containers
-subtitle: Configure trust for your proxy's root certificate
-description: Add your corporate proxy's root certificate to Apollo Router containers to enable TLS inspection in enterprise environments.
+title: HTTP proxy configuration
+subtitle: Route router traffic through a corporate HTTP proxy
+description: Configure HTTP_PROXY, HTTPS_PROXY, and NO_PROXY to route Apollo Router's outbound connections through a proxy, and add the proxy's certificate to the router's trust store for TLS inspection environments.
 ---
 
 import ElasticNotice from '../../../../shared/elastic-notice.mdx';
 
-If your organization uses a corporate proxy that performs TLS inspection (SSL inspection or HTTPS interception), add the proxy's root certificate to your router container. Without this certificate, Apollo Router can't establish secure connections to GraphOS or your subgraphs.
+Corporate network environments often require outbound HTTP traffic to pass through a proxy. Apollo Router supports standard proxy environment variables for its control-plane and telemetry connections, and can be configured to trust a proxy's TLS certificate when the proxy performs traffic inspection.
 
 <ElasticNotice />
 
-## Understanding proxy certificate requirements
+## Affected connections
 
-Corporate proxies often intercept HTTPS traffic for security monitoring. They decrypt and re-encrypt traffic using their own certificate. Apollo Router must have the proxy's root certificate authority (CA) certificate installed in its trust store to trust these connections.
+Apollo Router respects `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` for connections that use its internal reqwest-based HTTP client. This includes:
 
-A missing proxy certificate causes these common symptoms:
+- **Apollo Uplink** — fetches the supergraph schema, license, and persisted query manifests
+- **GraphOS telemetry** — reports traces and metrics to GraphOS (Apollo Usage Reporting protocol and OTLP HTTP)
+- **Third-party telemetry exporters** — Datadog traces and other exporters using the HTTP transport
+- **JWKS endpoints** — fetches JSON Web Key Sets for JWT authentication
+
+**Subgraph connections are not affected.** The router uses a separate high-performance HTTP client built directly on `hyper` for subgraph traffic. That client doesn't read proxy environment variables. To proxy subgraph traffic, configure your network layer (for example, a service mesh or sidecar) instead.
+
+## Configure proxy routing
+
+Set `HTTPS_PROXY` and `NO_PROXY` before starting the router. The router reads these variables at startup — restart the router for changes to take effect.
+
+```bash
+export HTTPS_PROXY=https://your-proxy.example.com:3128
+export NO_PROXY=localhost,127.0.0.1
+```
+
+If your proxy performs TLS inspection, also add the proxy's root certificate to the router's trust store. See [Add the proxy certificate](#add-the-proxy-certificate) below.
+
+<Note>
+
+Proxy routing for GraphOS OTLP exporters also requires the HTTP transport. Set `experimental_otlp_tracing_protocol` and `experimental_otlp_metrics_protocol` to `http` in your router config. See [GraphOS reporting](/graphos/routing/observability/graphos/graphos-reporting#configuring-the-transport-protocol) for details. <MinVersionBadge version="Router v2.14.0" />
+
+</Note>
+
+## Add the proxy certificate
+
+If your proxy performs TLS inspection (SSL inspection or HTTPS interception), it decrypts and re-encrypts HTTPS traffic using its own certificate. Apollo Router must have the proxy's root CA certificate installed in its trust store to trust those connections. Without it, you'll see errors like:
+
 - Connection failures to Apollo Uplink
 - TLS handshake errors when fetching the supergraph schema
-- Certificate verification failures when connecting to subgraphs
+- Certificate verification failures in telemetry exporters
 
-## Adding certificates to Docker containers
+Apollo Router container images are based on Debian and use the system CA certificate store at `/etc/ssl/certs/`. You can add your proxy's certificate by either updating the container's CA store or by pointing the `SSL_CERT_FILE` environment variable at a certificate bundle.
 
-Apollo Router container images are based on Debian and use the system CA certificate store at `/etc/ssl/certs/`.
+### Use SSL_CERT_FILE
 
-### Mounting the certificate at runtime
+Set `SSL_CERT_FILE` to the path of a PEM bundle that contains both your proxy's root CA certificate and the standard system CA certificates. Apollo Router reads this variable at startup for all TLS connections.
+
+<Note>
+
+If `SSL_CERT_FILE` is set, Apollo Router loads certificates from that file instead of the system CA store. The bundle must include your proxy's root CA certificate alongside the system CA certificates you want to trust — not the proxy certificate alone.
+
+</Note>
+
+```bash
+# Combine your proxy CA with the system CA bundle
+cat /etc/ssl/certs/ca-certificates.crt /path/to/proxy-ca.crt > /path/to/combined-ca-bundle.pem
+export SSL_CERT_FILE=/path/to/combined-ca-bundle.pem
+```
+
+### Add certificates to Docker containers
+
+#### Mount the certificate at runtime
 
 Mount your proxy's root certificate and update the CA store when you start the container.
 
@@ -38,7 +81,7 @@ docker run -p 4000:4000 \
   -c "update-ca-certificates && su -s /bin/bash router -c '/dist/router_wrapper.sh'"
 ```
 
-### Building a custom image
+#### Build a custom image
 
 For production deployments, build a custom image that includes your proxy's root certificate.
 
@@ -61,11 +104,9 @@ docker run -p 4000:4000 \
   router-with-proxy-cert
 ```
 
-## Adding certificates in Kubernetes
+### Add certificates in Kubernetes
 
-When deploying with Kubernetes, use a ConfigMap or Secret to provide the certificate and an init container to install it.
-
-### Using an init container
+Use a ConfigMap and an init container to install the certificate.
 
 1. Create a ConfigMap with your proxy certificate.
 
@@ -106,9 +147,7 @@ When deploying with Kubernetes, use a ConfigMap or Secret to provide the certifi
             mountPath: /ca-certs
     ```
 
-### Building a custom image for Kubernetes
-
-Build a custom Docker image with the certificate as described in [Building a custom image](#building-a-custom-image) and reference it in your Helm values.
+To use a custom Docker image with Kubernetes instead, follow [Build a custom image](#build-a-custom-image) and reference it in your Helm values.
 
 ```yaml title="values.yaml"
 image:
@@ -116,28 +155,35 @@ image:
   tag: <your-tag>
 ```
 
-## Adding certificates for cloud deployments
+### Add certificates for cloud deployments
 
-For cloud deployments (AWS ECS, Azure Container Apps, GCP Cloud Run), build a custom Docker image that includes your proxy's root certificate, then push that image to your cloud provider's container registry.
+For cloud deployments (AWS ECS, Azure Container Apps, GCP Cloud Run), build a custom Docker image that includes your proxy's root certificate, then push it to your cloud provider's container registry.
 
-Follow the [custom image instructions](#building-a-custom-image), then push the image to your registry before you deploy.
+Follow the [custom image instructions](#build-a-custom-image), then push the image to your registry before deploying.
 
-## Verifying the certificate installation
+## Verify the configuration
 
-Check the container's CA store:
+If you're using `SSL_CERT_FILE`, confirm the variable is set and the bundle is readable before starting the router:
+
+```bash
+echo $SSL_CERT_FILE
+openssl verify -CAfile "$SSL_CERT_FILE" "$SSL_CERT_FILE"
+```
+
+If you're using the container CA store approach, check that the certificate is present:
 
 ```bash
 docker run --entrypoint /bin/bash -it router-with-proxy-cert -c "ls /etc/ssl/certs | grep proxy"
 ```
 
-Test connectivity to a service through the proxy:
+Test connectivity to Apollo Uplink through the proxy:
 
 ```bash
 docker run --entrypoint /bin/bash -it router-with-proxy-cert -c "curl -v https://uplink.api.apollographql.com/"
 ```
 
-## Related Topics
+## Related topics
 
-- [TLS configuration](/graphos/routing/security/tls): Configure TLS settings for Apollo Router
-- [Docker deployment](/graphos/routing/self-hosted/containerization/docker): Deploy Apollo Runtime using Docker
-- [Kubernetes deployment](/graphos/routing/self-hosted/containerization/kubernetes/quickstart): Deploy Apollo Router using Helm
+- [TLS configuration](/graphos/routing/security/tls)
+- [Docker deployment](/graphos/routing/self-hosted/containerization/docker)
+- [Kubernetes deployment](/graphos/routing/self-hosted/containerization/kubernetes/quickstart)
