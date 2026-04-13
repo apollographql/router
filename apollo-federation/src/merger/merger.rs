@@ -1681,7 +1681,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     }
 
     fn merge_directive_definitions(&mut self) -> Result<(), FederationError> {
-        // We should skip the supergraph specific directives, that is the @core and @join directives.
+        // We should skip the supergraph specific directives, that is the @link and @join directives.
 
         // Collect all directive names from both the merged schema and the compose directive manager
         let directive_names: IndexSet<Name> = self
