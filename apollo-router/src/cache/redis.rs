@@ -421,6 +421,16 @@ impl RedisCacheStorage {
                 // that we're unable to connect to them; it's much better to let fred abort and
                 // then recreate the client with a fresh view of the infrastructure
                 config.replica.ignore_reconnection_errors = false;
+                config.replica.primary_fallback = true;
+                // NOTE: lazy_connections must be true (fred's default). With eager connections,
+                // a replica connection failure during add_connection propagates via ? through
+                // sync_replicas and can trigger the reconnection policy pool-wide. With lazy
+                // connections, failures are deferred to per-command time and isolated. The
+                // RouteableReplicaFilter prevents ghost replicas from entering the routing
+                // table at topology sync time regardless, but lazy connections provide
+                // additional blast-radius isolation for replicas that pass the TCP probe but
+                // fail Redis protocol setup (AUTH, HELLO, etc).
+                config.replica.lazy_connections = true;
                 config.tcp = TcpConfig {
                     #[cfg(target_os = "linux")]
                     user_timeout: Some(self.redis_client_config.timeout),
