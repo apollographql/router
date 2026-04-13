@@ -1,0 +1,17 @@
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+  instrumentation:
+    instruments:
+      router:
+        short_request_count:
+          type: counter
+          value: unit
+          unit: reqs
+          description: "test request duration selector"
+          condition:
+            lt:
+              - unit: seconds
+              - 10
