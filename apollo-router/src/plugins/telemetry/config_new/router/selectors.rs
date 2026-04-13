@@ -553,6 +553,8 @@ mod test {
     use crate::plugins::telemetry::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
+    use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadTracker;
+    use crate::plugins::telemetry::config_new::selectors::DurationUnit;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::otel;
@@ -1116,5 +1118,54 @@ mod test {
             .build()
             .unwrap();
         assert!(selector_disabled.on_request(&request).is_none());
+    }
+
+    #[test]
+    fn router_request_duration() {
+        let context = crate::context::Context::new();
+        let tracker = RouterOverheadTracker::new();
+        context.extensions().with_lock(|ext| ext.insert(tracker));
+
+        let response = RouterResponse::fake_builder()
+            .context(context.clone())
+            .build()
+            .unwrap();
+
+        // Milliseconds → I64
+        let selector = RouterSelector::RequestDuration {
+            unit: DurationUnit::Milliseconds,
+        };
+        assert!(matches!(
+            selector.on_response(&response).unwrap(),
+            opentelemetry::Value::I64(_)
+        ));
+
+        // Seconds → F64
+        let selector = RouterSelector::RequestDuration {
+            unit: DurationUnit::Seconds,
+        };
+        assert!(matches!(
+            selector.on_response(&response).unwrap(),
+            opentelemetry::Value::F64(_)
+        ));
+
+        // Nanoseconds → I64
+        let selector = RouterSelector::RequestDuration {
+            unit: DurationUnit::Nanoseconds,
+        };
+        assert!(matches!(
+            selector.on_response(&response).unwrap(),
+            opentelemetry::Value::I64(_)
+        ));
+
+        // on_request returns None (response-only selector)
+        let selector = RouterSelector::RequestDuration {
+            unit: DurationUnit::Milliseconds,
+        };
+        let request = RouterRequest::fake_builder()
+            .context(context)
+            .build()
+            .unwrap();
+        assert!(selector.on_request(&request).is_none());
     }
 }
