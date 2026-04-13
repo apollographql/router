@@ -4960,21 +4960,14 @@ mod tests {
         async {
             // A mock that never returns within a reasonable window (5 s).
             let slow_mock =
-                create_mock_http_client_with_delay(std::time::Duration::from_secs_f64(5.0));
-
-            // Wrap with a very short timeout so it always fires before the sleep.
-            let timeout_client = tower::ServiceBuilder::new()
-                .layer(tower::timeout::TimeoutLayer::new(
-                    std::time::Duration::from_secs_f64(1.0),
-                ))
-                .service(slow_mock);
+                create_mock_http_client_with_delay(std::time::Duration::from_secs_f64(0.50));
 
             let router_stage = create_router_stage_for_request_validation_test();
             let mock_router_service = create_mock_router_service();
 
             let service_stack = router_stage
                 .as_service(
-                    timeout_client,
+                    slow_mock,
                     mock_router_service.boxed(),
                     "http://test".to_string(),
                     Arc::new("".to_string()),
@@ -4984,9 +4977,16 @@ mod tests {
 
             let request = router::Request::fake_builder().build().unwrap();
             // The call is expected to fail due to the timeout.
-            let coprocessor_result = service_stack.oneshot(request).await;
+            let coprocessor_result =
+                tokio::time::timeout(Duration::from_secs(1), service_stack.oneshot(request)).await;
             // I added this:
-            tracing::trace!("coprocessor_result: {:?}, msg: {}", coprocessor_result, "coprocessor returned");
+            tracing::trace!(
+                "coprocessor_result: {:?}, msg: {}",
+                coprocessor_result,
+                "coprocessor returned"
+            );
+
+            eprintln!("{:?}", coprocessor_result);
 
             // Despite the timeout error the histogram must have been recorded
             // (duration is captured before the result is propagated).
@@ -5033,8 +5033,7 @@ mod tests {
     #[tokio::test]
     async fn subgraph_request_duration_histogram_recorded_on_timeout() {
         async {
-            let slow_mock =
-                create_mock_http_client_with_delay(std::time::Duration::from_secs(10));
+            let slow_mock = create_mock_http_client_with_delay(std::time::Duration::from_secs(10));
 
             let timeout_client = tower::ServiceBuilder::new()
                 .layer(tower::timeout::TimeoutLayer::new(
