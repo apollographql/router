@@ -243,7 +243,7 @@ dependencies = [
  "serde_json_bytes",
  "sha1",
  "shape",
- "similar 3.0.0",
+ "similar 3.1.0",
  "strum 0.28.0",
  "strum_macros 0.28.0",
  "tempfile",
@@ -414,7 +414,7 @@ dependencies = [
  "sha1",
  "sha2",
  "shellexpand",
- "similar 3.0.0",
+ "similar 3.1.0",
  "socket2 0.5.10",
  "static_assertions",
  "strum 0.28.0",
@@ -6405,9 +6405,9 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "similar"
-version = "3.0.0"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26d0b06eba54f0ca0770f970a3e89823e766ca638dd940f8469fa0fa50c75396"
+checksum = "04d93e861ede2e497b47833469b8ec9d5c07fa4c78ce7a00f6eb7dd8168b4b3f"
 dependencies = [
  "bstr",
 ]
