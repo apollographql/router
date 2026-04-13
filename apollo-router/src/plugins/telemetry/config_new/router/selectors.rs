@@ -22,6 +22,7 @@ use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
 use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadTracker;
 use crate::plugins::telemetry::config_new::selectors::ActiveSubgraphRequests;
+use crate::plugins::telemetry::config_new::selectors::DurationUnit;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
@@ -172,6 +173,11 @@ pub(crate) enum RouterSelector {
     RouterOverhead {
         /// Extract router overhead duration in seconds
         router_overhead: bool,
+    },
+    /// Total request duration from when the request was received
+    RequestDuration {
+        /// The unit for the duration (milliseconds, seconds, nanoseconds)
+        unit: DurationUnit,
     },
     /// Number of active subgraph requests at the time of overhead calculation
     ActiveSubgraphRequests {
@@ -343,6 +349,11 @@ impl Selector for RouterSelector {
                     let result = tracker.calculate_overhead();
                     opentelemetry::Value::F64(result.overhead.as_secs_f64())
                 }),
+            RouterSelector::RequestDuration { unit } => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterOverheadTracker>().cloned())
+                .map(|tracker| unit.to_otel_value(tracker.total_duration())),
             RouterSelector::ActiveSubgraphRequests {
                 active_subgraph_requests,
             } => response
