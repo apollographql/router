@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -105,4 +107,28 @@ pub(crate) enum CacheControlSelector {
     NoStore,
     /// Value of s-maxage or max-age in cache-control
     MaxAge,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum DurationUnit {
+    /// Duration in milliseconds (integer)
+    #[serde(alias = "ms")]
+    Milliseconds,
+    /// Duration in seconds (floating point)
+    #[serde(alias = "s")]
+    Seconds,
+    /// Duration in nanoseconds (integer)
+    #[serde(alias = "ns")]
+    Nanoseconds,
+}
+
+impl DurationUnit {
+    pub(crate) fn to_otel_value(&self, duration: Duration) -> opentelemetry::Value {
+        match self {
+            Self::Milliseconds => opentelemetry::Value::I64(duration.as_millis() as i64),
+            Self::Seconds => opentelemetry::Value::F64(duration.as_secs_f64()),
+            Self::Nanoseconds => opentelemetry::Value::I64(duration.as_nanos() as i64),
+        }
+    }
 }
