@@ -14,6 +14,7 @@
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::anyhow;
 use apollo_router::TestHarness;
@@ -396,8 +397,9 @@ where
         _ => Err(anyhow!("error retrieving response")),
     };
 
-    // We must always try to find the report regardless of if the response had failures
-    for _ in 0..10 {
+    // Poll until the expected report arrives. The old 10 × 100 ms window was too tight for CI.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
         let my_reports = reports.lock().await;
         let report = my_reports.iter().find(filter);
         if report.is_some() && matches!(found_report, Ok(None)) {
@@ -405,7 +407,11 @@ where
             break;
         }
         drop(my_reports);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for matching trace report"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());

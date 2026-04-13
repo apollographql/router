@@ -21,6 +21,7 @@ use std::future::Future;
 use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::anyhow;
 use apollo_router::TestHarness;
@@ -410,8 +411,9 @@ where
         _ => Err(anyhow!("error retrieving response")),
     };
 
-    // We must always try to find the report regardless of if the response had failures
-    for _ in 0..10 {
+    // Poll until the expected report arrives. The old 10 × 100 ms window was too tight for CI.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
         let my_reports = reports.lock().await;
         let report = my_reports.iter().find(filter);
         if report.is_some() && matches!(found_report, Ok(None)) {
@@ -419,7 +421,11 @@ where
             break;
         }
         drop(my_reports);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for matching report"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
     task.abort();
 
@@ -449,25 +455,29 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
     // Drain the response (and throw it away)
     let _found_report = response.response.into_body().collect().await;
 
-    // Give the server a little time to export something
-    // If this test fails, consider increasing this time.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let mut request_count = 0;
-
-    // In a more ideal world we would have an implementation of `AddAssign<&reports::Report>
-    // However we don't. Let's do the minimal amount of checking and ensure that at least the
-    // number of requests can be tested. Clearly, this doesn't test all of the stats, but it's a
-    // fairly reliable check and at least we are testing something.
-    for report in reports.lock().await.iter().filter(filter) {
-        let stats = &report
-            .traces_per_query
-            .values()
-            .next()
-            .expect("has something")
-            .stats_with_context;
-        request_count += stats[0].query_latency_stats.as_ref().unwrap().request_count;
-    }
+    // Poll until at least one matching report with stats arrives. The old fixed 500 ms sleep
+    // was too short under CI load.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let request_count = loop {
+        let mut count = 0;
+        for report in reports.lock().await.iter().filter(filter) {
+            let stats = &report
+                .traces_per_query
+                .values()
+                .next()
+                .expect("has something")
+                .stats_with_context;
+            count += stats[0].query_latency_stats.as_ref().unwrap().request_count;
+        }
+        if count > 0 {
+            break count;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for batch stats reports"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
     task.abort();
     request_count
 }

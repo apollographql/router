@@ -1450,16 +1450,9 @@ impl IntegrationTest {
                 .text()
                 .await
             {
-                let mut v = vec![];
-                for text in &texts {
-                    if !metrics.contains(text) {
-                        v.push(*text);
-                    }
-                }
-                if v.len() == texts.len() {
+                texts.retain(|text| !metrics.contains(text));
+                if texts.is_empty() {
                     return;
-                } else {
-                    texts = v;
                 }
                 last_metrics = metrics;
             }
@@ -1899,13 +1892,20 @@ fn merge_overrides(
     };
 
     insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
+    insert_redis_namespace(config.pointer_mut("/apq/router/cache/redis"));
+    insert_redis_namespace(config.pointer_mut("/preview_entity_cache/subgraph/all/redis"));
     insert_redis_namespace(config.pointer_mut("/response_cache/subgraph/all/redis"));
-    if let Some(response_cache_per_subgraph) = config
-        .pointer_mut("/response_cache/subgraph/subgraphs")
-        .and_then(|o| o.as_object_mut())
-    {
-        for subgraph_config in response_cache_per_subgraph.values_mut() {
-            insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
+    for per_subgraph_path in [
+        "/response_cache/subgraph/subgraphs",
+        "/preview_entity_cache/subgraph/subgraphs",
+    ] {
+        if let Some(subgraphs) = config
+            .pointer_mut(per_subgraph_path)
+            .and_then(|o| o.as_object_mut())
+        {
+            for subgraph_config in subgraphs.values_mut() {
+                insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
+            }
         }
     }
 
@@ -1913,7 +1913,7 @@ fn merge_overrides(
 }
 
 /// Extract Redis URLs from config. This assumes that caches will share a redis instance; it just
-/// returns the first URLs found from: query plan, response cache all, response cache subgraphs
+/// returns the first URLs found from any known Redis config path.
 fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
     let convert_urls = |urls: &Vec<Value>| {
         urls.iter()
@@ -1921,26 +1921,25 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
             .collect()
     };
 
-    if let Some(urls) = config
-        .pointer("/supergraph/query_planning/cache/redis/urls")
-        .and_then(|o| o.as_array())
-    {
-        return Some(convert_urls(urls));
-    }
-
-    if let Some(response_cache_config) = config.pointer("/response_cache/subgraph") {
-        if let Some(urls) = response_cache_config
-            .pointer("/all/redis/urls")
-            .and_then(|o| o.as_array())
-        {
+    let top_level_paths = [
+        "/supergraph/query_planning/cache/redis/urls",
+        "/apq/router/cache/redis/urls",
+        "/preview_entity_cache/subgraph/all/redis/urls",
+        "/response_cache/subgraph/all/redis/urls",
+    ];
+    for path in top_level_paths {
+        if let Some(urls) = config.pointer(path).and_then(|o| o.as_array()) {
             return Some(convert_urls(urls));
         }
+    }
 
-        if let Some(subgraphs) = response_cache_config
-            .get("subgraphs")
-            .and_then(|o| o.as_object())
-        {
-            for (_, subgraph_config) in subgraphs.iter() {
+    let per_subgraph_sections = [
+        "/response_cache/subgraph/subgraphs",
+        "/preview_entity_cache/subgraph/subgraphs",
+    ];
+    for section in per_subgraph_sections {
+        if let Some(subgraphs) = config.pointer(section).and_then(|o| o.as_object()) {
+            for subgraph_config in subgraphs.values() {
                 if let Some(urls) = subgraph_config
                     .pointer("/redis/urls")
                     .and_then(|o| o.as_array())

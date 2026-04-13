@@ -71,25 +71,29 @@ async fn execute_and_validate_metrics(
     // Execute a query to create pipeline and connection handles
     router.execute_default_query().await;
 
-    // Wait a bit for metrics to be exported
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Poll until at least one metrics request arrives at the mock server
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let metrics_requests = loop {
+        let requests = mock_server
+            .received_requests()
+            .await
+            .expect("Could not get otlp requests");
 
-    // Get the metrics requests from the mock server
-    let requests = mock_server
-        .received_requests()
-        .await
-        .expect("Could not get otlp requests");
+        let matched: Vec<_> = requests
+            .iter()
+            .filter(|r| r.url.path().ends_with("/metrics"))
+            .collect();
 
-    let metrics_requests: Vec<_> = requests
-        .iter()
-        .filter(|r| r.url.path().ends_with("/metrics"))
-        .collect();
-
-    assert!(
-        !metrics_requests.is_empty(),
-        "No metrics requests received on iteration {}",
-        iteration
-    );
+        if !matched.is_empty() {
+            break matched.into_iter().cloned().collect::<Vec<_>>();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "No metrics requests received on iteration {}",
+            iteration,
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
 
     // Validate expected updown counter metrics
     let request_bodies: Vec<_> = metrics_requests.iter().map(|r| &r.body).collect();
