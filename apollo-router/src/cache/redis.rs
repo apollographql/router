@@ -1809,5 +1809,337 @@ mod test {
             );
             Ok(())
         }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn repeated_pool_replacement_does_not_leak(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let baseline = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
+
+            let after_first = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+            let pool_size = after_first - baseline;
+            assert!(pool_size > 0, "pool should have at least one client");
+
+            for i in 0..10 {
+                storage.create_client_pool().await?;
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                let current = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+                assert_eq!(
+                    current,
+                    baseline + pool_size,
+                    "iteration {i}: count should stay at baseline + pool_size, not grow"
+                );
+            }
+
+            assert!(storage.client().await.is_ok(), "pool should be functional");
+
+            drop(storage);
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            let after_drop = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+            assert_eq!(after_drop, baseline, "count should return to baseline");
+            Ok(())
+        }
+
+        fn unreachable_redis_config(required_to_start: bool) -> crate::configuration::RedisCache {
+            let config_json = json!({
+                "urls": ["redis://127.0.0.1:1"],
+                "namespace": random_namespace(),
+                "required_to_start": required_to_start,
+                "timeout": "2s",
+                "ttl": "60s"
+            });
+            serde_json::from_value(config_json).expect("invalid redis cache configuration")
+        }
+
+        #[tokio::test]
+        async fn required_to_start_true_fails_when_redis_unavailable() -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let storage =
+                RedisCacheStorage::new(unreachable_redis_config(true), "test").await?;
+            assert!(storage.inner.read().is_none(), "should start without a pool");
+
+            let result = storage.create_client_pool().await;
+            assert!(
+                result.is_err(),
+                "create_client_pool should fail with unreachable redis and required_to_start=true"
+            );
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn required_to_start_false_starts_without_redis() -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let storage =
+                RedisCacheStorage::new(unreachable_redis_config(false), "test").await?;
+
+            let result = storage.create_client_pool().await;
+            assert!(
+                result.is_ok(),
+                "create_client_pool should succeed with required_to_start=false even if redis is unreachable"
+            );
+            assert!(
+                storage.inner.read().is_some(),
+                "pool should be populated even though redis is unreachable"
+            );
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn scan_during_recreation_returns_error(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
+
+            storage.inner.write().take();
+
+            let result = storage
+                .scan_with_namespaced_results("*".to_string(), Some(100))
+                .await;
+            assert!(result.is_err(), "scan should error when pool is None");
+
+            wait_for_recreation(&storage).await;
+
+            let result = storage
+                .scan_with_namespaced_results("*".to_string(), Some(100))
+                .await;
+            assert!(result.is_ok(), "scan should succeed after recreation");
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn scan_delete_cycle_removes_keys(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            use fred::types::scan::Scanner;
+            use futures::StreamExt;
+
+            let _guard = lock_for_static().lock().await;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
+
+            let keys: Vec<_> = (0..5)
+                .map(|i| {
+                    (
+                        RedisKey(format!("scan_del_{i}")),
+                        RedisValue(format!("val_{i}")),
+                    )
+                })
+                .collect();
+            storage.insert_multiple(&keys, None).await?;
+
+            let mut stream = storage
+                .scan_with_namespaced_results("*scan_del_*".to_string(), Some(100))
+                .await?;
+            let mut scanned_keys = Vec::new();
+            while let Some(result) = stream.next().await {
+                if let Some(found) = result?.take_results() {
+                    scanned_keys.extend(found);
+                }
+            }
+            assert!(
+                scanned_keys.len() >= 5,
+                "should find at least the 5 inserted keys, found {}",
+                scanned_keys.len()
+            );
+
+            let deleted = storage
+                .delete_from_scan_result(scanned_keys.into_iter())
+                .await?;
+            assert!(deleted >= 5, "should delete at least 5 keys");
+
+            let mut stream = storage
+                .scan_with_namespaced_results("*scan_del_*".to_string(), Some(100))
+                .await?;
+            let mut remaining = Vec::new();
+            while let Some(result) = stream.next().await {
+                if let Some(found) = result?.take_results() {
+                    remaining.extend(found);
+                }
+            }
+            assert!(remaining.is_empty(), "all scan_del keys should be deleted");
+            Ok(())
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        #[rstest::rstest]
+        async fn concurrent_client_calls_during_recreation(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let baseline = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
+            let pool_size = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed) - baseline;
+
+            storage.inner.write().take();
+
+            let handles: Vec<_> = (0..50)
+                .map(|_| {
+                    let s = storage.clone();
+                    tokio::spawn(async move { s.client().await })
+                })
+                .collect();
+
+            let results: Vec<_> = futures::future::join_all(handles)
+                .await
+                .into_iter()
+                .map(|r| r.expect("task panicked"))
+                .collect();
+
+            let err_count = results.iter().filter(|r| r.is_err()).count();
+            assert!(err_count > 0, "some tasks should get errors during recreation");
+
+            wait_for_recreation(&storage).await;
+
+            let count_after = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+            assert_eq!(
+                count_after,
+                baseline + pool_size,
+                "only one recreation should have occurred"
+            );
+
+            let second_handles: Vec<_> = (0..50)
+                .map(|_| {
+                    let s = storage.clone();
+                    tokio::spawn(async move { s.client().await })
+                })
+                .collect();
+
+            for result in futures::future::join_all(second_handles).await {
+                assert!(
+                    result.expect("task panicked").is_ok(),
+                    "all tasks should succeed after recreation"
+                );
+            }
+            Ok(())
+        }
+
+        fn redis_config_with_pool_size(
+            clustered: bool,
+            pool_size: u32,
+        ) -> crate::configuration::RedisCache {
+            let url = if clustered {
+                "redis-cluster://localhost:7000"
+            } else {
+                "redis://localhost:6379"
+            };
+            let config_json = json!({
+                "urls": [url],
+                "namespace": random_namespace(),
+                "required_to_start": true,
+                "ttl": "60s",
+                "pool_size": pool_size
+            });
+            serde_json::from_value(config_json).expect("invalid redis cache configuration")
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn active_client_count_stable_across_replacements(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let baseline = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+
+            let storage =
+                RedisCacheStorage::new(redis_config_with_pool_size(clustered, 2), "test").await?;
+            storage.create_client_pool().await?;
+            assert_eq!(
+                ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed),
+                baseline + 2,
+                "pool_size=2 should add 2 to count"
+            );
+
+            for i in 0..4 {
+                storage.create_client_pool().await?;
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                assert_eq!(
+                    ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed),
+                    baseline + 2,
+                    "replacement {i}: count should stay at baseline + 2"
+                );
+            }
+
+            drop(storage);
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            assert_eq!(
+                ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed),
+                baseline,
+                "count should return to baseline"
+            );
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn active_client_count_never_negative() -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let baseline = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
+
+            for _ in 0..10 {
+                let storage =
+                    RedisCacheStorage::new(redis_config(false), "test").await?;
+                storage.create_client_pool().await?;
+                drop(storage);
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                assert!(
+                    ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed) >= baseline,
+                    "count must never go below baseline"
+                );
+            }
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn metrics_task_aborted_across_pool_replacement(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
+
+            let old_metrics_handle = storage
+                .inner
+                .read()
+                .as_ref()
+                .unwrap()
+                .metrics_collector
+                .abort_handle()
+                .expect("metrics should be activated");
+            assert!(!old_metrics_handle.is_finished());
+
+            storage.create_client_pool().await?;
+            tokio::task::yield_now().await;
+
+            assert!(
+                old_metrics_handle.is_finished(),
+                "old metrics task should be aborted after pool replacement"
+            );
+
+            let new_metrics_handle = storage
+                .inner
+                .read()
+                .as_ref()
+                .unwrap()
+                .metrics_collector
+                .abort_handle()
+                .expect("new metrics should be activated");
+            assert!(
+                !new_metrics_handle.is_finished(),
+                "new metrics task should be running"
+            );
+            Ok(())
+        }
     }
 }
