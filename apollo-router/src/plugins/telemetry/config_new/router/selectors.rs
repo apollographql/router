@@ -504,6 +504,7 @@ impl Selector for RouterSelector {
                     | RouterSelector::ResponseSizeHint { .. }
                     | RouterSelector::RouterOverhead { .. }
                     | RouterSelector::ActiveSubgraphRequests { .. }
+                    | RouterSelector::RequestDuration { .. }
                     | RouterSelector::OnGraphQLError { .. }
                     | RouterSelector::ContextId { .. }
             ),
