@@ -354,6 +354,7 @@ mod test {
     use crate::cache::estimate_size;
     use crate::cache::storage::CacheStorage;
     use crate::cache::storage::ValueType;
+    use crate::configuration::RedisCache;
     use crate::metrics::FutureMetricsExt;
 
     #[tokio::test]
@@ -510,5 +511,54 @@ mod test {
         }
         .with_metrics()
         .await;
+    }
+
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    struct TestValue(String);
+    impl ValueType for TestValue {}
+
+    fn unreachable_redis_config(required_to_start: bool) -> RedisCache {
+        serde_json::from_value(serde_json::json!({
+            "urls": ["redis://127.0.0.1:1"],
+            "namespace": "storage_test",
+            "required_to_start": required_to_start,
+            "timeout": "2s",
+            "ttl": "60s"
+        }))
+        .expect("invalid config")
+    }
+
+    /// With required_to_start=true and an unreachable Redis, CacheStorage::new should
+    /// propagate the connection error.
+    #[tokio::test]
+    async fn new_with_required_to_start_true_fails_when_redis_unreachable() {
+        let config = unreachable_redis_config(true);
+        let result: Result<CacheStorage<String, TestValue>, _> =
+            CacheStorage::new(NonZeroUsize::new(10).unwrap(), Some(config), "test").await;
+        assert!(
+            result.is_err(),
+            "CacheStorage::new should fail when Redis is unreachable and required_to_start=true"
+        );
+    }
+
+    /// With required_to_start=false and an unreachable Redis, CacheStorage::new should
+    /// succeed. The in-memory cache should still work even though Redis is unavailable.
+    #[tokio::test]
+    async fn new_with_required_to_start_false_succeeds_when_redis_unreachable() {
+        let config = unreachable_redis_config(false);
+        let cache: CacheStorage<String, TestValue> =
+            CacheStorage::new(NonZeroUsize::new(10).unwrap(), Some(config), "test")
+                .await
+                .expect("should succeed with required_to_start=false");
+
+        cache
+            .insert("key".to_string(), TestValue("value".to_string()))
+            .await;
+        let result = cache.get(&"key".to_string(), |_| Ok(())).await;
+        assert!(
+            result.is_some(),
+            "in-memory cache should work even when Redis is unavailable"
+        );
+        assert_eq!(result.unwrap().0, "value");
     }
 }

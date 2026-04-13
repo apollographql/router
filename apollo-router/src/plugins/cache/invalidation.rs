@@ -270,3 +270,67 @@ impl InvalidationRequest {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use tower::BoxError;
+
+    use super::*;
+    use crate::cache::redis::RedisCacheStorage;
+
+    fn make_invalidation_with_empty_pool(
+        storage: RedisCacheStorage,
+    ) -> (Invalidation, Arc<EntityStorage>) {
+        let mut subgraphs = HashMap::new();
+        subgraphs.insert("products".to_string(), storage);
+        let entity_storage = Arc::new(EntityStorage {
+            all: None,
+            subgraphs,
+        });
+        let invalidation = Invalidation {
+            storage: entity_storage.clone(),
+            scan_count: 100,
+            semaphore: Arc::new(Semaphore::new(1)),
+        };
+        (invalidation, entity_storage)
+    }
+
+    /// When the Redis pool is unavailable (inner is None), scan_with_namespaced_results
+    /// returns an error. The invalidation code should map it to InvalidationError::RedisError
+    /// rather than panicking or hanging.
+    #[tokio::test]
+    async fn invalidation_scan_returns_error_when_pool_unavailable() -> Result<(), BoxError> {
+        let config_json = serde_json::json!({
+            "urls": ["redis://127.0.0.1:6379"],
+            "namespace": "invalidation_test",
+            "required_to_start": false,
+            "timeout": "2s",
+            "ttl": "60s"
+        });
+        let config = serde_json::from_value(config_json)?;
+        let storage = RedisCacheStorage::new(config, "test").await?;
+        // Don't call create_client_pool — pool stays empty
+
+        let (invalidation, _) = make_invalidation_with_empty_pool(storage);
+
+        let result = invalidation
+            .invalidate(
+                InvalidationOrigin::Endpoint,
+                vec![InvalidationRequest::Subgraph {
+                    subgraph: "products".to_string(),
+                }],
+            )
+            .await;
+
+        assert!(result.is_err(), "should fail when pool is unavailable");
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("RedisError") || err_msg.contains("redis"),
+            "error should originate from Redis layer, got: {err_msg}"
+        );
+        Ok(())
+    }
+}

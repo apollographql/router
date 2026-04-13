@@ -1183,6 +1183,51 @@ mod test {
         }
     }
 
+    /// `insert_multiple` returns `Ok(())` even when pipeline command execution fails.
+    /// The error is recorded via `record_query_error` but not propagated to callers.
+    /// This means callers using `inspect_err` on the result will not observe pipeline
+    /// command failures — only pool-access failures from `pipeline().await?`.
+    #[tokio::test]
+    async fn insert_multiple_swallows_pipeline_command_errors() {
+        use std::sync::Arc;
+
+        use fred::error::Error as RedisError;
+        use fred::error::ErrorKind;
+        use fred::mocks::MockCommand;
+        use fred::mocks::Mocks;
+        use fred::types::Value;
+
+        use super::RedisKey;
+        use super::RedisValue;
+        use super::RedisCacheStorage;
+
+        #[derive(Debug)]
+        struct FailingSets;
+        impl Mocks for FailingSets {
+            fn process_command(&self, command: MockCommand) -> Result<Value, RedisError> {
+                if *command.cmd == *"SET" {
+                    return Err(RedisError::new(ErrorKind::IO, "simulated write failure"));
+                }
+                Ok(Value::Queued)
+            }
+        }
+
+        let storage = RedisCacheStorage::from_mocks(Arc::new(FailingSets))
+            .await
+            .expect("mock setup failed");
+
+        let data = vec![
+            (RedisKey("k1".to_string()), RedisValue("v1".to_string())),
+            (RedisKey("k2".to_string()), RedisValue("v2".to_string())),
+        ];
+
+        let result: Result<(), _> = storage.insert_multiple(&data, None).await;
+        assert!(
+            result.is_ok(),
+            "insert_multiple should return Ok even when pipeline commands fail"
+        );
+    }
+
     /// Module that collects tests which actually run against Redis.
     ///
     /// This allows us to put the insanely long #[cfg] line in one place and fixes linting issues
