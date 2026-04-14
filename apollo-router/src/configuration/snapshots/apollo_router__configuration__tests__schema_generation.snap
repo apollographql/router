@@ -8794,7 +8794,7 @@ expression: "&schema"
           "additionalProperties": false,
           "description": "Total request duration from when the request was received",
           "properties": {
-            "unit": {
+            "request_duration": {
               "allOf": [
                 {
                   "$ref": "#/definitions/DurationUnit"
@@ -8804,7 +8804,7 @@ expression: "&schema"
             }
           },
           "required": [
-            "unit"
+            "request_duration"
           ],
           "type": "object"
         },
