@@ -59,6 +59,7 @@ use crate::plugins::authentication::jwks::Audiences;
 use crate::plugins::authentication::jwks::JWTCriteria;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::jwks::JwksManager;
+use crate::plugins::authentication::jwks::SearchResult;
 use crate::plugins::authentication::jwks::parse_jwks;
 use crate::plugins::authentication::jwks::search_jwks;
 use crate::services::router;
@@ -1071,6 +1072,7 @@ async fn build_jwks_search_components() -> JwksManager {
             audiences: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            allow_missing_exp: false,
             headers: Vec::new(),
         });
     }
@@ -1087,7 +1089,7 @@ async fn it_finds_key_with_criteria_kid_and_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    let (_issuer, _audience, key) = search_jwks(&jwks_manager, &criteria)
+    let SearchResult { jwk: key, .. } = search_jwks(&jwks_manager, &criteria)
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -1104,7 +1106,7 @@ async fn it_finds_best_matching_key_with_criteria_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    let (_issuer, _audience, key) = search_jwks(&jwks_manager, &criteria)
+    let SearchResult { jwk: key, .. } = search_jwks(&jwks_manager, &criteria)
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -1133,7 +1135,7 @@ async fn it_finds_key_with_criteria_algorithm_ec() {
         alg: Algorithm::ES256,
     };
 
-    let (_issuer, _audience, key) = search_jwks(&jwks_manager, &criteria)
+    let SearchResult { jwk: key, .. } = search_jwks(&jwks_manager, &criteria)
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -1153,7 +1155,7 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
         alg: Algorithm::RS256,
     };
 
-    let (_issuer, _audience, key) = search_jwks(&jwks_manager, &criteria)
+    let SearchResult { jwk: key, .. } = search_jwks(&jwks_manager, &criteria)
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -1172,7 +1174,12 @@ struct Claims {
     aud: Option<String>,
 }
 
-fn make_manager(jwk: &Jwk, issuers: Option<Issuers>, audiences: Option<Audiences>) -> JwksManager {
+fn make_manager_with_allow_missing_exp(
+    jwk: &Jwk,
+    issuers: Option<Issuers>,
+    audiences: Option<Audiences>,
+    allow_missing_exp: bool,
+) -> JwksManager {
     let jwks = JwkSet {
         keys: vec![jwk.clone()],
     };
@@ -1184,11 +1191,16 @@ fn make_manager(jwk: &Jwk, issuers: Option<Issuers>, audiences: Option<Audiences
         audiences,
         algorithms: None,
         poll_interval: Duration::from_secs(60),
+        allow_missing_exp,
         headers: Vec::new(),
     }];
     let map = HashMap::from([(url, jwks); 1]);
 
     JwksManager::new_test(list, map)
+}
+
+fn make_manager(jwk: &Jwk, issuers: Option<Issuers>, audiences: Option<Audiences>) -> JwksManager {
+    make_manager_with_allow_missing_exp(jwk, issuers, audiences, false)
 }
 
 #[tokio::test]
@@ -1580,6 +1592,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
             audiences: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
+            allow_missing_exp: false,
             headers: Vec::new(),
         });
     }
@@ -1613,6 +1626,7 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
             audiences: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
+            allow_missing_exp: false,
             headers: Vec::new(),
         });
     }
@@ -1653,6 +1667,7 @@ async fn it_accepts_key_without_use_or_keyops() {
             audiences: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            allow_missing_exp: false,
             headers: Vec::new(),
         });
     }
@@ -1685,6 +1700,7 @@ async fn it_accepts_elliptic_curve_key_without_alg() {
             audiences: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            allow_missing_exp: false,
             headers: Vec::new(),
         });
     }
@@ -1717,6 +1733,7 @@ async fn it_accepts_rsa_key_without_alg() {
             audiences: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
+            allow_missing_exp: false,
             headers: Vec::new(),
         });
     }
@@ -1773,6 +1790,7 @@ async fn jwks_send_headers() {
         audiences: None,
         algorithms: Some(HashSet::from([Algorithm::RS256])),
         poll_interval: Duration::from_secs(60),
+        allow_missing_exp: false,
         headers: vec![Header {
             name: HeaderName::from_static("jwks-authz"),
             value: HeaderValue::from_static("user1"),
@@ -1810,6 +1828,10 @@ mod common {
     use crate::services::supergraph;
 
     pub(super) fn jwk(signing_key: &SigningKey) -> Jwk {
+        jwk_with_kid(signing_key, "hello")
+    }
+
+    pub(super) fn jwk_with_kid(signing_key: &SigningKey, kid: &str) -> Jwk {
         let verifying_key = signing_key.verifying_key();
         let point = verifying_key.to_encoded_point(false);
         Jwk {
@@ -1817,7 +1839,7 @@ mod common {
                 public_key_use: Some(PublicKeyUse::Signature),
                 key_operations: Some(vec![KeyOperations::Verify]),
                 key_algorithm: Some(KeyAlgorithm::ES256),
-                key_id: Some("hello".to_string()),
+                key_id: Some(kid.to_string()),
                 ..Default::default()
             },
             algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
@@ -1859,6 +1881,259 @@ mod common {
             .unwrap()
             .try_into()
             .unwrap()
+    }
+
+    pub(super) fn build_request_with_header_token_kid(
+        signing_key: SigningKey,
+        token_claims: serde_json::Value,
+        kid: &str,
+    ) -> router::Request {
+        let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+        header.kid = Some(kid.to_string());
+        let token = encode(&header, &token_claims, &encoding_key(&signing_key)).unwrap();
+
+        supergraph::Request::canned_builder()
+            .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+}
+
+mod expiry_validation {
+    use std::collections::HashMap;
+    use std::collections::HashSet;
+    use std::ops::ControlFlow;
+    use std::str::FromStr;
+    use std::time::Duration;
+
+    use http::StatusCode;
+    use jsonwebtoken::get_current_timestamp;
+    use jsonwebtoken::jwk::JwkSet;
+    use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::rand_core::OsRng;
+    use url::Url;
+
+    use super::common::build_request_with_header_token;
+    use super::common::build_request_with_header_token_kid;
+    use super::common::jwk;
+    use super::common::jwk_with_kid;
+    use super::common::jwt_conf_with_header_source;
+    use super::make_manager;
+    use super::make_manager_with_allow_missing_exp;
+    use crate::plugins::authentication::authenticate;
+    use crate::plugins::authentication::jwks::Audiences;
+    use crate::plugins::authentication::jwks::Issuers;
+    use crate::plugins::authentication::jwks::JwksConfig;
+    use crate::plugins::authentication::jwks::JwksManager;
+    use crate::services::router;
+
+    fn authenticate_request(
+        token_claims: serde_json::Value,
+        allow_missing_exp: bool,
+    ) -> ControlFlow<router::Response, router::Request> {
+        let signing_key = SigningKey::random(&mut OsRng);
+        let manager = if allow_missing_exp {
+            make_manager_with_allow_missing_exp(&jwk(&signing_key), None, None, true)
+        } else {
+            make_manager(&jwk(&signing_key), None, None)
+        };
+
+        let request = build_request_with_header_token(signing_key, token_claims);
+        authenticate(&jwt_conf_with_header_source(), &manager, request)
+    }
+
+    #[test]
+    fn it_rejects_jwt_without_exp_by_default() {
+        let token_claims = serde_json::json!({
+            "sub": "test"
+        });
+
+        match authenticate_request(token_claims, false) {
+            ControlFlow::Break(response) => {
+                assert_eq!(response.response.status(), StatusCode::UNAUTHORIZED);
+            }
+            ControlFlow::Continue(_) => {
+                panic!("request without `exp` should be rejected by default");
+            }
+        }
+    }
+
+    #[test]
+    fn it_accepts_jwt_without_exp_when_configured() {
+        let token_claims = serde_json::json!({
+            "sub": "test"
+        });
+
+        match authenticate_request(token_claims, true) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(response) => {
+                panic!(
+                    "request without `exp` should be accepted when allow_missing_exp is enabled: {response:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn it_rejects_jwt_with_expired_exp_when_configured() {
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": 1
+        });
+
+        match authenticate_request(token_claims, true) {
+            ControlFlow::Break(response) => {
+                assert_eq!(response.response.status(), StatusCode::UNAUTHORIZED);
+            }
+            ControlFlow::Continue(_) => {
+                panic!(
+                    "request with expired `exp` should be rejected even when allow_missing_exp is enabled"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn it_accepts_jwt_with_future_exp_when_configured() {
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp() + 3600
+        });
+
+        match authenticate_request(token_claims, true) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(response) => {
+                panic!(
+                    "request with future `exp` should be accepted when allow_missing_exp is enabled: {response:?}"
+                );
+            }
+        }
+    }
+
+    fn authenticate_request_with_constraints(
+        token_claims: serde_json::Value,
+        issuers: Option<Issuers>,
+        audiences: Option<Audiences>,
+        allow_missing_exp: bool,
+    ) -> ControlFlow<router::Response, router::Request> {
+        let signing_key = SigningKey::random(&mut OsRng);
+        let manager = make_manager_with_allow_missing_exp(
+            &jwk(&signing_key),
+            issuers,
+            audiences,
+            allow_missing_exp,
+        );
+        let request = build_request_with_header_token(signing_key, token_claims);
+        authenticate(&jwt_conf_with_header_source(), &manager, request)
+    }
+
+    #[test]
+    fn it_rejects_jwt_without_exp_with_wrong_issuer() {
+        let issuers = HashSet::from(["https://expected.example.com".to_string()]);
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "iss": "https://wrong.example.com"
+        });
+
+        match authenticate_request_with_constraints(token_claims, Some(issuers), None, true) {
+            ControlFlow::Break(response) => {
+                assert_eq!(
+                    response.response.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR
+                );
+            }
+            ControlFlow::Continue(_) => {
+                panic!("token with wrong issuer must be rejected even with allow_missing_exp");
+            }
+        }
+    }
+
+    #[test]
+    fn it_rejects_jwt_without_exp_with_wrong_audience() {
+        let audiences = HashSet::from(["expected-audience".to_string()]);
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "aud": "wrong-audience"
+        });
+
+        match authenticate_request_with_constraints(token_claims, None, Some(audiences), true) {
+            ControlFlow::Break(response) => {
+                assert_eq!(response.response.status(), StatusCode::UNAUTHORIZED);
+            }
+            ControlFlow::Continue(_) => {
+                panic!("token with wrong audience must be rejected even with allow_missing_exp");
+            }
+        }
+    }
+
+    #[test]
+    fn it_respects_per_jwks_allow_missing_exp_scoping() {
+        // JWKS A: allow_missing_exp = true, kid = "key-a"
+        let signing_key_a = SigningKey::random(&mut OsRng);
+        let jwk_a = jwk_with_kid(&signing_key_a, "key-a");
+
+        // JWKS B: allow_missing_exp = false, kid = "key-b"
+        let signing_key_b = SigningKey::random(&mut OsRng);
+        let jwk_b = jwk_with_kid(&signing_key_b, "key-b");
+
+        let url_a = Url::from_str("file:///jwks-a.json").unwrap();
+        let url_b = Url::from_str("file:///jwks-b.json").unwrap();
+
+        let list = vec![
+            JwksConfig {
+                url: url_a.clone(),
+                issuers: None,
+                audiences: None,
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                allow_missing_exp: true,
+                headers: Vec::new(),
+            },
+            JwksConfig {
+                url: url_b.clone(),
+                issuers: None,
+                audiences: None,
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                allow_missing_exp: false,
+                headers: Vec::new(),
+            },
+        ];
+
+        let map = HashMap::from([
+            (url_a, JwkSet { keys: vec![jwk_a] }),
+            (url_b, JwkSet { keys: vec![jwk_b] }),
+        ]);
+
+        let manager = JwksManager::new_test(list, map);
+
+        // Token signed by key A (allow_missing_exp=true), no exp -> must accept
+        let token_claims = serde_json::json!({"sub": "test"});
+        let request = build_request_with_header_token_kid(signing_key_a, token_claims, "key-a");
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(response) => {
+                panic!(
+                    "token without exp signed by key-a (allow_missing_exp=true) should be accepted: {response:?}"
+                );
+            }
+        }
+
+        // Token signed by key B (allow_missing_exp=false), no exp -> must reject
+        let token_claims = serde_json::json!({"sub": "test"});
+        let request = build_request_with_header_token_kid(signing_key_b, token_claims, "key-b");
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Break(response) => {
+                assert_eq!(response.response.status(), StatusCode::UNAUTHORIZED);
+            }
+            ControlFlow::Continue(_) => {
+                panic!(
+                    "token without exp must be rejected when matched JWKS has allow_missing_exp=false"
+                );
+            }
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 use std::process::Command;
 
-use anyhow::ensure;
 use anyhow::Result;
+use anyhow::ensure;
 use xtask::*;
 
 #[derive(Debug, clap::Parser)]

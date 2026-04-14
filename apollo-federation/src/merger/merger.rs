@@ -83,6 +83,7 @@ use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
+use crate::schema::same_type;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
 use crate::schema::validators::access_control::validate_transitive_access_control_requirements_in_the_supergraph;
@@ -92,6 +93,7 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::FallibleOnceCell;
 use crate::utils::MultiIndexMap;
+use crate::utils::first_max_by_key;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
 use crate::utils::iter_into_single_item;
@@ -620,7 +622,7 @@ impl Merger {
         {
             let imports = directives
                 .iter()
-                .map(|(original, alias)| {
+                .map(|(alias, original)| {
                     if *alias == *original {
                         Import {
                             alias: None,
@@ -823,9 +825,6 @@ impl Merger {
             for (name, definition) in subgraph.schema().schema().directive_definitions.iter() {
                 if self.merged.get_directive_definition(name).is_none()
                     && self.is_merged_directive_definition(&subgraph.name, definition)
-                    && !self
-                        .compose_directive_manager
-                        .has_latest_directive_definition(name)
                 {
                     let pos = DirectiveDefinitionPosition {
                         directive_name: name.clone(),
@@ -848,6 +847,15 @@ impl Merger {
             .should_compose_directive(subgraph_name, &directive.name)
         {
             return true;
+        }
+
+        if self
+            .directives_using_join_directive
+            .contains(&directive.name)
+        {
+            // This directive will be added as `@join__directive` by the `add_join_directive_directives`
+            // method. So, we skip the normal merging logic.
+            return false;
         }
 
         self.merged_federation_directive_names
@@ -1682,20 +1690,16 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     }
 
     fn merge_directive_definitions(&mut self) -> Result<(), FederationError> {
-        // We should skip the supergraph specific directives, that is the @core and @join directives.
+        // We should skip the supergraph specific directives, that is the @link and @join directives.
 
         // Collect all directive names from both the merged schema and the compose directive manager
-        let mut directive_names: IndexSet<Name> = self
+        let directive_names: IndexSet<Name> = self
             .merged
             .schema()
             .directive_definitions
             .keys()
             .cloned()
             .collect();
-
-        for name in self.compose_directive_manager.composed_directive_names() {
-            directive_names.insert(name.clone());
-        }
 
         for directive_name in directive_names {
             if self
@@ -1918,7 +1922,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 continue;
             };
 
-            if Self::same_type(ty, source_ty) {
+            if same_type(ty, source_ty) {
                 trace!("Types are identical");
                 continue;
             } else if let Ok(true) = self.is_strict_subtype(ty, source_ty) {
@@ -2093,18 +2097,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         }
     }
 
-    fn same_type(dest_type: &Type, source_type: &Type) -> bool {
-        match (dest_type, source_type) {
-            (Type::Named(n1), Type::Named(n2)) => n1 == n2,
-            (Type::NonNullNamed(n1), Type::NonNullNamed(n2)) => n1 == n2,
-            (Type::List(inner1), Type::List(inner2)) => Self::same_type(inner1, inner2),
-            (Type::NonNullList(inner1), Type::NonNullList(inner2)) => {
-                Self::same_type(inner1, inner2)
-            }
-            _ => false,
-        }
-    }
-
     pub(in crate::merger) fn is_strict_subtype(
         &self,
         potential_supertype: &Type,
@@ -2207,96 +2199,78 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     where
         T: HasLocations + HasDescription + Display,
     {
-        let mut descriptions: IndexMap<&str, (usize, &str)> = Default::default();
-        for (idx, source) in sources.iter() {
-            let desc = source
-                .as_ref()
-                .and_then(|s| s.description(self.subgraphs[*idx].schema()))
-                .map(|d| d.trim())
-                .unwrap_or("");
-            if desc.is_empty() {
-                continue;
-            }
-            descriptions
-                .entry(desc)
-                .and_modify(|(count, _)| *count += 1)
-                .or_insert_with(|| (1, self.names[*idx].as_str()));
-        }
-        // we don't want to raise a hint if a description is ""
-        descriptions.shift_remove("");
+        let descriptions: IndexMap<&str, usize> = sources
+            .iter()
+            .filter_map(|(idx, source)| {
+                source
+                    .as_ref()
+                    .and_then(|s| s.description(self.subgraphs[*idx].schema()))
+            })
+            // PORT NOTE: JS was keeping empty descriptions but only using them if no other description was provided
+            //  (i.e. we would pick any description over multiple empty descriptions)
+            .filter(|d| !d.is_empty())
+            .fold(Default::default(), |mut acc, desc| {
+                *acc.entry(desc).or_default() += 1;
+                acc
+            });
 
         if !descriptions.is_empty() {
-            let (chosen_description, single) =
-                if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
-                    (Some((*description).to_string()), true)
-                } else {
-                    // Sort deterministically: by count (desc), then description lex (asc = pick first),
-                    // then subgraph name (asc). First element is the chosen one.
-                    let chosen =
-                        descriptions
-                            .iter()
-                            .max_by(|(description_a, a), (description_b, b)| {
-                                b.0.cmp(&a.0)
-                                    .then_with(|| description_a.cmp(description_b))
-                                    .then_with(|| a.1.cmp(b.1))
-                            });
-                    (
-                        chosen.map(|(description, _)| (*description).to_string()),
-                        false,
-                    )
-                };
-            drop(descriptions);
-            if let Some(chosen_description) = chosen_description {
-                dest.set_description(&mut self.merged, Some(Node::new_str(&chosen_description)))?;
-                if !single {
-                    // TODO: Currently showing full descriptions in the hint
-                    // messages, which is probably fine in some cases. However this
-                    // might get less helpful if the description appears to differ
-                    // by a very small amount (a space, a single character typo) and
-                    // even more so the bigger the description is, and we could
-                    // improve the experience here. For instance, we could print the
-                    // supergraph description but then show other descriptions as
-                    // diffs from that (using, say,
-                    // https://www.npmjs.com/package/diff). And we could even switch
-                    // between diff/non-diff modes based on the levenshtein
-                    // distances between the description we found. That said, we
-                    // should decide if we want to bother here: maybe we can leave
-                    // it to studio so handle a better experience (as it can more UX
-                    // wise).
-                    let name = if T::is_schema_definition() {
-                        "The schema definition".to_string()
-                    } else {
-                        format!("Element \"{dest}\"")
-                    };
-                    self.error_reporter.report_mismatch_hint(
-                        HintCode::InconsistentDescription,
-                        format!("{name} has inconsistent descriptions across subgraphs. "),
-                        dest,
-                        sources,
-                        &self.subgraphs,
-                        |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
-                        |elem, idx| {
-                            elem.description(self.subgraphs[idx].schema())
-                                .map(|desc| desc.to_string())
-                        },
-                        |desc, subgraphs| {
-                            format!(
-                                "The supergraph will use description (from {}):\n{}",
-                                subgraphs.unwrap_or_else(|| "undefined".to_string()),
-                                Self::description_string(desc, "  ")
-                            )
-                        },
-                        |desc, subgraphs| {
-                            format!(
-                                "\nIn {}, the description is:\n{}",
-                                subgraphs,
-                                Self::description_string(desc, "  ")
-                            )
-                        },
-                        false,
-                        true,
-                    );
+            if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
+                dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
+            } else {
+                // find the description with the highest count
+                if let Some((description, _)) =
+                    first_max_by_key(descriptions.iter(), |(_, count)| *count)
+                {
+                    dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
                 }
+                // TODO: Currently showing full descriptions in the hint
+                // messages, which is probably fine in some cases. However this
+                // might get less helpful if the description appears to differ
+                // by a very small amount (a space, a single character typo) and
+                // even more so the bigger the description is, and we could
+                // improve the experience here. For instance, we could print the
+                // supergraph description but then show other descriptions as
+                // diffs from that (using, say,
+                // https://www.npmjs.com/package/diff). And we could even switch
+                // between diff/non-diff modes based on the levenshtein
+                // distances between the description we found. That said, we
+                // should decide if we want to bother here: maybe we can leave
+                // it to studio so handle a better experience (as it can more UX
+                // wise).
+                let name = if T::is_schema_definition() {
+                    "The schema definition".to_string()
+                } else {
+                    format!("Element \"{dest}\"")
+                };
+                self.error_reporter.report_mismatch_hint(
+                    HintCode::InconsistentDescription,
+                    format!("{name} has inconsistent descriptions across subgraphs. "),
+                    dest,
+                    sources,
+                    &self.subgraphs,
+                    |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
+                    |elem, idx| {
+                        elem.description(self.subgraphs[idx].schema())
+                            .map(|desc| desc.to_string())
+                    },
+                    |desc, subgraphs| {
+                        format!(
+                            "The supergraph will use description (from {}):\n{}",
+                            subgraphs.unwrap_or_else(|| "undefined".to_string()),
+                            Self::description_string(desc, "  ")
+                        )
+                    },
+                    |desc, subgraphs| {
+                        format!(
+                            "\nIn {}, the description is:\n{}",
+                            subgraphs,
+                            Self::description_string(desc, "  ")
+                        )
+                    },
+                    false,
+                    true,
+                );
             }
         }
         Ok(())
@@ -2342,47 +2316,62 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             let Some(link_import_identity_url_map) = schema.metadata() else {
                 continue;
             };
-            let Ok(Some(link_directive_name)) = self
-                .link_spec_definition
-                .directive_name_in_schema(schema, &DEFAULT_LINK_NAME)
-            else {
-                continue;
-            };
 
             let source: DirectiveTargetPosition = source.clone().try_into()?;
             for directive in source.get_all_applied_directives(schema).iter() {
-                let mut should_include_as_join_directive = false;
-
-                if directive.name == link_directive_name {
-                    if let Ok(link) = Link::from_directive_application(directive) {
-                        should_include_as_join_directive =
-                            self.should_use_join_directive_for_url(&link.url);
-
+                let source_link =
+                    link_import_identity_url_map.source_link_of_directive(&directive.name);
+                // `directive_name_for_join_directive`: The directive name to use in the extracted subgraph
+                // schema. For Connectors (see `should_use_join_directive_for_url`), this is an import name (the
+                // same name imported in the supergraph and the extracted subgraphs). For others, this is
+                // the fully qualified directive name in the subgraph schema (re-assigned below).
+                let directive_name_for_join_directive = if source_link
+                    .as_ref()
+                    .is_some_and(|e| e.link.url.identity == Identity::link_identity())
+                {
+                    if let Ok(link) = Link::from_directive_application(directive, schema.schema())
+                        && self.should_use_join_directive_for_url(&link.url)
+                    {
                         // Persist link when the spec uses @join__directive and the feature
                         // identity is one of the known join-directive feature definitions.
-                        if should_include_as_join_directive
-                            && SPEC_REGISTRY.get_definition(&link.url).is_some()
-                        {
+                        if SPEC_REGISTRY.get_definition(&link.url).is_some() {
                             links_to_persist.push((link.url.clone(), directive.as_ref().clone()));
                         }
+                        Some(directive.name.clone())
+                    } else {
+                        None
                     }
-                } else if let Some(url_for_directive) =
-                    link_import_identity_url_map.source_link_of_directive(&directive.name)
+                // See if directives from this feature URL should use the @join__directive.
+                } else if source_link
+                    .as_ref()
+                    .is_some_and(|e| self.should_use_join_directive_for_url(&e.link.url))
                 {
-                    should_include_as_join_directive =
-                        self.should_use_join_directive_for_url(&url_for_directive.link.url);
-                    if !should_include_as_join_directive
-                        && self
-                            .directives_using_join_directive
-                            .contains(&directive.name)
-                    {
-                        should_include_as_join_directive = true;
+                    Some(directive.name.clone())
+                // See if this directive is one of the directives that should use the @join__directive.
+                } else if self
+                    .directives_using_join_directive
+                    .contains(&directive.name)
+                {
+                    if let Some(source_link) = source_link {
+                        // Compute the fully qualified directive name in the subgraph schema without using
+                        // `import`, so it can be referenced in the extracted subgraph schema via
+                        // `@join__directive`.
+                        Some(Link::directive_name_in_schema_for_core_arguments(
+                            &source_link.link.url,
+                            &source_link.link.url.identity.name,
+                            &[],
+                            &source_link.name_in_spec,
+                        ))
+                    } else {
+                        Some(directive.name.clone())
                     }
-                }
+                } else {
+                    None
+                };
 
-                if should_include_as_join_directive {
+                if let Some(directive_name_for_join_directive) = directive_name_for_join_directive {
                     let existing_joins = joins_by_directive_name
-                        .entry(directive.name.clone())
+                        .entry(directive_name_for_join_directive)
                         .or_default();
                     let existing_graphs_with_these_arguments = existing_joins
                         .entry(directive.arguments.clone())
