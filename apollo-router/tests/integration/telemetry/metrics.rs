@@ -630,9 +630,19 @@ async fn test_request_duration_selector() {
     router.execute_default_query().await;
     router
         .assert_metrics_contains(
-            r#"short_request_count_total{otel_scope_name="apollo/router"} 1"#,
+            r#"request_happened_total{otel_scope_name="apollo/router"} 1"#,
             None,
         )
         .await;
+    router
+        .assert_metrics_contains(
+            r#"reasonably_short_total{otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_does_not_contain(r#"overly_short_total{otel_scope_name="apollo/router"}"#)
+        .await;
+
     router.graceful_shutdown().await;
 }
