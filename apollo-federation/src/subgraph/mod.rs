@@ -74,7 +74,7 @@ impl Subgraph {
             .get_all(&default_link_name);
 
         for directive in link_directives {
-            let link_directive = Link::from_directive_application(directive)?;
+            let link_directive = Link::from_directive_application(directive, &schema)?;
             if link_directive.url.identity == Identity::federation_identity() {
                 if imported_federation_definitions.is_some() {
                     let msg = "invalid graphql schema - multiple @link imports for the federation specification are not supported";

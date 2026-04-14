@@ -3093,8 +3093,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix this if we decide we care, but probably not worth the effort
-    // Port note: Ported from JS test "contextual argument on a directive definition argument"
     fn test_fromcontext_on_directive_definition() {
         let schema_str = r#"
             extend schema
