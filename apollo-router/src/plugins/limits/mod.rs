@@ -1,7 +1,6 @@
 mod layer;
 mod limited;
 
-use std::collections::HashMap;
 use std::error::Error;
 
 use async_trait::async_trait;
@@ -15,6 +14,8 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::Context;
+use crate::configuration::connector::ConnectorConfiguration;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
@@ -36,10 +37,10 @@ pub(crate) struct Config {
     pub(crate) router: RouterLimitsConfig,
 
     /// Limits that apply to outbound subgraph responses.
-    pub(crate) subgraph: SubgraphLimitsConfig,
+    pub(crate) subgraph: SubgraphConfiguration<SubgraphLimits>,
 
     /// Limits that apply to outbound connector responses.
-    pub(crate) connector: ConnectorLimitsConfig,
+    pub(crate) connector: ConnectorConfiguration<ConnectorLimits>,
 }
 
 /// Limits that apply to inbound requests to the router.
@@ -174,27 +175,6 @@ impl Default for RouterLimitsConfig {
     }
 }
 
-/// Limits that apply to outbound subgraph responses.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-#[schemars(rename = "SubgraphLimitsConfig")]
-pub(crate) struct SubgraphLimitsConfig {
-    /// Limits applied to all subgraph responses, unless overridden per subgraph.
-    pub(crate) all: Option<SubgraphLimits>,
-
-    /// Per-subgraph limit overrides.
-    pub(crate) subgraphs: HashMap<String, SubgraphLimits>,
-}
-
-impl SubgraphLimitsConfig {
-    pub(crate) fn get_response_limit(&self, subgraph_name: &str) -> Option<usize> {
-        self.subgraphs
-            .get(subgraph_name)
-            .and_then(|s| s.http_max_response_bytes)
-            .or_else(|| self.all.as_ref()?.http_max_response_bytes)
-    }
-}
-
 /// Per-subgraph response size limits.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -202,33 +182,13 @@ impl SubgraphLimitsConfig {
 pub(crate) struct SubgraphLimits {
     /// Limit the size of incoming subgraph response bodies read from the network,
     /// to protect against running out of memory. Default: no limit.
-    pub(crate) http_max_response_bytes: Option<usize>,
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) http_max_response_bytes: Option<ByteSize>,
 }
 
 /// Extension type placed on the request context to signal the subgraph response size limit.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq)]
 pub(crate) struct SubgraphResponseSizeLimit(pub usize);
-
-/// Limits that apply to outbound connector responses.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-#[schemars(rename = "ConnectorLimitsConfig")]
-pub(crate) struct ConnectorLimitsConfig {
-    /// Limits applied to all connector responses, unless overridden per source.
-    pub(crate) all: Option<ConnectorLimits>,
-
-    /// Per-source limit overrides, keyed by `subgraph_name.source_name`.
-    pub(crate) sources: HashMap<String, ConnectorLimits>,
-}
-
-impl ConnectorLimitsConfig {
-    pub(crate) fn get_response_limit(&self, source_name: &str) -> Option<usize> {
-        self.sources
-            .get(source_name)
-            .and_then(|s| s.http_max_response_bytes)
-            .or_else(|| self.all.as_ref()?.http_max_response_bytes)
-    }
-}
 
 /// Per-connector-source response size limits.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -237,12 +197,47 @@ impl ConnectorLimitsConfig {
 pub(crate) struct ConnectorLimits {
     /// Limit the size of incoming connector response bodies read from the network,
     /// to protect against running out of memory. Default: no limit.
-    pub(crate) http_max_response_bytes: Option<usize>,
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) http_max_response_bytes: Option<ByteSize>,
 }
 
 /// Extension type placed on the request context to signal the connector response size limit.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq)]
 pub(crate) struct ConnectorResponseSizeLimit(pub usize);
+
+impl Config {
+    fn subgraph_response_size_limit(
+        &self,
+        subgraph_name: &str,
+    ) -> Option<SubgraphResponseSizeLimit> {
+        // check for non-null subgraph.http_max_response_bytes or all.http_max_response_bytes
+        let subgraph_limit = self
+            .subgraph
+            .subgraphs
+            .get(subgraph_name)
+            .and_then(|s| s.http_max_response_bytes);
+        let limit = subgraph_limit.or_else(|| self.subgraph.all.http_max_response_bytes)?;
+
+        // convert to usize (needed for limits plugin)
+        Some(SubgraphResponseSizeLimit(limit.as_u64().try_into().ok()?))
+    }
+
+    fn connector_response_size_limit(
+        &self,
+        source_name: &str,
+    ) -> Option<ConnectorResponseSizeLimit> {
+        // check for non-null subgraph.http_max_response_bytes or all.http_max_response_bytes
+        let source_limit = self
+            .connector
+            .sources
+            .get(source_name)
+            .and_then(|s| s.http_max_response_bytes);
+        let limit = source_limit.or_else(|| self.connector.all.http_max_response_bytes)?;
+
+        // convert to usize (needed for limits plugin)
+        Some(ConnectorResponseSizeLimit(limit.as_u64().try_into().ok()?))
+    }
+}
 
 struct LimitsPlugin {
     config: Config,
@@ -280,14 +275,11 @@ impl PluginPrivate for LimitsPlugin {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        let limit = self.config.subgraph.get_response_limit(name);
-        match limit {
+        match self.config.subgraph_response_size_limit(name) {
             None => service,
             Some(limit) => ServiceBuilder::new()
                 .map_request(move |req: SubgraphRequest| {
-                    req.context
-                        .extensions()
-                        .with_lock(|e| e.insert(SubgraphResponseSizeLimit(limit)));
+                    req.context.extensions().with_lock(|e| e.insert(limit));
                     req
                 })
                 .service(service)
@@ -300,14 +292,11 @@ impl PluginPrivate for LimitsPlugin {
         service: connector::request_service::BoxService,
         source_name: String,
     ) -> connector::request_service::BoxService {
-        let limit = self.config.connector.get_response_limit(&source_name);
-        match limit {
+        match self.config.connector_response_size_limit(&source_name) {
             None => service,
             Some(limit) => ServiceBuilder::new()
                 .map_request(move |req: connector::request_service::Request| {
-                    req.context
-                        .extensions()
-                        .with_lock(|e| e.insert(ConnectorResponseSizeLimit(limit)));
+                    req.context.extensions().with_lock(|e| e.insert(limit));
                     req
                 })
                 .service(service)
@@ -371,16 +360,32 @@ impl BodyLimitError {
 register_private_plugin!("apollo", "limits", LimitsPlugin);
 
 #[cfg(test)]
-mod test {
-    use std::collections::HashMap;
+impl From<SubgraphConfiguration<SubgraphLimits>> for Config {
+    fn from(subgraph: SubgraphConfiguration<SubgraphLimits>) -> Self {
+        Self {
+            subgraph,
+            ..Self::default()
+        }
+    }
+}
 
+#[cfg(test)]
+impl From<ConnectorConfiguration<ConnectorLimits>> for Config {
+    fn from(connector: ConnectorConfiguration<ConnectorLimits>) -> Self {
+        Self {
+            connector,
+            ..Self::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
     use http::StatusCode;
     use tower::BoxError;
 
     use crate::Context;
     use crate::plugins::limits::LimitsPlugin;
-    use crate::plugins::limits::SubgraphLimits;
-    use crate::plugins::limits::SubgraphLimitsConfig;
     use crate::plugins::limits::SubgraphResponseSizeLimit;
     use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::test::PluginTestHarness;
@@ -577,128 +582,166 @@ mod test {
         plugin
     }
 
-    // --- SubgraphLimitsConfig::get_response_limit ---
+    /// Check configuration for subgraph_response_limit
+    mod subgraph_response_limit {
+        use bytesize::ByteSize;
 
-    #[test]
-    fn get_response_limit_no_config() {
-        let config = SubgraphLimitsConfig::default();
-        assert_eq!(config.get_response_limit("products"), None);
+        use crate::configuration::subgraph::SubgraphConfiguration;
+        use crate::plugins::limits::Config;
+        use crate::plugins::limits::SubgraphLimits;
+        use crate::plugins::limits::SubgraphResponseSizeLimit;
+
+        #[test]
+        fn get_response_limit_no_config() {
+            let subgraph_config = SubgraphConfiguration::<SubgraphLimits>::default();
+            let config: Config = subgraph_config.into();
+            assert_eq!(config.subgraph_response_size_limit("products"), None);
+        }
+
+        #[test]
+        fn get_response_limit_all() {
+            let mut subgraph_config = SubgraphConfiguration::<SubgraphLimits>::default();
+            subgraph_config.all.http_max_response_bytes = Some(ByteSize::kb(1));
+
+            let config: Config = subgraph_config.into();
+            assert_eq!(
+                config.subgraph_response_size_limit("products"),
+                Some(SubgraphResponseSizeLimit(1000))
+            );
+            assert_eq!(
+                config.subgraph_response_size_limit("reviews"),
+                Some(SubgraphResponseSizeLimit(1000))
+            );
+        }
+
+        #[test]
+        fn get_response_limit_subgraph_specific() {
+            let mut subgraph_config = SubgraphConfiguration::<SubgraphLimits>::default();
+            subgraph_config.subgraphs.insert(
+                "products".to_string(),
+                SubgraphLimits {
+                    http_max_response_bytes: Some(ByteSize::b(512)),
+                },
+            );
+
+            let config: Config = subgraph_config.into();
+            assert_eq!(
+                config.subgraph_response_size_limit("products"),
+                Some(SubgraphResponseSizeLimit(512))
+            );
+            assert_eq!(config.subgraph_response_size_limit("reviews"), None);
+        }
+
+        #[test]
+        fn get_response_limit_subgraph_overrides_all() {
+            let mut subgraph_config = SubgraphConfiguration::<SubgraphLimits>::default();
+            subgraph_config.all.http_max_response_bytes = Some(ByteSize::kib(1));
+            subgraph_config.subgraphs.insert(
+                "products".to_string(),
+                SubgraphLimits {
+                    http_max_response_bytes: Some(ByteSize::b(500)),
+                },
+            );
+            subgraph_config.subgraphs.insert(
+                "reviews".to_string(),
+                SubgraphLimits {
+                    http_max_response_bytes: None,
+                },
+            );
+
+            let config: Config = subgraph_config.into();
+            // per-subgraph override wins
+            assert_eq!(
+                config.subgraph_response_size_limit("products"),
+                Some(SubgraphResponseSizeLimit(500))
+            );
+            // fallback to all despite having an entry in the map
+            assert_eq!(
+                config.subgraph_response_size_limit("reviews"),
+                Some(SubgraphResponseSizeLimit(1024))
+            );
+        }
     }
 
-    #[test]
-    fn get_response_limit_all() {
-        let config = SubgraphLimitsConfig {
-            all: Some(SubgraphLimits {
-                http_max_response_bytes: Some(1024),
-            }),
-            subgraphs: HashMap::new(),
-        };
-        assert_eq!(config.get_response_limit("products"), Some(1024));
-        assert_eq!(config.get_response_limit("reviews"), Some(1024));
-    }
+    /// Check configuration for connector_response_limit
+    mod connector_response_limit {
+        use bytesize::ByteSize;
 
-    #[test]
-    fn get_response_limit_subgraph_specific() {
-        let mut subgraphs = HashMap::new();
-        subgraphs.insert(
-            "products".to_string(),
-            SubgraphLimits {
-                http_max_response_bytes: Some(512),
-            },
-        );
-        let config = SubgraphLimitsConfig {
-            all: None,
-            subgraphs,
-        };
-        assert_eq!(config.get_response_limit("products"), Some(512));
-        assert_eq!(config.get_response_limit("reviews"), None);
-    }
-
-    #[test]
-    fn get_response_limit_subgraph_overrides_all() {
-        let mut subgraphs = HashMap::new();
-        subgraphs.insert(
-            "products".to_string(),
-            SubgraphLimits {
-                http_max_response_bytes: Some(512),
-            },
-        );
-        let config = SubgraphLimitsConfig {
-            all: Some(SubgraphLimits {
-                http_max_response_bytes: Some(1024),
-            }),
-            subgraphs,
-        };
-        // per-subgraph override wins
-        assert_eq!(config.get_response_limit("products"), Some(512));
-        // fallback to all
-        assert_eq!(config.get_response_limit("reviews"), Some(1024));
-    }
-
-    // --- ConnectorLimitsConfig::get_response_limit ---
-
-    #[test]
-    fn get_connector_response_limit_no_config() {
-        use crate::plugins::limits::ConnectorLimitsConfig;
-
-        let config = ConnectorLimitsConfig::default();
-        assert_eq!(config.get_response_limit("products.rest"), None);
-    }
-
-    #[test]
-    fn get_connector_response_limit_all() {
+        use crate::configuration::connector::ConnectorConfiguration;
+        use crate::plugins::limits::Config;
         use crate::plugins::limits::ConnectorLimits;
-        use crate::plugins::limits::ConnectorLimitsConfig;
+        use crate::plugins::limits::ConnectorResponseSizeLimit;
 
-        let config = ConnectorLimitsConfig {
-            all: Some(ConnectorLimits {
-                http_max_response_bytes: Some(2048),
-            }),
-            sources: HashMap::new(),
-        };
-        assert_eq!(config.get_response_limit("products.rest"), Some(2048));
-        assert_eq!(config.get_response_limit("reviews.api"), Some(2048));
-    }
+        #[test]
+        fn get_response_limit_no_config() {
+            let connector_config = ConnectorConfiguration::<ConnectorLimits>::default();
+            let config: Config = connector_config.into();
+            assert_eq!(config.connector_response_size_limit("products.rest"), None);
+        }
 
-    #[test]
-    fn get_connector_response_limit_source_specific() {
-        use crate::plugins::limits::ConnectorLimits;
-        use crate::plugins::limits::ConnectorLimitsConfig;
+        #[test]
+        fn get_response_limit_all() {
+            let mut connector_config = ConnectorConfiguration::<ConnectorLimits>::default();
+            connector_config.all.http_max_response_bytes = Some(ByteSize::kb(1));
 
-        let mut sources = HashMap::new();
-        sources.insert(
-            "products.rest".to_string(),
-            ConnectorLimits {
-                http_max_response_bytes: Some(512),
-            },
-        );
-        let config = ConnectorLimitsConfig { all: None, sources };
-        assert_eq!(config.get_response_limit("products.rest"), Some(512));
-        assert_eq!(config.get_response_limit("reviews.api"), None);
-    }
+            let config: Config = connector_config.into();
+            assert_eq!(
+                config.connector_response_size_limit("products.rest"),
+                Some(ConnectorResponseSizeLimit(1000))
+            );
+            assert_eq!(
+                config.connector_response_size_limit("reviews.api"),
+                Some(ConnectorResponseSizeLimit(1000))
+            );
+        }
 
-    #[test]
-    fn get_connector_response_limit_source_overrides_all() {
-        use crate::plugins::limits::ConnectorLimits;
-        use crate::plugins::limits::ConnectorLimitsConfig;
+        #[test]
+        fn get_response_limit_subgraph_specific() {
+            let mut connector_config = ConnectorConfiguration::<ConnectorLimits>::default();
+            connector_config.sources.insert(
+                "products.rest".to_string(),
+                ConnectorLimits {
+                    http_max_response_bytes: Some(ByteSize::b(512)),
+                },
+            );
 
-        let mut sources = HashMap::new();
-        sources.insert(
-            "products.rest".to_string(),
-            ConnectorLimits {
-                http_max_response_bytes: Some(512),
-            },
-        );
-        let config = ConnectorLimitsConfig {
-            all: Some(ConnectorLimits {
-                http_max_response_bytes: Some(2048),
-            }),
-            sources,
-        };
-        // per-source override wins
-        assert_eq!(config.get_response_limit("products.rest"), Some(512));
-        // fallback to all
-        assert_eq!(config.get_response_limit("reviews.api"), Some(2048));
+            let config: Config = connector_config.into();
+            assert_eq!(
+                config.connector_response_size_limit("products.rest"),
+                Some(ConnectorResponseSizeLimit(512))
+            );
+            assert_eq!(config.connector_response_size_limit("reviews.api"), None);
+        }
+
+        #[test]
+        fn get_response_limit_subgraph_overrides_all() {
+            let mut connector_config = ConnectorConfiguration::<ConnectorLimits>::default();
+            connector_config.all.http_max_response_bytes = Some(ByteSize::kib(1));
+            connector_config.sources.insert(
+                "products.rest".to_string(),
+                ConnectorLimits {
+                    http_max_response_bytes: Some(ByteSize::b(500)),
+                },
+            );
+            connector_config.sources.insert(
+                "reviews.api".to_string(),
+                ConnectorLimits {
+                    http_max_response_bytes: None,
+                },
+            );
+
+            let config: Config = connector_config.into();
+            // per-subgraph override wins
+            assert_eq!(
+                config.connector_response_size_limit("products.rest"),
+                Some(ConnectorResponseSizeLimit(500))
+            );
+            // fallback to all despite having an entry in the map
+            assert_eq!(
+                config.connector_response_size_limit("reviews.api"),
+                Some(ConnectorResponseSizeLimit(1024))
+            );
+        }
     }
 
     // --- LimitsPlugin::connector_request_service ---
@@ -794,7 +837,7 @@ mod test {
         use crate::plugins::limits::ConnectorResponseSizeLimit;
 
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
-            .config("limits:\n  connector:\n    all:\n      http_max_response_bytes: 2048")
+            .config("limits:\n  connector:\n    all:\n      http_max_response_bytes: 2kib")
             .build()
             .await
             .expect("test harness");
@@ -852,7 +895,7 @@ mod test {
     #[tokio::test]
     async fn subgraph_service_sets_limit_on_context() {
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
-            .config("limits:\n  subgraph:\n    all:\n      http_max_response_bytes: 1024")
+            .config("limits:\n  subgraph:\n    all:\n      http_max_response_bytes: 1024b")
             .build()
             .await
             .expect("test harness");
