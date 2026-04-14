@@ -43,6 +43,11 @@ struct ScoringContext<'a> {
     query: &'a ExecutableDocument,
     variables: &'a Object,
     should_estimate_requires: bool,
+    /// When scoring a subgraph operation triggered by an entity fetch (i.e. FetchNode.requires
+    /// is non-empty), this holds the estimated number of representations that will be sent.
+    /// Used as the `instance_count` for the `_entities` root field instead of the configured
+    /// default `list_size`.
+    entity_count_hint: Option<i32>,
 }
 
 fn score_argument(
@@ -232,8 +237,22 @@ impl StaticCostCalculator {
         let instance_count = if !field.ty().is_list() {
             1
         } else if let Some(value) = list_size_from_upstream {
-            // This is a sized field whose length is defined by the `@listSize` directive on the parent field
+            // Sized field: length defined by @listSize on the parent field
             value
+        } else if field.name == "_entities" {
+            if let Some(hint) = ctx.entity_count_hint {
+                // Use cardinality derived from the FlattenNode path in the query plan.
+                // This is more accurate than the static list_size default for entity fetches.
+                tracing::debug!(
+                    "_entities instance_count overridden by FlattenNode path cardinality: {}",
+                    hint
+                );
+                hint
+            } else if let Some(subgraph_list_size) = self.subgraph_list_size(subgraph) {
+                subgraph_list_size as i32
+            } else {
+                self.list_size as i32
+            }
         } else if let Some(expected_size) = effective_expected_size {
             expected_size
         } else if let Some(subgraph_list_size) = self.subgraph_list_size(subgraph) {
@@ -489,7 +508,24 @@ impl StaticCostCalculator {
         match plan_node {
             PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, variables),
             PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, variables),
-            PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node, variables),
+            PlanNode::Flatten(flatten_node) => {
+                // Check if the inner node is directly an entity fetch (non-empty requires).
+                // If so, supply the cardinality derived from the flatten path so that
+                // _entities is scored with the correct instance count.
+                if let PlanNode::Fetch(fetch_node) = flatten_node.node.as_ref() {
+                    if !fetch_node.requires.is_empty() {
+                        let cardinality = self.estimated_path_cardinality(&flatten_node.path);
+                        return self.estimated_cost_of_operation(
+                            &fetch_node.service_name,
+                            &fetch_node.operation,
+                            variables,
+                            Some(cardinality),
+                        );
+                    }
+                }
+                // Non-entity flatten or nested structure: recurse normally.
+                self.score_plan_node(&flatten_node.node, variables)
+            }
             PlanNode::Condition {
                 condition: _,
                 if_clause,
@@ -502,11 +538,13 @@ impl StaticCostCalculator {
                 &fetch_node.service_name,
                 &fetch_node.operation,
                 variables,
+                None,
             ),
             PlanNode::Subscription { primary, rest: _ } => self.estimated_cost_of_operation(
                 &primary.service_name,
                 &primary.operation,
                 variables,
+                None,
             ),
         }
     }
@@ -516,6 +554,7 @@ impl StaticCostCalculator {
         subgraph: &str,
         operation: &SerializableDocument,
         variables: &Object,
+        entity_count_hint: Option<i32>,
     ) -> Result<CostBySubgraph, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
@@ -528,7 +567,8 @@ impl StaticCostCalculator {
         let operation = operation
             .as_parsed()
             .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
-        let cost = self.estimated(operation, schema, variables, false, subgraph)?;
+        let cost =
+            self.estimated(operation, schema, variables, false, subgraph, entity_count_hint)?;
         Ok(CostBySubgraph::new(subgraph, cost))
     }
 
@@ -588,6 +628,7 @@ impl StaticCostCalculator {
         variables: &Object,
         should_estimate_requires: bool,
         subgraph: &str,
+        entity_count_hint: Option<i32>,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         let ctx = ScoringContext {
@@ -595,6 +636,7 @@ impl StaticCostCalculator {
             query,
             variables,
             should_estimate_requires,
+            entity_count_hint,
         };
         if let Some(op) = &query.operations.anonymous {
             cost += self.score_operation(op, &ctx, subgraph)?;
@@ -868,6 +910,7 @@ mod tests {
                 &variables,
                 true,
                 "",
+                None,
             )
             .unwrap()
     }
@@ -899,7 +942,7 @@ mod tests {
         );
 
         calculator
-            .estimated(&query, &calculator.supergraph_schema, &variables, true, "")
+            .estimated(&query, &calculator.supergraph_schema, &variables, true, "", None)
             .unwrap()
     }
 
@@ -1298,6 +1341,7 @@ mod tests {
                 &Default::default(),
                 true,
                 "",
+                None,
             )
             .unwrap();
 
@@ -1310,6 +1354,7 @@ mod tests {
                 &Default::default(),
                 true,
                 "",
+                None,
             )
             .unwrap();
 
