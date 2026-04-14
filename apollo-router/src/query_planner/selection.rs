@@ -914,6 +914,56 @@ mod tests {
         );
     }
 
+    /// When a nullable required field is completely absent from the entity data (not present
+    /// at all, as opposed to present with a null value), `execute_selection_set` should fill
+    /// it in as null and proceed without errors.
+    #[test]
+    fn test_missing_nullable_required_field_proceeds_with_null() {
+        let schema = with_supergraph_boilerplate(
+            "type Query @join__type(graph: TEST) { me: String @join__field(graph: TEST) }
+            type Entity { code: String name: String }",
+        );
+        let schema = Schema::parse(&schema, &Default::default()).unwrap();
+
+        // `name` is completely absent from the response
+        let response = bjson!({
+            "__typename": "Entity",
+            "code": "ABC"
+        });
+
+        let requires = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "Entity",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "__typename",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "code",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "name",
+                    }
+                ],
+            },
+        ]);
+        let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
+
+        let (value, had_errors) = execute_selection_set(&response, &selection, &schema, None);
+
+        // Nullable field `name` is absent — should be filled as null without errors.
+        assert!(!had_errors, "Expected no errors for missing nullable field");
+        assert_eq!(
+            value,
+            bjson!({"__typename": "Entity", "code": "ABC", "name": null}),
+            "Missing nullable field should be filled as null in the representation"
+        );
+    }
+
     fn with_supergraph_boilerplate(content: &str) -> String {
         format!(
             "{}\n{}",
