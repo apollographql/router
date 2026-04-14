@@ -53,12 +53,13 @@ impl ParsedSupergraphCoordinate {
         }
     }
 
+    /// Whether this coordinate is marked `@inaccessible` in the given subgraph (not the supergraph).
     fn subgraph_marks_inaccessible_element(
         &self,
-        _subgraph: &Subgraph<crate::subgraph::typestate::Validated>,
+        subgraph: &Subgraph<crate::subgraph::typestate::Validated>,
         inaccessible: &Name,
-        schema: &FederationSchema,
     ) -> Result<bool, crate::error::FederationError> {
+        let schema = subgraph.schema();
         match self {
             Self::Target(p) => directive_target_is_inaccessible(p, schema, inaccessible),
             Self::DirectiveDefinition(p) => {
@@ -332,7 +333,7 @@ fn referencer_matches_required_inaccessible(
 fn is_relevant_subgraph_referencer(
     code: &ErrorCode,
     referencer: &DirectiveTargetPosition,
-    supergraph: &FederationSchema,
+    referencer_subgraph_schema: &FederationSchema,
     inaccessible_element_type_names: &[String],
     subgraph_has_inaccessible_elements: bool,
 ) -> bool {
@@ -344,11 +345,12 @@ fn is_relevant_subgraph_referencer(
             let Ok(expected) = Name::new(first.as_str()) else {
                 return false;
             };
-            referencer_base_type_name(referencer, supergraph).is_some_and(|ty| ty == expected)
+            referencer_base_type_name(referencer, referencer_subgraph_schema)
+                .is_some_and(|ty| ty == expected)
         }
         ErrorCode::DefaultValueUsesInaccessible | ErrorCode::ImplementedByInaccessible => true,
         ErrorCode::RequiredInaccessible => {
-            referencer_matches_required_inaccessible(referencer, supergraph)
+            referencer_matches_required_inaccessible(referencer, referencer_subgraph_schema)
         }
         ErrorCode::DisallowedInaccessible | ErrorCode::OnlyInaccessibleChildren => {
             subgraph_has_inaccessible_elements
@@ -410,11 +412,9 @@ fn subgraph_locations_for_single_inaccessible_error(
             if !parsed.exists_in(subgraph.schema()) {
                 continue;
             }
-            let Ok(marked) = parsed.subgraph_marks_inaccessible_element(
-                subgraph,
-                &inaccessible_name,
-                supergraph,
-            ) else {
+            let Ok(marked) =
+                parsed.subgraph_marks_inaccessible_element(subgraph, &inaccessible_name)
+            else {
                 continue;
             };
             if marked {
@@ -440,7 +440,7 @@ fn subgraph_locations_for_single_inaccessible_error(
                     if is_relevant_subgraph_referencer(
                         code,
                         target_pos,
-                        supergraph,
+                        subgraph.schema(),
                         &links.elements,
                         subgraph_has_inaccessible[idx],
                     ) {
@@ -477,5 +477,72 @@ fn is_relevant_directive_definition_referencer(
             subgraph_has_inaccessible_elements
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_supergraph_coordinate;
+    use crate::Supergraph;
+    use crate::subgraph::Subgraph;
+
+    fn sample_supergraph() -> Supergraph {
+        let s1 = Subgraph::parse_and_expand(
+            "S1",
+            "http://s1",
+            r#"
+            type Query {
+              t: T
+              f(a: Int): T
+            }
+
+            type T @key(fields: "k") {
+              k: ID
+            }
+            "#,
+        )
+        .unwrap();
+        let s2 = Subgraph::parse_and_expand(
+            "S2",
+            "http://s2",
+            r#"
+            type T @key(fields: "k") {
+              k: ID
+              a: Int
+            }
+            "#,
+        )
+        .unwrap();
+        Supergraph::compose(vec![&s1, &s2]).unwrap()
+    }
+
+    #[test]
+    fn parse_supergraph_coordinate_rejects_empty_or_whitespace() {
+        let sg = sample_supergraph();
+        assert!(parse_supergraph_coordinate(&sg.schema, "").is_none());
+        assert!(parse_supergraph_coordinate(&sg.schema, "   ").is_none());
+    }
+
+    #[test]
+    fn parse_supergraph_coordinate_type_and_field() {
+        let sg = sample_supergraph();
+        assert!(parse_supergraph_coordinate(&sg.schema, "Query.t").is_some());
+        assert!(parse_supergraph_coordinate(&sg.schema, "Query.f").is_some());
+        assert!(parse_supergraph_coordinate(&sg.schema, "T").is_some());
+        assert!(parse_supergraph_coordinate(&sg.schema, "Unknown").is_none());
+    }
+
+    #[test]
+    fn parse_supergraph_coordinate_field_argument() {
+        let sg = sample_supergraph();
+        assert!(parse_supergraph_coordinate(&sg.schema, "Query.f(a:)").is_some());
+        assert!(parse_supergraph_coordinate(&sg.schema, "Query.f(").is_none());
+    }
+
+    #[test]
+    fn parse_supergraph_coordinate_known_directive_definition() {
+        let sg = sample_supergraph();
+        // Present on composed supergraph schemas (federation join spec).
+        assert!(parse_supergraph_coordinate(&sg.schema, "@join__graph").is_some());
     }
 }

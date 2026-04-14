@@ -558,7 +558,8 @@ impl Merger {
                     hints,
                 });
             }
-            match Self::validate_supergraph_schema(self.merged.clone(), &self.subgraphs) {
+            let merged = self.merged;
+            match Self::validate_supergraph_schema(merged, &self.subgraphs) {
                 Ok(supergraph) => Ok(MergeResult {
                     supergraph: Some(supergraph),
                     errors: Vec::default(),
