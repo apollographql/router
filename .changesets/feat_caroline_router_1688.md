@@ -2,9 +2,9 @@
 
 Adds a new `request_duration` selector for the router service that returns the total elapsed time from when the router received the request. The unit is configurable:
 
-- `ms` — duration in milliseconds (integer)
-- `s` — duration in seconds (float)
-- `ns` — duration in nanoseconds (integer)
+- `seconds` (float)
+- `milliseconds` (integer)
+- `nanoseconds` (integer)
 
 The selector can be used as a custom instrument attribute or combined with conditions to filter based on request duration. For example, to count requests that complete in under 10 seconds:
 

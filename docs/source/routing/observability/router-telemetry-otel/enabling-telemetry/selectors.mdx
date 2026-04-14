@@ -52,7 +52,7 @@ The router service is the initial entrypoint for all requests. It is HTTP centri
 | `error`               | No          | `reason`                    | a string value containing error reason when it's a critical error    |
 | `router_overhead`     | No          | `true` \| `false`             | Router processing overhead duration in seconds (excludes subgraph wait time) |
 | `active_subgraph_requests` | No     | `count` \| `bool`            | The number of active subgraph requests (`count`) or whether any are active (`bool`) |
-| `request_duration`    | No          | `ms` \| `s` \| `ns` | Total request duration from when the router received the request |
+| `request_duration`    | No          | `seconds` \| `milliseconds` \| `nanoseconds` | Total request duration from when the router received the request |
 
 ### Supergraph
 
