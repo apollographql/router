@@ -676,13 +676,31 @@ mod tests {
             error.to_string()
         )
     }
-
-    async fn run_trailing_slash_test(path: &str, without_slash: &str) {
+    #[rstest::rstest]
+    #[case::config_does_not_include_slash("/graphql", "/graphql")]
+    #[case::config_does_not_include_slash("/graphql", "/graphql/")]
+    #[case::config_does_not_include_slash("/graphql", "/graphql//")]
+    #[case::config_includes_slash("/graphql/", "/graphql")]
+    #[case::config_includes_slash("/graphql/", "/graphql/")]
+    #[case::config_includes_slash("/graphql/", "/graphql//")]
+    #[case::config_includes_multiple_slashes("/graphql///", "/graphql")]
+    #[case::config_includes_multiple_slashes("/graphql///", "/graphql/")]
+    #[case::config_includes_multiple_slashes("/graphql///", "/graphql//")]
+    #[case::root("/", "")]
+    #[case::root("/", "/")]
+    #[tokio::test]
+    async fn it_supports_paths_regardless_of_trailing_slashes(
+        #[case] config_path: &str,
+        #[case] query_path: &str,
+    ) -> Result<(), BoxError> {
         let configuration = Arc::new(
             Configuration::fake_builder()
-                .supergraph(Supergraph::fake_builder().path(path.to_string()).build())
-                .build()
-                .unwrap(),
+                .supergraph(
+                    Supergraph::fake_builder()
+                        .path(config_path.to_string())
+                        .build(),
+                )
+                .build()?,
         );
 
         let router_service = router::service::from_supergraph_mock_callback_and_configuration(
@@ -704,83 +722,27 @@ mod tests {
             HeaderValue::from_static(APPLICATION_JSON.essence_str()),
         );
 
-        let (server, _) = init_with_config(router_service, configuration, MultiMap::new())
-            .await
-            .unwrap();
+        let (server, _) = init_with_config(router_service, configuration, MultiMap::new()).await?;
 
         let client = reqwest::Client::builder()
             .default_headers(default_headers)
-            .build()
-            .unwrap();
+            .build()?;
 
-        let url_without_slash = format!(
-            "{}{}",
+        let query_url = format!(
+            "{}{query_path}",
             server.graphql_listen_address().as_ref().unwrap(),
-            without_slash
         );
 
-        let response_without_slash = client
-            .post(&url_without_slash)
+        let response = client
+            .post(&query_url)
             .body(json!({ "query": "query { __typename }" }).to_string())
             .send()
-            .await
-            .unwrap();
+            .await?;
 
-        assert_eq!(response_without_slash.status(), reqwest::StatusCode::OK);
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
 
-        let url_with_slash = format!(
-            "{}{}/",
-            server.graphql_listen_address().as_ref().unwrap(),
-            without_slash
-        );
+        server.shutdown().await?;
 
-        let response_with_slash = client
-            .post(&url_with_slash)
-            .body(json!({ "query": "query { __typename }" }).to_string())
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(response_with_slash.status(), reqwest::StatusCode::OK);
-
-        let url_with_multuple_slash = format!(
-            "{}{}///",
-            server.graphql_listen_address().as_ref().unwrap(),
-            without_slash
-        );
-
-        let response_with_multiple_slash = client
-            .post(&url_with_multuple_slash)
-            .body(json!({ "query": "query { __typename }" }).to_string())
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(
-            response_with_multiple_slash.status(),
-            reqwest::StatusCode::OK
-        );
-
-        server.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn trailing_slash_normalization_graphql_path_without_slash() {
-        run_trailing_slash_test("/graphql", "/graphql").await;
-    }
-
-    #[tokio::test]
-    async fn trailing_slash_normalization_graphql_path_with_trailing_slash() {
-        run_trailing_slash_test("/graphql/", "/graphql").await;
-    }
-
-    #[tokio::test]
-    async fn trailing_slash_normalization_graphql_path_with_multiple_trailing_slash() {
-        run_trailing_slash_test("/graphql///", "/graphql").await;
-    }
-
-    #[tokio::test]
-    async fn trailing_slash_normalization_root_path() {
-        run_trailing_slash_test("/", "").await;
+        Ok(())
     }
 }
