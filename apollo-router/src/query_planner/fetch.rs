@@ -169,6 +169,14 @@ pub(crate) struct Variables {
 }
 
 impl Variables {
+    /// Build variables for a subgraph fetch from the current response data.
+    ///
+    /// Returns a pair of `(Option<Variables>, Vec<Path>)`:
+    /// - The first element is `Some(variables)` when entity representations were successfully
+    ///   built, or `None` when there are no entities to fetch (either no matching data or all
+    ///   entities were skipped).
+    /// - The second element is a list of paths for entities whose required fields were
+    ///   unsatisfied (and thus skipped). The caller should generate errors for these paths.
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
@@ -180,7 +188,7 @@ impl Variables {
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
-    ) -> Option<Variables> {
+    ) -> (Option<Variables>, Vec<Path>) {
         let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
@@ -192,6 +200,7 @@ impl Variables {
                     .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
             }));
 
+            let mut unsatisfied_paths: Vec<Path> = Vec::new();
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::default();
             data.select_values_and_paths(schema, current_dir, |path, value| {
@@ -200,24 +209,30 @@ impl Variables {
                     context.execute_on_path(path);
                 }
 
-                let mut value = execute_selection_set(value, requires, schema, None);
-                if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
-                    rewrites::apply_rewrites(schema, &mut value, input_rewrites);
-                    match values.get_index_of(&value) {
-                        Some(index) => {
-                            inverted_paths[index].push(path.clone());
-                        }
-                        None => {
-                            inverted_paths.push(vec![path.clone()]);
-                            values.insert(value);
-                            debug_assert!(inverted_paths.len() == values.len());
+                let (mut value, had_errors) = execute_selection_set(value, requires, schema, None);
+                if had_errors {
+                    // Execution error means an unsatisfied condition => skip the entity and record the path.
+                    unsatisfied_paths.push(path.clone());
+                } else {
+                    let value_ok = value.as_object().map(|o| !o.is_empty()).unwrap_or(false);
+                    if value_ok {
+                        rewrites::apply_rewrites(schema, &mut value, input_rewrites);
+                        match values.get_index_of(&value) {
+                            Some(index) => {
+                                inverted_paths[index].push(path.clone());
+                            }
+                            None => {
+                                inverted_paths.push(vec![path.clone()]);
+                                values.insert(value);
+                                debug_assert!(inverted_paths.len() == values.len());
+                            }
                         }
                     }
                 }
             });
 
             if values.is_empty() {
-                return None;
+                return (None, unsatisfied_paths);
             }
 
             let representations = Value::Array(Vec::from_iter(values));
@@ -227,11 +242,14 @@ impl Variables {
             };
 
             variables.insert("representations", representations);
-            Some(Variables {
-                variables,
-                inverted_paths,
-                contextual_arguments,
-            })
+            (
+                Some(Variables {
+                    variables,
+                    inverted_paths,
+                    contextual_arguments,
+                }),
+                unsatisfied_paths,
+            )
         } else {
             // with nested operations (Query or Mutation has an operation returning a Query or Mutation),
             // when the first fetch fails, the query plan will still execute up until the second fetch,
@@ -244,21 +262,24 @@ impl Variables {
                     .map(|value| value.is_null())
                     .unwrap_or(true)
             {
-                return None;
+                return (None, Vec::new());
             }
 
-            Some(Variables {
-                variables: variable_usages
-                    .iter()
-                    .filter_map(|key| {
-                        body.variables
-                            .get_key_value(key.as_ref())
-                            .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-                    })
-                    .collect::<Object>(),
-                inverted_paths: Vec::new(),
-                contextual_arguments: None,
-            })
+            (
+                Some(Variables {
+                    variables: variable_usages
+                        .iter()
+                        .filter_map(|key| {
+                            body.variables
+                                .get_key_value(key.as_ref())
+                                .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
+                        })
+                        .collect::<Object>(),
+                    inverted_paths: Vec::new(),
+                    contextual_arguments: None,
+                }),
+                Vec::new(),
+            )
         }
     }
 }

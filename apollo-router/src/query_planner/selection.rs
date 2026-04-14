@@ -11,11 +11,35 @@ use crate::json_ext::ValueExt;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
+/// Executes a selection set against the input data, extracting fields specified by the selections.
+/// Returns `(value, had_errors)` where `had_errors` is true if a non-nullable field was missing
+/// and an error null was evaluated for it.
+/// Note: Unlike the GraphQL spec execution, this function does not bubble up error nulls to the
+///       nearest nullable parent, but instead it indicates the presence of such errors via the
+///       `had_errors` flag.
 pub(crate) fn execute_selection_set<'a>(
     input_content: &'a Value,
     selections: &[Selection],
     schema: &Schema,
+    current_type: Option<&'a str>,
+) -> (Value, bool) {
+    let mut had_errors = false;
+    let value = execute_selection_set_inner(
+        input_content,
+        selections,
+        schema,
+        current_type,
+        &mut had_errors,
+    );
+    (value, had_errors)
+}
+
+fn execute_selection_set_inner<'a>(
+    input_content: &'a Value,
+    selections: &[Selection],
+    schema: &Schema,
     mut current_type: Option<&'a str>,
+    had_errors: &mut bool,
 ) -> Value {
     let content = match input_content.as_object() {
         Some(o) => o,
@@ -76,6 +100,7 @@ pub(crate) fn execute_selection_set<'a>(
                         {
                             output.insert(ByteString::from(selection_name.to_owned()), Value::Null);
                         } else {
+                            *had_errors = true;
                             return Value::Null;
                         }
                     }
@@ -85,13 +110,14 @@ pub(crate) fn execute_selection_set<'a>(
                                 .iter()
                                 .map(|element| {
                                     if !selections.is_empty() {
-                                        execute_selection_set(
+                                        execute_selection_set_inner(
                                             element,
                                             selections,
                                             schema,
                                             field_type
                                                 .as_ref()
                                                 .map(|ty| ty.inner_named_type().as_str()),
+                                            had_errors,
                                         )
                                     } else {
                                         element.clone()
@@ -102,11 +128,12 @@ pub(crate) fn execute_selection_set<'a>(
                         } else if !selections.is_empty() {
                             output.insert(
                                 key.clone(),
-                                execute_selection_set(
+                                execute_selection_set_inner(
                                     value,
                                     selections,
                                     schema,
                                     field_type.as_ref().map(|ty| ty.inner_named_type().as_str()),
+                                    had_errors,
                                 ),
                             );
                         } else {
@@ -121,17 +148,23 @@ pub(crate) fn execute_selection_set<'a>(
             }) => match type_condition {
                 None => continue,
                 Some(condition) => {
-                    if type_condition_matches(schema, current_type, condition)
-                        && let Value::Object(selected) =
-                            execute_selection_set(input_content, selections, schema, current_type)
-                    {
-                        for (key, value) in selected.into_iter() {
-                            match output.entry(key) {
-                                Entry::Vacant(e) => {
-                                    e.insert(value);
-                                }
-                                Entry::Occupied(e) => {
-                                    e.into_mut().type_aware_deep_merge(value, schema);
+                    if type_condition_matches(schema, current_type, condition) {
+                        let inner = execute_selection_set_inner(
+                            input_content,
+                            selections,
+                            schema,
+                            current_type,
+                            had_errors,
+                        );
+                        if let Value::Object(selected) = inner {
+                            for (key, value) in selected.into_iter() {
+                                match output.entry(key) {
+                                    Entry::Vacant(e) => {
+                                        e.insert(value);
+                                    }
+                                    Entry::Occupied(e) => {
+                                        e.into_mut().type_aware_deep_merge(value, schema);
+                                    }
                                 }
                             }
                         }
@@ -152,7 +185,7 @@ pub(crate) fn execute_selection_set<'a>(
 /// <https://spec.graphql.org/October2021/#DoesFragmentTypeApply()>
 /// <https://spec.graphql.org/October2021/#CompleteValue()>
 /// <https://spec.graphql.org/October2021/#ResolveAbstractType()>
-fn type_condition_matches(
+pub(crate) fn type_condition_matches(
     schema: &Schema,
     current_type: Option<&str>,
     type_condition: &str,
@@ -240,7 +273,7 @@ mod tests {
         Ok(Value::Array(
             values
                 .into_iter()
-                .map(|value| execute_selection_set(value, selections, schema, None))
+                .map(|value| execute_selection_set(value, selections, schema, None).0)
                 .collect::<Vec<_>>(),
         ))
     }
@@ -388,7 +421,7 @@ mod tests {
         ]);
         let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
 
-        let value = execute_selection_set(&response, &selection, &schema, None);
+        let (value, _had_errors) = execute_selection_set(&response, &selection, &schema, None);
         println!(
             "response\n{}\nand selection\n{:?}\n returns:\n{}",
             serde_json::to_string_pretty(&response).unwrap(),
@@ -653,7 +686,7 @@ mod tests {
 
         let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
 
-        let value = execute_selection_set(&response, &selection, &schema, None);
+        let (value, _had_errors) = execute_selection_set(&response, &selection, &schema, None);
 
         assert_eq!(
             value,
@@ -678,6 +711,205 @@ mod tests {
                   "id": 1780384,
                 },
                 "id": 1780384,
+            })
+        );
+    }
+
+    /// Test for the nested non-null field missing bug.
+    ///
+    /// When `@requires(fields: "data { a b }")` and `b` is non-null but missing,
+    /// `execute_selection_set` should return `Value::Null` so the entity is skipped.
+    /// Currently it returns `{ "data": null }` (a non-empty object), which causes the
+    /// entity to NOT be skipped in `Variables::new` (fetch.rs), leading to an invalid
+    /// representation being sent to the subgraph.
+    #[test]
+    fn test_nested_non_null_missing_field_should_nullify_parent() {
+        let schema = with_supergraph_boilerplate(
+            "type Query @join__type(graph: TEST) { me: String @join__field(graph: TEST) }
+            type Entity { data: NestedData! }
+            type NestedData { a: String! b: String! }",
+        );
+        let schema = Schema::parse(&schema, &Default::default()).unwrap();
+
+        // Simulates @requires(fields: "data { a b }") where `b` is missing
+        let response = bjson!({
+            "__typename": "Entity",
+            "data": {
+                "a": "value_a"
+                // "b" is missing — it's non-null (String!), so this should fail
+            }
+        });
+
+        // Selection: ... on Entity { __typename data { a b } }
+        let requires = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "Entity",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "__typename",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "data",
+                        "selections": [
+                            {
+                                "kind": "Field",
+                                "name": "a",
+                            },
+                            {
+                                "kind": "Field",
+                                "name": "b",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]);
+        let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
+
+        let (value, had_errors) = execute_selection_set(&response, &selection, &schema, None);
+
+        // `execute_selection_set` returns `{ "__typename": "Entity", "data": null }` because
+        // null-bubbling stops at the `data` field level. The `had_errors` flag is what
+        // fetch.rs uses to skip this entity from the downstream fetch.
+        assert!(
+            had_errors,
+            "Expected had_errors=true for missing non-null field"
+        );
+        assert_eq!(
+            value,
+            bjson!({"__typename": "Entity", "data": null}),
+            "Expected data to be nullified due to missing non-null field `b`"
+        );
+    }
+
+    /// Same as above but with a nullable parent field.
+    /// Even when the parent field (`data`) is nullable, if a nested non-null field is
+    /// missing, the representation is incomplete and should not be sent.
+    #[test]
+    fn test_nested_non_null_missing_field_nullable_parent_should_nullify() {
+        let schema = with_supergraph_boilerplate(
+            "type Query @join__type(graph: TEST) { me: String @join__field(graph: TEST) }
+            type Entity { data: NestedData }
+            type NestedData { a: String! b: String! }",
+        );
+        let schema = Schema::parse(&schema, &Default::default()).unwrap();
+
+        // `data` is present (non-null object), but inner field `b` is missing
+        let response = bjson!({
+            "__typename": "Entity",
+            "data": {
+                "a": "value_a"
+            }
+        });
+
+        let requires = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "Entity",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "__typename",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "data",
+                        "selections": [
+                            {
+                                "kind": "Field",
+                                "name": "a",
+                            },
+                            {
+                                "kind": "Field",
+                                "name": "b",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]);
+        let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
+
+        let (value, had_errors) = execute_selection_set(&response, &selection, &schema, None);
+
+        // `execute_selection_set` returns `{ "__typename": "Entity", "data": null }` because
+        // null-bubbling nullifies the `data` field. The `had_errors` flag is what fetch.rs
+        // uses to skip this entity from the downstream fetch.
+        assert!(
+            had_errors,
+            "Expected had_errors=true for missing non-null field"
+        );
+        assert_eq!(
+            value,
+            bjson!({"__typename": "Entity", "data": null}),
+            "Expected data to be nullified due to missing non-null field `b`"
+        );
+    }
+
+    /// Verify that when all nested fields are present, the selection works correctly.
+    #[test]
+    fn test_nested_fields_all_present() {
+        let schema = with_supergraph_boilerplate(
+            "type Query @join__type(graph: TEST) { me: String @join__field(graph: TEST) }
+            type Entity { data: NestedData! }
+            type NestedData { a: String! b: String! }",
+        );
+        let schema = Schema::parse(&schema, &Default::default()).unwrap();
+
+        let response = bjson!({
+            "__typename": "Entity",
+            "data": {
+                "a": "value_a",
+                "b": "value_b"
+            }
+        });
+
+        let requires = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "Entity",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "__typename",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "data",
+                        "selections": [
+                            {
+                                "kind": "Field",
+                                "name": "a",
+                            },
+                            {
+                                "kind": "Field",
+                                "name": "b",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]);
+        let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
+
+        let (value, had_errors) = execute_selection_set(&response, &selection, &schema, None);
+
+        // All fields present — should return the full selection
+        assert!(
+            !had_errors,
+            "Expected no errors when all fields are present"
+        );
+        assert_eq!(
+            value,
+            bjson!({
+                "__typename": "Entity",
+                "data": {
+                    "a": "value_a",
+                    "b": "value_b"
+                }
             })
         );
     }

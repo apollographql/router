@@ -4,12 +4,28 @@ expression: "serde_json::to_value(&response).unwrap()"
 ---
 {
   "data": {
-    "book": {
-      "__typename": "Book",
-      "id": "1",
-      "author": {
-        "__typename": "Author"
+    "book": null
+  },
+  "errors": [
+    {
+      "message": "Could not fetch field",
+      "path": [
+        "book",
+        "id"
+      ],
+      "extensions": {
+        "code": "UNSATISFIED_FETCH_CONDITION"
       }
     }
+  ],
+  "extensions": {
+    "valueCompletion": [
+      {
+        "message": "Null value found for non-nullable type ID",
+        "path": [
+          "book"
+        ]
+      }
+    ]
   }
 }

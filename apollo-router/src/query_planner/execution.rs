@@ -4,6 +4,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use futures::future::join_all;
 use futures::prelude::*;
+use indexmap::IndexSet;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
@@ -14,6 +15,7 @@ use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
 use super::log;
+use super::selection::type_condition_matches;
 use super::subscription::SubscriptionHandle;
 use crate::Context;
 use crate::axum_factory::CanceledRequest;
@@ -46,8 +48,12 @@ use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::SubscriptionRequest;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
+use crate::spec::Fragment;
+use crate::spec::Fragments;
 use crate::spec::Query;
 use crate::spec::Schema;
+use crate::spec::Selection;
+use crate::spec::TYPENAME;
 
 impl QueryPlan {
     #[allow(clippy::too_many_arguments)]
@@ -228,7 +234,9 @@ impl PlanNode {
                                 .build(),
                         ];
                     } else {
-                        match Variables::new(
+                        // Note: subscriptions currently pass empty requires (&[]), so
+                        // _unsatisfied_paths will always be empty.
+                        let (opt_variables, _unsatisfied_paths) = Variables::new(
                             &[],
                             &subscription_node.variable_usages,
                             parent_value,
@@ -237,7 +245,8 @@ impl PlanNode {
                             parameters.schema,
                             &subscription_node.input_rewrites,
                             &None,
-                        ) {
+                        );
+                        match opt_variables {
                             Some(variables) => {
                                 let service = parameters.service_factory.create();
                                 let request = fetch::Request::Subscription(
@@ -283,7 +292,7 @@ impl PlanNode {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
-                        match Variables::new(
+                        let (opt_variables, unsatisfied_paths) = Variables::new(
                             &fetch_node.requires,
                             &fetch_node.variable_usages,
                             parent_value,
@@ -292,7 +301,19 @@ impl PlanNode {
                             parameters.schema.as_ref(),
                             &fetch_node.input_rewrites,
                             &fetch_node.context_rewrites,
-                        ) {
+                        );
+
+                        // Generate errors for any entities whose required fields were missing.
+                        let mut skipped_errors = Vec::new();
+                        for unsatisfied_path in &unsatisfied_paths {
+                            skipped_errors.extend(errors_for_skipped_fetch(
+                                parameters,
+                                unsatisfied_path,
+                                parent_value,
+                            ));
+                        }
+
+                        match opt_variables {
                             Some(variables) => {
                                 let paths = variables.inverted_paths.clone();
                                 let service = parameters.service_factory.create();
@@ -339,6 +360,7 @@ impl PlanNode {
 
                                     errors.push(err);
                                 }
+                                errors.extend(skipped_errors);
 
                                 FetchNode::deferred_fetches(
                                     current_dir,
@@ -350,7 +372,7 @@ impl PlanNode {
                             }
                             None => {
                                 value = Value::Object(Object::default());
-                                errors = Vec::new();
+                                errors = skipped_errors;
                             }
                         };
                     }
@@ -654,6 +676,333 @@ impl DeferredNode {
                 }
                 drop(tx);
             };
+        }
+    }
+}
+
+/// Generate errors for fields that could not be fetched because the entity
+/// fetch was skipped (a non-nullable `@requires` input field was missing).
+///
+/// Uses the supergraph query's selection set to find which fields are expected
+/// at `current_dir`, then checks which of those are absent from `parent_value`.
+/// Each missing field gets an error with its path.
+/// Navigate a JSON value by following key segments in a path, returning
+/// the nested value (or `Value::Null` if any segment is missing or
+/// non-object).
+fn errors_for_skipped_fetch(
+    parameters: &ExecutionParameters<'_>,
+    current_dir: &Path,
+    parent_value: &Value,
+) -> Vec<Error> {
+    // Navigate parent_value to the object at current_dir
+    let entity_data = get_value_at_path(parent_value, current_dir);
+
+    let variables = &parameters.supergraph_request.body().variables;
+    let expected_fields = collect_field_names_at_path(
+        &parameters.query.operation.selection_set,
+        &current_dir.0,
+        parent_value,
+        parameters.schema,
+        variables,
+        &parameters.query.fragments,
+    );
+
+    expected_fields
+        .into_iter()
+        .filter(|field_name| {
+            // Only generate errors for fields NOT already present in parent_value
+            match entity_data {
+                Value::Object(obj) => !obj.contains_key(*field_name),
+                _ => true,
+            }
+        })
+        .map(|field_name| {
+            let mut path = current_dir.clone();
+            path.push(PathElement::Key(field_name.to_string(), None));
+            Error::builder()
+                .message("Could not fetch field")
+                .path(path)
+                .extension_code("UNSATISFIED_FETCH_CONDITION")
+                .build()
+        })
+        .collect()
+}
+
+fn get_value_at_path<'a>(value: &'a Value, path: &Path) -> &'a Value {
+    let mut current = value;
+    for segment in &path.0 {
+        match segment {
+            PathElement::Key(k, _) => match current {
+                Value::Object(obj) => {
+                    current = match obj.get(k.as_str()) {
+                        Some(v) => v,
+                        None => &Value::Null,
+                    };
+                }
+                _ => {
+                    return &Value::Null;
+                }
+            },
+            PathElement::Index(i) => match current {
+                Value::Array(arr) => {
+                    current = match arr.get(*i) {
+                        Some(v) => v,
+                        None => &Value::Null,
+                    };
+                }
+                _ => {
+                    return &Value::Null;
+                }
+            },
+            _ => {
+                return &Value::Null;
+            }
+        }
+    }
+    current
+}
+
+/// Extract `__typename` from a JSON value, returning `None` if not present.
+fn typename_of(value: &Value) -> Option<&str> {
+    match value {
+        Value::Object(obj) => obj.get(TYPENAME).and_then(|v| v.as_str()),
+        _ => None,
+    }
+}
+
+/// Collect field names from a query selection set at the given path, handling inline fragments,
+/// named fragment spreads, and @skip/@include conditions.
+///
+/// When `remaining_dir` is non-empty, navigates through selections (including fragments) to reach
+/// the target depth. Once there, collects unique field names (excluding `__typename`), recursing
+/// into fragments whose `type_condition` matches the runtime type at each level (read from
+/// `current_value`'s `__typename`).
+fn collect_field_names_at_path<'sel>(
+    selection_set: &'sel [Selection],
+    remaining_dir: &[PathElement],
+    current_value: &Value,
+    schema: &Schema,
+    variables: &Object,
+    fragments: &'sel Fragments,
+) -> IndexSet<&'sel str> {
+    let current_type = typename_of(current_value);
+    if let Some((segment, rest)) = remaining_dir.split_first() {
+        match segment {
+            PathElement::Key(k, _) => {
+                let key = k.as_str();
+                // Look up the child value for the next navigation level
+                let child_value = match current_value {
+                    Value::Object(obj) => obj.get(key).unwrap_or(&Value::Null),
+                    _ => &Value::Null,
+                };
+                let mut field_names = IndexSet::new();
+                collect_field_names_at_path_inner(
+                    selection_set,
+                    key,
+                    rest,
+                    child_value,
+                    current_type,
+                    schema,
+                    variables,
+                    fragments,
+                    &mut field_names,
+                );
+                field_names
+            }
+            PathElement::Index(i) => {
+                // Array index doesn't correspond to a selection set field — navigate
+                // into the array element value and continue with the same selection set.
+                let child_value = match current_value {
+                    Value::Array(arr) => arr.get(*i).unwrap_or(&Value::Null),
+                    _ => &Value::Null,
+                };
+                collect_field_names_at_path(
+                    selection_set,
+                    rest,
+                    child_value,
+                    schema,
+                    variables,
+                    fragments,
+                )
+            }
+            _ => IndexSet::default(),
+        }
+    } else {
+        let mut field_names = IndexSet::new();
+        collect_fields_from_selections(
+            selection_set,
+            current_type,
+            schema,
+            variables,
+            fragments,
+            &mut field_names,
+        );
+        field_names
+    }
+}
+
+/// Navigate into a selection set looking for fields matching `key`, digging into inline fragments
+/// and named fragment spreads. `child_value` is the JSON value at the child level. `current_type`
+/// is the runtime type at this level for fragment type-condition checks. Collects field names
+/// from all matching fields across all matching fragments (does not short-circuit on the first
+/// match, since multiple fragments may contain the same key and contribute different sub-fields).
+#[allow(clippy::too_many_arguments)]
+fn collect_field_names_at_path_inner<'sel>(
+    selection_set: &'sel [Selection],
+    key: &str,
+    remaining_dir: &[PathElement],
+    child_value: &Value,
+    current_type: Option<&str>,
+    schema: &Schema,
+    variables: &Object,
+    fragments: &'sel Fragments,
+    field_names: &mut IndexSet<&'sel str>,
+) {
+    for sel in selection_set {
+        match sel {
+            Selection::Field {
+                name,
+                alias,
+                selection_set: Some(inner),
+                include_skip,
+                ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                let field_name = alias.as_ref().unwrap_or(name);
+                if field_name.as_str() == key {
+                    field_names.extend(collect_field_names_at_path(
+                        inner,
+                        remaining_dir,
+                        child_value,
+                        schema,
+                        variables,
+                        fragments,
+                    ));
+                }
+            }
+            Selection::InlineFragment {
+                type_condition,
+                selection_set,
+                include_skip,
+                ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                if type_condition_matches(schema, current_type, type_condition) {
+                    collect_field_names_at_path_inner(
+                        selection_set,
+                        key,
+                        remaining_dir,
+                        child_value,
+                        current_type,
+                        schema,
+                        variables,
+                        fragments,
+                        field_names,
+                    );
+                }
+            }
+            Selection::FragmentSpread {
+                name, include_skip, ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                if let Some(Fragment {
+                    type_condition,
+                    selection_set,
+                }) = fragments.get(name)
+                    && type_condition_matches(schema, current_type, type_condition)
+                {
+                    collect_field_names_at_path_inner(
+                        selection_set,
+                        key,
+                        remaining_dir,
+                        child_value,
+                        current_type,
+                        schema,
+                        variables,
+                        fragments,
+                        field_names,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Recursively collect field names from a selection set, expanding inline fragments and named
+/// fragment spreads whose type_condition matches `entity_type`.
+fn collect_fields_from_selections<'sel>(
+    selection_set: &'sel [Selection],
+    entity_type: Option<&str>,
+    schema: &Schema,
+    variables: &Object,
+    fragments: &'sel Fragments,
+    field_names: &mut IndexSet<&'sel str>,
+) {
+    for sel in selection_set {
+        match sel {
+            Selection::Field {
+                name,
+                alias,
+                include_skip,
+                ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                if name.as_str() == TYPENAME {
+                    continue;
+                }
+                field_names.insert(alias.as_ref().unwrap_or(name).as_str());
+            }
+            Selection::InlineFragment {
+                type_condition,
+                selection_set,
+                include_skip,
+                ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                if type_condition_matches(schema, entity_type, type_condition) {
+                    collect_fields_from_selections(
+                        selection_set,
+                        entity_type,
+                        schema,
+                        variables,
+                        fragments,
+                        field_names,
+                    );
+                }
+            }
+            Selection::FragmentSpread {
+                name, include_skip, ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                if let Some(Fragment {
+                    type_condition,
+                    selection_set,
+                }) = fragments.get(name)
+                    && type_condition_matches(schema, entity_type, type_condition)
+                {
+                    collect_fields_from_selections(
+                        selection_set,
+                        entity_type,
+                        schema,
+                        variables,
+                        fragments,
+                        field_names,
+                    );
+                }
+            }
         }
     }
 }
