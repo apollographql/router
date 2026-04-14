@@ -2215,6 +2215,30 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorConfiguration2": {
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorLimits"
+            }
+          ],
+          "default": {
+            "http_max_response_size": null
+          },
+          "description": "Options applying to all sources"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ConnectorLimits"
+          },
+          "default": {},
+          "description": "Map of subgraph_name.connector_source_name to configuration",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "ConnectorHeadersConfiguration": {
       "additionalProperties": false,
       "properties": {
@@ -2243,42 +2267,13 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Per-connector-source response size limits.",
       "properties": {
-        "http_max_response_bytes": {
+        "http_max_response_size": {
           "default": null,
           "description": "Limit the size of incoming connector response bodies read from the network,\nto protect against running out of memory. Default: no limit.",
-          "format": "uint",
-          "minimum": 0,
           "type": [
-            "integer",
+            "string",
             "null"
           ]
-        }
-      },
-      "type": "object"
-    },
-    "ConnectorLimitsConfig": {
-      "additionalProperties": false,
-      "description": "Limits that apply to outbound connector responses.",
-      "properties": {
-        "all": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ConnectorLimits"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Limits applied to all connector responses, unless overridden per source."
-        },
-        "sources": {
-          "additionalProperties": {
-            "$ref": "#/definitions/ConnectorLimits"
-          },
-          "default": {},
-          "description": "Per-source limit overrides, keyed by `subgraph_name.source_name`.",
-          "type": "object"
         }
       },
       "type": "object"
@@ -6790,11 +6785,13 @@ expression: "&schema"
         "connector": {
           "allOf": [
             {
-              "$ref": "#/definitions/ConnectorLimitsConfig"
+              "$ref": "#/definitions/ConnectorConfiguration2"
             }
           ],
           "default": {
-            "all": null,
+            "all": {
+              "http_max_response_size": null
+            },
             "sources": {}
           },
           "description": "Limits that apply to outbound connector responses."
@@ -6824,11 +6821,13 @@ expression: "&schema"
         "subgraph": {
           "allOf": [
             {
-              "$ref": "#/definitions/SubgraphLimitsConfig"
+              "$ref": "#/definitions/SubgraphSubgraphLimitsConfiguration"
             }
           ],
           "default": {
-            "all": null,
+            "all": {
+              "http_max_response_size": null
+            },
             "subgraphs": {}
           },
           "description": "Limits that apply to outbound subgraph responses."
@@ -10110,42 +10109,13 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Per-subgraph response size limits.",
       "properties": {
-        "http_max_response_bytes": {
+        "http_max_response_size": {
           "default": null,
           "description": "Limit the size of incoming subgraph response bodies read from the network,\nto protect against running out of memory. Default: no limit.",
-          "format": "uint",
-          "minimum": 0,
           "type": [
-            "integer",
+            "string",
             "null"
           ]
-        }
-      },
-      "type": "object"
-    },
-    "SubgraphLimitsConfig": {
-      "additionalProperties": false,
-      "description": "Limits that apply to outbound subgraph responses.",
-      "properties": {
-        "all": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SubgraphLimits"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Limits applied to all subgraph responses, unless overridden per subgraph."
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SubgraphLimits"
-          },
-          "default": {},
-          "description": "Per-subgraph limit overrides.",
-          "type": "object"
         }
       },
       "type": "object"
@@ -11174,6 +11144,31 @@ expression: "&schema"
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/Subgraph2"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphSubgraphLimitsConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphLimits"
+            }
+          ],
+          "default": {
+            "http_max_response_size": null
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphLimits"
           },
           "default": {},
           "description": "per subgraph options",

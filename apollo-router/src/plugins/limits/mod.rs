@@ -183,7 +183,7 @@ pub(crate) struct SubgraphLimits {
     /// Limit the size of incoming subgraph response bodies read from the network,
     /// to protect against running out of memory. Default: no limit.
     #[schemars(with = "Option<String>", default)]
-    pub(crate) http_max_response_bytes: Option<ByteSize>,
+    pub(crate) http_max_response_size: Option<ByteSize>,
 }
 
 /// Extension type placed on the request context to signal the subgraph response size limit.
@@ -198,7 +198,7 @@ pub(crate) struct ConnectorLimits {
     /// Limit the size of incoming connector response bodies read from the network,
     /// to protect against running out of memory. Default: no limit.
     #[schemars(with = "Option<String>", default)]
-    pub(crate) http_max_response_bytes: Option<ByteSize>,
+    pub(crate) http_max_response_size: Option<ByteSize>,
 }
 
 /// Extension type placed on the request context to signal the connector response size limit.
@@ -210,13 +210,13 @@ impl Config {
         &self,
         subgraph_name: &str,
     ) -> Option<SubgraphResponseSizeLimit> {
-        // check for non-null subgraph.http_max_response_bytes or all.http_max_response_bytes
+        // check for non-null subgraph.http_max_response_size or all.http_max_response_size
         let subgraph_limit = self
             .subgraph
             .subgraphs
             .get(subgraph_name)
-            .and_then(|s| s.http_max_response_bytes);
-        let limit = subgraph_limit.or_else(|| self.subgraph.all.http_max_response_bytes)?;
+            .and_then(|s| s.http_max_response_size);
+        let limit = subgraph_limit.or_else(|| self.subgraph.all.http_max_response_size)?;
 
         // convert to usize (needed for limits plugin)
         Some(SubgraphResponseSizeLimit(limit.as_u64().try_into().ok()?))
@@ -226,13 +226,13 @@ impl Config {
         &self,
         source_name: &str,
     ) -> Option<ConnectorResponseSizeLimit> {
-        // check for non-null subgraph.http_max_response_bytes or all.http_max_response_bytes
+        // check for non-null subgraph.http_max_response_size or all.http_max_response_size
         let source_limit = self
             .connector
             .sources
             .get(source_name)
-            .and_then(|s| s.http_max_response_bytes);
-        let limit = source_limit.or_else(|| self.connector.all.http_max_response_bytes)?;
+            .and_then(|s| s.http_max_response_size);
+        let limit = source_limit.or_else(|| self.connector.all.http_max_response_size)?;
 
         // convert to usize (needed for limits plugin)
         Some(ConnectorResponseSizeLimit(limit.as_u64().try_into().ok()?))
@@ -601,7 +601,7 @@ mod test {
         #[test]
         fn get_response_limit_all() {
             let mut subgraph_config = SubgraphConfiguration::<SubgraphLimits>::default();
-            subgraph_config.all.http_max_response_bytes = Some(ByteSize::kb(1));
+            subgraph_config.all.http_max_response_size = Some(ByteSize::kb(1));
 
             let config: Config = subgraph_config.into();
             assert_eq!(
@@ -620,7 +620,7 @@ mod test {
             subgraph_config.subgraphs.insert(
                 "products".to_string(),
                 SubgraphLimits {
-                    http_max_response_bytes: Some(ByteSize::b(512)),
+                    http_max_response_size: Some(ByteSize::b(512)),
                 },
             );
 
@@ -635,17 +635,17 @@ mod test {
         #[test]
         fn get_response_limit_subgraph_overrides_all() {
             let mut subgraph_config = SubgraphConfiguration::<SubgraphLimits>::default();
-            subgraph_config.all.http_max_response_bytes = Some(ByteSize::kib(1));
+            subgraph_config.all.http_max_response_size = Some(ByteSize::kib(1));
             subgraph_config.subgraphs.insert(
                 "products".to_string(),
                 SubgraphLimits {
-                    http_max_response_bytes: Some(ByteSize::b(500)),
+                    http_max_response_size: Some(ByteSize::b(500)),
                 },
             );
             subgraph_config.subgraphs.insert(
                 "reviews".to_string(),
                 SubgraphLimits {
-                    http_max_response_bytes: None,
+                    http_max_response_size: None,
                 },
             );
 
@@ -682,7 +682,7 @@ mod test {
         #[test]
         fn get_response_limit_all() {
             let mut connector_config = ConnectorConfiguration::<ConnectorLimits>::default();
-            connector_config.all.http_max_response_bytes = Some(ByteSize::kb(1));
+            connector_config.all.http_max_response_size = Some(ByteSize::kb(1));
 
             let config: Config = connector_config.into();
             assert_eq!(
@@ -701,7 +701,7 @@ mod test {
             connector_config.sources.insert(
                 "products.rest".to_string(),
                 ConnectorLimits {
-                    http_max_response_bytes: Some(ByteSize::b(512)),
+                    http_max_response_size: Some(ByteSize::b(512)),
                 },
             );
 
@@ -716,17 +716,17 @@ mod test {
         #[test]
         fn get_response_limit_subgraph_overrides_all() {
             let mut connector_config = ConnectorConfiguration::<ConnectorLimits>::default();
-            connector_config.all.http_max_response_bytes = Some(ByteSize::kib(1));
+            connector_config.all.http_max_response_size = Some(ByteSize::kib(1));
             connector_config.sources.insert(
                 "products.rest".to_string(),
                 ConnectorLimits {
-                    http_max_response_bytes: Some(ByteSize::b(500)),
+                    http_max_response_size: Some(ByteSize::b(500)),
                 },
             );
             connector_config.sources.insert(
                 "reviews.api".to_string(),
                 ConnectorLimits {
-                    http_max_response_bytes: None,
+                    http_max_response_size: None,
                 },
             );
 
@@ -837,7 +837,7 @@ mod test {
         use crate::plugins::limits::ConnectorResponseSizeLimit;
 
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
-            .config("limits:\n  connector:\n    all:\n      http_max_response_bytes: 2kib")
+            .config("limits:\n  connector:\n    all:\n      http_max_response_size: 2kib")
             .build()
             .await
             .expect("test harness");
@@ -895,7 +895,7 @@ mod test {
     #[tokio::test]
     async fn subgraph_service_sets_limit_on_context() {
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
-            .config("limits:\n  subgraph:\n    all:\n      http_max_response_bytes: 1024b")
+            .config("limits:\n  subgraph:\n    all:\n      http_max_response_size: 1024b")
             .build()
             .await
             .expect("test harness");

@@ -10,17 +10,17 @@ Configure a global default and optional per-subgraph or per-source overrides:
 limits:
   subgraph:
     all:
-      http_max_response_bytes: 10485760 # 10 MB for all subgraphs
+      http_max_response_size: 10MB # 10 MB for all subgraphs
     subgraphs:
       products:
-        http_max_response_bytes: 20971520 # 20 MB override for 'products'
+        http_max_response_size: 20MB # 20 MB override for 'products'
 
   connector:
     all:
-      http_max_response_bytes: 5242880 # 5 MB for all connector sources
+      http_max_response_size: 5MB # 5 MB for all connector sources
     sources:
       products.rest:
-        http_max_response_bytes: 10485760 # 10 MB override for 'products.rest'
+        http_max_response_size: 10MB # 10 MB override for 'products.rest'
 ```
 
 There is no default limit; responses are unrestricted unless you configure this option.
