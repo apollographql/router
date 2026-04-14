@@ -28,7 +28,6 @@ use crate::Endpoint;
 use crate::configuration::ListenAddr;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::register_private_plugin;
 use crate::services::router;
 
 #[derive(Debug, Serialize)]

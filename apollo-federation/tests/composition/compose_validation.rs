@@ -442,6 +442,65 @@ fn post_merge_errors_if_type_does_not_implement_interface_on_interface() {
     );
 }
 
+#[test]
+fn requires_fields_validated_in_supergraph_schema() {
+    // The @requires fields arguments should be validated against the supergraph schema, not the
+    // subgraph schema. Thus, even if subgraph B's @requires fields argument value is invalid in the
+    // subgraph schema, it's still valid in supergraph after merging.
+
+    // In subgraph A, type B implements interface I.
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          t: T
+        }
+
+        interface I {
+          x: String
+        }
+
+        type B implements I @key(fields: "x") {
+          x: String @shareable
+          y: String
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+          i: I
+        }
+        "#,
+    };
+
+    // In subgraph B, type B does NOT implement interface I,
+    // but @requires uses an inline fragment `... on B` within an I-typed field.
+    // This should be valid because B implements I in the supergraph.
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        interface I {
+          x: String
+        }
+
+        type B @key(fields: "x") {
+          x: String @shareable
+          y: String @external
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+          i: I @external
+          computed: String @requires(fields: "i { x ... on B { y } }")
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    result.expect(
+        "Expected composition to succeed when type implements interface in another subgraph",
+    );
+}
+
 // =============================================================================
 // MISC VALIDATIONS - Standalone validation tests
 // =============================================================================
